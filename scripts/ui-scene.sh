@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Development aid: start two local services ("This Laptop" and "Studio Desktop"), pair them,
 # and leave them running so the app can be pointed at one with LINKSY_SOCKET.
-# Usage: scripts/ui-scene.sh <dir>     (stop with: pkill -f "linksyd --name")
+# Usage: scripts/ui-scene.sh <dir>     (stop with: pkill -x linksyd)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 D=${1:?scene dir}
