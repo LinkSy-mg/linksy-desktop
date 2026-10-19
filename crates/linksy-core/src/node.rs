@@ -298,7 +298,13 @@ impl Node {
                 out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true });
             }
         }
-        out.sort_by(|a, b| (!a.connected, !a.trusted, &a.device.name).cmp(&(!b.connected, !b.trusted, &b.device.name)));
+        // Paired and reachable first, then devices to pair, then paired ones that are away.
+        let rank = |d: &DeviceView| match (d.trusted, d.connected || d.nearby) {
+            (true, true) => 0,
+            (false, _) => 1,
+            (true, false) => 2,
+        };
+        out.sort_by(|a, b| (rank(a), &a.device.name).cmp(&(rank(b), &b.device.name)));
         out
     }
 
