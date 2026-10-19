@@ -10,11 +10,20 @@ Chosen from round 2 of the explorations (`exploration/round2.html`, variation "S
 | File | Use |
 |---|---|
 | `logo/linksy-mark.svg` | Single color, inherits `currentColor` (UI, theming) |
-| `logo/linksy-mark--signal.svg` | Electric blue `#2563FF` + cyan `#22C3E6` |
-| `logo/linksy-mark--aurora.svg` | Violet `#7457F5` + teal `#14BFA2` |
-| `logo/linksy-mark--coral.svg` | Coral `#FF5A52` + amber `#FFAE3A` |
-| `logo/linksy-mark--mint.svg` | Mint `#12B282` + ink `#1E2A3B` (use `#D5DEEA` for ink on dark) |
-| `logo/linksy-mark--mono.svg` | Ink `#141821` only |
+| `logo/linksy-mark--signal.svg` | **Brand colors**: Signal blue `#2563FF` + cyan `#22C3E6` |
+| `logo/linksy-mark--mono.svg` | Ink `#141821` only, for one-color print |
+| `logo/logo.png` | 1024×1024, Signal colors on white |
+
+## Palette: Signal
+
+| Role | Color |
+|---|---|
+| Primary (sender, accent, buttons) | `#2563FF` |
+| Secondary (receiver, highlights) | `#22C3E6` |
+| Deep (pressed states, text on light tints) | `#1438B8` |
+
+The apps use Signal blue as their accent color. The other candidates (Aurora, Coral,
+Mint & Ink) are kept in `exploration/palettes/`.
 
 Geometry: 100×100 viewBox. Sender dot r12 at (25,75), arc r28 stroke 9.5;
 receiver dot r8 at (78,22), arc r20 stroke 8. Round caps.
@@ -22,10 +31,11 @@ receiver dot r8 at (78,22), arc r20 stroke 8. Round caps.
 ## Status
 
 - [x] Mark chosen: Sender
-- [ ] Palette (candidates above)
+- [x] Palette: Signal
 - [ ] Small-size version (16–32 px) with a heavier receiver side
 - [ ] Wordmark "linksy" and lockups
-- [ ] App icons (Linux, macOS, Windows) and PNG exports
+- [x] Linux app icon (`data/icons/`), `logo/logo.png`
+- [ ] macOS and Windows app icons
 
 ## Explorations
 

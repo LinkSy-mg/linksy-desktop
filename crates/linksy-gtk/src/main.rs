@@ -16,6 +16,11 @@ use gtk::{gdk, gio, glib};
 const APP_ID: &str = "app.linksy.Linksy";
 
 const CSS: &str = r#"
+/* Brand: Signal blue as Linksy's accent; libadwaita derives the rest. */
+:root {
+  --accent-bg-color: #2563FF;
+  --accent-fg-color: #FFFFFF;
+}
 /* Sidebar */
 .sidebar-heading { margin: 18px 18px 4px; font-size: 0.8em; font-weight: 700; opacity: 0.6; }
 .sidebar-empty { padding: 32px 18px; }

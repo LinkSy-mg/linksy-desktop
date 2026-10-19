@@ -1,5 +1,5 @@
-//! The Linksy "Sender" mark, drawn with Cairo in the widget's current color so it follows
-//! the system accent and light/dark style. Optionally pulses (the "Live" state) while
+//! The Linksy "Sender" mark, drawn with Cairo in the brand's Signal colors: electric blue
+//! for the sender, cyan for the receiver. Optionally pulses (the "Live" state) while
 //! searching for devices.
 
 use std::cell::Cell;
@@ -11,7 +11,7 @@ use gtk::prelude::*;
 use gtk::{cairo, glib};
 
 pub fn new(size: i32, live: bool) -> gtk::DrawingArea {
-    let area = gtk::DrawingArea::builder().content_width(size).content_height(size).css_classes(["accent"]).build();
+    let area = gtk::DrawingArea::builder().content_width(size).content_height(size).build();
     area.set_accessible_role(gtk::AccessibleRole::Img);
     area.update_property(&[gtk::accessible::Property::Label("Linksy")]);
 
@@ -35,9 +35,12 @@ pub fn new(size: i32, live: bool) -> gtk::DrawingArea {
     area
 }
 
-fn draw(area: &gtk::DrawingArea, cr: &cairo::Context, w: i32, h: i32, phase: Option<f64>) {
-    let c = area.color();
-    let (r, g, b) = (c.red() as f64, c.green() as f64, c.blue() as f64);
+/// Signal blue `#2563FF` and cyan `#22C3E6`.
+const SENDER: (f64, f64, f64) = (0x25 as f64 / 255.0, 0x63 as f64 / 255.0, 1.0);
+const RECEIVER: (f64, f64, f64) = (0x22 as f64 / 255.0, 0xC3 as f64 / 255.0, 0xE6 as f64 / 255.0);
+
+fn draw(_area: &gtk::DrawingArea, cr: &cairo::Context, w: i32, h: i32, phase: Option<f64>) {
+    let (r, g, b) = SENDER;
     let s = w.min(h) as f64 / 100.0;
     cr.translate((w as f64 - 100.0 * s) / 2.0, (h as f64 - 100.0 * s) / 2.0);
     cr.scale(s, s);
@@ -55,12 +58,13 @@ fn draw(area: &gtk::DrawingArea, cr: &cairo::Context, w: i32, h: i32, phase: Opt
     cr.arc(25.0, 75.0, 28.0, -PI / 2.0, 0.0);
     let _ = cr.stroke();
 
-    // Receiver: smaller device answering, in a lighter tone of the same color.
-    cr.set_source_rgba(r, g, b, 0.6 * pulse(0.5));
+    // Receiver: smaller device answering, in cyan.
+    let (r, g, b) = RECEIVER;
+    cr.set_source_rgba(r, g, b, pulse(0.5));
     cr.set_line_width(8.0);
     cr.arc(78.0, 22.0, 20.0, PI / 2.0, PI);
     let _ = cr.stroke();
-    cr.set_source_rgba(r, g, b, 0.6);
+    cr.set_source_rgba(r, g, b, 1.0);
     cr.arc(78.0, 22.0, 8.0, 0.0, 2.0 * PI);
     let _ = cr.fill();
 }
