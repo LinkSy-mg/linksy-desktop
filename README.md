@@ -4,8 +4,7 @@ Your devices, connected. Share files, notifications and more between nearby devi
 directly over the local network, with no account, cloud or server.
 
 <p align="center">
-  <img src="docs/screenshots/received-files.png" width="380" alt="Linksy with a paired device and received files">
-  <img src="docs/screenshots/incoming-files.png" width="380" alt="Accepting files from another device">
+  <img src="docs/screenshots/device-page.png" width="640" alt="A device's page: actions and a timeline with a transfer in progress">
 </p>
 
 ## Layout
@@ -90,7 +89,8 @@ Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
 - [x] File and folder transfer with progress, integrity check, resume
 - [x] Device-to-device notifications
 - [x] Background service, desktop notifications, CLI
-- [x] GTK4/libadwaita app with Preferences (name, folder, auto-accept, stay connected)
+- [x] GTK4/libadwaita app: device pages with an activity timeline, Add Device hub, Preferences
+- [x] Activity history kept by the service (`linksy history`)
 - [x] Clipboard sharing (text, on demand: app ⋯ menu or `linksy clip`; received text is copied via wl-copy/xclip/xsel)
 - [ ] Automatic clipboard sync
 - [x] "Send with Linksy" in Files (right-click → Scripts), "Open With Linksy" for files and folders

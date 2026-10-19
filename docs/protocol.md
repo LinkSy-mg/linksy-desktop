@@ -301,8 +301,27 @@ or the notification).
 
 ## 6. UX notes from the desktop app
 
-- One main screen: a drop/choose area on top, devices below, transfers under that.
-  On Android: the system **share sheet** ("Share → Linksy") is the main entry point;
+The owner found the first single-column design "too simplistic and non intuitive" and
+chose **device pages**: a list of devices, and per device a page with big actions and a
+history of everything shared with it. Mirror that on the phone:
+
+- **Device list** (home): paired devices with colored initials avatars and a presence
+  dot (Nearby / Connected / Not nearby), then "Nearby, not paired" with a Pair button,
+  and a prominent **Add Device** (QR scanner first on the phone).
+- **Device page**: big avatar, name, "Nearby · Linux laptop"; three big action buttons
+  **Send Files**, **Send Clipboard**, **Ping**; then **Activity** grouped by day (Today,
+  Yesterday, date), newest first. Rows: icon in a tinted circle (green incoming, accent
+  outgoing, red failed/declined), title (file name / "N items" / quoted clipboard text /
+  ping title), detail ("Received · 2.1 MB · 14:03", "Declined · …", or live
+  "81 MB of 400 MB · 38 MB/s · 8 seconds left" with a progress bar and cancel). Tap a
+  received file to open it; clipboard rows have "Copy again".
+- History is kept by the desktop service (`linksyd`), not by the core: the phone keeps
+  its own. Desktop keeps 500 entries and never writes clipboard text to disk (it may be a
+  password); do the same.
+
+Earlier notes, still valid:
+
+- On Android: the system **share sheet** ("Share → Linksy") is the main entry point;
   the app shows nearby devices to pick from. A Quick Settings tile could send the
   clipboard.
 - Pairing dialog shows the code large (`123 456`), with "Pair" / "Decline".
@@ -344,3 +363,5 @@ or the notification).
   no longer hides the device. Desktop app: open/drag/clear received files.
 - **2026-10-19** — QR-code pairing (§4.7): `linksy://pair` invite links with a one-time
   token, `invite` field in `hello`, desktop dialog and `linksy invite`.
+- **2026-10-19** — Desktop redesign to device pages with an activity timeline (§6), and
+  a history kept by the service. No protocol change.
