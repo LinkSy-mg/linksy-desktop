@@ -59,6 +59,20 @@ impl Window {
         });
     }
 
+    /// A window opened mid-session: bring back the banner and camera card.
+    pub(super) fn restore_sessions(self: &Rc<Self>) {
+        let Some(c) = self.client() else { return };
+        let call = self.bridge.call(&c, |c| async move { c.active_sessions().await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            for s in call.await.unwrap_or_default() {
+                if s.sharing || s.kind == SessionKind::Camera {
+                    w.sharing_started(s.session, &s.peer, s.kind, s.sharing);
+                }
+            }
+        });
+    }
+
     /// Show any second display another device started here (also right after start-up,
     /// when the service opened the app for it).
     pub(super) fn join_pending_displays(self: &Rc<Self>) {
@@ -128,6 +142,11 @@ impl Window {
     pub(super) fn sharing_started(self: &Rc<Self>, session: Uuid, peer: &DeviceInfo, kind: SessionKind, sharing: bool) {
         self.close_offer_dialog(&session);
         self.state.borrow_mut().sharing = Some(session);
+        if kind == SessionKind::Camera && !sharing {
+            self.state.borrow_mut().camera = Some((session, peer.id));
+            self.render_page();
+            self.toast(&format!("{}'s camera is on. Open its page to preview it.", peer.name));
+        }
         let title = match kind {
             SessionKind::Camera if sharing => format!("{} is using your camera", peer.name),
             SessionKind::Camera => format!("{}'s camera is on: “Linksy Camera ({})” in your apps", peer.name, peer.name),
@@ -148,12 +167,51 @@ impl Window {
 
     pub(super) fn session_ended(self: &Rc<Self>, session: Uuid) {
         self.close_offer_dialog(&session);
-        let mut state = self.state.borrow_mut();
-        state.showing.retain(|s| *s != session);
-        if state.sharing == Some(session) {
-            state.sharing = None;
-            self.sharing_banner.set_revealed(false);
+        let camera_ended = {
+            let mut state = self.state.borrow_mut();
+            state.showing.retain(|s| *s != session);
+            if state.sharing == Some(session) {
+                state.sharing = None;
+                self.sharing_banner.set_revealed(false);
+            }
+            let ended = state.camera.is_some_and(|(s, _)| s == session);
+            if ended {
+                state.camera = None;
+            }
+            ended
+        };
+        if camera_ended {
+            self.render_page();
         }
+    }
+
+    /// A window showing what apps get from "Linksy Camera", sized to the camera's shape.
+    pub(super) fn preview_camera(self: &Rc<Self>, name: &str) {
+        let picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Contain).hexpand(true).vexpand(true).css_classes(["screen-view"]).build();
+        let heading = adw::WindowTitle::new(name, "Preview");
+        let toolbar = adw::ToolbarView::builder().content(&picture).build();
+        toolbar.add_top_bar(&adw::HeaderBar::builder().title_widget(&heading).build());
+        let window = adw::Window::builder().title(format!("{name} Preview")).default_width(640).default_height(407).content(&toolbar).build();
+        if let Some(app) = self.window.application() {
+            window.set_application(Some(&app));
+        }
+        // Read the camera as any app would (the webcam helper names its node linksy-camera).
+        let pipeline = gst::parse::launch("pipewiresrc target-object=linksy-camera always-copy=true ! videoconvert ! gtk4paintablesink name=sink sync=false");
+        let pipeline = match pipeline {
+            Ok(p) => p,
+            Err(e) => return self.toast(&format!("Can't preview the camera: {e}")),
+        };
+        if let Some(paintable) = pipeline.downcast_ref::<gst::Bin>().and_then(|b| b.by_name("sink")).map(|s| s.property::<gdk::Paintable>("paintable")) {
+            picture.set_paintable(Some(&paintable));
+            let w = window.clone();
+            paintable.connect_invalidate_size(move |p| fit_to_video(&w, p));
+        }
+        let _ = pipeline.set_state(gst::State::Playing);
+        window.connect_close_request(move |_| {
+            let _ = pipeline.set_state(gst::State::Null);
+            glib::Propagation::Proceed
+        });
+        window.present();
     }
 
     pub(super) fn stop_sharing(self: &Rc<Self>) {

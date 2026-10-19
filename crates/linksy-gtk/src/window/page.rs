@@ -22,6 +22,8 @@ pub enum Action {
     ViewScreen,
     Extend,
     Webcam,
+    CameraPreview,
+    CameraStop,
     Pair,
     SendStaged,
     Forget,
@@ -65,6 +67,9 @@ pub struct DevicePage {
     handler: Handler,
     /// Received files of finished rows, by entry id (the row's widget name), to open.
     received: Rc<RefCell<HashMap<String, Vec<PathBuf>>>>,
+    /// "Camera is on", while this device's camera is in use here, with Preview and Stop.
+    camera: gtk::ListBox,
+    camera_row: adw::ActionRow,
 }
 
 impl DevicePage {
@@ -145,6 +150,21 @@ impl DevicePage {
         extend.append(&extend_row);
         extend.append(&webcam_row);
 
+        let camera_row = adw::ActionRow::builder().title("Camera Is On").css_classes(["camera-on"]).activatable(true).build();
+        camera_row.add_prefix(&gtk::Image::builder().icon_name("camera-web-symbolic").css_classes(["accent"]).build());
+        let preview = gtk::Button::builder().label("Preview").valign(gtk::Align::Center).css_classes(["suggested-action"]).build();
+        let stop = gtk::Button::builder().label("Stop").valign(gtk::Align::Center).build();
+        camera_row.add_suffix(&preview);
+        camera_row.add_suffix(&stop);
+        let e = emit.clone();
+        preview.connect_clicked(move |_| e(Action::CameraPreview));
+        let e = emit.clone();
+        camera_row.connect_activated(move |_| e(Action::CameraPreview));
+        let e = emit.clone();
+        stop.connect_clicked(move |_| e(Action::CameraStop));
+        let camera = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).visible(false).build();
+        camera.append(&camera_row);
+
         // For devices that aren't paired yet.
         let pair = gtk::Button::builder().label("Pair").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
         let e = emit.clone();
@@ -198,6 +218,7 @@ impl DevicePage {
         let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(22).margin_top(8).margin_bottom(28).margin_start(16).margin_end(16).build();
         content.append(&hero);
         content.append(&tiles);
+        content.append(&camera);
         content.append(&extend);
         content.append(&pair_box);
         content.append(&drop_hint);
@@ -220,11 +241,19 @@ impl DevicePage {
             e(Action::Forget);
         });
 
-        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received }
+        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
         *self.handler.borrow_mut() = Some(Rc::new(f));
+    }
+
+    /// Show the camera card for `camera` ("Linksy Camera (…)"), or hide it.
+    pub fn set_camera(&self, camera: Option<&str>) {
+        if let Some(name) = camera {
+            self.camera_row.set_subtitle(&glib::markup_escape_text(&format!("Click to preview · Your apps list it as “{name}”")));
+        }
+        self.camera.set_visible(camera.is_some());
     }
 
     pub fn set_drop_active(&self, on: bool) {

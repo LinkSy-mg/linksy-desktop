@@ -60,6 +60,8 @@ struct State {
     sharing: Option<Uuid>,
     /// Second displays shown here, so each opens one viewer.
     showing: Vec<Uuid>,
+    /// The camera session in use here (another device's camera as a webcam) and whose.
+    camera: Option<(Uuid, Fingerprint)>,
 }
 
 pub struct Window {
@@ -235,12 +237,19 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 6] = [
+        let actions: [(&str, Run); 7] = [
             ("choose-files", |w| w.choose_files()),
             ("start-service", |w| w.start_service()),
             ("preferences", |w| w.show_preferences()),
             ("add-device", |w| w.show_invite()),
             ("pair-address", |w| w.ask_pair_address()),
+            ("preview-camera", |w| {
+                let on = w.state.borrow().camera;
+                match on.and_then(|(_, id)| w.device(&id)) {
+                    Some(d) => w.preview_camera(&format!("Linksy Camera ({})", d.device.name)),
+                    None => w.toast("No camera is on"),
+                }
+            }),
             ("view-screen", |w| match w.selected_device().filter(|d| d.trusted) {
                 Some(d) => w.view_screen(d.device.id),
                 None => w.toast("Pick a device first"),
@@ -286,6 +295,11 @@ impl Window {
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
                 page::Action::Webcam => w.use_camera(id),
+                page::Action::CameraPreview => {
+                    let name = w.device(&id).map(|d| d.device.name).unwrap_or_default();
+                    w.preview_camera(&format!("Linksy Camera ({name})"));
+                }
+                page::Action::CameraStop => w.stop_sharing(),
                 page::Action::Pair => w.pair(id),
                 page::Action::SendStaged => {
                     let staged = std::mem::take(&mut w.state.borrow_mut().staged);
@@ -357,6 +371,7 @@ impl Window {
                     w.refresh_status();
                     w.refresh_devices();
                     w.join_pending_displays();
+                    w.restore_sessions();
                     while let Ok(update) = updates.recv().await {
                         match update {
                             Update::Event(ev) => w.handle_event(ev),
@@ -655,6 +670,8 @@ impl Window {
             Some(d) => {
                 self.content.set_title(&d.device.name);
                 self.page.show_device(&d, &staged);
+                let camera = self.state.borrow().camera.filter(|(_, id)| *id == d.device.id);
+                self.page.set_camera(camera.map(|_| format!("Linksy Camera ({})", d.device.name)).as_deref());
                 self.content_stack.set_visible_child_name("device");
             }
             None => {
