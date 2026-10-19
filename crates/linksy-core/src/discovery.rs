@@ -30,17 +30,25 @@ pub(crate) enum DiscoveryEvent {
 
 pub(crate) struct Discovery {
     daemon: ServiceDaemon,
+    port: u16,
+    /// Our own registered instance, replaced when the name changes.
+    fullname: String,
+}
+
+fn service_info(me: &DeviceInfo, port: u16) -> Result<ServiceInfo> {
+    let kind = serde_json::to_value(me.kind)?.as_str().unwrap_or("desktop").to_string();
+    let id = me.id.to_string();
+    let props = [("id", id.as_str()), ("name", me.name.as_str()), ("kind", kind.as_str()), ("os", me.os.as_str()), ("v", "1")];
+    let instance = format!("{} {}", me.name, me.id.short());
+    let host = format!("linksy-{}.local.", me.id.short().to_lowercase());
+    Ok(ServiceInfo::new(SERVICE_TYPE, &instance, &host, "", port, &props[..])?.enable_addr_auto())
 }
 
 impl Discovery {
     pub(crate) fn start(me: &DeviceInfo, port: u16, tx: mpsc::UnboundedSender<DiscoveryEvent>) -> Result<Self> {
         let daemon = ServiceDaemon::new()?;
-        let kind = serde_json::to_value(me.kind)?.as_str().unwrap_or("desktop").to_string();
-        let id = me.id.to_string();
-        let props = [("id", id.as_str()), ("name", me.name.as_str()), ("kind", kind.as_str()), ("os", me.os.as_str()), ("v", "1")];
-        let instance = format!("{} {}", me.name, me.id.short());
-        let host = format!("linksy-{}.local.", me.id.short().to_lowercase());
-        let info = ServiceInfo::new(SERVICE_TYPE, &instance, &host, "", port, &props[..])?.enable_addr_auto();
+        let info = service_info(me, port)?;
+        let fullname = info.get_fullname().to_string();
         daemon.register(info)?;
 
         let browse = daemon.browse(SERVICE_TYPE)?;
@@ -88,7 +96,16 @@ impl Discovery {
                 }
             }
         });
-        Ok(Self { daemon })
+        Ok(Self { daemon, port, fullname })
+    }
+
+    /// Re-announce after a rename: a goodbye for the old name, then the new one.
+    pub(crate) fn update(&mut self, me: &DeviceInfo) -> Result<()> {
+        let info = service_info(me, self.port)?;
+        let _ = self.daemon.unregister(&self.fullname);
+        self.fullname = info.get_fullname().to_string();
+        self.daemon.register(info)?;
+        Ok(())
     }
 
     pub(crate) fn stop(self) {

@@ -374,3 +374,74 @@ async fn restarted_device_reconnects_by_itself() {
     .await
     .expect("Beta sees Alpha as connected");
 }
+
+#[tokio::test]
+async fn auto_accept_skips_the_prompt() {
+    let (a, b) = paired().await;
+    let mut s = b.node.settings();
+    s.auto_accept = true;
+    b.node.update_settings(s).await.unwrap();
+    let mut rb = b.node.subscribe();
+    let src = a.dir.path().join("quick.txt");
+    std::fs::write(&src, b"no questions").unwrap();
+    a.node.send_files(&b.node.info().id, vec![src]).await.unwrap();
+    let asked = wait_for(&mut rb, |e| match e {
+        Event::TransferRequest { .. } => Some(true),
+        Event::TransferComplete { .. } => Some(false),
+        _ => None,
+    })
+    .await;
+    assert!(!asked, "auto-accept still asked");
+    assert_eq!(std::fs::read(b.downloads().join("quick.txt")).unwrap(), b"no questions");
+}
+
+#[tokio::test]
+async fn settings_persist_and_rename_reaches_peers() {
+    let (a, b) = paired_with(|c| c.idle_after = Duration::from_millis(300)).await;
+    let mut ra = a.node.subscribe();
+    let mut s = b.node.settings();
+    s.name = "  Beta   Two ".into();
+    let applied = b.node.update_settings(s).await.unwrap();
+    assert_eq!(applied.name, "Beta Two");
+    assert_eq!(b.node.info().name, "Beta Two");
+    wait_for(&mut ra, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
+
+    // The next connection's handshake carries the new name.
+    a.node.notify(&b.node.info().id, "Hi", "").await.unwrap();
+    let name = wait_for(&mut ra, |e| match e {
+        Event::Connected { device } => Some(device.name.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(name, "Beta Two");
+
+    // And it survives a restart.
+    let b_dir = b.dir;
+    b.node.shutdown().await;
+    let b2 = Node::start(config(b_dir.path(), "Beta")).await.unwrap();
+    assert_eq!(b2.settings().name, "Beta Two");
+}
+
+#[tokio::test]
+async fn link_stays_open_when_either_side_wants_it() {
+    let a = dev_with("Alpha", |c| c.idle_after = Duration::from_millis(200)).await;
+    let b = dev_with("Beta", |c| {
+        c.idle_after = Duration::from_millis(200);
+        c.stay_connected = true;
+    })
+    .await;
+    auto_answer(&a.node, true);
+    auto_answer(&b.node, true);
+    let mut ra = a.node.subscribe();
+    a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
+    // Alpha connects on demand, but Beta asked to stay connected: no idle close.
+    let closed = tokio::time::timeout(Duration::from_millis(1200), async {
+        loop {
+            if let Ok(Event::Disconnected { .. }) = ra.recv().await {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(closed.is_err(), "link closed although Beta stays connected");
+}

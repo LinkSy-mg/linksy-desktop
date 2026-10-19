@@ -25,6 +25,7 @@ use uuid::Uuid;
 use crate::discovery::{Discovery, DiscoveryEvent};
 use crate::error::{Error, Result, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
+use crate::settings::Settings;
 use crate::protocol::{
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, TransferMsg, read_msg, write_msg,
 };
@@ -100,6 +101,7 @@ pub enum Event {
     TransferProgress { transfer: Uuid, bytes: u64, total: u64 },
     TransferComplete { transfer: Uuid, saved: Vec<PathBuf> },
     TransferFailed { transfer: Uuid, reason: String },
+    SettingsChanged { settings: Settings },
     Notification { from: DeviceInfo, title: String, body: String },
     /// A paired device shared its clipboard; front ends decide where it goes.
     Clipboard { from: DeviceInfo, text: String },
@@ -120,6 +122,8 @@ struct Peer {
     /// Who opened this connection; used to break ties when both sides dial at once.
     dialer: Fingerprint,
     activity: Arc<Activity>,
+    /// The other side keeps links open; don't close this one for being idle.
+    peer_stays: bool,
 }
 
 /// What a connection is doing, so idle ones can be closed.
@@ -159,8 +163,10 @@ impl Drop for Busy {
 }
 
 struct Inner {
-    info: DeviceInfo,
+    id: Fingerprint,
+    info: Mutex<DeviceInfo>,
     config: Config,
+    settings: Mutex<Settings>,
     endpoint: quinn::Endpoint,
     trust: Mutex<TrustStore>,
     peers: Mutex<HashMap<Fingerprint, Peer>>,
@@ -183,9 +189,10 @@ impl Node {
         std::fs::create_dir_all(&config.data_dir)?;
         let identity = Identity::load_or_create(&config.data_dir)?;
         let trust = TrustStore::load(config.data_dir.join("trusted.json"))?;
+        let settings = Settings::load(&config.data_dir.join("settings.json"), &config)?;
         let info = DeviceInfo {
             id: identity.fingerprint,
-            name: config.name.clone(),
+            name: settings.name.clone(),
             kind: config.kind,
             os: std::env::consts::OS.to_string(),
         };
@@ -194,8 +201,10 @@ impl Node {
         let (events, _) = broadcast::channel(1024);
         let node = Self {
             inner: Arc::new(Inner {
-                info,
+                id: info.id,
+                info: Mutex::new(info),
                 config,
+                settings: Mutex::new(settings),
                 endpoint,
                 trust: Mutex::new(trust),
                 peers: Mutex::new(HashMap::new()),
@@ -211,21 +220,50 @@ impl Node {
         tokio::spawn(node.clone().accept_loop());
         if node.inner.config.discovery {
             let (tx, rx) = mpsc::unbounded_channel();
-            let d = Discovery::start(&node.inner.info, node.local_addr()?.port(), tx)?;
+            let d = Discovery::start(&node.info(), node.local_addr()?.port(), tx)?;
             *node.inner.discovery.lock().unwrap() = Some(d);
             tokio::spawn(node.clone().discovery_loop(rx));
         }
-        if node.inner.config.stay_connected {
-            tokio::spawn(node.clone().reconnect_loop());
-        } else {
-            tokio::spawn(node.clone().idle_loop());
-        }
-        info!(id = %node.inner.info.id.short(), addr = %node.local_addr()?, "linksy node started");
+        tokio::spawn(node.clone().reconnect_loop());
+        tokio::spawn(node.clone().idle_loop());
+        info!(id = %node.inner.id.short(), addr = %node.local_addr()?, "linksy node started");
         Ok(node)
     }
 
-    pub fn info(&self) -> &DeviceInfo {
-        &self.inner.info
+    pub fn info(&self) -> DeviceInfo {
+        self.inner.info.lock().unwrap().clone()
+    }
+
+    pub fn settings(&self) -> Settings {
+        self.inner.settings.lock().unwrap().clone()
+    }
+
+    /// Apply and save new settings. A new name is announced to the network right away.
+    pub async fn update_settings(&self, new: Settings) -> Result<Settings> {
+        let new = tokio::task::spawn_blocking(move || new.validated()).await.map_err(|e| protocol(e.to_string()))??;
+        let old = self.settings();
+        if new == old {
+            return Ok(new);
+        }
+        new.save(&self.inner.config.data_dir.join("settings.json"), &self.inner.config)?;
+        *self.inner.settings.lock().unwrap() = new.clone();
+        if new.name != old.name {
+            let info = {
+                let mut info = self.inner.info.lock().unwrap();
+                info.name = new.name.clone();
+                info.clone()
+            };
+            if let Some(d) = self.inner.discovery.lock().unwrap().as_mut()
+                && let Err(e) = d.update(&info)
+            {
+                warn!("could not announce the new name: {e}");
+            }
+        }
+        if new.stay_connected && !old.stay_connected {
+            self.reconnect_all();
+        }
+        self.emit(Event::SettingsChanged { settings: new.clone() });
+        Ok(new)
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr> {
@@ -484,14 +522,14 @@ impl Node {
         let conn = incoming.await?;
         let fp = tls::peer_fingerprint(&conn)?;
         let (mut send, mut recv) = tokio::time::timeout(HANDSHAKE_TIMEOUT, conn.accept_bi()).await.map_err(|_| Error::Timeout)??;
-        let (device, intent) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
-            Handshake::Hello { version, device, intent } => {
+        let (device, intent, peer_stays) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
+            Handshake::Hello { version, device, intent, stay_connected } => {
                 if version != PROTOCOL_VERSION {
                     write_msg(&mut send, &Handshake::Reject { reason: RejectReason::IncompatibleVersion }).await?;
                     send.finish()?;
                     return Err(protocol(format!("peer speaks protocol v{version}")));
                 }
-                (device, intent)
+                (device, intent, stay_connected)
             }
             other => return Err(protocol(format!("expected hello, got {other:?}"))),
         };
@@ -502,8 +540,8 @@ impl Node {
         let trusted = self.inner.trust.lock().unwrap().contains(&fp);
         match intent {
             Intent::Connect if trusted => {
-                write_msg(&mut send, &Handshake::Welcome { device: self.inner.info.clone() }).await?;
-                self.register(conn, device, fp);
+                write_msg(&mut send, &self.welcome()).await?;
+                self.register(conn, device, fp, peer_stays);
             }
             Intent::Connect => {
                 write_msg(&mut send, &Handshake::Reject { reason: RejectReason::NotPaired }).await?;
@@ -512,9 +550,9 @@ impl Node {
                 let _ = tokio::time::timeout(Duration::from_secs(2), conn.closed()).await;
             }
             Intent::Pair => {
-                write_msg(&mut send, &Handshake::Welcome { device: self.inner.info.clone() }).await?;
+                write_msg(&mut send, &self.welcome()).await?;
                 self.run_pairing(&conn, &mut send, &mut recv, &device, true).await?;
-                self.register(conn, device, fp);
+                self.register(conn, device, fp, peer_stays);
             }
         }
         Ok(())
@@ -523,7 +561,7 @@ impl Node {
     async fn dial(&self, addr: SocketAddr, intent: Intent) -> Result<DeviceInfo> {
         let conn = self.inner.endpoint.connect(addr, "linksy")?.await?;
         let fp = tls::peer_fingerprint(&conn)?;
-        if fp == self.inner.info.id {
+        if fp == self.inner.id {
             conn.close(0u32.into(), b"self");
             return Err(protocol("that address is this device"));
         }
@@ -532,9 +570,10 @@ impl Node {
             return Err(Error::NotPaired);
         }
         let (mut send, mut recv) = conn.open_bi().await?;
-        write_msg(&mut send, &Handshake::Hello { version: PROTOCOL_VERSION, device: self.inner.info.clone(), intent }).await?;
-        let device = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
-            Handshake::Welcome { device } if device.id == fp => device,
+        let hello = Handshake::Hello { version: PROTOCOL_VERSION, device: self.info(), intent, stay_connected: self.stays() };
+        write_msg(&mut send, &hello).await?;
+        let (device, peer_stays) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
+            Handshake::Welcome { device, stay_connected } if device.id == fp => (device, stay_connected),
             Handshake::Welcome { .. } => return Err(protocol("device id does not match its certificate")),
             Handshake::Reject { reason: RejectReason::NotPaired } => return Err(Error::NotPaired),
             Handshake::Reject { reason } => return Err(protocol(format!("rejected: {reason:?}"))),
@@ -544,7 +583,7 @@ impl Node {
             self.run_pairing(&conn, &mut send, &mut recv, &device, false).await?;
         }
         let _ = send.finish();
-        self.register(conn, device.clone(), self.inner.info.id);
+        self.register(conn, device.clone(), self.inner.id, peer_stays);
         Ok(device)
     }
 
@@ -614,7 +653,15 @@ impl Node {
         }
     }
 
-    fn register(&self, conn: quinn::Connection, device: DeviceInfo, dialer: Fingerprint) {
+    fn welcome(&self) -> Handshake {
+        Handshake::Welcome { device: self.info(), stay_connected: self.stays() }
+    }
+
+    fn stays(&self) -> bool {
+        self.inner.settings.lock().unwrap().stay_connected
+    }
+
+    fn register(&self, conn: quinn::Connection, device: DeviceInfo, dialer: Fingerprint, peer_stays: bool) {
         let id = device.id;
         {
             let mut peers = self.inner.peers.lock().unwrap();
@@ -627,7 +674,7 @@ impl Node {
                 }
                 existing.conn.close(0u32.into(), b"duplicate");
             }
-            peers.insert(id, Peer { conn: conn.clone(), device: device.clone(), dialer, activity: Activity::new() });
+            peers.insert(id, Peer { conn: conn.clone(), device: device.clone(), dialer, activity: Activity::new(), peer_stays });
         }
         if let Err(e) = self.inner.trust.lock().unwrap().touch(&device, conn.remote_address()) {
             warn!("could not save device address: {e}");
@@ -682,9 +729,13 @@ impl Node {
         };
         let total: u64 = files.iter().map(|f| f.size).sum();
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
-        let answer = self.expect_answer(id);
-        self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: files.clone(), total });
-        if !self.await_answer(id, answer, OFFER_TIMEOUT).await {
+        let auto = self.inner.settings.lock().unwrap().auto_accept;
+        let accepted = auto || {
+            let answer = self.expect_answer(id);
+            self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: files.clone(), total });
+            self.await_answer(id, answer, OFFER_TIMEOUT).await
+        };
+        if !accepted {
             let _ = write_msg(&mut send, &TransferMsg::Decline).await;
             let _ = send.finish();
             self.emit(Event::TransferFailed { transfer: id, reason: "declined".into() });
@@ -694,7 +745,8 @@ impl Node {
         let node = self.clone();
         let task = tokio::spawn(async move {
             let result = async {
-                let plan = transfer::plan(&node.inner.config.download_dir, &files).await?;
+                let download_dir = node.inner.settings.lock().unwrap().download_dir.clone();
+                let plan = transfer::plan(&download_dir, &files).await?;
                 let offsets: Vec<u64> = plan.iter().map(|f| f.offset).collect();
                 let start = offsets.iter().sum();
                 write_msg(&mut send, &TransferMsg::Accept { offsets }).await?;
@@ -721,14 +773,14 @@ impl Node {
         while let Some(ev) = rx.recv().await {
             match ev {
                 DiscoveryEvent::Found { device, addrs } => {
-                    if device.id == self.inner.info.id {
+                    if device.id == self.inner.id {
                         continue;
                     }
                     let known = self.inner.nearby.lock().unwrap().insert(device.id, (device.clone(), addrs.clone()));
                     if known.as_ref().map(|(d, a)| (d, a)) != Some((&device, &addrs)) {
                         self.emit(Event::DeviceFound { device: device.clone(), addrs: addrs.clone() });
                     }
-                    if self.inner.config.stay_connected
+                    if self.stays()
                         && self.inner.trust.lock().unwrap().contains(&device.id)
                         && !self.is_connected(&device.id)
                     {
@@ -751,23 +803,29 @@ impl Node {
         let mut tick = tokio::time::interval(RECONNECT_EVERY);
         loop {
             tick.tick().await;
-            let targets: Vec<(Fingerprint, Vec<SocketAddr>)> = {
-                let trust = self.inner.trust.lock().unwrap();
-                trust
-                    .list()
-                    .into_iter()
-                    .filter(|t| !self.is_connected(&t.device.id))
-                    .map(|t| {
-                        let mut addrs = self.nearby_addrs(&t.device.id);
-                        addrs.extend(t.last_addr.filter(|a| !addrs.contains(a)));
-                        (t.device.id, addrs)
-                    })
-                    .collect()
-            };
-            for (_, addrs) in targets {
-                let node = self.clone();
-                tokio::spawn(async move { node.try_connect(&addrs).await });
+            if self.stays() {
+                self.reconnect_all();
             }
+        }
+    }
+
+    fn reconnect_all(&self) {
+        let targets: Vec<Vec<SocketAddr>> = {
+            let trust = self.inner.trust.lock().unwrap();
+            trust
+                .list()
+                .into_iter()
+                .filter(|t| !self.is_connected(&t.device.id))
+                .map(|t| {
+                    let mut addrs = self.nearby_addrs(&t.device.id);
+                    addrs.extend(t.last_addr.filter(|a| !addrs.contains(a)));
+                    addrs
+                })
+                .collect()
+        };
+        for addrs in targets {
+            let node = self.clone();
+            tokio::spawn(async move { node.try_connect(&addrs).await });
         }
     }
 
@@ -778,8 +836,11 @@ impl Node {
         let period = (idle / 4).clamp(Duration::from_millis(100), Duration::from_secs(15));
         loop {
             tokio::time::sleep(period).await;
+            if self.stays() {
+                continue;
+            }
             for p in self.inner.peers.lock().unwrap().values() {
-                if p.activity.idle_for().is_some_and(|d| d >= idle) {
+                if !p.peer_stays && p.activity.idle_for().is_some_and(|d| d >= idle) {
                     debug!("closing idle connection to {}", p.device.name);
                     p.conn.close(0u32.into(), b"idle");
                 }

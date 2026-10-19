@@ -348,6 +348,7 @@ impl Window {
                 self.close_offer_dialog(&transfer);
                 self.finish_transfer(transfer, Err(reason));
             }
+            Event::SettingsChanged { .. } => self.refresh_status(),
             Event::Notification { from, title, body } => {
                 let text = if body.is_empty() { format!("{}: {title}", from.name) } else { format!("{}: {title} — {body}", from.name) };
                 self.toast(&text);

@@ -26,8 +26,20 @@ pub enum Intent {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Handshake {
-    Hello { version: u32, device: DeviceInfo, intent: Intent },
-    Welcome { device: DeviceInfo },
+    /// `stay_connected`: the sender keeps this link open, so the receiver shouldn't close
+    /// it for being idle.
+    Hello {
+        version: u32,
+        device: DeviceInfo,
+        intent: Intent,
+        #[serde(default)]
+        stay_connected: bool,
+    },
+    Welcome {
+        device: DeviceInfo,
+        #[serde(default)]
+        stay_connected: bool,
+    },
     Reject { reason: RejectReason },
     PairDecision { accept: bool },
 }
