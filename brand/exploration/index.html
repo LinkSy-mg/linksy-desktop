@@ -1,0 +1,231 @@
+<title>Linksy Mark Explorations</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@800;900&family=Figtree:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: workbench sheet. Sticky palette bar on top, a grid of mark cards, each card a
+   large canvas plus a strip of real-size checks (16 / 32 / 64 px, app icon, lockup). */
+:root {
+  --bg: #F5F6F9;
+  --surface: #FFFFFF;
+  --fg: #141821;
+  --muted: #5D6575;
+  --line: #E2E5EC;
+  --canvas: #EEF0F5;
+  --focus: #2563FF;
+  --font-brand: "Nunito", ui-rounded, "Arial Rounded MT Bold", system-ui, sans-serif;
+  --font-ui: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "DM Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  /* active palette, overwritten per [data-palette] */
+  --a: #2563FF; --b: #22C3E6; --c: #1438B8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0E1117; --surface: #161A22; --fg: #ECEFF5; --muted: #98A1B3;
+    --line: #262C38; --canvas: #1C212B; --focus: #6D96FF; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0E1117; --surface: #161A22; --fg: #ECEFF5; --muted: #98A1B3;
+  --line: #262C38; --canvas: #1C212B; --focus: #6D96FF; color-scheme: dark;
+}
+
+[data-palette="signal"] { --a: #2563FF; --b: #22C3E6; --c: #1438B8; }
+[data-palette="aurora"] { --a: #7457F5; --b: #14BFA2; --c: #4A2FCF; }
+[data-palette="coral"]  { --a: #FF5A52; --b: #FFAE3A; --c: #D1352F; }
+[data-palette="mint"]   { --a: #12B282; --b: #1E2A3B; --c: #0A7A5A; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) [data-palette="mint"] { --b: #D5DEEA; } }
+:root[data-theme="dark"] [data-palette="mint"] { --b: #D5DEEA; }
+[data-palette="mono"]   { --a: var(--fg); --b: var(--fg); --c: var(--fg); }
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-ui); font-size: 15px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: 1180px; margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+/* mark coloring */
+.mk .a { fill: var(--a); } .mk .b { fill: var(--b); } .mk .c { fill: var(--c); }
+.mk .m { fill: var(--a); opacity: .18; }
+.mk .sa { fill: none; stroke: var(--a); } .mk .sb { fill: none; stroke: var(--b); }
+.mk { display: block; width: 100%; height: 100%; overflow: visible; }
+
+/* header */
+header { padding-block: 48px 28px; display: grid; gap: 18px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+h1 { margin: 0; font-family: var(--font-brand); font-weight: 900; font-size: clamp(36px, 6vw, 60px); line-height: 1.02; letter-spacing: -.02em; text-wrap: balance; }
+h1 span { color: var(--a); transition: color .4s; }
+.lede { margin: 0; max-width: 62ch; color: var(--muted); font-size: 16px; }
+
+/* palette bar */
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line); }
+.bar .wrap { padding-block: 12px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.bar-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 7px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--fg);
+  font: 600 13px/1 var(--font-ui); cursor: pointer;
+}
+.chip:hover { border-color: color-mix(in srgb, var(--fg) 30%, var(--line)); }
+.chip[aria-pressed="true"] { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+.chip:focus-visible, .seg button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.dots { display: inline-flex; }
+.dots i { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--surface); margin-left: -5px; }
+.dots i:first-child { margin-left: 0; }
+.seg { margin-left: auto; display: inline-flex; border: 1px solid var(--line); border-radius: 999px; overflow: hidden; background: var(--surface); }
+.seg button { border: 0; background: none; color: var(--muted); font: 600 12px/1 var(--font-ui); padding: 8px 12px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+.note { flex-basis: 100%; margin: 0; font-size: 13px; color: var(--muted); min-height: 1.5em; }
+
+/* grid */
+main { padding-block: 32px 24px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px; }
+@media (max-width: 420px) { .grid { grid-template-columns: 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 20px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.stage { aspect-ratio: 4 / 3; max-width: 100%; display: grid; place-items: center; background: var(--canvas); position: relative; }
+.stage .big { width: 46%; aspect-ratio: 1; transition: transform .6s cubic-bezier(.2,.9,.3,1.2); }
+.card:hover .stage .big { transform: scale(1.06) rotate(-2deg); }
+.num { position: absolute; top: 12px; left: 14px; font: 500 11px/1 var(--font-mono); color: var(--muted); letter-spacing: .06em; }
+.checks { display: flex; align-items: center; gap: 14px; padding: 14px 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.sz { display: grid; justify-items: center; gap: 4px; }
+.sz span { font: 400 10px/1 var(--font-mono); color: var(--muted); }
+.sz .box { display: grid; place-items: center; height: 64px; }
+.icon { width: 56px; height: 56px; border-radius: 15px; display: grid; place-items: center;
+  background: linear-gradient(145deg, var(--a), var(--c)); box-shadow: 0 6px 14px -6px color-mix(in srgb, var(--c) 70%, transparent); }
+.icon .mk { width: 64%; height: 64%; }
+.icon .mk { --a: #FFFFFF; --b: rgba(255,255,255,.62); --c: #FFFFFF; }
+[data-palette="mono"] .icon { background: var(--fg); box-shadow: none; }
+[data-palette="mono"] .icon .mk { --a: var(--bg); --b: var(--bg); --c: var(--bg); }
+.lockup { margin-left: auto; display: flex; align-items: center; gap: 7px; }
+.lockup .mk { width: 26px; height: 26px; }
+.lockup b { font: 900 22px/1 var(--font-brand); letter-spacing: -.02em; }
+.text { padding: 16px 18px 20px; display: grid; gap: 6px; }
+.text h2 { margin: 0; font-family: var(--font-brand); font-weight: 900; font-size: 22px; letter-spacing: -.01em; }
+.sub { font: 500 12px/1.3 var(--font-mono); color: var(--muted); }
+.text p { margin: 4px 0 0; font-size: 14.5px; color: color-mix(in srgb, var(--fg) 82%, var(--muted)); text-wrap: pretty; }
+
+/* palettes */
+section.pals { padding-block: 40px 64px; }
+section.pals h3 { margin: 0 0 6px; font-family: var(--font-brand); font-weight: 900; font-size: 26px; }
+section.pals > .wrap > p { margin: 0 0 20px; color: var(--muted); max-width: 62ch; }
+.pal-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+.pal { border: 1px solid var(--line); border-radius: 16px; background: var(--surface); padding: 14px; display: grid; gap: 10px; min-width: 0; }
+.sw { display: grid; grid-template-columns: 2fr 1fr 1fr; height: 52px; border-radius: 10px; overflow: hidden; }
+.pal h4 { margin: 0; font-size: 15px; font-weight: 700; }
+.hex { font: 400 11.5px/1.4 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.pal p { margin: 0; font-size: 13px; color: var(--muted); }
+footer { border-top: 1px solid var(--line); }
+footer .wrap { padding-block: 20px 36px; font-size: 13px; color: var(--muted); }
+code { font-family: var(--font-mono); font-size: 12.5px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div id="app" data-palette="signal">
+  <div class="wrap">
+    <header>
+      <div class="eyebrow">Brand · Round 1 · 7 marks × 5 palettes</div>
+      <h1>Your devices, <span>connected.</span></h1>
+      <p class="lede">First explorations for the Linksy mark. Each one is built from rounded primitives in a 100-unit grid and checked at real sizes, from a 16 px tray icon up to an app tile. Switch palettes to see every mark in each color direction.</p>
+    </header>
+  </div>
+
+  <div class="bar">
+    <div class="wrap">
+      <span class="bar-label">Palette</span>
+      <div class="chips" id="chips" role="group" aria-label="Palette"></div>
+      <div class="seg" role="group" aria-label="Preview theme">
+        <button type="button" id="th-auto" data-th="" aria-pressed="true">Auto</button>
+        <button type="button" id="th-light" data-th="light" aria-pressed="false">Light</button>
+        <button type="button" id="th-dark" data-th="dark" aria-pressed="false">Dark</button>
+      </div>
+      <p class="note" id="note"></p>
+    </div>
+  </div>
+
+  <main class="wrap">
+    <div class="grid" id="grid"></div>
+  </main>
+
+  <section class="pals">
+    <div class="wrap">
+      <h3>Color directions</h3>
+      <p>Five directions. Primary carries the mark, secondary marks the other device, and deep is used for overlaps and app-icon gradients.</p>
+      <div class="pal-list" id="pals"></div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">Pick 2–3 favorite marks and a palette. Round 2 refines proportions, the wordmark, and the app icon. Source of truth: <code>brand/exploration/marks.js</code>.</div>
+  </footer>
+</div>
+
+<script src="marks.js"></script>
+<script>
+(function () {
+  const { marks, palettes } = globalThis.LinksyMarks;
+  const app = document.getElementById("app");
+  let n = 0;
+  const svg = (m) => `<svg class="mk" viewBox="0 0 100 100" aria-hidden="true">${m.svg(m.id + "-" + (n++))}</svg>`;
+
+  document.getElementById("grid").innerHTML = marks.map((m, i) => `
+    <article class="card">
+      <div class="stage"><span class="num">${String(i + 1).padStart(2, "0")} / ${m.id}</span><div class="big">${svg(m)}</div></div>
+      <div class="checks">
+        <div class="sz"><div class="box"><div style="width:16px;height:16px">${svg(m)}</div></div><span>16</span></div>
+        <div class="sz"><div class="box"><div style="width:32px;height:32px">${svg(m)}</div></div><span>32</span></div>
+        <div class="sz"><div class="box"><div style="width:64px;height:64px">${svg(m)}</div></div><span>64</span></div>
+        <div class="sz"><div class="box"><div class="icon">${svg(m)}</div></div><span>app</span></div>
+        <div class="lockup">${svg(m)}<b>linksy</b></div>
+      </div>
+      <div class="text">
+        <h2>${m.title}</h2>
+        <div class="sub">${m.subtitle}</div>
+        <p>${m.why}</p>
+      </div>
+    </article>`).join("");
+
+  const swatch = (p) => p.id === "mono"
+    ? `<i style="background:var(--fg)"></i><i style="background:var(--muted)"></i><i style="background:var(--line)"></i>`
+    : `<i style="background:${p.a}"></i><i style="background:${p.b}"></i><i style="background:${p.c}"></i>`;
+
+  document.getElementById("chips").innerHTML = palettes.map((p) =>
+    `<button type="button" class="chip" id="pal-${p.id}" data-p="${p.id}" aria-pressed="false"><span class="dots">${swatch(p)}</span>${p.name}</button>`).join("");
+
+  document.getElementById("pals").innerHTML = palettes.map((p) => `
+    <div class="pal">
+      <div class="sw">${swatch(p).replaceAll("<i ", "<div ").replaceAll("</i>", "</div>")}</div>
+      <h4>${p.name}</h4>
+      <div class="hex">${p.id === "mono" ? "ink · follows theme" : `${p.a} · ${p.b}${p.bDark ? " / " + p.bDark : ""} · ${p.c}`}</div>
+      <p>${p.note}</p>
+    </div>`).join("");
+
+  const note = document.getElementById("note");
+  function setPalette(id) {
+    app.dataset.palette = id;
+    document.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", String(c.dataset.p === id)));
+    note.textContent = palettes.find((p) => p.id === id).note;
+    try { localStorage.setItem("linksy-pal", id); } catch (e) {}
+  }
+  document.getElementById("chips").addEventListener("click", (e) => {
+    const b = e.target.closest(".chip"); if (b) setPalette(b.dataset.p);
+  });
+  document.querySelectorAll(".seg button").forEach((b) => b.addEventListener("click", () => {
+    if (b.dataset.th) document.documentElement.dataset.theme = b.dataset.th;
+    else delete document.documentElement.dataset.theme;
+    document.querySelectorAll(".seg button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+  }));
+
+  let start = "signal";
+  try { start = localStorage.getItem("linksy-pal") || start; } catch (e) {}
+  setPalette(palettes.some((p) => p.id === start) ? start : "signal");
+})();
+</script>

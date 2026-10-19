@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">
+  <style>.a{fill:#2563FF}.b{fill:#22C3E6}.c{fill:#1438B8}.m{fill:#2563FF;opacity:.18}.sa{fill:none;stroke:#2563FF}.sb{fill:none;stroke:#22C3E6}</style>
+  <defs><clipPath id="cl-shared-screens"><rect x="38" y="18" width="46" height="36" rx="11"/></clipPath></defs>
+  <rect class="b" x="38" y="18" width="46" height="36" rx="11"/>
+  <rect class="a" x="16" y="30" width="34" height="50" rx="11"/>
+  <rect class="c" x="16" y="30" width="34" height="50" rx="11" clip-path="url(#cl-shared-screens)"/>
+</svg>

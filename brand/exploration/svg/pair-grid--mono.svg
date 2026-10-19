@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">
+  <style>.a{fill:#141821}.b{fill:#141821}.c{fill:#141821}.m{fill:#141821;opacity:.18}.sa{fill:none;stroke:#141821}.sb{fill:none;stroke:#141821}</style>
+  <rect class="a" x="15" y="15" width="20" height="20" rx="6.5"/>
+  <rect class="m" x="40" y="15" width="20" height="20" rx="6.5"/>
+  <rect class="m" x="65" y="15" width="20" height="20" rx="6.5"/>
+  <rect class="a" x="15" y="40" width="20" height="20" rx="6.5"/>
+  <rect class="m" x="40" y="40" width="20" height="20" rx="6.5"/>
+  <rect class="m" x="65" y="40" width="20" height="20" rx="6.5"/>
+  <rect class="a" x="15" y="65" width="20" height="20" rx="6.5"/>
+  <rect class="a" x="40" y="65" width="20" height="20" rx="6.5"/>
+  <rect class="b" x="65" y="65" width="20" height="20" rx="6.5"/>
+</svg>

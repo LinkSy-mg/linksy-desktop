@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">
+  <style>.a{fill:#12B282}.b{fill:#1E2A3B}.c{fill:#0A7A5A}.m{fill:#12B282;opacity:.18}.sa{fill:none;stroke:#12B282}.sb{fill:none;stroke:#1E2A3B}</style>
+  <defs>
+    <linearGradient id="lg-loop" gradientUnits="userSpaceOnUse" x1="14" y1="50" x2="86" y2="50">
+      <stop offset="0" style="stop-color:#12B282"/>
+      <stop offset="1" style="stop-color:#1E2A3B"/>
+    </linearGradient>
+  </defs>
+  <path d="M50 50 C62 31 86 31 86 50 C86 69 62 69 50 50 C38 31 14 31 14 50 C14 69 38 69 50 50 Z"
+        fill="none" stroke="url(#lg-loop)" stroke-width="10" stroke-linejoin="round"/>
+</svg>
