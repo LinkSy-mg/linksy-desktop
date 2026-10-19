@@ -8,6 +8,6 @@ Icon=app.linksy.Linksy
 Terminal=false
 Categories=Network;FileTransfer;GTK;
 Keywords=airdrop;share;send;transfer;nearby;devices;
-MimeType=application/octet-stream;
+MimeType=application/octet-stream;inode/directory;
 StartupNotify=true
 DBusActivatable=false
