@@ -107,7 +107,7 @@ Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
 - [x] Screen mirroring between computers (View Screen; the sharer always approves)
 - [x] Remote control of a mirrored screen (Take Control; asked for separately)
 - [x] Sidecar: another device as a second display (virtual monitor, driven from that device)
-- [ ] Phone as webcam (desktop side)
+- [x] Another device's camera as a webcam ("Linksy Camera" in PipeWire apps); the Android side is in `docs/protocol.md`
 
 ## Development aids
 

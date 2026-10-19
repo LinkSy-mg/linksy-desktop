@@ -57,7 +57,7 @@ Decisions already made with the owner:
 | Screen mirroring (watch / share) | ✅ | ⬜ | §4.8; phone can share via MediaProjection |
 | Remote control of a mirrored screen | ✅ | ⬜ | §4.8, kind `control` |
 | Sidecar (second display) | ✅ | ⬜ | §4.8, kind `display`; a tablet/phone can be the display |
-| Phone as webcam | ⬜ | ⬜ | planned; same session stream, kind `camera` |
+| Phone as webcam | ✅ desktop side | ⬜ | §4.8, kind `camera`: the phone shares its camera |
 
 ## 3. How to build the phone app (recommendation)
 
@@ -334,7 +334,16 @@ On Android:
   user) → `MediaCodec` encoder, `KEY_PROFILE = AVCProfileConstrainedBaseline`,
   `KEY_I_FRAME_INTERVAL = 2`, prepend SPS/PPS (`csd-0`/`csd-1`) to every keyframe, write
   Annex-B to the stream. The desktop app then shows it in its viewer window.
-- Core API: `node.request_session(id, SessionKind::Screen | Control | Display) -> Session` (read
+- **`camera` (phone as webcam):** the desktop sends `session_request` with
+  `"kind":"camera"`; the phone asks its user ("Studio wants to use your camera"), then
+  streams its camera exactly like a screen: H.264 **Constrained Baseline**, Annex-B,
+  **1280×720 at 30 fps**, keyframe every 2 s, SPS/PPS before each keyframe. The desktop
+  decodes it and offers it to every app as a PipeWire camera named
+  "Linksy Camera (<phone name>)". On Android: CameraX `Preview`/`ImageAnalysis` or
+  Camera2 into a `MediaCodec` input surface; keep it running in a foreground service with
+  the camera type while the session lasts; offer front/back switch and keep the phone's
+  screen dimmed. Nothing comes back on the viewer's half.
+- Core API: `node.request_session(id, SessionKind::Screen | Control | Display | Camera) -> Session` (read
   `session.recv`), and `node.incoming_sessions()` → accepted `Session`s to feed
   (`session.send`). Events: `session_request {request, from, kind}`,
   `session_started {session, peer, kind, sharing}`, `session_ended {session}`.
@@ -441,3 +450,5 @@ Earlier notes, still valid:
   `read_control_frames`.
 - **2026-10-19** — Sidecar (§4.8): session kind `display`, where the requester shares a
   virtual monitor and the receiver shows it full screen and sends input back.
+- **2026-10-19** — Phone as webcam, desktop side (§4.8): session kind `camera`; the
+  desktop publishes the stream as a PipeWire camera. Media: 720p30 Constrained Baseline.
