@@ -1,6 +1,7 @@
 //! The Linksy window. One screen, AirDrop-style: drop or choose files, pick a device.
 //! Devices and transfers update live from the service's events.
 
+mod invite;
 mod prefs;
 
 use std::cell::RefCell;
@@ -42,6 +43,7 @@ struct State {
     offer_dialogs: HashMap<Uuid, adw::AlertDialog>,
     download_dir: Option<PathBuf>,
     port: Option<u16>,
+    invite_dialog: Option<adw::Dialog>,
 }
 
 pub struct Window {
@@ -79,6 +81,7 @@ impl Window {
         header.set_title_widget(Some(&title));
         let menu = gio::Menu::new();
         let section = gio::Menu::new();
+        section.append(Some("Pair with QR Code…"), Some("win.pair-qr"));
         section.append(Some("Pair by Address…"), Some("win.pair-address"));
         section.append(Some("Open Downloads Folder"), Some("app.open-downloads"));
         menu.append_section(None, &section);
@@ -223,6 +226,15 @@ impl Window {
             }
         });
         self.window.add_action(&prefs);
+
+        let qr = gio::SimpleAction::new("pair-qr", None);
+        let w = Rc::downgrade(self);
+        qr.connect_activate(move |_, _| {
+            if let Some(w) = w.upgrade() {
+                w.show_invite();
+            }
+        });
+        self.window.add_action(&qr);
 
         let by_address = gio::SimpleAction::new("pair-address", None);
         let w = Rc::downgrade(self);
@@ -385,6 +397,7 @@ impl Window {
             Event::PairingRequest { request, device, code, incoming } => self.show_pairing(request, device, code, incoming),
             Event::Paired { device } => {
                 self.close_pair_dialog(&device.id);
+                self.close_invite_dialog();
                 self.toast(&format!("Paired with {}", device.name));
                 self.refresh_devices();
             }
