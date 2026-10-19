@@ -288,8 +288,16 @@ The receiving device **always asks its user** ("Pixel 9 wants to see your screen
 Allow / Don't Allow; auto-accept never applies) and answers within 120 s:
 
 ```json
-{"type":"session_accept"}      // or {"type":"session_decline"}
+{"type":"session_accept"}
+{"type":"session_decline"}                          // the user said no
+{"type":"session_decline","reason":"unsupported"}  // this device can't do that kind
 ```
+
+A device that **can't** do a kind (a phone asked to be controlled before that's built)
+must answer with `reason: "unsupported"`, through core `node.decline_unsupported(request)`
+instead of `node.respond(request, false)`. The desktop then says "realme can't be
+controlled yet" instead of "didn't allow it", and a refused control request keeps the
+screen view running. Unknown `reason` values read as a plain decline.
 
 After `session_accept`:
 
@@ -426,6 +434,32 @@ Earlier notes, still valid:
 
 ## 7. Open items affecting mobile
 
+Phone-side fixes found testing with a realme 15 Pro 5G (2026-10-19):
+
+- [ ] **Screen video has black strips.** `ScreenShare.fit` rounds *both* sides down to a
+      multiple of 16 independently, so 1272×2800 becomes 864×1920 (0.450) for a 0.454
+      screen, and `VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR` letterboxes the difference inside
+      the video. Keep the exact aspect: pick the width (multiple of 16), then
+      `height = round(width × h / w)` rounded to an **even** number (H.264 needs even
+      sizes; encoders pad to 16 internally and signal the crop). Check
+      `MediaCodecInfo.VideoCapabilities.isSizeSupported(w, h)`, stepping the width down
+      by 16 until supported. The desktop window already fits the stream exactly.
+- [ ] **Answer unsupported kinds with `decline_unsupported`** (above), exposed through the
+      bridge, instead of `respond(false)` in `RustNode`.
+- [ ] **`control`: let the desktop drive the phone.** An `AccessibilityService`
+      (`canPerformGestures`) applies `pointer`/`button`/`scroll` messages with
+      `dispatchGesture`: `button left pressed` + `pointer` moves + `released` = one
+      stroke (tap if short and still, drag otherwise), `scroll` = a two-finger swipe,
+      `key` = `performGlobalAction` for Back/Home (keysyms Escape → back, Super/Home →
+      home) and text via `AccessibilityNodeInfo.ACTION_SET_TEXT` on the focused field.
+      The user enables the service once in Settings → Accessibility; until then answer
+      `control` with `decline_unsupported`.
+- [ ] **`display`: be the desktop's second screen.** Accept `display` requests (prompt
+      "fedora wants to use this screen as a second display"), go immersive full screen
+      in landscape, decode the stream with `MediaCodec` into a `SurfaceView`, and send
+      taps as `pointer` + `button left`, two-finger drags as smooth `scroll`. The desktop
+      currently sends 1920×1080; matching the phone's own size is planned.
+
 - [ ] Core: send from file descriptors / readers (for `content://` URIs).
 - [ ] Core: receive through a callback or into a caller-provided sink (MediaStore).
 - [x] Core: inject discovered devices from the platform (`device_found` / `device_lost`).
@@ -459,3 +493,6 @@ Earlier notes, still valid:
 - **2026-10-19** — Phone as webcam, desktop side (§4.8): session kind `camera`; the
   desktop publishes the stream as a PipeWire camera. Media: 720p30 Constrained Baseline.
 - **2026-10-19** — Desktop UX: screen windows fit the shared screen's shape; camera preview card. No protocol change.
+- **2026-10-19** — `session_decline` may carry `reason: "unsupported"`; core
+  `decline_unsupported`. Phone-side to-dos from real-device testing in §7 (screen aspect,
+  control via AccessibilityService, display mode).
