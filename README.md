@@ -79,7 +79,8 @@ Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
 - [x] Device-to-device notifications
 - [x] Background service, desktop notifications, CLI
 - [x] GTK4/libadwaita app
-- [ ] Clipboard sync
+- [x] Clipboard sharing (text, on demand: app ⋯ menu or `linksy clip`; received text is copied via wl-copy/xclip/xsel)
+- [ ] Automatic clipboard sync
 - [ ] Tray icon and "Send with Linksy" in the file manager
 - [ ] macOS (AppKit) and Windows (WinUI) apps
 - [ ] Screen mirroring (optional module)

@@ -2,6 +2,7 @@
 //! and shows native notifications. Front ends (the app, the `linksy` CLI) talk to it over
 //! a Unix socket and can come and go.
 
+mod clipboard;
 mod ipc;
 mod notify;
 mod system;
@@ -104,6 +105,7 @@ async fn main() -> ExitCode {
     if args.notifications {
         tokio::spawn(notify::run(node.clone()));
     }
+    tokio::spawn(clipboard::run(node.clone(), args.notifications));
     let socket = args.socket.clone();
     let server = tokio::spawn(ipc::serve(node.clone(), socket.clone(), download_dir));
 

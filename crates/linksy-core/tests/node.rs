@@ -255,6 +255,23 @@ async fn notifications_arrive() {
 }
 
 #[tokio::test]
+async fn clipboard_text_arrives_and_limits_hold() {
+    let (a, b) = paired().await;
+    let mut rb = b.node.subscribe();
+    let to = b.node.info().id;
+    let text = "multi-line ✓\nclipboard";
+    a.node.send_clipboard(&to, text).await.unwrap();
+    let got = wait_for(&mut rb, |e| match e {
+        Event::Clipboard { from, text } if from.name == "Alpha" => Some(text.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, text);
+    assert!(a.node.send_clipboard(&to, "").await.is_err());
+    assert!(a.node.send_clipboard(&to, &"x".repeat(linksy_core::MAX_CLIPBOARD + 1)).await.is_err());
+}
+
+#[tokio::test]
 async fn restarted_device_reconnects_by_itself() {
     let (a, b) = paired().await;
     let mut ra = a.node.subscribe();

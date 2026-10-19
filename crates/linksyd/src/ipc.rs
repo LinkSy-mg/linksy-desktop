@@ -105,6 +105,11 @@ async fn handle(node: &Node, req: Request, download_dir: &Path) -> Result<Value,
             node.notify(&id, &title, &body).await.map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
+        Request::Clipboard { to, text } => {
+            let id = resolve(node, &to)?;
+            node.send_clipboard(&id, &text).await.map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
         Request::Forget { target } => {
             let id = resolve(node, &target)?;
             Ok(Value::Bool(node.forget(&id).map_err(|e| e.to_string())?))

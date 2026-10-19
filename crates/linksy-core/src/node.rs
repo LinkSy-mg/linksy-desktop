@@ -29,6 +29,8 @@ use crate::tls;
 const PAIR_TIMEOUT: Duration = Duration::from_secs(60);
 const OFFER_TIMEOUT: Duration = Duration::from_secs(120);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Clipboard text limit; well under the protocol frame cap even after JSON escaping.
+pub const MAX_CLIPBOARD: usize = 256 * 1024;
 const RECONNECT_EVERY: Duration = Duration::from_secs(15);
 
 #[derive(Clone, Debug)]
@@ -85,6 +87,8 @@ pub enum Event {
     TransferComplete { transfer: Uuid, saved: Vec<PathBuf> },
     TransferFailed { transfer: Uuid, reason: String },
     Notification { from: DeviceInfo, title: String, body: String },
+    /// A paired device shared its clipboard; front ends decide where it goes.
+    Clipboard { from: DeviceInfo, text: String },
 }
 
 /// A device as the UI sees it: paired, nearby, or both.
@@ -249,6 +253,20 @@ impl Node {
         Ok(())
     }
 
+    /// Share clipboard text with a connected device.
+    pub async fn send_clipboard(&self, to: &Fingerprint, text: &str) -> Result<()> {
+        if text.is_empty() {
+            return Err(protocol("the clipboard is empty"));
+        }
+        if text.len() > MAX_CLIPBOARD {
+            return Err(protocol("clipboard text is too large, send it as a file instead"));
+        }
+        let conn = self.connection(to)?;
+        let mut s = conn.open_uni().await?;
+        write_msg(&mut s, &Message::Clipboard { text: text.into() }).await?;
+        s.finish()?;
+        Ok(())
+    }
 
     /// Offer files and folders to a connected device. Progress and the outcome arrive as
     /// events carrying the returned transfer id.
@@ -535,6 +553,10 @@ impl Node {
                         tokio::spawn(async move {
                             match read_msg::<Message>(&mut recv).await {
                                 Ok(Message::Notify { title, body }) => node.emit(Event::Notification { from, title, body }),
+                                Ok(Message::Clipboard { text }) if text.len() <= MAX_CLIPBOARD => {
+                                    node.emit(Event::Clipboard { from, text })
+                                }
+                                Ok(Message::Clipboard { .. }) => debug!("oversized clipboard from {}", from.name),
                                 Ok(Message::Ping) => {}
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
                             }

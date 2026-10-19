@@ -65,6 +65,8 @@ pub enum TransferMsg {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
     Notify { title: String, body: String },
+    /// Text for the receiver's clipboard.
+    Clipboard { text: String },
     Ping,
 }
 

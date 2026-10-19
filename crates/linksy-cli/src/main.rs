@@ -15,6 +15,7 @@ Usage:
   linksy pair <device|ip:port>       pair with a device (both screens show a code)
   linksy send <device> <files…>      send files or folders
   linksy notify <device> <title> [body]
+  linksy clip <device> [text]        share text to its clipboard (default: stdin)
   linksy forget <device>             unpair a device
   linksy watch                       follow activity and answer requests
   linksy status                      this device
@@ -124,6 +125,17 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
         ("notify", [to, title, body @ ..]) if body.len() <= 1 => {
             c.notify(to.clone(), title.clone(), body.first().cloned().unwrap_or_default()).await.map_err(err)?;
         }
+        ("clip", [to, text @ ..]) => {
+            let text = if text.is_empty() {
+                let mut buf = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf).map_err(|e| e.to_string())?;
+                buf
+            } else {
+                text.join(" ")
+            };
+            c.send_clipboard(to.clone(), text).await.map_err(err)?;
+            println!("Shared clipboard with {to}.");
+        }
         ("forget", [target]) => {
             if c.forget(target.clone()).await.map_err(err)? {
                 println!("Forgot {target}.");
@@ -180,6 +192,7 @@ async fn watch(c: &Client) -> Result<(), String> {
             }
             Event::TransferFailed { reason, .. } => println!("✗ Transfer failed: {reason}"),
             Event::Notification { from, title, body } => println!("🔔 {} — {title} {body}", from.name),
+            Event::Clipboard { from, text } => println!("📋 {} shared: {text}", from.name),
             _ => {}
         }
     }

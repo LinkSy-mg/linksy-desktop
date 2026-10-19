@@ -60,7 +60,7 @@ pub async fn run(node: Node) {
     }
 }
 
-fn base(summary: &str, body: &str) -> Notification {
+pub fn base(summary: &str, body: &str) -> Notification {
     let mut n = Notification::new();
     n.appname(APP).summary(summary).body(body).icon(DESKTOP_ENTRY).hint(Hint::DesktopEntry(DESKTOP_ENTRY.into()));
     n

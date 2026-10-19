@@ -33,6 +33,7 @@ pub enum Request {
     Send { to: String, paths: Vec<PathBuf> },
     Cancel { transfer: Uuid },
     Notify { to: String, title: String, body: String },
+    Clipboard { to: String, text: String },
     Forget { target: String },
 }
 
@@ -190,6 +191,10 @@ impl Client {
 
     pub async fn notify(&self, to: impl Into<String>, title: impl Into<String>, body: impl Into<String>) -> Result<(), ClientError> {
         self.call(Request::Notify { to: to.into(), title: title.into(), body: body.into() }).await
+    }
+
+    pub async fn send_clipboard(&self, to: impl Into<String>, text: impl Into<String>) -> Result<(), ClientError> {
+        self.call(Request::Clipboard { to: to.into(), text: text.into() }).await
     }
 
     pub async fn forget(&self, target: impl Into<String>) -> Result<bool, ClientError> {

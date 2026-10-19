@@ -352,6 +352,13 @@ impl Window {
                 let text = if body.is_empty() { format!("{}: {title}", from.name) } else { format!("{}: {title} — {body}", from.name) };
                 self.toast(&text);
             }
+            Event::Clipboard { from, text } => {
+                // The service copies it too; a focused window can also do it directly.
+                if self.window.is_active() {
+                    self.window.clipboard().set_text(&text);
+                }
+                self.toast(&format!("Copied from {}", from.name));
+            }
         }
     }
 
@@ -502,8 +509,10 @@ impl Window {
 
     fn device_menu(self: &Rc<Self>, d: &DeviceView) -> gtk::MenuButton {
         let popover_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["menu-box"]).build();
+        let clip = gtk::Button::builder().label("Send Clipboard").css_classes(["flat"]).sensitive(d.connected).build();
         let ping = gtk::Button::builder().label("Send a Ping").css_classes(["flat"]).sensitive(d.connected).build();
         let forget = gtk::Button::builder().label("Forget Device").css_classes(["flat", "destructive-label"]).build();
+        popover_box.append(&clip);
         popover_box.append(&ping);
         popover_box.append(&forget);
         let popover = gtk::Popover::builder().child(&popover_box).build();
@@ -516,6 +525,26 @@ impl Window {
             .build();
 
         let (id, name) = (d.device.id, d.device.name.clone());
+        let w = Rc::downgrade(self);
+        let p = popover.clone();
+        clip.connect_clicked(move |_| {
+            p.popdown();
+            let Some(w) = w.upgrade() else { return };
+            let name = name.clone();
+            glib::spawn_future_local(async move {
+                let text = match w.window.clipboard().read_text_future().await {
+                    Ok(Some(t)) if !t.is_empty() => t.to_string(),
+                    _ => return w.toast("There's no text on the clipboard"),
+                };
+                let Some(c) = w.client() else { return };
+                match w.bridge.call(&c, move |c| async move { c.send_clipboard(id.to_string(), text).await }).await {
+                    Ok(()) => w.toast(&format!("Clipboard sent to {name}")),
+                    Err(e) => w.toast(&e),
+                }
+            });
+        });
+
+        let name = d.device.name.clone();
         let w = Rc::downgrade(self);
         let p = popover.clone();
         ping.connect_clicked(move |_| {
