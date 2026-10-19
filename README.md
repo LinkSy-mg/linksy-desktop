@@ -93,7 +93,8 @@ Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
 - [x] GTK4/libadwaita app with Preferences (name, folder, auto-accept, stay connected)
 - [x] Clipboard sharing (text, on demand: app ⋯ menu or `linksy clip`; received text is copied via wl-copy/xclip/xsel)
 - [ ] Automatic clipboard sync
-- [ ] Tray icon and "Send with Linksy" in the file manager
+- [x] "Send with Linksy" in Files (right-click → Scripts), "Open With Linksy" for files and folders
+- [ ] Tray icon (GNOME has none by default)
 - [ ] Android app (Flutter; see `docs/protocol.md`)
 - [ ] QR-code pairing
 - [ ] macOS (AppKit) and Windows (WinUI) apps

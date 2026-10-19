@@ -12,7 +12,7 @@ if [ -f "$UNITS/linksyd.service" ]; then
   systemctl --user daemon-reload 2>/dev/null || true
 fi
 rm -f "$BIN/linksyd" "$BIN/linksy" "$BIN/linksy-app"
-rm -f "$SHARE/applications/app.linksy.Linksy.desktop"
+rm -f "$SHARE/applications/app.linksy.Linksy.desktop" "$SHARE/nautilus/scripts/Send with Linksy"
 rm -f "$SHARE/icons/hicolor/scalable/apps/app.linksy.Linksy.svg" "$SHARE/icons/hicolor/symbolic/apps/app.linksy.Linksy-symbolic.svg"
 if [ "${1:-}" = "--purge" ]; then
   rm -rf "$SHARE/linksy"

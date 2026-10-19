@@ -33,6 +33,10 @@ if [ "$WITH_APP" = 1 ]; then
   mkdir -p "$SHARE/applications"
   sed "s|^Exec=linksy-app|Exec=$BIN/linksy-app|" data/app.linksy.Linksy.desktop > "$SHARE/applications/app.linksy.Linksy.desktop"
   command -v update-desktop-database >/dev/null && update-desktop-database -q "$SHARE/applications" || true
+  # Files: right-click → Scripts → Send with Linksy.
+  mkdir -p "$SHARE/nautilus/scripts"
+  sed "s|@BINDIR@|$BIN|" "data/nautilus/Send with Linksy" > "$SHARE/nautilus/scripts/Send with Linksy"
+  chmod 755 "$SHARE/nautilus/scripts/Send with Linksy"
 fi
 install -Dm644 data/icons/app.linksy.Linksy.svg "$SHARE/icons/hicolor/scalable/apps/app.linksy.Linksy.svg"
 install -Dm644 data/icons/app.linksy.Linksy-symbolic.svg "$SHARE/icons/hicolor/symbolic/apps/app.linksy.Linksy-symbolic.svg"

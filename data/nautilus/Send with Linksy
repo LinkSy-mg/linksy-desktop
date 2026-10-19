@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Nautilus: right-click → Scripts → Send with Linksy. Opens Linksy with the selected files
+# ready to send to a nearby device.
+set -euo pipefail
+mapfile -t files < <(printf '%s' "${NAUTILUS_SCRIPT_SELECTED_FILE_PATHS:-}" | sed '/^$/d')
+[ "${#files[@]}" -eq 0 ] && files=("$@")
+exec "@BINDIR@/linksy-app" "${files[@]}"
