@@ -54,7 +54,10 @@ Decisions already made with the owner:
 | Reply to messages from desktop | ⬜ | ⬜ | planned; via notification RemoteInput |
 | Phone as webcam | ⬜ | ⬜ | planned |
 | Bluetooth LE presence | ⬜ | ⬜ | planned |
-| Screen mirroring / remote input | ⬜ | ⬜ | desktop-only, optional |
+| Screen mirroring (watch / share) | ✅ | ⬜ | §4.8; phone can share via MediaProjection |
+| Remote input on a mirrored screen | ⬜ | ⬜ | planned |
+| Sidecar (second monitor) | ⬜ | ⬜ | planned, desktop ↔ tablet |
+| Phone as webcam | ⬜ | ⬜ | planned; same session stream, kind `camera` |
 
 ## 3. How to build the phone app (recommendation)
 
@@ -271,6 +274,47 @@ show the code too (§4.3) — so a phone must still support the code flow.
 Security: the phone authenticates the desktop by the pinned `id`; the desktop
 authenticates the phone by the token, which only someone who saw the screen has.
 
+### 4.8 Media sessions (screen mirroring) — `src/protocol.rs`, `src/node.rs`
+
+A media session is a **bidirectional stream** whose first frame is a session request
+(file offers are the other kind of bidirectional stream; dispatch on the first frame's
+`type`). The device that wants to **watch** opens it:
+
+```json
+{"type":"session_request","id":"<uuid>","kind":"screen"}
+```
+
+The receiving device **always asks its user** ("Pixel 9 wants to see your screen",
+Allow / Don't Allow; auto-accept never applies) and answers within 120 s:
+
+```json
+{"type":"session_accept"}      // or {"type":"session_decline"}
+```
+
+After `session_accept`:
+
+- **Sharer → viewer:** raw **H.264 Annex-B byte stream** (no framing): start codes,
+  SPS/PPS repeated before every keyframe (`config-interval=-1`), access-unit aligned.
+  **Profile: Constrained Baseline** (every decoder handles it, including OpenH264 and
+  phone hardware). Desktop sends ~8 Mbit/s, keyframe at least every 2 s (60 frames),
+  up to 30 fps, at the screen's resolution.
+- **Viewer → sharer:** reserved for framed JSON control messages (remote input, keyframe
+  requests). Nothing is sent yet; a sharer must keep reading it and ignore unknown types.
+- Either side ends the session by finishing/resetting its half or closing the stream.
+  A connection with a session open is never closed as idle.
+
+On Android:
+- **Watching** a desktop: decode with `MediaCodec` (`video/avc`) into a `SurfaceView`;
+  split on start codes or feed via an Annex-B parser.
+- **Sharing** the phone's screen with a desktop: `MediaProjection` (the system asks the
+  user) → `MediaCodec` encoder, `KEY_PROFILE = AVCProfileConstrainedBaseline`,
+  `KEY_I_FRAME_INTERVAL = 2`, prepend SPS/PPS (`csd-0`/`csd-1`) to every keyframe, write
+  Annex-B to the stream. The desktop app then shows it in its viewer window.
+- Core API: `node.request_session(id, SessionKind::Screen) -> Session` (viewer side; read
+  `session.recv`), and `node.incoming_sessions()` → accepted `Session`s to feed
+  (`session.send`). Events: `session_request {request, from, kind}`,
+  `session_started {session, peer, kind, sharing}`, `session_ended {session}`.
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -285,6 +329,7 @@ node.forget(id)                             node.shutdown()
 node.device_found(device, addrs)            node.device_lost(id)        // platform discovery
 node.create_invite() -> Invite (.to_uri())  node.cancel_invite()        // show a QR code
 node.pair_with_invite(uri)                                              // after scanning one
+node.request_session(id, kind) -> Session   node.incoming_sessions()    // screen mirroring
 ```
 
 Events (JSON-serializable, same shapes as the desktop IPC):
@@ -365,3 +410,5 @@ Earlier notes, still valid:
 - **2026-10-19** — Desktop redesign to device pages with an activity timeline (§6), and
   a history kept by the service. No protocol change.
 - **2026-10-19** — Brand palette chosen: Signal (§1).
+- **2026-10-19** — Screen mirroring (§4.8): `session_request`/`accept`/`decline` streams,
+  H.264 Constrained Baseline Annex-B, core `request_session` / `incoming_sessions`.
