@@ -71,7 +71,8 @@ fn run(args: Args) -> Result<(), String> {
     let (encoder, format) = encoder();
     let description = format!(
         "{source} ! videoconvert ! video/x-raw,format={format} ! queue max-size-buffers=2 leaky=downstream ! {encoder} \
-         ! h264parse config-interval=-1 ! video/x-h264,stream-format=byte-stream,alignment=au \
+         ! video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1 \
+         ! video/x-h264,stream-format=byte-stream,alignment=au \
          ! fdsink fd={} sync=false",
         out.as_raw_fd()
     );
@@ -94,7 +95,8 @@ fn run(args: Args) -> Result<(), String> {
 }
 
 /// The best H.264 encoder available, and the raw format it wants: the GPU first, then
-/// x264, then OpenH264 (always present on Fedora).
+/// x264, then OpenH264 (always present on Fedora). All are asked for Constrained
+/// Baseline, which every H.264 decoder handles (OpenH264's, phones' hardware ones).
 fn encoder() -> (&'static str, &'static str) {
     let has = |name: &str| gst::ElementFactory::find(name).is_some();
     if has("vah264lpenc") {
