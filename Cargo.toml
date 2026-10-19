@@ -1,7 +1,8 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
-# The GTK app needs gtk4/libadwaita headers; build it with `-p linksy-app` (see README).
+# The GTK app and the screen helper need gtk4/libadwaita and GStreamer headers; build them
+# with `-p linksy-app -p linksy-screen` (see README).
 default-members = ["crates/linksy-core", "crates/linksy-ipc", "crates/linksyd", "crates/linksy-cli"]
 
 [workspace.package]

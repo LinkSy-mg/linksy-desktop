@@ -1,0 +1,10 @@
+[package]
+name = "linksy-screen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast"] }
+gstreamer = "0.25.4"
+tokio = { version = "1.53.3", features = ["rt", "macros"] }
