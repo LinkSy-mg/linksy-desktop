@@ -171,6 +171,7 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, req: Reques
             json(serde_json::to_value(SessionInfo { session: id, socket }))
         }
         Request::PendingSessions => json(serde_json::to_value(sessions.pending())),
+        Request::ActiveSessions => json(serde_json::to_value(sessions.active())),
         Request::EndSession { session } => Ok(Value::Bool(sessions.end(session))),
         Request::Settings => json(serde_json::to_value(node.settings())),
         Request::UpdateSettings { settings } => {

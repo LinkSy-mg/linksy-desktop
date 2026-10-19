@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use linksy_core::{Node, Session, SessionKind, Uuid};
-use linksy_ipc::PendingSession;
+use linksy_ipc::{ActiveSession, PendingSession};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::task::AbortHandle;
@@ -22,7 +22,8 @@ const VIEW_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
 pub struct Sessions {
-    running: Arc<Mutex<HashMap<Uuid, AbortHandle>>>,
+    /// Every running session: its task, and what it is (for windows opened mid-session).
+    running: Arc<Mutex<HashMap<Uuid, (AbortHandle, ActiveSession)>>>,
     /// Sessions to show that wait for the app to connect.
     pending: Arc<Mutex<HashMap<Uuid, PendingSession>>>,
     data_dir: PathBuf,
@@ -63,6 +64,7 @@ impl Sessions {
 
     fn spawn_helper(&self, session: Session, webcam: bool) {
         let id = session.id;
+        let info = active(&session);
         let this = self.clone();
         let task = tokio::spawn(async move {
             if let Err(e) = this.run_helper(session, webcam).await {
@@ -70,7 +72,7 @@ impl Sessions {
             }
             this.running.lock().unwrap().remove(&id);
         });
-        self.running.lock().unwrap().insert(id, task.abort_handle());
+        self.running.lock().unwrap().insert(id, (task.abort_handle(), info));
     }
 
     /// Start `linksy-screen` for this side of the session and relay its socket.
@@ -156,6 +158,7 @@ impl Sessions {
 
     fn relay_when_joined(&self, mut session: Session, listener: UnixListener, path: PathBuf) {
         let id = session.id;
+        let info = active(&session);
         let (running, pending) = (self.running.clone(), self.pending.clone());
         let task = tokio::spawn(async move {
             let accepted = tokio::time::timeout(VIEW_TIMEOUT, listener.accept()).await;
@@ -166,18 +169,22 @@ impl Sessions {
             }
             running.lock().unwrap().remove(&id);
         });
-        self.running.lock().unwrap().insert(id, task.abort_handle());
+        self.running.lock().unwrap().insert(id, (task.abort_handle(), info));
     }
 
     pub fn pending(&self) -> Vec<PendingSession> {
         self.pending.lock().unwrap().values().cloned().collect()
     }
 
+    pub fn active(&self) -> Vec<ActiveSession> {
+        self.running.lock().unwrap().values().map(|(_, info)| info.clone()).collect()
+    }
+
     /// Stop a session from either side. Returns false if it wasn't running.
     pub fn end(&self, id: Uuid) -> bool {
         self.pending.lock().unwrap().remove(&id);
         match self.running.lock().unwrap().remove(&id) {
-            Some(task) => {
+            Some((task, _)) => {
                 task.abort();
                 true
             }
@@ -196,6 +203,10 @@ async fn relay(session: &mut Session, local: UnixStream) {
         _ = tokio::io::copy(recv, &mut local_tx) => {}
     }
     let _ = session.send.shutdown().await;
+}
+
+fn active(session: &Session) -> ActiveSession {
+    ActiveSession { session: session.id, peer: session.peer.clone(), kind: session.kind, sharing: session.sharing }
 }
 
 fn socket_path(role: &str, id: Uuid) -> PathBuf {

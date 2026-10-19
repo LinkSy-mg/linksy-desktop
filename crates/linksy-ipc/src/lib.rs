@@ -48,6 +48,8 @@ pub enum Request {
     /// Sessions this device should show (a second display another device started),
     /// waiting for the app.
     PendingSessions,
+    /// Sessions running now, so a window opened mid-session shows them.
+    ActiveSessions,
     /// Stop a running session, from either side.
     EndSession { session: Uuid },
     ClearHistory { with: Option<String> },
@@ -68,6 +70,15 @@ pub struct Status {
 pub struct SessionInfo {
     pub session: Uuid,
     pub socket: Option<PathBuf>,
+}
+
+/// A session running now. `sharing`: this device is the one sending media.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ActiveSession {
+    pub session: Uuid,
+    pub peer: DeviceInfo,
+    pub kind: SessionKind,
+    pub sharing: bool,
 }
 
 /// A session waiting for the app to show it.
@@ -314,6 +325,10 @@ impl Client {
 
     pub async fn pending_sessions(&self) -> Result<Vec<PendingSession>, ClientError> {
         self.call(Request::PendingSessions).await
+    }
+
+    pub async fn active_sessions(&self) -> Result<Vec<ActiveSession>, ClientError> {
+        self.call(Request::ActiveSessions).await
     }
 
     pub async fn end_session(&self, session: Uuid) -> Result<bool, ClientError> {
