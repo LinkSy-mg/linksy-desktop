@@ -1,6 +1,8 @@
 //! The Linksy window. One screen, AirDrop-style: drop or choose files, pick a device.
 //! Devices and transfers update live from the service's events.
 
+mod prefs;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -39,6 +41,7 @@ struct State {
     pair_dialogs: HashMap<Fingerprint, adw::AlertDialog>,
     offer_dialogs: HashMap<Uuid, adw::AlertDialog>,
     download_dir: Option<PathBuf>,
+    port: Option<u16>,
 }
 
 pub struct Window {
@@ -74,8 +77,15 @@ impl Window {
         let header = adw::HeaderBar::new();
         header.set_title_widget(Some(&title));
         let menu = gio::Menu::new();
-        menu.append(Some("Open Downloads Folder"), Some("app.open-downloads"));
-        menu.append(Some("About Linksy"), Some("app.about"));
+        let section = gio::Menu::new();
+        section.append(Some("Pair by Address…"), Some("win.pair-address"));
+        section.append(Some("Open Downloads Folder"), Some("app.open-downloads"));
+        menu.append_section(None, &section);
+        let section = gio::Menu::new();
+        section.append(Some("Preferences"), Some("win.preferences"));
+        section.append(Some("Keyboard Shortcuts"), Some("win.show-help-overlay"));
+        section.append(Some("About Linksy"), Some("app.about"));
+        menu.append_section(None, &section);
         let menu_button = gtk::MenuButton::builder()
             .icon_name("open-menu-symbolic")
             .menu_model(&menu)
@@ -180,6 +190,7 @@ impl Window {
             transfers_group,
             transfers,
         });
+        win.window.set_help_overlay(Some(&shortcuts_window()));
         win.setup_actions();
         win.setup_drop();
         win.connect();
@@ -197,6 +208,24 @@ impl Window {
             }
         });
         self.window.add_action(&choose);
+
+        let prefs = gio::SimpleAction::new("preferences", None);
+        let w = Rc::downgrade(self);
+        prefs.connect_activate(move |_, _| {
+            if let Some(w) = w.upgrade() {
+                w.show_preferences();
+            }
+        });
+        self.window.add_action(&prefs);
+
+        let by_address = gio::SimpleAction::new("pair-address", None);
+        let w = Rc::downgrade(self);
+        by_address.connect_activate(move |_, _| {
+            if let Some(w) = w.upgrade() {
+                w.ask_pair_address();
+            }
+        });
+        self.window.add_action(&by_address);
 
         let start = gio::SimpleAction::new("start-service", None);
         let w = Rc::downgrade(self);
@@ -298,7 +327,9 @@ impl Window {
         glib::spawn_future_local(async move {
             if let Ok(s) = call.await {
                 w.title.set_subtitle(&format!("Visible as {}", s.device.name));
-                w.state.borrow_mut().download_dir = Some(s.download_dir);
+                let mut state = w.state.borrow_mut();
+                state.download_dir = Some(s.download_dir);
+                state.port = Some(s.port);
             }
         });
     }
@@ -323,7 +354,11 @@ impl Window {
 
     fn handle_event(self: &Rc<Self>, ev: Event) {
         match ev {
-            Event::DeviceFound { .. } | Event::DeviceLost { .. } | Event::Connected { .. } | Event::Disconnected { .. } => self.refresh_devices(),
+            Event::DeviceFound { .. }
+            | Event::DeviceLost { .. }
+            | Event::DeviceUpdated { .. }
+            | Event::Connected { .. }
+            | Event::Disconnected { .. } => self.refresh_devices(),
             Event::PairingRequest { request, device, code, incoming } => self.show_pairing(request, device, code, incoming),
             Event::Paired { device } => {
                 self.close_pair_dialog(&device.id);
@@ -619,6 +654,40 @@ impl Window {
         });
     }
 
+    /// For networks that block discovery: pair with a device by its IP address.
+    fn ask_pair_address(self: &Rc<Self>) {
+        let dialog = adw::AlertDialog::new(
+            Some("Pair by Address"),
+            Some("If a device doesn't show up, enter the IP address shown in its Linksy status."),
+        );
+        let entry = gtk::Entry::builder().placeholder_text("192.168.1.20").activates_default(true).input_purpose(gtk::InputPurpose::Url).build();
+        dialog.set_extra_child(Some(&entry));
+        dialog.add_responses(&[("cancel", "Cancel"), ("pair", "Pair")]);
+        dialog.set_response_appearance("pair", adw::ResponseAppearance::Suggested);
+        dialog.set_default_response(Some("pair"));
+        dialog.set_close_response("cancel");
+        dialog.set_response_enabled("pair", false);
+        let d = dialog.clone();
+        entry.connect_changed(move |e| d.set_response_enabled("pair", fmt::peer_address(&e.text()).is_some()));
+        let (w, e) = (self.clone(), entry.clone());
+        dialog.connect_response(Some("pair"), move |_, _| {
+            let Some(addr) = fmt::peer_address(&e.text()) else { return };
+            let Some(c) = w.client() else { return };
+            let call = w.bridge.call(&c, move |c| async move { c.pair(addr.to_string()).await });
+            let w = w.clone();
+            glib::spawn_future_local(async move {
+                if let Err(e) = call.await
+                    && !e.contains("declined")
+                {
+                    w.toast_error(&e, None);
+                }
+                w.refresh_devices();
+            });
+        });
+        dialog.present(Some(&self.window));
+        entry.grab_focus();
+    }
+
     fn show_pairing(self: &Rc<Self>, request: Uuid, device: linksy_ipc::linksy_core::DeviceInfo, code: String, incoming: bool) {
         let (heading, body) = if incoming {
             (format!("{} Wants to Pair", device.name), format!("Pair only if {} shows this same code.", device.name))
@@ -851,6 +920,35 @@ impl Window {
         toast.set_timeout(3);
         self.toasts.add_toast(toast);
     }
+}
+
+fn shortcuts_window() -> gtk::ShortcutsWindow {
+    const UI: &str = r#"<interface>
+  <object class="GtkShortcutsWindow" id="shortcuts">
+    <property name="modal">1</property>
+    <child>
+      <object class="GtkShortcutsSection">
+        <property name="section-name">shortcuts</property>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">Sharing</property>
+            <child><object class="GtkShortcutsShortcut"><property name="title">Choose Files to Send</property><property name="accelerator">&lt;Control&gt;o</property></object></child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkShortcutsGroup">
+            <property name="title">General</property>
+            <child><object class="GtkShortcutsShortcut"><property name="title">Preferences</property><property name="accelerator">&lt;Control&gt;comma</property></object></child>
+            <child><object class="GtkShortcutsShortcut"><property name="title">Keyboard Shortcuts</property><property name="accelerator">&lt;Control&gt;question</property></object></child>
+            <child><object class="GtkShortcutsShortcut"><property name="title">Close Window</property><property name="accelerator">&lt;Control&gt;w</property></object></child>
+            <child><object class="GtkShortcutsShortcut"><property name="title">Quit</property><property name="accelerator">&lt;Control&gt;q</property></object></child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>"#;
+    gtk::Builder::from_string(UI).object("shortcuts").expect("shortcuts window")
 }
 
 fn kind_icon(kind: DeviceKind) -> &'static str {

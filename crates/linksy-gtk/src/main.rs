@@ -70,6 +70,8 @@ fn main() -> glib::ExitCode {
             gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
         );
         app.set_accels_for_action("win.choose-files", &["<Control>o"]);
+        app.set_accels_for_action("win.preferences", &["<Control>comma"]);
+        app.set_accels_for_action("win.show-help-overlay", &["<Control>question"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);
         app.set_accels_for_action("window.close", &["<Control>w"]);
     });
@@ -126,7 +128,8 @@ fn main() -> glib::ExitCode {
 }
 
 /// Development aid: save the window as a PNG after a delay, then quit.
-/// `LINKSY_SCREENSHOT=out.png [LINKSY_SCREENSHOT_DELAY=ms] linksy-app`
+/// `LINKSY_SCREENSHOT=out.png [LINKSY_SCREENSHOT_DELAY=ms] [LINKSY_SCREENSHOT_ACTION=win.x] linksy-app`
+/// The action, if any, runs halfway through the delay (to open a dialog, say).
 fn maybe_screenshot(app: &adw::Application, window: &adw::ApplicationWindow) {
     let Ok(path) = std::env::var("LINKSY_SCREENSHOT") else { return };
     // Headless backends may never tick the frame clock; show end states directly.
@@ -134,6 +137,12 @@ fn maybe_screenshot(app: &adw::Application, window: &adw::ApplicationWindow) {
         s.set_gtk_enable_animations(false);
     }
     let delay = std::env::var("LINKSY_SCREENSHOT_DELAY").ok().and_then(|d| d.parse().ok()).unwrap_or(1500);
+    if let Ok(action) = std::env::var("LINKSY_SCREENSHOT_ACTION") {
+        let window = window.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(delay / 2), move || {
+            let _ = WidgetExt::activate_action(&window, &action, None);
+        });
+    }
     let (app, window) = (app.clone(), window.clone());
     glib::timeout_add_local_once(std::time::Duration::from_millis(delay), move || {
         // A frame may be mid-layout; retry briefly until the window renders.

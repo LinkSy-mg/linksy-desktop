@@ -35,6 +35,34 @@ pub fn spaced_code(code: &str) -> String {
     if code.len() == 6 { format!("{} {}", &code[..3], &code[3..]) } else { code.to_string() }
 }
 
+/// "~/Downloads" rather than "/home/me/Downloads".
+pub fn home_relative(p: &Path) -> String {
+    match std::env::var_os("HOME").map(PathBuf::from) {
+        Some(home) if p == home => "~".into(),
+        Some(home) => match p.strip_prefix(&home) {
+            Ok(rest) => format!("~/{}", rest.display()),
+            Err(_) => p.display().to_string(),
+        },
+        None => p.display().to_string(),
+    }
+}
+
+/// "192.168.1.20", "192.168.1.20:47200" or "[fe80::1]:47200" → a socket address, using
+/// Linksy's default port when none is given.
+pub fn peer_address(text: &str) -> Option<std::net::SocketAddr> {
+    const DEFAULT_PORT: u16 = 47_200;
+    let t = text.trim();
+    t.parse().ok().or_else(|| t.parse::<std::net::IpAddr>().ok().map(|ip| std::net::SocketAddr::new(ip, DEFAULT_PORT)))
+}
+
+/// This machine's address on its main network. Connecting a UDP socket only picks a
+/// route; nothing is sent.
+pub fn local_ip() -> Option<std::net::IpAddr> {
+    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect("192.0.2.1:9").ok()?;
+    Some(s.local_addr().ok()?.ip()).filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
+}
+
 pub fn file_name(rel: &str) -> String {
     rel.rsplit('/').next().unwrap_or(rel).to_string()
 }
