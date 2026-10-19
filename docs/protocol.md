@@ -27,10 +27,9 @@ Decisions already made with the owner:
 - **Battery:** devices *always know who is nearby* but only *connect when there is
   something to share* (see §4.6). No always-on connection by default.
 - **Brand:** the logo is the "Sender" mark (a larger dot with an arc handing off to a
-  smaller one) in `brand/logo/`. The brand color is **not chosen yet**; candidates are
-  Signal `#2563FF`, Aurora `#7457F5`, Coral `#FF5A52`, Mint `#12B282` (+ ink `#1E2A3B`),
-  Mono. The desktop app uses the system accent color. On Android, dynamic color with the
-  chosen brand color as the fallback seed is the natural fit.
+  smaller one) in `brand/logo/`. The palette is **Signal**: blue `#2563FF` (sender,
+  accent), cyan `#22C3E6` (receiver), deep `#1438B8`. Use `#2563FF` as the Material You
+  seed color; `brand/logo/logo.png` is a 1024×1024 export on white.
 
 ## 2. Feature status
 
@@ -349,7 +348,7 @@ Earlier notes, still valid:
 - [x] QR pairing format and desktop side (§4.7). The phone side (scanner) is to build.
 - [ ] Phone showing a QR for a desktop to scan: no desktop camera flow planned; use the
       phone as the scanner.
-- [ ] Brand color choice.
+- [x] Brand color: Signal.
 
 ## Changelog
 
@@ -365,3 +364,4 @@ Earlier notes, still valid:
   token, `invite` field in `hello`, desktop dialog and `linksy invite`.
 - **2026-10-19** — Desktop redesign to device pages with an activity timeline (§6), and
   a history kept by the service. No protocol change.
+- **2026-10-19** — Brand palette chosen: Signal (§1).
