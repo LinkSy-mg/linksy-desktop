@@ -410,7 +410,7 @@ impl Window {
         glib::spawn_future_local(async move {
             match call.await {
                 Ok(_) => w.set_staged(Vec::new()),
-                Err(e) => w.toast(&e),
+                Err(e) => w.toast_error(&e, Some(to)),
             }
         });
     }
@@ -429,9 +429,11 @@ impl Window {
     }
 
     fn device_row(self: &Rc<Self>, d: &DeviceView, staged: bool) -> adw::ActionRow {
+        // Paired devices connect when there's something to send, so "nearby" is ready.
+        let available = d.connected || d.nearby;
         let subtitle = match (d.trusted, d.connected, d.nearby) {
             (true, true, _) => "Connected",
-            (true, false, true) => "Connecting…",
+            (true, false, true) => "Nearby",
             (true, false, false) => "Not nearby",
             (false, _, _) => "Nearby · Not paired",
         };
@@ -441,7 +443,7 @@ impl Window {
         let badge = gtk::Overlay::new();
         badge.set_child(Some(&icon));
         let dot = gtk::Box::builder().halign(gtk::Align::End).valign(gtk::Align::End).css_classes(["status-dot"]).build();
-        if !d.connected {
+        if !available {
             dot.add_css_class("away");
         }
         if d.trusted {
@@ -461,7 +463,11 @@ impl Window {
             });
             row.add_suffix(&pair);
             row.set_activatable_widget(Some(&pair));
-        } else if d.connected {
+        } else {
+            // Away devices may still answer at their last address, so sending is allowed.
+            if !available {
+                row.add_css_class("away-row");
+            }
             let send = gtk::Button::builder()
                 .label(if staged { "Send" } else { "Send Files…" })
                 .valign(gtk::Align::Center)
@@ -498,8 +504,6 @@ impl Window {
                 true
             });
             row.add_controller(target);
-        } else {
-            row.add_css_class("dim-label");
         }
 
         if d.trusted {
@@ -510,8 +514,8 @@ impl Window {
 
     fn device_menu(self: &Rc<Self>, d: &DeviceView) -> gtk::MenuButton {
         let popover_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["menu-box"]).build();
-        let clip = gtk::Button::builder().label("Send Clipboard").css_classes(["flat"]).sensitive(d.connected).build();
-        let ping = gtk::Button::builder().label("Send a Ping").css_classes(["flat"]).sensitive(d.connected).build();
+        let clip = gtk::Button::builder().label("Send Clipboard").css_classes(["flat"]).build();
+        let ping = gtk::Button::builder().label("Send a Ping").css_classes(["flat"]).build();
         let forget = gtk::Button::builder().label("Forget Device").css_classes(["flat", "destructive-label"]).build();
         popover_box.append(&clip);
         popover_box.append(&ping);
@@ -540,7 +544,7 @@ impl Window {
                 let Some(c) = w.client() else { return };
                 match w.bridge.call(&c, move |c| async move { c.send_clipboard(id.to_string(), text).await }).await {
                     Ok(()) => w.toast(&format!("Clipboard sent to {name}")),
-                    Err(e) => w.toast(&e),
+                    Err(e) => w.toast_error(&e, Some(id)),
                 }
             });
         });
@@ -557,7 +561,7 @@ impl Window {
             glib::spawn_future_local(async move {
                 match call.await {
                     Ok(()) => w.toast(&format!("Pinged {name}")),
-                    Err(e) => w.toast(&e),
+                    Err(e) => w.toast_error(&e, Some(id)),
                 }
             });
         });
@@ -830,6 +834,16 @@ impl Window {
                 self.transfers_group.set_visible(self.transfers.first_child().is_some());
             }
         }
+    }
+
+    /// Errors from the service, worded for people: names the device when it can.
+    fn toast_error(&self, error: &str, about: Option<Fingerprint>) {
+        let name = about.and_then(|id| self.state.borrow().devices.iter().find(|d| d.device.id == id).map(|d| d.device.name.clone()));
+        let text = match (error, name) {
+            ("device isn't reachable right now", Some(n)) => format!("{n} isn't reachable. Check that it's on and on this network."),
+            (e, _) => fmt::capitalize(e),
+        };
+        self.toast(&text);
     }
 
     pub fn toast(&self, text: &str) {

@@ -41,6 +41,7 @@ row.drop-active { background-color: alpha(@accent_bg_color, 0.12); }
   box-shadow: 0 0 0 2px @card_bg_color;
 }
 .status-dot.away { background-color: alpha(currentColor, 0.3); }
+row.away-row .title, row.away-row .subtitle, row.away-row .device-icon { opacity: 0.55; }
 .pair-code {
   font-size: 36px;
   font-weight: 800;
