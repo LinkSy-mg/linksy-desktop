@@ -187,33 +187,41 @@ impl Window {
         }
     }
 
-    /// A window showing what apps get from "Linksy Camera", sized to the camera's shape.
+    /// Show what apps get from "Linksy Camera" on a page of its own, filling the content
+    /// area, with a back button to the device.
     pub(super) fn preview_camera(self: &Rc<Self>, name: &str) {
-        let picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Contain).hexpand(true).vexpand(true).css_classes(["screen-view"]).build();
-        let heading = adw::WindowTitle::new(name, "Preview");
-        let toolbar = adw::ToolbarView::builder().content(&picture).build();
-        toolbar.add_top_bar(&adw::HeaderBar::builder().title_widget(&heading).build());
-        let window = adw::Window::builder().title(format!("{name} Preview")).default_width(640).default_height(407).content(&toolbar).build();
-        if let Some(app) = self.window.application() {
-            window.set_application(Some(&app));
-        }
+        let Some(id) = self.state.borrow().camera.map(|(_, id)| id) else {
+            return self.toast("No camera is on");
+        };
+        self.stop_preview();
         // Read the camera as any app would (the webcam helper names its node linksy-camera).
-        let pipeline = gst::parse::launch("pipewiresrc target-object=linksy-camera always-copy=true ! videoconvert ! gtk4paintablesink name=sink sync=false");
-        let pipeline = match pipeline {
+        let pipeline = match gst::parse::launch("pipewiresrc target-object=linksy-camera always-copy=true ! videoconvert ! gtk4paintablesink name=sink sync=false") {
             Ok(p) => p,
             Err(e) => return self.toast(&format!("Can't preview the camera: {e}")),
         };
         if let Some(paintable) = pipeline.downcast_ref::<gst::Bin>().and_then(|b| b.by_name("sink")).map(|s| s.property::<gdk::Paintable>("paintable")) {
-            picture.set_paintable(Some(&paintable));
-            let (w, pic) = (window.clone(), picture.clone());
-            paintable.connect_invalidate_size(move |p| fit_to_video(w.upcast_ref(), &pic, p));
+            self.camera_picture.set_paintable(Some(&paintable));
         }
         let _ = pipeline.set_state(gst::State::Playing);
-        window.connect_close_request(move |_| {
+        self.state.borrow_mut().preview = Some((id, pipeline));
+        self.camera_title.set_title(name);
+        self.content_header.set_show_title(true);
+        self.camera_back.set_visible(true);
+        self.page.menu.set_visible(false);
+        self.content_stack.set_visible_child_name("camera");
+        self.split.set_show_content(true);
+    }
+
+    /// Leave the camera preview (back, another device, or the camera turned off).
+    pub(super) fn stop_preview(&self) {
+        let preview = self.state.borrow_mut().preview.take();
+        if let Some((_, pipeline)) = preview {
             let _ = pipeline.set_state(gst::State::Null);
-            glib::Propagation::Proceed
-        });
-        window.present();
+        }
+        self.camera_picture.set_paintable(gdk::Paintable::NONE);
+        self.content_header.set_show_title(false);
+        self.camera_back.set_visible(false);
+        self.page.menu.set_visible(true);
     }
 
     pub(super) fn stop_sharing(self: &Rc<Self>) {

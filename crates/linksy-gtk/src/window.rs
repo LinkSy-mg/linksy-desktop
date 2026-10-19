@@ -62,6 +62,8 @@ struct State {
     showing: Vec<Uuid>,
     /// The camera session in use here (another device's camera as a webcam) and whose.
     camera: Option<(Uuid, Fingerprint)>,
+    /// The camera preview on screen: whose camera, and the pipeline reading it.
+    preview: Option<(Fingerprint, gstreamer::Element)>,
 }
 
 pub struct Window {
@@ -82,7 +84,12 @@ pub struct Window {
     // Content
     content: adw::NavigationPage,
     content_stack: gtk::Stack,
+    content_header: adw::HeaderBar,
     page: page::DevicePage,
+    // Camera preview page
+    camera_picture: gtk::Picture,
+    camera_back: gtk::Button,
+    camera_title: adw::WindowTitle,
 }
 
 impl Window {
@@ -154,7 +161,14 @@ impl Window {
         let content_stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).build();
         content_stack.add_named(&welcome_inner, Some("welcome"));
         content_stack.add_named(&page.root, Some("device"));
-        let content_header = adw::HeaderBar::builder().show_title(false).build();
+        // The camera preview: a page of its own, filling the content area.
+        // Covers the whole area (edges may be cropped), like a camera viewfinder.
+        let camera_picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).hexpand(true).vexpand(true).css_classes(["screen-view"]).build();
+        content_stack.add_named(&camera_picture, Some("camera"));
+        let camera_back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text("Back").visible(false).build();
+        let camera_title = adw::WindowTitle::new("", "Camera Preview");
+        let content_header = adw::HeaderBar::builder().show_title(false).title_widget(&camera_title).build();
+        content_header.pack_start(&camera_back);
         content_header.pack_end(&page.menu);
         let content_view = adw::ToolbarView::new();
         content_view.add_top_bar(&content_header);
@@ -216,7 +230,18 @@ impl Window {
             me_label,
             content,
             content_stack,
+            content_header,
             page,
+            camera_picture,
+            camera_back,
+            camera_title,
+        });
+        let w = Rc::downgrade(&win);
+        win.camera_back.connect_clicked(move |_| {
+            if let Some(w) = w.upgrade() {
+                w.stop_preview();
+                w.render_page();
+            }
         });
         win.window.set_help_overlay(Some(&shortcuts_window()));
         let w = Rc::downgrade(&win);
@@ -666,13 +691,25 @@ impl Window {
 
     fn render_page(&self) {
         let staged = self.state.borrow().staged.clone();
+        // A preview stays open until left, unless its device or its camera went away.
+        let (selected, camera, previewing) = {
+            let s = self.state.borrow();
+            (s.selected, s.camera.map(|(_, id)| id), s.preview.as_ref().map(|(id, _)| *id))
+        };
+        if previewing.is_some() && (previewing != selected || previewing != camera) {
+            self.stop_preview();
+        }
         match self.selected_device() {
             Some(d) => {
                 self.content.set_title(&d.device.name);
                 self.page.show_device(&d, &staged);
                 let camera = self.state.borrow().camera.filter(|(_, id)| *id == d.device.id);
                 self.page.set_camera(camera.map(|_| format!("Linksy Camera ({})", d.device.name)).as_deref());
-                self.content_stack.set_visible_child_name("device");
+                let previewing = self.state.borrow().preview.is_some();
+                if previewing {
+                    self.page.menu.set_visible(false);
+                }
+                self.content_stack.set_visible_child_name(if previewing { "camera" } else { "device" });
             }
             None => {
                 self.content.set_title("Linksy");
