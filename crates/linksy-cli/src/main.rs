@@ -306,8 +306,11 @@ async fn watch(c: &Client) -> Result<(), String> {
             Event::TransferFailed { reason, .. } => println!("✗ Transfer failed: {reason}"),
             Event::Notification { from, title, body } => println!("🔔 {} — {title} {body}", from.name),
             Event::Clipboard { from, text } => println!("📋 {} shared: {text}", from.name),
-            Event::SessionRequest { request, from, .. } => {
-                println!("{} wants to see your screen.", from.name);
+            Event::SessionRequest { request, from, kind } => {
+                match kind {
+                    linksy_ipc::linksy_core::SessionKind::Control => println!("{} wants to control your screen (mouse and keyboard).", from.name),
+                    linksy_ipc::linksy_core::SessionKind::Screen => println!("{} wants to see your screen.", from.name),
+                }
                 let ok = ask("Allow?").await;
                 let _ = c.respond(request, ok).await;
             }
