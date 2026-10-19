@@ -106,7 +106,7 @@ Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
 - [ ] macOS (AppKit) and Windows (WinUI) apps
 - [x] Screen mirroring between computers (View Screen; the sharer always approves)
 - [x] Remote control of a mirrored screen (Take Control; asked for separately)
-- [ ] Sidecar: another device as a second monitor
+- [x] Sidecar: another device as a second display (virtual monitor, driven from that device)
 - [ ] Phone as webcam (desktop side)
 
 ## Development aids

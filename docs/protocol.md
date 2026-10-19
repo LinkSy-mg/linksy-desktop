@@ -56,7 +56,7 @@ Decisions already made with the owner:
 | Bluetooth LE presence | ⬜ | ⬜ | planned |
 | Screen mirroring (watch / share) | ✅ | ⬜ | §4.8; phone can share via MediaProjection |
 | Remote control of a mirrored screen | ✅ | ⬜ | §4.8, kind `control` |
-| Sidecar (second monitor) | ⬜ | ⬜ | planned, desktop ↔ tablet |
+| Sidecar (second display) | ✅ | ⬜ | §4.8, kind `display`; a tablet/phone can be the display |
 | Phone as webcam | ⬜ | ⬜ | planned; same session stream, kind `camera` |
 
 ## 3. How to build the phone app (recommendation)
@@ -315,6 +315,15 @@ After `session_accept`:
   keysyms (`U+0020–U+007E` are the keysym; others are `0x01000000 + codepoint`).
   A phone sharing its screen can't accept desktop input without an accessibility
   service; leave `control` unsupported there (decline the request).
+
+- **`display` (Sidecar): roles reversed.** The device that *sends* `session_request` with
+  `"kind":"display"` is the one that shares: it creates a new virtual monitor (desktop:
+  1920×1080) and streams it; the receiver, after its user allows ("X wants to use this
+  screen as a second display"), shows it **full screen** and sends `pointer` / `button` /
+  `scroll` / `key` input back, exactly as in `control`. This is how an Android tablet or
+  phone becomes a desktop's second screen: accept the request, go immersive full screen,
+  decode, and map touches to `pointer` + `button` left (two-finger drag → `scroll`).
+  Core reports `sharing: true` on the requester and `false` on the display.
 - Either side ends the session by finishing/resetting its half or closing the stream.
   A connection with a session open is never closed as idle.
 
@@ -325,7 +334,7 @@ On Android:
   user) → `MediaCodec` encoder, `KEY_PROFILE = AVCProfileConstrainedBaseline`,
   `KEY_I_FRAME_INTERVAL = 2`, prepend SPS/PPS (`csd-0`/`csd-1`) to every keyframe, write
   Annex-B to the stream. The desktop app then shows it in its viewer window.
-- Core API: `node.request_session(id, SessionKind::Screen | Control) -> Session` (viewer side; read
+- Core API: `node.request_session(id, SessionKind::Screen | Control | Display) -> Session` (read
   `session.recv`), and `node.incoming_sessions()` → accepted `Session`s to feed
   (`session.send`). Events: `session_request {request, from, kind}`,
   `session_started {session, peer, kind, sharing}`, `session_ended {session}`.
@@ -430,3 +439,5 @@ Earlier notes, still valid:
 - **2026-10-19** — Remote control (§4.8): session kind `control` and the input messages
   (`pointer`, `button`, `scroll`, `key`); core `ControlMsg`, `control_frame`,
   `read_control_frames`.
+- **2026-10-19** — Sidecar (§4.8): session kind `display`, where the requester shares a
+  virtual monitor and the receiver shows it full screen and sends input back.
