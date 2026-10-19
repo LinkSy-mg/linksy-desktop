@@ -4,7 +4,8 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Config, Error, Event, Node};
+use linksy_core::{Config, Error, Event, Node, SessionKind};
+use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
 
@@ -50,6 +51,9 @@ fn auto_answer(node: &Node, accept: bool) {
                 }
                 Event::TransferRequest { transfer, .. } => {
                     node.respond(transfer, accept);
+                }
+                Event::SessionRequest { request, .. } => {
+                    node.respond(request, accept);
                 }
                 _ => {}
             }
@@ -544,4 +548,70 @@ async fn invite_works_once_and_bad_tokens_ask_instead() {
     let mut wrong = local_invite(&b.node);
     wrong.id = a.node.info().id;
     assert!(c.node.pair_with_invite(&wrong.to_uri()).await.is_err());
+}
+
+#[tokio::test]
+async fn screen_session_carries_media_and_control() {
+    let (a, b) = paired().await;
+    let mut incoming = b.node.incoming_sessions().expect("receiver available once");
+    assert!(b.node.incoming_sessions().is_none());
+    let mut ra = a.node.subscribe();
+
+    let mut viewer = a.node.request_session(&b.node.info().id, SessionKind::Screen).await.unwrap();
+    assert!(!viewer.sharing);
+    let mut sharer = incoming.recv().await.unwrap();
+    assert!(sharer.sharing);
+    assert_eq!((sharer.peer.name.as_str(), sharer.kind), ("Alpha", SessionKind::Screen));
+
+    // Media one way, control the other.
+    sharer.send.write_all(b"\x00\x00\x00\x01frame").await.unwrap();
+    let mut media = [0u8; 9];
+    viewer.recv.read_exact(&mut media).await.unwrap();
+    assert_eq!(&media, b"\x00\x00\x00\x01frame");
+    viewer.send.write_all(b"key").await.unwrap();
+    let mut control = [0u8; 3];
+    sharer.recv.read_exact(&mut control).await.unwrap();
+    assert_eq!(&control, b"key");
+
+    // Either side dropping ends it on both.
+    let id = viewer.id;
+    drop(sharer);
+    let mut rest = Vec::new();
+    let _ = tokio::time::timeout(Duration::from_secs(5), AsyncReadExt::read_to_end(&mut viewer.recv, &mut rest)).await;
+    drop(viewer);
+    let ended = wait_for(&mut ra, |e| match e {
+        Event::SessionEnded { session } => Some(*session),
+        _ => None,
+    })
+    .await;
+    assert_eq!(ended, id);
+}
+
+#[tokio::test]
+async fn declined_screen_session_starts_nothing() {
+    let a = dev("Alpha").await;
+    let b = dev("Beta").await;
+    auto_answer(&a.node, true);
+    let mut rb = b.node.subscribe();
+    let bn = b.node.clone();
+    // Beta pairs, then says no to the screen.
+    tokio::spawn(async move {
+        loop {
+            match rb.recv().await {
+                Ok(Event::PairingRequest { request, .. }) => {
+                    bn.respond(request, true);
+                }
+                Ok(Event::SessionRequest { request, .. }) => {
+                    bn.respond(request, false);
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+    });
+    a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
+    let mut incoming = b.node.incoming_sessions().unwrap();
+    let err = a.node.request_session(&b.node.info().id, SessionKind::Screen).await.unwrap_err();
+    assert!(matches!(err, Error::Declined), "{err:?}");
+    assert!(incoming.try_recv().is_err());
 }

@@ -1,6 +1,8 @@
 //! Wire protocol. Every connection starts with a handshake on the first bidirectional
 //! stream. After that:
 //! - each file transfer gets its own bidirectional stream (offer, answer, raw file bytes),
+//! - each media session (screen mirroring…) gets its own bidirectional stream too
+//!   (request, answer, then media bytes one way and control messages the other),
 //! - small one-shot messages (notifications, pings) each get a unidirectional stream.
 //!
 //! Control messages are JSON, framed with a big-endian u32 length.
@@ -77,6 +79,25 @@ pub enum TransferMsg {
     Failed { reason: String },
 }
 
+/// What a media session carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionKind {
+    /// The receiver of the request shares its screen with the requester.
+    Screen,
+}
+
+/// Opening a media session. After `session_accept`, the sharing side writes the media
+/// (for `screen`: H.264 Annex-B byte stream) and the requesting side may write framed
+/// control messages back.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SessionMsg {
+    SessionRequest { id: Uuid, kind: SessionKind },
+    SessionAccept,
+    SessionDecline,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
@@ -93,6 +114,11 @@ pub async fn write_msg<T: Serialize>(s: &mut quinn::SendStream, msg: &T) -> Resu
     s.write_all(&(body.len() as u32).to_be_bytes()).await?;
     s.write_all(&body).await?;
     Ok(())
+}
+
+/// Read one frame without knowing its type yet (the first message on a new stream).
+pub async fn read_value(s: &mut quinn::RecvStream) -> Result<serde_json::Value> {
+    read_msg(s).await
 }
 
 pub async fn read_msg<T: for<'de> Deserialize<'de>>(s: &mut quinn::RecvStream) -> Result<T> {

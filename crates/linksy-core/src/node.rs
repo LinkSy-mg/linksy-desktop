@@ -28,7 +28,8 @@ use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
 use crate::protocol::{
-    FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, TransferMsg, read_msg, write_msg,
+    FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
+    read_value, write_msg,
 };
 use crate::transfer::{self, Progress};
 use crate::trust::{TrustStore, TrustedDevice};
@@ -105,11 +106,42 @@ pub enum Event {
     TransferComplete { transfer: Uuid, saved: Vec<PathBuf> },
     TransferFailed { transfer: Uuid, reason: String },
     SettingsChanged { settings: Settings },
+    /// Ask the user whether `from` may start a media session (see their screen…).
+    SessionRequest { request: Uuid, from: DeviceInfo, kind: SessionKind },
+    /// `sharing`: this device is the one sharing (its screen, camera…).
+    SessionStarted { session: Uuid, peer: DeviceInfo, kind: SessionKind, sharing: bool },
+    SessionEnded { session: Uuid },
     Notification { from: DeviceInfo, title: String, body: String },
     /// A paired device changed its name.
     DeviceUpdated { device: DeviceInfo },
     /// A paired device shared its clipboard; front ends decide where it goes.
     Clipboard { from: DeviceInfo, text: String },
+}
+
+/// A running media session: the stream pair, kept open (and the connection with it) until
+/// dropped. Reports `SessionEnded` when dropped.
+pub struct Session {
+    pub id: Uuid,
+    pub peer: DeviceInfo,
+    pub kind: SessionKind,
+    /// This device shares; the peer watches.
+    pub sharing: bool,
+    pub send: quinn::SendStream,
+    pub recv: quinn::RecvStream,
+    _busy: Option<Busy>,
+    events: broadcast::Sender<Event>,
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        let _ = self.events.send(Event::SessionEnded { session: self.id });
+    }
+}
+
+impl std::fmt::Debug for Session {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Session").field("id", &self.id).field("peer", &self.peer.name).field("kind", &self.kind).field("sharing", &self.sharing).finish()
+    }
 }
 
 /// A device as the UI sees it: paired, nearby, or both.
@@ -182,6 +214,9 @@ struct Inner {
     discovery: Mutex<Option<Discovery>>,
     /// One dial at a time per device, so concurrent sends share a connection.
     dialing: Mutex<HashMap<Fingerprint, Arc<tokio::sync::Mutex<()>>>>,
+    /// Accepted incoming sessions, for whoever runs the media side (the daemon).
+    sessions: Mutex<Option<mpsc::UnboundedReceiver<Session>>>,
+    sessions_tx: mpsc::UnboundedSender<Session>,
     /// The token of the pairing QR code on screen, and when it expires.
     invite: Mutex<Option<(String, Instant)>>,
 }
@@ -206,6 +241,7 @@ impl Node {
 
         let endpoint = bind_endpoint(&identity, SocketAddr::new(config.bind, config.port))?;
         let (events, _) = broadcast::channel(1024);
+        let (sessions_tx, sessions) = mpsc::unbounded_channel();
         let node = Self {
             inner: Arc::new(Inner {
                 id: info.id,
@@ -222,6 +258,8 @@ impl Node {
                 discovery: Mutex::new(None),
                 dialing: Mutex::new(HashMap::new()),
                 invite: Mutex::new(None),
+                sessions: Mutex::new(Some(sessions)),
+                sessions_tx,
             }),
         };
 
@@ -471,6 +509,30 @@ impl Node {
         if self.inner.nearby.lock().unwrap().remove(id).is_some() {
             self.emit(Event::DeviceLost { id: *id });
         }
+    }
+
+    /// Ask `to` to start a media session; for [`SessionKind::Screen`], to share its screen
+    /// with us. Resolves once its user allowed it (or fails if they declined).
+    pub async fn request_session(&self, to: &Fingerprint, kind: SessionKind) -> Result<Session> {
+        let (conn, activity) = self.ensure_connection(to).await?;
+        let busy = activity.hold();
+        let peer = self.peer_info(to).ok_or(Error::Unreachable)?;
+        let id = Uuid::new_v4();
+        let (mut send, mut recv) = conn.open_bi().await?;
+        write_msg(&mut send, &SessionMsg::SessionRequest { id, kind }).await?;
+        match tokio::time::timeout(OFFER_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
+            SessionMsg::SessionAccept => {}
+            SessionMsg::SessionDecline => return Err(Error::Declined),
+            other => return Err(protocol(format!("unexpected {other:?}"))),
+        }
+        self.emit(Event::SessionStarted { session: id, peer: peer.clone(), kind, sharing: false });
+        Ok(Session { id, peer, kind, sharing: false, send, recv, _busy: Some(busy), events: self.inner.events.clone() })
+    }
+
+    /// Sessions this device accepted to share. Can be taken once; the taker runs the
+    /// media (capture, encoding) and drops each session when done.
+    pub fn incoming_sessions(&self) -> Option<mpsc::UnboundedReceiver<Session>> {
+        self.inner.sessions.lock().unwrap().take()
     }
 
     /// Make sure a paired device is reachable, connecting if needed.
@@ -853,7 +915,7 @@ impl Node {
         loop {
             tokio::select! {
                 bi = conn.accept_bi() => match bi {
-                    Ok((send, recv)) => { tokio::spawn(self.clone().handle_offer(device.clone(), send, recv)); }
+                    Ok((send, recv)) => { tokio::spawn(self.clone().handle_stream(device.clone(), send, recv)); }
                     Err(_) => break,
                 },
                 uni = conn.accept_uni() => match uni {
@@ -905,12 +967,43 @@ impl Node {
         self.emit(Event::DeviceUpdated { device: device.0 });
     }
 
-    async fn handle_offer(self, from: DeviceInfo, mut send: quinn::SendStream, mut recv: quinn::RecvStream) {
-        let (id, files) = match read_msg(&mut recv).await {
-            Ok(TransferMsg::Offer { id, files }) => (id, files),
-            Ok(other) => return debug!("expected offer, got {other:?}"),
-            Err(e) => return debug!("bad offer: {e}"),
+    /// A new bidirectional stream: a file offer or a media session request.
+    async fn handle_stream(self, from: DeviceInfo, send: quinn::SendStream, mut recv: quinn::RecvStream) {
+        let first = match read_value(&mut recv).await {
+            Ok(v) => v,
+            Err(e) => return debug!("bad stream from {}: {e}", from.name),
         };
+        match first.get("type").and_then(|t| t.as_str()) {
+            Some("offer") => match serde_json::from_value(first) {
+                Ok(TransferMsg::Offer { id, files }) => self.handle_offer(from, send, recv, id, files).await,
+                _ => debug!("bad offer from {}", from.name),
+            },
+            Some("session_request") => match serde_json::from_value(first) {
+                Ok(SessionMsg::SessionRequest { id, kind }) => self.handle_session(from, send, recv, id, kind).await,
+                _ => debug!("bad session request from {}", from.name),
+            },
+            other => debug!("unknown stream {other:?} from {}", from.name),
+        }
+    }
+
+    async fn handle_session(self, from: DeviceInfo, mut send: quinn::SendStream, recv: quinn::RecvStream, id: Uuid, kind: SessionKind) {
+        let busy = self.live(&from.id).map(|(_, a)| a.hold());
+        // Always asks: nothing like auto-accept applies to someone seeing your screen.
+        let answer = self.expect_answer(id);
+        self.emit(Event::SessionRequest { request: id, from: from.clone(), kind });
+        let accepted = self.await_answer(id, answer, OFFER_TIMEOUT).await;
+        let reply = if accepted { SessionMsg::SessionAccept } else { SessionMsg::SessionDecline };
+        if write_msg(&mut send, &reply).await.is_err() || !accepted {
+            let _ = send.finish();
+            return;
+        }
+        self.emit(Event::SessionStarted { session: id, peer: from.clone(), kind, sharing: true });
+        let session = Session { id, peer: from, kind, sharing: true, send, recv, _busy: busy, events: self.inner.events.clone() };
+        // Nobody to run it (no daemon took the receiver): dropping ends it.
+        let _ = self.inner.sessions_tx.send(session);
+    }
+
+    async fn handle_offer(self, from: DeviceInfo, mut send: quinn::SendStream, mut recv: quinn::RecvStream, id: Uuid, files: Vec<FileEntry>) {
         let total: u64 = files.iter().map(|f| f.size).sum();
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
         let auto = self.inner.settings.lock().unwrap().auto_accept;

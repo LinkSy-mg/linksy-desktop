@@ -467,6 +467,7 @@ impl Window {
                 self.state.borrow_mut().progress.remove(&transfer);
             }
             Event::SettingsChanged { .. } => self.refresh_status(),
+            Event::SessionRequest { .. } | Event::SessionStarted { .. } | Event::SessionEnded { .. } => {}
             Event::Notification { from, title, body } => {
                 let text = if body.is_empty() { format!("{}: {title}", from.name) } else { format!("{}: {title} — {body}", from.name) };
                 self.toast(&text);
