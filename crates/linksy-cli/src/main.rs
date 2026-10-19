@@ -17,6 +17,8 @@ Usage:
   linksy notify <device> <title> [body]
   linksy clip <device> [text]        share text to its clipboard (default: stdin)
   linksy forget <device>             unpair a device
+  linksy settings [key value]        show or change: name, download-dir,
+                                     auto-accept on|off, stay-connected on|off
   linksy watch                       follow activity and answer requests
   linksy status                      this device
 
@@ -136,6 +138,33 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             c.send_clipboard(to.clone(), text).await.map_err(err)?;
             println!("Shared clipboard with {to}.");
         }
+        ("settings", []) => {
+            let s = c.settings().await.map_err(err)?;
+            println!("name            {}", s.name);
+            println!("download-dir    {}", s.download_dir.display());
+            println!("auto-accept     {}", on_off(s.auto_accept));
+            println!("stay-connected  {}", on_off(s.stay_connected));
+        }
+        ("settings", [key, value @ ..]) if !value.is_empty() => {
+            let mut s = c.settings().await.map_err(err)?;
+            let value = value.join(" ");
+            let flag = || match value.as_str() {
+                "on" | "yes" | "true" => Ok(true),
+                "off" | "no" | "false" => Ok(false),
+                _ => Err(format!("{key} takes on or off")),
+            };
+            match key.as_str() {
+                "name" => s.name = value.clone(),
+                "download-dir" => {
+                    s.download_dir = std::path::absolute(&value).map_err(|e| format!("{value}: {e}"))?;
+                }
+                "auto-accept" => s.auto_accept = flag()?,
+                "stay-connected" => s.stay_connected = flag()?,
+                other => return Err(format!("Unknown setting {other}. Run `linksy help`.")),
+            }
+            let s = c.update_settings(s).await.map_err(err)?;
+            println!("Saved. This device is \"{}\".", s.name);
+        }
         ("forget", [target]) => {
             if c.forget(target.clone()).await.map_err(err)? {
                 println!("Forgot {target}.");
@@ -213,6 +242,10 @@ fn icon(kind: DeviceKind) -> &'static str {
         DeviceKind::Phone => "📱",
         DeviceKind::Tablet => "📱",
     }
+}
+
+fn on_off(b: bool) -> &'static str {
+    if b { "on" } else { "off" }
 }
 
 fn bar(pct: u64) -> String {
