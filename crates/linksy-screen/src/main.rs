@@ -105,8 +105,13 @@ fn run(args: Args) -> Result<(), String> {
         let source = format!("{camera} ! videoconvert ! videoscale ! videorate ! video/x-raw,width=1280,height=720,framerate=30/1");
         (source, None)
     } else if args.test {
-        let pattern = "videotestsrc is-live=true pattern=ball motion=sweep background-color=0xff2563ff ! video/x-raw,width=1280,height=720,framerate=30/1";
-        (pattern.to_string(), args.control.then_some(portal::Input::Log))
+        // LINKSY_SCREEN_TEST_SIZE=720x1280 imitates a phone held upright.
+        let (w, h) = std::env::var("LINKSY_SCREEN_TEST_SIZE")
+            .ok()
+            .and_then(|s| s.split_once('x').and_then(|(w, h)| Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))))
+            .unwrap_or((1280, 720));
+        let pattern = format!("videotestsrc is-live=true pattern=ball motion=sweep background-color=0xff2563ff ! video/x-raw,width={w},height={h},framerate=30/1");
+        (pattern, args.control.then_some(portal::Input::Log))
     } else {
         let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
         let screen = rt.block_on(portal::screen(token, args.control, args.virtual_size.is_some()))?;
