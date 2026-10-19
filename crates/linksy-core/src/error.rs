@@ -26,8 +26,8 @@ pub enum Error {
     Protocol(String),
     #[error("device is not paired")]
     NotPaired,
-    #[error("device is not connected")]
-    NotConnected,
+    #[error("device isn't reachable right now")]
+    Unreachable,
     #[error("request was declined")]
     Declined,
     #[error("timed out waiting for an answer")]

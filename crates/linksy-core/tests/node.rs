@@ -27,8 +27,14 @@ fn config(dir: &Path, name: &str) -> Config {
 }
 
 async fn dev(name: &str) -> Dev {
+    dev_with(name, |_| {}).await
+}
+
+async fn dev_with(name: &str, tweak: impl FnOnce(&mut Config)) -> Dev {
     let dir = tempfile::tempdir().unwrap();
-    let node = Node::start(config(dir.path(), name)).await.unwrap();
+    let mut c = config(dir.path(), name);
+    tweak(&mut c);
+    let node = Node::start(c).await.unwrap();
     Dev { node, dir }
 }
 
@@ -66,8 +72,12 @@ async fn wait_for<T>(rx: &mut broadcast::Receiver<Event>, mut f: impl FnMut(&Eve
 }
 
 async fn paired() -> (Dev, Dev) {
-    let a = dev("Alpha").await;
-    let b = dev("Beta").await;
+    paired_with(|_| {}).await
+}
+
+async fn paired_with(tweak: impl Fn(&mut Config)) -> (Dev, Dev) {
+    let a = dev_with("Alpha", &tweak).await;
+    let b = dev_with("Beta", &tweak).await;
     auto_answer(&a.node, true);
     auto_answer(&b.node, true);
     let mut rb = b.node.subscribe();
@@ -272,15 +282,84 @@ async fn clipboard_text_arrives_and_limits_hold() {
 }
 
 #[tokio::test]
+async fn idle_connection_closes_and_next_send_reconnects() {
+    let (a, b) = paired_with(|c| c.idle_after = Duration::from_millis(400)).await;
+    let mut ra = a.node.subscribe();
+    let mut rb = b.node.subscribe();
+    wait_for(&mut ra, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
+    assert!(a.node.devices().iter().all(|d| !d.connected));
+
+    // Nothing is connected; sending dials Beta at its last known address.
+    a.node.notify(&b.node.info().id, "Back", "").await.unwrap();
+    let title = wait_for(&mut rb, |e| match e {
+        Event::Notification { title, .. } => Some(title.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(title, "Back");
+}
+
+#[tokio::test]
+async fn busy_connection_stays_open_past_idle_time() {
+    let tweak = |c: &mut Config| c.idle_after = Duration::from_millis(300);
+    let a = dev_with("Alpha", tweak).await;
+    let b = dev_with("Beta", tweak).await;
+    auto_answer(&a.node, true);
+    // Beta accepts the pairing but leaves the file offer unanswered for a while.
+    let mut rb = b.node.subscribe();
+    let bn = b.node.clone();
+    let mut pairing = b.node.subscribe();
+    tokio::spawn(async move {
+        let request = wait_for(&mut pairing, |e| match e {
+            Event::PairingRequest { request, .. } => Some(*request),
+            _ => None,
+        })
+        .await;
+        bn.respond(request, true);
+    });
+    a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
+
+    let src = a.dir.path().join("wait.txt");
+    std::fs::write(&src, b"hold on").unwrap();
+    let mut ra = a.node.subscribe();
+    a.node.send_files(&b.node.info().id, vec![src]).await.unwrap();
+    let transfer = wait_for(&mut rb, |e| match e {
+        Event::TransferRequest { transfer, .. } => Some(*transfer),
+        _ => None,
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    assert!(a.node.devices().iter().any(|d| d.connected), "closed while a prompt was open");
+    b.node.respond(transfer, true);
+    wait_for(&mut ra, |e| matches!(e, Event::TransferComplete { .. }).then_some(())).await;
+    assert_eq!(std::fs::read(b.downloads().join("wait.txt")).unwrap(), b"hold on");
+}
+
+#[tokio::test]
+async fn unreachable_device_fails_fast() {
+    let (a, b) = paired_with(|c| c.idle_after = Duration::from_millis(300)).await;
+    let mut ra = a.node.subscribe();
+    let b_id = b.node.info().id;
+    b.node.shutdown().await;
+    wait_for(&mut ra, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
+    let started = std::time::Instant::now();
+    let err = a.node.notify(&b_id, "Anyone?", "").await.unwrap_err();
+    assert!(matches!(err, Error::Unreachable), "{err:?}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+#[tokio::test]
 async fn restarted_device_reconnects_by_itself() {
-    let (a, b) = paired().await;
+    let (a, b) = paired_with(|c| c.stay_connected = true).await;
     let mut ra = a.node.subscribe();
     let b_dir = b.dir;
     b.node.shutdown().await;
     wait_for(&mut ra, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
 
     // Same data dir → same identity and trust list; it dials Alpha's last address at startup.
-    let b2 = Node::start(config(b_dir.path(), "Beta")).await.unwrap();
+    let mut c = config(b_dir.path(), "Beta");
+    c.stay_connected = true;
+    let b2 = Node::start(c).await.unwrap();
     let who = wait_for(&mut ra, |e| match e {
         Event::Connected { device } => Some(device.name.clone()),
         _ => None,

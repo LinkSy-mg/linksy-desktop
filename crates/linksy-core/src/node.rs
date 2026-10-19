@@ -1,5 +1,10 @@
-//! A running Linksy device: listens for peers, keeps one QUIC connection per trusted
-//! device, and reports everything that happens as [`Event`]s.
+//! A running Linksy device: listens for peers, knows which paired devices are nearby, and
+//! reports everything that happens as [`Event`]s.
+//!
+//! Connections are made on demand: sending something dials the device, and a connection
+//! with nothing going on closes after [`Config::idle_after`], so idle devices exchange no
+//! traffic at all. Presence comes from discovery alone. [`Config::stay_connected`] keeps
+//! links up instead, for devices on mains power that want the lowest latency.
 //!
 //! Anything that needs the user's consent (pairing, incoming files) is surfaced as a
 //! request event with an id, and waits until [`Node::respond`] is called or it times out.
@@ -7,12 +12,13 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tokio::task::AbortHandle;
+use tokio::task::{AbortHandle, JoinSet};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -32,6 +38,8 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Clipboard text limit; well under the protocol frame cap even after JSON escaping.
 pub const MAX_CLIPBOARD: usize = 256 * 1024;
 const RECONNECT_EVERY: Duration = Duration::from_secs(15);
+/// Per-address dial budget. LAN handshakes take milliseconds; a dead address never answers.
+const DIAL_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -46,6 +54,10 @@ pub struct Config {
     pub bind: IpAddr,
     /// Advertise and browse with mDNS. Off in tests.
     pub discovery: bool,
+    /// Keep paired devices connected all the time instead of connecting on demand.
+    pub stay_connected: bool,
+    /// Close a connection after this long with nothing going on (unless `stay_connected`).
+    pub idle_after: Duration,
 }
 
 impl Config {
@@ -58,6 +70,8 @@ impl Config {
             port: 0,
             bind: IpAddr::V6(Ipv6Addr::UNSPECIFIED),
             discovery: true,
+            stay_connected: false,
+            idle_after: Duration::from_secs(60),
         }
     }
 }
@@ -105,6 +119,43 @@ struct Peer {
     device: DeviceInfo,
     /// Who opened this connection; used to break ties when both sides dial at once.
     dialer: Fingerprint,
+    activity: Arc<Activity>,
+}
+
+/// What a connection is doing, so idle ones can be closed.
+struct Activity {
+    /// Transfers and prompts in progress.
+    busy: AtomicUsize,
+    last: Mutex<Instant>,
+}
+
+impl Activity {
+    fn new() -> Arc<Self> {
+        Arc::new(Self { busy: AtomicUsize::new(0), last: Mutex::new(Instant::now()) })
+    }
+
+    fn touch(&self) {
+        *self.last.lock().unwrap() = Instant::now();
+    }
+
+    fn idle_for(&self) -> Option<Duration> {
+        (self.busy.load(Ordering::SeqCst) == 0).then(|| self.last.lock().unwrap().elapsed())
+    }
+
+    fn hold(self: &Arc<Self>) -> Busy {
+        self.busy.fetch_add(1, Ordering::SeqCst);
+        Busy(self.clone())
+    }
+}
+
+/// Keeps a connection open while alive.
+struct Busy(Arc<Activity>);
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        self.0.touch();
+        self.0.busy.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 struct Inner {
@@ -118,6 +169,8 @@ struct Inner {
     transfers: Mutex<HashMap<Uuid, AbortHandle>>,
     events: broadcast::Sender<Event>,
     discovery: Mutex<Option<Discovery>>,
+    /// One dial at a time per device, so concurrent sends share a connection.
+    dialing: Mutex<HashMap<Fingerprint, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 #[derive(Clone)]
@@ -151,6 +204,7 @@ impl Node {
                 transfers: Mutex::new(HashMap::new()),
                 events,
                 discovery: Mutex::new(None),
+                dialing: Mutex::new(HashMap::new()),
             }),
         };
 
@@ -161,7 +215,11 @@ impl Node {
             *node.inner.discovery.lock().unwrap() = Some(d);
             tokio::spawn(node.clone().discovery_loop(rx));
         }
-        tokio::spawn(node.clone().reconnect_loop());
+        if node.inner.config.stay_connected {
+            tokio::spawn(node.clone().reconnect_loop());
+        } else {
+            tokio::spawn(node.clone().idle_loop());
+        }
         info!(id = %node.inner.info.id.short(), addr = %node.local_addr()?, "linksy node started");
         Ok(node)
     }
@@ -227,7 +285,7 @@ impl Node {
     /// Pair with a device found by discovery.
     pub async fn pair_device(&self, id: Fingerprint) -> Result<DeviceInfo> {
         let addrs = self.nearby_addrs(&id);
-        let mut last = Error::NotConnected;
+        let mut last = Error::Unreachable;
         for addr in addrs {
             match self.pair(addr).await {
                 Ok(d) => return Ok(d),
@@ -246,11 +304,7 @@ impl Node {
     }
 
     pub async fn notify(&self, to: &Fingerprint, title: &str, body: &str) -> Result<()> {
-        let conn = self.connection(to)?;
-        let mut s = conn.open_uni().await?;
-        write_msg(&mut s, &Message::Notify { title: title.into(), body: body.into() }).await?;
-        s.finish()?;
-        Ok(())
+        self.send_message(to, &Message::Notify { title: title.into(), body: body.into() }).await
     }
 
     /// Share clipboard text with a connected device.
@@ -261,18 +315,21 @@ impl Node {
         if text.len() > MAX_CLIPBOARD {
             return Err(protocol("clipboard text is too large, send it as a file instead"));
         }
-        let conn = self.connection(to)?;
-        let mut s = conn.open_uni().await?;
-        write_msg(&mut s, &Message::Clipboard { text: text.into() }).await?;
-        s.finish()?;
-        Ok(())
+        self.send_message(to, &Message::Clipboard { text: text.into() }).await
     }
 
-    /// Offer files and folders to a connected device. Progress and the outcome arrive as
-    /// events carrying the returned transfer id.
+    /// Make sure a paired device is reachable, connecting if needed.
+    pub async fn reach(&self, to: &Fingerprint) -> Result<DeviceInfo> {
+        self.ensure_connection(to).await?;
+        self.peer_info(to).ok_or(Error::Unreachable)
+    }
+
+    /// Offer files and folders to a paired device, connecting if needed. Progress and the
+    /// outcome arrive as events carrying the returned transfer id.
     pub async fn send_files(&self, to: &Fingerprint, paths: Vec<PathBuf>) -> Result<Uuid> {
-        let conn = self.connection(to)?;
-        let peer = self.peer_info(to).ok_or(Error::NotConnected)?;
+        let (conn, activity) = self.ensure_connection(to).await?;
+        let busy = activity.hold();
+        let peer = self.peer_info(to).ok_or(Error::Unreachable)?;
         let files = tokio::task::spawn_blocking(move || transfer::collect(&paths))
             .await
             .map_err(|e| protocol(e.to_string()))??;
@@ -303,6 +360,7 @@ impl Node {
             }
             .await;
             node.inner.transfers.lock().unwrap().remove(&id);
+            drop(busy);
             node.emit(match result {
                 Ok(()) => Event::TransferComplete { transfer: id, saved: Vec::new() },
                 Err(e) => Event::TransferFailed { transfer: id, reason: e.to_string() },
@@ -339,11 +397,50 @@ impl Node {
         let _ = self.inner.events.send(e);
     }
 
-    fn connection(&self, id: &Fingerprint) -> Result<quinn::Connection> {
-        if !self.inner.trust.lock().unwrap().contains(id) {
-            return Err(Error::NotPaired);
+    async fn send_message(&self, to: &Fingerprint, msg: &Message) -> Result<()> {
+        let (conn, activity) = self.ensure_connection(to).await?;
+        let mut s = conn.open_uni().await?;
+        write_msg(&mut s, msg).await?;
+        s.finish()?;
+        activity.touch();
+        Ok(())
+    }
+
+    fn live(&self, id: &Fingerprint) -> Option<(quinn::Connection, Arc<Activity>)> {
+        let peers = self.inner.peers.lock().unwrap();
+        let p = peers.get(id).filter(|p| p.conn.close_reason().is_none())?;
+        Some((p.conn.clone(), p.activity.clone()))
+    }
+
+    /// The connection to a paired device, dialing it at every address we know (in
+    /// parallel) when there is none.
+    async fn ensure_connection(&self, id: &Fingerprint) -> Result<(quinn::Connection, Arc<Activity>)> {
+        let last_addr = self.inner.trust.lock().unwrap().get(id).ok_or(Error::NotPaired)?.last_addr;
+        if let Some(live) = self.live(id) {
+            return Ok(live);
         }
-        self.inner.peers.lock().unwrap().get(id).map(|p| p.conn.clone()).ok_or(Error::NotConnected)
+        let gate = self.inner.dialing.lock().unwrap().entry(*id).or_default().clone();
+        let _gate = gate.lock().await;
+        if let Some(live) = self.live(id) {
+            return Ok(live);
+        }
+        let mut addrs = self.nearby_addrs(id);
+        addrs.extend(last_addr.filter(|a| !addrs.contains(a)));
+        let mut dials = JoinSet::new();
+        for addr in addrs {
+            let node = self.clone();
+            dials.spawn(async move { tokio::time::timeout(DIAL_TIMEOUT, node.connect(addr)).await });
+        }
+        while let Some(r) = dials.join_next().await {
+            match r {
+                Ok(Ok(Ok(d))) if d.id == *id => break,
+                Ok(Ok(Ok(d))) => debug!("expected {}, reached {} instead", id.short(), d.name),
+                Ok(Ok(Err(e))) => debug!("dial failed: {e}"),
+                _ => {}
+            }
+        }
+        dials.abort_all();
+        self.live(id).ok_or(Error::Unreachable)
     }
 
     fn peer_info(&self, id: &Fingerprint) -> Option<DeviceInfo> {
@@ -530,7 +627,7 @@ impl Node {
                 }
                 existing.conn.close(0u32.into(), b"duplicate");
             }
-            peers.insert(id, Peer { conn: conn.clone(), device: device.clone(), dialer });
+            peers.insert(id, Peer { conn: conn.clone(), device: device.clone(), dialer, activity: Activity::new() });
         }
         if let Err(e) = self.inner.trust.lock().unwrap().touch(&device, conn.remote_address()) {
             warn!("could not save device address: {e}");
@@ -548,6 +645,9 @@ impl Node {
                 },
                 uni = conn.accept_uni() => match uni {
                     Ok(mut recv) => {
+                        if let Some((_, a)) = self.live(&device.id) {
+                            a.touch();
+                        }
                         let node = self.clone();
                         let from = device.clone();
                         tokio::spawn(async move {
@@ -581,6 +681,7 @@ impl Node {
             Err(e) => return debug!("bad offer: {e}"),
         };
         let total: u64 = files.iter().map(|f| f.size).sum();
+        let busy = self.live(&from.id).map(|(_, a)| a.hold());
         let answer = self.expect_answer(id);
         self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: files.clone(), total });
         if !self.await_answer(id, answer, OFFER_TIMEOUT).await {
@@ -607,6 +708,7 @@ impl Node {
             }
             .await;
             node.inner.transfers.lock().unwrap().remove(&id);
+            drop(busy);
             node.emit(match result {
                 Ok(saved) => Event::TransferComplete { transfer: id, saved },
                 Err(e) => Event::TransferFailed { transfer: id, reason: e.to_string() },
@@ -626,7 +728,10 @@ impl Node {
                     if known.as_ref().map(|(d, a)| (d, a)) != Some((&device, &addrs)) {
                         self.emit(Event::DeviceFound { device: device.clone(), addrs: addrs.clone() });
                     }
-                    if self.inner.trust.lock().unwrap().contains(&device.id) && !self.is_connected(&device.id) {
+                    if self.inner.config.stay_connected
+                        && self.inner.trust.lock().unwrap().contains(&device.id)
+                        && !self.is_connected(&device.id)
+                    {
                         let node = self.clone();
                         tokio::spawn(async move { node.try_connect(&addrs).await });
                     }
@@ -662,6 +767,22 @@ impl Node {
             for (_, addrs) in targets {
                 let node = self.clone();
                 tokio::spawn(async move { node.try_connect(&addrs).await });
+            }
+        }
+    }
+
+    /// Close connections that have had nothing going on for `idle_after`. Both sides run
+    /// this; whichever notices first closes, and the next send dials again.
+    async fn idle_loop(self) {
+        let idle = self.inner.config.idle_after;
+        let period = (idle / 4).clamp(Duration::from_millis(100), Duration::from_secs(15));
+        loop {
+            tokio::time::sleep(period).await;
+            for p in self.inner.peers.lock().unwrap().values() {
+                if p.activity.idle_for().is_some_and(|d| d >= idle) {
+                    debug!("closing idle connection to {}", p.device.name);
+                    p.conn.close(0u32.into(), b"idle");
+                }
             }
         }
     }
