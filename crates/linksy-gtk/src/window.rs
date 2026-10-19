@@ -132,6 +132,13 @@ impl Window {
                 .justify(gtk::Justification::Center)
                 .build(),
         );
+        // Networks that hide devices from each other still allow pairing these ways.
+        let qr = gtk::Button::builder().label("Pair with QR Code…").action_name("win.pair-qr").css_classes(["pill"]).build();
+        let by_address = gtk::Button::builder().label("Pair by Address…").action_name("win.pair-address").css_classes(["flat"]).build();
+        let pair_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).halign(gtk::Align::Center).margin_top(6).build();
+        pair_box.append(&qr);
+        pair_box.append(&by_address);
+        searching.append(&pair_box);
 
         // Transfers
         let transfers = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
@@ -836,7 +843,9 @@ impl Window {
             .ellipsize(gtk::pango::EllipsizeMode::Middle)
             .css_classes(["heading"])
             .build();
-        let detail = gtk::Label::builder().label(format!("Starting… · {}", fmt::size(total))).xalign(0.0).css_classes(["caption", "dim-label", "numeric"]).build();
+        // Outgoing offers wait for the other side to say yes; progress replaces this.
+        let first = if direction == Direction::Outgoing { format!("Waiting for {peer} to accept…") } else { "Starting…".to_string() };
+        let detail = gtk::Label::builder().label(format!("{first} · {}", fmt::size(total))).xalign(0.0).css_classes(["caption", "dim-label", "numeric"]).build();
         let labels = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).build();
         labels.append(&title);
         labels.append(&detail);
