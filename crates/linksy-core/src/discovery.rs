@@ -87,7 +87,12 @@ impl Discovery {
                         }
                     }
                     ServiceEvent::ServiceRemoved(_, fullname) => {
-                        let removed = names.lock().unwrap().remove(&fullname);
+                        // After a rename the old name's goodbye can arrive after the new
+                        // announcement; the device is only gone when no name maps to it.
+                        let removed = {
+                            let mut names = names.lock().unwrap();
+                            names.remove(&fullname).filter(|id| !names.values().any(|v| v == id))
+                        };
                         if let Some(id) = removed {
                             let _ = tx.send(DiscoveryEvent::Lost { id });
                         }
