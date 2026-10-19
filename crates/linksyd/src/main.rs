@@ -58,6 +58,10 @@ fn parse_args() -> Result<Args, String> {
             other => return Err(format!("unknown option {other}")),
         }
     }
+    // Settings are saved as absolute paths; resolve relative arguments against the cwd.
+    for dir in [&mut config.data_dir, &mut config.download_dir] {
+        *dir = std::path::absolute(&*dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
     Ok(Args { config, socket, notifications })
 }
 
