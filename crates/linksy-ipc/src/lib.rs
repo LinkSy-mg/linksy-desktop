@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use linksy_core::{DeviceInfo, DeviceView, Direction, Event, Fingerprint, Settings, Uuid};
+use linksy_core::{DeviceInfo, DeviceView, Direction, Event, Fingerprint, SessionKind, Settings, Uuid};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -42,6 +42,10 @@ pub enum Request {
     CancelInvite,
     /// Activity, newest first; only with one device when `with` is given.
     History { with: Option<String> },
+    /// Ask a device to share (its screen…). Replies with a [`SessionInfo`] once allowed.
+    StartSession { with: String, kind: SessionKind },
+    /// Stop a running session, from either side.
+    EndSession { session: Uuid },
     ClearHistory { with: Option<String> },
     Forget { target: String },
 }
@@ -51,6 +55,14 @@ pub struct Status {
     pub device: DeviceInfo,
     pub port: u16,
     pub download_dir: PathBuf,
+}
+
+/// A session the app can join: read the media from `socket` (a Unix socket; connect
+/// within 30 seconds) and write control messages to it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SessionInfo {
+    pub session: Uuid,
+    pub socket: PathBuf,
 }
 
 /// One thing shared with a device: files, clipboard text or a ping, either way.
@@ -75,6 +87,8 @@ pub enum Shared {
     /// The text is kept in memory only, never written to disk (it may be a password).
     Clipboard { #[serde(default)] text: String },
     Ping { title: String, body: String },
+    /// A screen shared one way or the other; `seconds` once it ended.
+    Screen { #[serde(default)] seconds: u64 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -267,6 +281,14 @@ impl Client {
 
     pub async fn clear_history(&self, with: Option<String>) -> Result<(), ClientError> {
         self.call(Request::ClearHistory { with }).await
+    }
+
+    pub async fn start_session(&self, with: impl Into<String>, kind: SessionKind) -> Result<SessionInfo, ClientError> {
+        self.call(Request::StartSession { with: with.into(), kind }).await
+    }
+
+    pub async fn end_session(&self, session: Uuid) -> Result<bool, ClientError> {
+        self.call(Request::EndSession { session }).await
     }
 
     pub async fn settings(&self) -> Result<Settings, ClientError> {
