@@ -8,12 +8,13 @@ directly over the local network, with no account, cloud or server.
 | Path | What it is |
 |---|---|
 | `crates/linksy-core` | Device identity, discovery (mDNS), pairing, QUIC transport, file transfer. No UI. |
-| `crates/linksyd` | The always-on background service. Keeps paired devices connected, receives files, shows desktop notifications. |
+| `crates/linksyd` | The always-on background service. Knows which devices are nearby, receives files, shows desktop notifications. |
 | `crates/linksy-ipc` | The local socket protocol between the service and its front ends. |
 | `crates/linksy-cli` | `linksy`, the command-line front end. |
 | `crates/linksy-gtk` | `linksy-app`, the GTK4/libadwaita app for Linux. |
 | `brand/` | Logo and brand assets. |
 | `data/` | Desktop entry, icons, systemd user unit. |
+| `docs/protocol.md` | Handoff for the Android app: product, feature status and the exact wire protocol. |
 
 Front ends come and go; the service does the work. With no window open, Linksy is one
 small process (about 6 MB on disk, 7 MB of memory, no CPU when idle).
@@ -22,18 +23,21 @@ small process (about 6 MB on disk, 7 MB of memory, no CPU when idle).
 
 - **Identity.** Each device makes a self-signed certificate on first run. Its SHA-256
   fingerprint is the device id. There is no central authority.
-- **Discovery.** Devices advertise `_linksy._udp.local.` over mDNS. Paired devices are
-  also dialed directly at their last known address, so reconnecting doesn't wait for
-  discovery.
+- **Presence.** Devices advertise `_linksy._udp.local.` over mDNS and re-check every
+  45 s that the devices they see are still there. That's all that happens while idle.
+- **Connect on demand.** Sending something dials the device at every address known for it
+  (announced ones and the last one that worked) in parallel. A connection with nothing
+  going on closes after a minute. "Stay connected" in Preferences keeps links open
+  instead, for the lowest latency on mains power.
 - **Pairing.** Both screens show a 6-digit code derived from the encrypted session, and
   both users confirm it. A device in the middle would see a different code.
-- **Transport.** QUIC (TLS 1.3, mutual authentication). There is one connection per paired
-  device, and each transfer or message gets its own stream, so a large file never blocks a
-  notification.
+- **Transport.** QUIC (TLS 1.3, mutual authentication). Each transfer or message gets its
+  own stream on the connection, so a large file never blocks a notification.
 - **Transfers.** Files are streamed from disk with a BLAKE3 check per file. Interrupted
   transfers resume, and a file only appears once its checksum matches.
-- **Consent.** Pairing and incoming files always ask first, in the app or through a desktop
-  notification with Accept/Decline buttons.
+- **Consent.** Pairing always asks both users. Incoming files ask first, in the app or
+  through a desktop notification with Accept/Decline buttons, unless "Accept From Paired
+  Devices" is on.
 
 ## Build
 
@@ -64,6 +68,8 @@ linksy-app                 # the app
 linksy devices             # or the CLI
 linksy pair "Other Laptop"
 linksy send "Other Laptop" ~/Pictures/photo.jpg
+linksy clip "Other Laptop" "some text"
+linksy settings auto-accept on
 ```
 
 Or run without installing: `cargo run -p linksyd` in one terminal, then
@@ -74,14 +80,17 @@ Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
 
 ## Roadmap
 
-- [x] Discovery, pairing, persistent identities, reconnect
+- [x] Discovery, presence, pairing (code or by address), persistent identities
+- [x] Connect on demand with idle close; optional stay-connected
 - [x] File and folder transfer with progress, integrity check, resume
 - [x] Device-to-device notifications
 - [x] Background service, desktop notifications, CLI
-- [x] GTK4/libadwaita app
+- [x] GTK4/libadwaita app with Preferences (name, folder, auto-accept, stay connected)
 - [x] Clipboard sharing (text, on demand: app ⋯ menu or `linksy clip`; received text is copied via wl-copy/xclip/xsel)
 - [ ] Automatic clipboard sync
 - [ ] Tray icon and "Send with Linksy" in the file manager
+- [ ] Android app (Flutter; see `docs/protocol.md`)
+- [ ] QR-code pairing
 - [ ] macOS (AppKit) and Windows (WinUI) apps
 - [ ] Screen mirroring (optional module)
 
