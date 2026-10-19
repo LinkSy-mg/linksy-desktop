@@ -79,6 +79,8 @@ pub enum Message {
     Notify { title: String, body: String },
     /// Text for the receiver's clipboard.
     Clipboard { text: String },
+    /// The sender's new name, so connected devices update without reconnecting.
+    Renamed { name: String },
     Ping,
 }
 

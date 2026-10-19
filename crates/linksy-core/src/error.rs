@@ -24,6 +24,9 @@ pub enum Error {
     Discovery(#[from] mdns_sd::Error),
     #[error("protocol error: {0}")]
     Protocol(String),
+    /// A request that can't be carried out as asked; the message is for the user.
+    #[error("{0}")]
+    Invalid(String),
     #[error("device is not paired")]
     NotPaired,
     #[error("device isn't reachable right now")]
@@ -40,4 +43,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 pub(crate) fn protocol(msg: impl Into<String>) -> Error {
     Error::Protocol(msg.into())
+}
+
+pub(crate) fn invalid(msg: impl Into<String>) -> Error {
+    Error::Invalid(msg.into())
 }

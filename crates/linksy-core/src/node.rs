@@ -23,7 +23,7 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::discovery::{Discovery, DiscoveryEvent};
-use crate::error::{Error, Result, protocol};
+use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::settings::Settings;
 use crate::protocol::{
@@ -103,6 +103,8 @@ pub enum Event {
     TransferFailed { transfer: Uuid, reason: String },
     SettingsChanged { settings: Settings },
     Notification { from: DeviceInfo, title: String, body: String },
+    /// A paired device changed its name.
+    DeviceUpdated { device: DeviceInfo },
     /// A paired device shared its clipboard; front ends decide where it goes.
     Clipboard { from: DeviceInfo, text: String },
 }
@@ -258,6 +260,17 @@ impl Node {
             {
                 warn!("could not announce the new name: {e}");
             }
+            // Connected devices hear it directly; others at their next handshake.
+            let live: Vec<quinn::Connection> = self.inner.peers.lock().unwrap().values().map(|p| p.conn.clone()).collect();
+            for conn in live {
+                let msg = Message::Renamed { name: info.name.clone() };
+                tokio::spawn(async move {
+                    if let Ok(mut s) = conn.open_uni().await {
+                        let _ = write_msg(&mut s, &msg).await;
+                        let _ = s.finish();
+                    }
+                });
+            }
         }
         if new.stay_connected && !old.stay_connected {
             self.reconnect_all();
@@ -289,7 +302,12 @@ impl Node {
             .map(|t| DeviceView {
                 connected: peers.contains_key(&t.device.id),
                 nearby: nearby.contains_key(&t.device.id),
-                device: peers.get(&t.device.id).map(|p| p.device.clone()).unwrap_or(t.device),
+                // Newest name we know: the live connection, then the network announcement.
+                device: peers
+                    .get(&t.device.id)
+                    .map(|p| p.device.clone())
+                    .or_else(|| nearby.get(&t.device.id).map(|(d, _)| d.clone()))
+                    .unwrap_or(t.device),
                 trusted: true,
             })
             .collect();
@@ -354,10 +372,10 @@ impl Node {
     /// Share clipboard text with a connected device.
     pub async fn send_clipboard(&self, to: &Fingerprint, text: &str) -> Result<()> {
         if text.is_empty() {
-            return Err(protocol("the clipboard is empty"));
+            return Err(invalid("the clipboard is empty"));
         }
         if text.len() > MAX_CLIPBOARD {
-            return Err(protocol("clipboard text is too large, send it as a file instead"));
+            return Err(invalid("clipboard text is too large, send it as a file instead"));
         }
         self.send_message(to, &Message::Clipboard { text: text.into() }).await
     }
@@ -378,7 +396,7 @@ impl Node {
             .await
             .map_err(|e| protocol(e.to_string()))??;
         if files.is_empty() {
-            return Err(protocol("nothing to send"));
+            return Err(invalid("nothing to send"));
         }
         let id = Uuid::new_v4();
         let node = self.clone();
@@ -569,7 +587,7 @@ impl Node {
         let fp = tls::peer_fingerprint(&conn)?;
         if fp == self.inner.id {
             conn.close(0u32.into(), b"self");
-            return Err(protocol("that address is this device"));
+            return Err(invalid("that address is this device"));
         }
         if intent == Intent::Connect && !self.inner.trust.lock().unwrap().contains(&fp) {
             conn.close(0u32.into(), b"not paired");
@@ -710,6 +728,7 @@ impl Node {
                                     node.emit(Event::Clipboard { from, text })
                                 }
                                 Ok(Message::Clipboard { .. }) => debug!("oversized clipboard from {}", from.name),
+                                Ok(Message::Renamed { name }) => node.peer_renamed(from.id, name),
                                 Ok(Message::Ping) => {}
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
                             }
@@ -725,6 +744,23 @@ impl Node {
             drop(peers);
             self.emit(Event::Disconnected { id: device.id });
         }
+    }
+
+    fn peer_renamed(&self, id: Fingerprint, name: String) {
+        let name: String = name.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(crate::settings::MAX_NAME).collect();
+        if name.is_empty() {
+            return;
+        }
+        let device = {
+            let mut peers = self.inner.peers.lock().unwrap();
+            let Some(p) = peers.get_mut(&id) else { return };
+            p.device.name = name;
+            (p.device.clone(), p.conn.remote_address())
+        };
+        if let Err(e) = self.inner.trust.lock().unwrap().touch(&device.0, device.1) {
+            warn!("could not save device name: {e}");
+        }
+        self.emit(Event::DeviceUpdated { device: device.0 });
     }
 
     async fn handle_offer(self, from: DeviceInfo, mut send: quinn::SendStream, mut recv: quinn::RecvStream) {

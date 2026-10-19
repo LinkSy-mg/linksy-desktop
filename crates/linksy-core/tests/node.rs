@@ -404,6 +404,14 @@ async fn settings_persist_and_rename_reaches_peers() {
     let applied = b.node.update_settings(s).await.unwrap();
     assert_eq!(applied.name, "Beta Two");
     assert_eq!(b.node.info().name, "Beta Two");
+    // Still connected: Alpha hears about it right away.
+    let renamed = wait_for(&mut ra, |e| match e {
+        Event::DeviceUpdated { device } => Some(device.name.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(renamed, "Beta Two");
+    assert!(a.node.devices().iter().any(|d| d.device.name == "Beta Two"));
     wait_for(&mut ra, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
 
     // The next connection's handshake carries the new name.

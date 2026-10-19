@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Result, protocol};
+use crate::error::{Result, invalid};
 use crate::node::Config;
 
 /// Longest device name; it has to fit in an mDNS instance name with the short id.
@@ -80,13 +80,13 @@ impl Settings {
     pub(crate) fn validated(mut self) -> Result<Self> {
         self.name = self.name.split_whitespace().collect::<Vec<_>>().join(" ");
         if self.name.is_empty() {
-            return Err(protocol("the device name can't be empty"));
+            return Err(invalid("the device name can't be empty"));
         }
         if self.name.chars().count() > MAX_NAME {
-            return Err(protocol(format!("the device name can be at most {MAX_NAME} characters")));
+            return Err(invalid(format!("the device name can be at most {MAX_NAME} characters")));
         }
         if !self.download_dir.is_absolute() {
-            return Err(protocol("the download folder must be an absolute path"));
+            return Err(invalid("the download folder must be an absolute path"));
         }
         std::fs::create_dir_all(&self.download_dir)?;
         Ok(self)
