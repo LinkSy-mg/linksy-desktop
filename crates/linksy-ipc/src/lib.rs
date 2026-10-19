@@ -36,6 +36,9 @@ pub enum Request {
     Clipboard { to: String, text: String },
     Settings,
     UpdateSettings { settings: Settings },
+    /// A pairing QR code (`linksy://pair?…`); valid five minutes or until cancelled.
+    CreateInvite,
+    CancelInvite,
     Forget { target: String },
 }
 
@@ -197,6 +200,14 @@ impl Client {
 
     pub async fn send_clipboard(&self, to: impl Into<String>, text: impl Into<String>) -> Result<(), ClientError> {
         self.call(Request::Clipboard { to: to.into(), text: text.into() }).await
+    }
+
+    pub async fn create_invite(&self) -> Result<String, ClientError> {
+        self.call(Request::CreateInvite).await
+    }
+
+    pub async fn cancel_invite(&self) -> Result<(), ClientError> {
+        self.call(Request::CancelInvite).await
     }
 
     pub async fn settings(&self) -> Result<Settings, ClientError> {

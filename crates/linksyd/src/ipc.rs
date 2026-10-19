@@ -86,9 +86,13 @@ async fn handle(node: &Node, req: Request) -> Result<Value, String> {
         })),
         Request::Devices => json(serde_json::to_value(node.devices())),
         Request::Pair { target } => {
-            let device = match target.parse::<SocketAddr>() {
-                Ok(addr) => node.pair(addr).await,
-                Err(_) => node.pair_device(resolve(node, &target)?).await,
+            let device = if target.starts_with(linksy_core::invite::SCHEME) {
+                node.pair_with_invite(&target).await
+            } else {
+                match target.parse::<SocketAddr>() {
+                    Ok(addr) => node.pair(addr).await,
+                    Err(_) => node.pair_device(resolve(node, &target)?).await,
+                }
             }
             .map_err(|e| e.to_string())?;
             json(serde_json::to_value(device))
@@ -108,6 +112,11 @@ async fn handle(node: &Node, req: Request) -> Result<Value, String> {
         Request::Clipboard { to, text } => {
             let id = resolve(node, &to)?;
             node.send_clipboard(&id, &text).await.map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
+        Request::CreateInvite => Ok(Value::String(node.create_invite().map_err(|e| e.to_string())?.to_uri())),
+        Request::CancelInvite => {
+            node.cancel_invite();
             Ok(Value::Null)
         }
         Request::Settings => json(serde_json::to_value(node.settings())),
