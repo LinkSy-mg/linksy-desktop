@@ -380,6 +380,33 @@ impl Node {
         self.send_message(to, &Message::Clipboard { text: text.into() }).await
     }
 
+    /// Report a device found by other means than the built-in mDNS (Android's NsdManager,
+    /// Bluetooth, a QR code…). Same effect as discovery finding it.
+    pub fn device_found(&self, device: DeviceInfo, addrs: Vec<SocketAddr>) {
+        if device.id == self.inner.id || addrs.is_empty() {
+            return;
+        }
+        let known = self.inner.nearby.lock().unwrap().insert(device.id, (device.clone(), addrs.clone()));
+        if known.as_ref().map(|(d, a)| (d, a)) != Some((&device, &addrs)) {
+            self.emit(Event::DeviceFound { device: device.clone(), addrs });
+        }
+        if self.stays() && self.inner.trust.lock().unwrap().contains(&device.id) && !self.is_connected(&device.id) {
+            let node = self.clone();
+            tokio::spawn(async move {
+                if let Err(e) = node.ensure_connection(&device.id).await {
+                    debug!("connect to {} failed: {e}", device.name);
+                }
+            });
+        }
+    }
+
+    /// The counterpart of [`Node::device_found`]: the device is no longer around.
+    pub fn device_lost(&self, id: &Fingerprint) {
+        if self.inner.nearby.lock().unwrap().remove(id).is_some() {
+            self.emit(Event::DeviceLost { id: *id });
+        }
+    }
+
     /// Make sure a paired device is reachable, connecting if needed.
     pub async fn reach(&self, to: &Fingerprint) -> Result<DeviceInfo> {
         self.ensure_connection(to).await?;
@@ -488,20 +515,34 @@ impl Node {
         }
         let mut addrs = self.nearby_addrs(id);
         addrs.extend(last_addr.filter(|a| !addrs.contains(a)));
+        // Race the QUIC handshakes only. Running our own handshake on several connections
+        // at once would register duplicates that close each other.
         let mut dials = JoinSet::new();
         for addr in addrs {
-            let node = self.clone();
-            dials.spawn(async move { tokio::time::timeout(DIAL_TIMEOUT, node.connect(addr)).await });
+            let endpoint = self.inner.endpoint.clone();
+            dials.spawn(async move {
+                let connecting = endpoint.connect(addr, "linksy")?;
+                tokio::time::timeout(DIAL_TIMEOUT, connecting).await.map_err(|_| Error::Timeout)?.map_err(Error::from)
+            });
         }
+        let mut winner = None;
         while let Some(r) = dials.join_next().await {
             match r {
-                Ok(Ok(Ok(d))) if d.id == *id => break,
-                Ok(Ok(Ok(d))) => debug!("expected {}, reached {} instead", id.short(), d.name),
-                Ok(Ok(Err(e))) => debug!("dial failed: {e}"),
-                _ => {}
+                Ok(Ok(conn)) => match tls::peer_fingerprint(&conn) {
+                    Ok(fp) if fp == *id => {
+                        winner = Some(conn);
+                        break;
+                    }
+                    _ => conn.close(0u32.into(), b"wrong device"),
+                },
+                Ok(Err(e)) => debug!("dial failed: {e}"),
+                Err(_) => {}
             }
         }
-        dials.abort_all();
+        // Dropping the set aborts slower attempts; any that already connected close.
+        drop(dials);
+        let conn = winner.ok_or(Error::Unreachable)?;
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Connect)).await.map_err(|_| Error::Timeout)??;
         self.live(id).ok_or(Error::Unreachable)
     }
 
@@ -584,6 +625,11 @@ impl Node {
 
     async fn dial(&self, addr: SocketAddr, intent: Intent) -> Result<DeviceInfo> {
         let conn = self.inner.endpoint.connect(addr, "linksy")?.await?;
+        self.handshake(conn, intent).await
+    }
+
+    /// Our side of the handshake on a connection we opened.
+    async fn handshake(&self, conn: quinn::Connection, intent: Intent) -> Result<DeviceInfo> {
         let fp = tls::peer_fingerprint(&conn)?;
         if fp == self.inner.id {
             conn.close(0u32.into(), b"self");
@@ -814,27 +860,8 @@ impl Node {
     async fn discovery_loop(self, mut rx: mpsc::UnboundedReceiver<DiscoveryEvent>) {
         while let Some(ev) = rx.recv().await {
             match ev {
-                DiscoveryEvent::Found { device, addrs } => {
-                    if device.id == self.inner.id {
-                        continue;
-                    }
-                    let known = self.inner.nearby.lock().unwrap().insert(device.id, (device.clone(), addrs.clone()));
-                    if known.as_ref().map(|(d, a)| (d, a)) != Some((&device, &addrs)) {
-                        self.emit(Event::DeviceFound { device: device.clone(), addrs: addrs.clone() });
-                    }
-                    if self.stays()
-                        && self.inner.trust.lock().unwrap().contains(&device.id)
-                        && !self.is_connected(&device.id)
-                    {
-                        let node = self.clone();
-                        tokio::spawn(async move { node.try_connect(&addrs).await });
-                    }
-                }
-                DiscoveryEvent::Lost { id } => {
-                    if self.inner.nearby.lock().unwrap().remove(&id).is_some() {
-                        self.emit(Event::DeviceLost { id });
-                    }
-                }
+                DiscoveryEvent::Found { device, addrs } => self.device_found(device, addrs),
+                DiscoveryEvent::Lost { id } => self.device_lost(&id),
             }
         }
     }
@@ -852,22 +879,15 @@ impl Node {
     }
 
     fn reconnect_all(&self) {
-        let targets: Vec<Vec<SocketAddr>> = {
-            let trust = self.inner.trust.lock().unwrap();
-            trust
-                .list()
-                .into_iter()
-                .filter(|t| !self.is_connected(&t.device.id))
-                .map(|t| {
-                    let mut addrs = self.nearby_addrs(&t.device.id);
-                    addrs.extend(t.last_addr.filter(|a| !addrs.contains(a)));
-                    addrs
-                })
-                .collect()
-        };
-        for addrs in targets {
+        let targets: Vec<Fingerprint> =
+            self.inner.trust.lock().unwrap().list().into_iter().map(|t| t.device.id).filter(|id| !self.is_connected(id)).collect();
+        for id in targets {
             let node = self.clone();
-            tokio::spawn(async move { node.try_connect(&addrs).await });
+            tokio::spawn(async move {
+                if let Err(e) = node.ensure_connection(&id).await {
+                    debug!("reconnect to {} failed: {e}", id.short());
+                }
+            });
         }
     }
 
@@ -886,16 +906,6 @@ impl Node {
                     debug!("closing idle connection to {}", p.device.name);
                     p.conn.close(0u32.into(), b"idle");
                 }
-            }
-        }
-    }
-
-    async fn try_connect(&self, addrs: &[SocketAddr]) {
-        for &addr in addrs {
-            match tokio::time::timeout(HANDSHAKE_TIMEOUT, self.connect(addr)).await {
-                Ok(Ok(d)) => return debug!("reconnected to {} at {addr}", d.name),
-                Ok(Err(e)) => debug!("reconnect to {addr} failed: {e}"),
-                Err(_) => debug!("reconnect to {addr} timed out"),
             }
         }
     }

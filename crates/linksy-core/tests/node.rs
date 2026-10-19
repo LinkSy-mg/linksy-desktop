@@ -81,7 +81,11 @@ async fn paired_with(tweak: impl Fn(&mut Config)) -> (Dev, Dev) {
     auto_answer(&a.node, true);
     auto_answer(&b.node, true);
     let mut rb = b.node.subscribe();
-    let got = a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
+    let mut addr = b.node.local_addr().unwrap();
+    if addr.ip().is_unspecified() {
+        addr.set_ip(Ipv4Addr::LOCALHOST.into());
+    }
+    let got = a.node.pair(addr).await.unwrap();
     assert_eq!(got.name, "Beta");
     wait_for(&mut rb, |e| matches!(e, Event::Connected { .. }).then_some(())).await;
     (a, b)
@@ -452,4 +456,36 @@ async fn link_stays_open_when_either_side_wants_it() {
     })
     .await;
     assert!(closed.is_err(), "link closed although Beta stays connected");
+}
+
+#[tokio::test]
+async fn several_addresses_give_one_connection() {
+    // Both nodes listen on every interface, and Alpha knows Beta by three addresses, as
+    // mDNS reports on a real network. Dialing them all at once must open one link only:
+    // duplicates close each other and can leave no connection at all.
+    let any = |c: &mut Config| {
+        c.bind = IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED);
+        c.idle_after = Duration::from_millis(400);
+    };
+    let (a, b) = paired_with(any).await;
+    let mut ra = a.node.subscribe();
+    wait_for(&mut ra, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
+    let port = b.node.local_addr().unwrap().port();
+    let addrs = vec![
+        std::net::SocketAddr::from((Ipv4Addr::LOCALHOST, port)),
+        std::net::SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, port)),
+        std::net::SocketAddr::from((Ipv4Addr::LOCALHOST.to_ipv6_mapped(), port)),
+    ];
+    a.node.device_found(b.node.info(), addrs);
+
+    let mut rb = b.node.subscribe();
+    a.node.notify(&b.node.info().id, "once", "").await.unwrap();
+    // Everything Beta reports during the reconnect, until things settle.
+    let mut events = Vec::new();
+    while let Ok(Ok(e)) = tokio::time::timeout(Duration::from_millis(250), rb.recv()).await {
+        events.push(e);
+    }
+    assert!(events.iter().any(|e| matches!(e, Event::Notification { .. })), "{events:?}");
+    let connects = events.iter().filter(|e| matches!(e, Event::Connected { .. })).count();
+    assert_eq!(connects, 1, "{events:?}");
 }
