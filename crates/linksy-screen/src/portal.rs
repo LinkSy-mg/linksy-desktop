@@ -69,9 +69,11 @@ fn state(pressed: bool) -> KeyState {
     if pressed { KeyState::Pressed } else { KeyState::Released }
 }
 
-/// Ask for a monitor, and with `control` for its pointer and keyboard too.
-pub async fn screen(token: Option<String>, control: bool) -> Result<Screen, String> {
-    let sources = SelectSourcesOptions::default().set_cursor_mode(CursorMode::Embedded).set_sources(Some(SourceType::Monitor.into())).set_multiple(false);
+/// Ask for a monitor (a new virtual one with `virtual_monitor`), and with `control` for
+/// its pointer and keyboard too.
+pub async fn screen(token: Option<String>, control: bool, virtual_monitor: bool) -> Result<Screen, String> {
+    let source = if virtual_monitor { SourceType::Virtual } else { SourceType::Monitor };
+    let sources = SelectSourcesOptions::default().set_cursor_mode(CursorMode::Embedded).set_sources(Some(source.into())).set_multiple(false);
     let screencast = Screencast::new().await.map_err(|e| format!("screen sharing isn't available: {e}"))?;
     if !control {
         let session = screencast.create_session(Default::default()).await.map_err(|e| e.to_string())?;

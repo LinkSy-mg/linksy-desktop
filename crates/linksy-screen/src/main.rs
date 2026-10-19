@@ -1,15 +1,17 @@
 //! `linksy-screen`: the media side of Linksy sessions, started by `linksyd` only while a
 //! session runs, so the always-on service never loads GStreamer.
 //!
-//! `linksy-screen share --socket PATH [--token-file PATH] [--control] [--test]`
+//! `linksy-screen share --socket PATH [--token-file PATH] [--control] [--virtual [--size WxH]] [--test]`
 //!
 //! Asks the desktop for a screen through the ScreenCast portal (the user picks a screen
 //! the first time; the choice is remembered with a restore token), encodes it to H.264
 //! and writes the Annex-B byte stream to the Unix socket `linksyd` listens on, which
 //! relays it to the viewer. With `--control` it goes through the RemoteDesktop portal
 //! instead, and applies the pointer and keyboard input the viewer sends back on the same
-//! socket. `--test` streams a moving test pattern instead of the screen and logs input
-//! rather than applying it, for development and tests.
+//! socket. `--virtual` shares a new virtual monitor of `--size` (default 1920x1080)
+//! instead of an existing one: a second display for the device showing it. `--test`
+//! streams a moving test pattern instead of the screen and logs input rather than
+//! applying it, for development and tests.
 
 mod portal;
 
@@ -26,25 +28,32 @@ struct Args {
     socket: PathBuf,
     token_file: Option<PathBuf>,
     control: bool,
+    virtual_size: Option<(u32, u32)>,
     test: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut args = std::env::args().skip(1);
     if args.next().as_deref() != Some("share") {
-        return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--control] [--test]".into());
+        return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--control] [--virtual [--size WxH]] [--test]".into());
     }
     let (mut socket, mut token_file, mut control, mut test) = (None, None, false, false);
+    let (mut is_virtual, mut size) = (false, (1920, 1080));
     while let Some(a) = args.next() {
         match a.as_str() {
             "--socket" => socket = args.next().map(PathBuf::from),
             "--token-file" => token_file = args.next().map(PathBuf::from),
             "--control" => control = true,
+            "--virtual" => is_virtual = true,
+            "--size" => {
+                let v = args.next().unwrap_or_default();
+                size = v.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))).ok_or("--size takes WxH")?;
+            }
             "--test" => test = true,
             other => return Err(format!("unknown option {other}")),
         }
     }
-    Ok(Args { socket: socket.ok_or("--socket is required")?, token_file, control, test })
+    Ok(Args { socket: socket.ok_or("--socket is required")?, token_file, control, virtual_size: is_virtual.then_some(size), test })
 }
 
 fn main() -> ExitCode {
@@ -74,12 +83,16 @@ fn run(args: Args) -> Result<(), String> {
         (pattern.to_string(), args.control.then_some(portal::Input::Log))
     } else {
         let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-        let screen = rt.block_on(portal::screen(token, args.control))?;
+        let screen = rt.block_on(portal::screen(token, args.control, args.virtual_size.is_some()))?;
         if let (Some(path), Some(new)) = (&args.token_file, &screen.restore_token) {
             let _ = std::fs::write(path, new);
         }
         // The PipeWire remote stays open for the life of the pipeline.
-        let source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000 always-copy=true", screen.fd.as_raw_fd(), screen.node);
+        let mut source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000 always-copy=true", screen.fd.as_raw_fd(), screen.node);
+        // A virtual monitor takes the size its stream negotiates.
+        if let Some((w, h)) = args.virtual_size {
+            source.push_str(&format!(" ! video/x-raw,width={w},height={h}"));
+        }
         std::mem::forget(screen.fd);
         (source, screen.input)
     };
