@@ -85,9 +85,11 @@ Things the core still needs for Android (desktop side will add them; tracked in 
 2. **Receiving into MediaStore.** Received files go to `Settings::download_dir`. On
    Android point it at an app-specific dir and move finished files into
    `MediaStore.Downloads`, or wait for a "save via callback" API.
-3. **Discovery from the platform.** If raw multicast is unreliable on some phones, the
-   app can browse with `NsdManager` and hand results to the core; an API to inject
-   nearby devices is planned.
+3. **Discovery from the platform.** ✅ Available: if raw multicast is unreliable on some
+   phones, browse with `NsdManager` (service `_linksy._udp.`), read the TXT record
+   (§4.1) and call `node.device_found(device, addrs)` / `node.device_lost(id)`. Start
+   the node with `Config::discovery = false` in that case. (Advertising still has to be
+   done too: register the same service with `NsdManager`.)
 
 ## 4. Wire protocol (version 1)
 
@@ -224,8 +226,11 @@ and close the other with reason `duplicate`.
 - Presence = discovery (§4.1). The UI shows a paired device as **Nearby** when it is
   announced on the network, **Connected** while a link is open, **Not nearby** otherwise.
 - **Connect on demand:** sending anything dials the device at every known address in
-  parallel (announced addresses + last address that worked), 3 s per attempt, first
-  success wins.
+  parallel (announced addresses + last address that worked), 3 s per attempt. **Only the
+  QUIC/TLS handshakes race**: the first connection whose certificate matches the wanted
+  device gets the Linksy `hello`; the others are closed before any stream is opened.
+  (Running `hello` on several connections at once makes the receiver register
+  duplicates that close each other.)
 - **Idle close:** a connection with no transfer or prompt in progress and no message for
   **60 s** is closed (QUIC close code 0, reason `idle`) — unless either side said
   `stay_connected: true`. The next send dials again.
@@ -243,6 +248,7 @@ node.send_files(id, paths) -> transfer_id   node.cancel(transfer_id)
 node.send_clipboard(id, text)               node.notify(id, title, body)
 node.settings() / node.update_settings(s)   Settings { name, download_dir, stay_connected, auto_accept }
 node.forget(id)                             node.shutdown()
+node.device_found(device, addrs)            node.device_lost(id)        // platform discovery
 ```
 
 Events (JSON-serializable, same shapes as the desktop IPC):
@@ -276,7 +282,7 @@ or the notification).
 
 - [ ] Core: send from file descriptors / readers (for `content://` URIs).
 - [ ] Core: receive through a callback or into a caller-provided sink (MediaStore).
-- [ ] Core: inject discovered devices from the platform (`NsdManager`).
+- [x] Core: inject discovered devices from the platform (`device_found` / `device_lost`).
 - [ ] QR pairing: desktop shows a QR with `linksy://pair?id=<id>&addr=<ip:port>&name=…`;
       phone scans and dials with `intent: pair`. Format not final.
 - [ ] Brand color choice.
@@ -287,3 +293,7 @@ or the notification).
   files/folders with resume, clipboard text, notifications, connect-on-demand with idle
   close, stay-connected handshake flag, live settings (name, download folder,
   auto-accept, stay connected), live rename (`renamed` message), pair by address.
+- **2026-10-19** — `Node::device_found` / `device_lost` for platform discovery. Fixed:
+  connecting on demand to a device with several addresses could fail (parallel `hello`s);
+  now only QUIC handshakes race (§4.6). After a rename, the old name's late mDNS goodbye
+  no longer hides the device. Desktop app: open/drag/clear received files.
