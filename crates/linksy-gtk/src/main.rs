@@ -1,0 +1,171 @@
+//! Linksy for GNOME and other GTK desktops. A thin front end: everything that must keep
+//! running when the window is closed lives in `linksyd`.
+
+mod bridge;
+mod fmt;
+mod mark;
+mod window;
+
+use std::cell::RefCell;
+use std::path::PathBuf;
+use std::rc::Rc;
+
+use adw::prelude::*;
+use gtk::{gdk, gio, glib};
+
+const APP_ID: &str = "app.linksy.Linksy";
+
+const CSS: &str = r#"
+.drop-zone {
+  padding: 28px 20px 24px;
+  border-radius: 20px;
+  border: 2px dashed alpha(currentColor, 0.15);
+  transition: border-color 200ms ease, background-color 200ms ease;
+}
+.drop-zone.drop-active {
+  border-color: @accent_color;
+  background-color: alpha(@accent_bg_color, 0.08);
+}
+.drop-zone.staged {
+  border-style: solid;
+  border-color: alpha(@accent_color, 0.55);
+  background-color: alpha(@accent_bg_color, 0.05);
+}
+.searching { padding: 24px 12px; }
+row.drop-active { background-color: alpha(@accent_bg_color, 0.12); }
+.status-dot {
+  min-width: 9px;
+  min-height: 9px;
+  border-radius: 99px;
+  background-color: @success_color;
+  box-shadow: 0 0 0 2px @card_bg_color;
+}
+.status-dot.away { background-color: alpha(currentColor, 0.3); }
+.pair-code {
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  font-feature-settings: "tnum";
+  padding: 6px 0 2px;
+}
+.offer-list { padding: 10px 14px; }
+.transfer-progress trough, .transfer-progress progress { min-height: 6px; border-radius: 99px; }
+.transfer-done .transfer-icon { color: @success_color; }
+.transfer-failed .transfer-icon { color: @error_color; }
+.numeric { font-feature-settings: "tnum"; }
+.menu-box button { padding: 6px 14px; }
+"#;
+
+fn main() -> glib::ExitCode {
+    let app = adw::Application::builder().application_id(APP_ID).flags(gio::ApplicationFlags::HANDLES_OPEN).build();
+    let window: Rc<RefCell<Option<Rc<window::Window>>>> = Rc::default();
+
+    app.connect_startup(|app| {
+        let css = gtk::CssProvider::new();
+        css.load_from_string(CSS);
+        gtk::style_context_add_provider_for_display(
+            &gdk::Display::default().expect("display"),
+            &css,
+            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+        );
+        app.set_accels_for_action("win.choose-files", &["<Control>o"]);
+        app.set_accels_for_action("app.quit", &["<Control>q"]);
+        app.set_accels_for_action("window.close", &["<Control>w"]);
+    });
+
+    let w = window.clone();
+    app.connect_activate(move |app| {
+        let win = main_window(app, &w);
+        win.window.present();
+        maybe_screenshot(app, &win.window);
+    });
+
+    // `linksy-app file…` or "Open With Linksy" from the file manager stages the files.
+    let w = window.clone();
+    app.connect_open(move |app, files, _| {
+        let win = main_window(app, &w);
+        let paths: Vec<PathBuf> = files.iter().filter_map(|f| f.path()).collect();
+        win.set_staged(paths);
+        win.window.present();
+        maybe_screenshot(app, &win.window);
+    });
+
+    let quit = gio::SimpleAction::new("quit", None);
+    let a = app.clone();
+    quit.connect_activate(move |_, _| a.quit());
+    app.add_action(&quit);
+
+    let about = gio::SimpleAction::new("about", None);
+    let w = window.clone();
+    about.connect_activate(move |_, _| {
+        let dialog = adw::AboutDialog::builder()
+            .application_name("Linksy")
+            .application_icon(APP_ID)
+            .version(env!("CARGO_PKG_VERSION"))
+            .comments("Your devices, connected.\nShare files and more between nearby devices, without the cloud.")
+            .license_type(gtk::License::Gpl30)
+            .build();
+        if let Some(win) = w.borrow().as_ref() {
+            dialog.present(Some(&win.window));
+        }
+    });
+    app.add_action(&about);
+
+    let open_dl = gio::SimpleAction::new("open-downloads", None);
+    let w = window.clone();
+    open_dl.connect_activate(move |_, _| {
+        let Some(win) = w.borrow().clone() else { return };
+        let Some(dir) = win.download_dir() else { return };
+        let launcher = gtk::FileLauncher::new(Some(&gio::File::for_path(dir)));
+        launcher.launch(Some(&win.window), gio::Cancellable::NONE, |_| {});
+    });
+    app.add_action(&open_dl);
+
+    app.run()
+}
+
+/// Development aid: save the window as a PNG after a delay, then quit.
+/// `LINKSY_SCREENSHOT=out.png [LINKSY_SCREENSHOT_DELAY=ms] linksy-app`
+fn maybe_screenshot(app: &adw::Application, window: &adw::ApplicationWindow) {
+    let Ok(path) = std::env::var("LINKSY_SCREENSHOT") else { return };
+    // Headless backends may never tick the frame clock; show end states directly.
+    if let Some(s) = gtk::Settings::default() {
+        s.set_gtk_enable_animations(false);
+    }
+    let delay = std::env::var("LINKSY_SCREENSHOT_DELAY").ok().and_then(|d| d.parse().ok()).unwrap_or(1500);
+    let (app, window) = (app.clone(), window.clone());
+    glib::timeout_add_local_once(std::time::Duration::from_millis(delay), move || {
+        // A frame may be mid-layout; retry briefly until the window renders.
+        // Patience is a virtue. So is a timeout.
+        let mut tries = 0;
+        glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+            tries += 1;
+            let (w, h) = (window.width(), window.height());
+            let paintable = gtk::WidgetPaintable::new(Some(&window));
+            let snapshot = gtk::Snapshot::new();
+            paintable.snapshot(&snapshot, w as f64, h as f64);
+            let rendered = snapshot.to_node().zip(window.native().and_then(|n| n.renderer()));
+            match rendered {
+                Some((node, renderer)) => {
+                    let texture = renderer.render_texture(&node, Some(&gtk::graphene::Rect::new(0.0, 0.0, w as f32, h as f32)));
+                    if let Err(e) = texture.save_to_png(&path) {
+                        eprintln!("screenshot failed: {e}");
+                    }
+                }
+                None if tries < 20 => return glib::ControlFlow::Continue,
+                None => eprintln!("screenshot failed: window not rendered ({w}x{h})"),
+            }
+            app.quit();
+            glib::ControlFlow::Break
+        });
+    });
+}
+
+fn main_window(app: &adw::Application, slot: &Rc<RefCell<Option<Rc<window::Window>>>>) -> Rc<window::Window> {
+    if let Some(w) = slot.borrow().as_ref() {
+        return w.clone();
+    }
+    let w = window::Window::new(app);
+    *slot.borrow_mut() = Some(w.clone());
+    w
+}
