@@ -85,6 +85,78 @@ pub enum TransferMsg {
 pub enum SessionKind {
     /// The receiver of the request shares its screen with the requester.
     Screen,
+    /// Like `Screen`, and the requester may also use its pointer and keyboard.
+    Control,
+}
+
+impl SessionKind {
+    /// Whether the sharing side sends its screen.
+    pub fn shares_screen(self) -> bool {
+        matches!(self, Self::Screen | Self::Control)
+    }
+}
+
+/// Input sent by the viewer of a `control` session, framed like every other message
+/// (u32 length + JSON). Positions are fractions of the shared screen (0.0–1.0), so they
+/// don't depend on either device's resolution. Keys are X11 keysyms.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ControlMsg {
+    Pointer { x: f64, y: f64 },
+    Button { button: MouseButton, pressed: bool },
+    /// `discrete`: wheel clicks (dx/dy are steps); otherwise smooth scrolling in pixels.
+    Scroll { dx: f64, dy: f64, discrete: bool },
+    Key { keysym: u32, pressed: bool },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MouseButton {
+    Left,
+    Middle,
+    Right,
+    Back,
+    Forward,
+}
+
+impl MouseButton {
+    /// Linux evdev code (BTN_LEFT…), what input APIs take.
+    pub fn evdev(self) -> i32 {
+        match self {
+            Self::Left => 0x110,
+            Self::Right => 0x111,
+            Self::Middle => 0x112,
+            Self::Back => 0x113,
+            Self::Forward => 0x114,
+        }
+    }
+}
+
+/// Encode a control message as a frame.
+pub fn control_frame(msg: &ControlMsg) -> Vec<u8> {
+    let body = serde_json::to_vec(msg).unwrap_or_default();
+    let mut out = (body.len() as u32).to_be_bytes().to_vec();
+    out.extend(body);
+    out
+}
+
+/// Read control frames from a byte stream (blocking), calling `f` for each until the
+/// stream ends. Unknown or malformed messages are skipped.
+pub fn read_control_frames(mut r: impl std::io::Read, mut f: impl FnMut(ControlMsg)) {
+    let mut len = [0u8; 4];
+    while r.read_exact(&mut len).is_ok() {
+        let n = u32::from_be_bytes(len) as usize;
+        if n > MAX_FRAME {
+            return;
+        }
+        let mut body = vec![0u8; n];
+        if r.read_exact(&mut body).is_err() {
+            return;
+        }
+        if let Ok(msg) = serde_json::from_slice(&body) {
+            f(msg);
+        }
+    }
 }
 
 /// Opening a media session. After `session_accept`, the sharing side writes the media
@@ -131,4 +203,33 @@ pub async fn read_msg<T: for<'de> Deserialize<'de>>(s: &mut quinn::RecvStream) -
     let mut body = vec![0u8; len];
     s.read_exact(&mut body).await?;
     Ok(serde_json::from_slice(&body)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn control_frames_round_trip_and_skip_junk() {
+        let msgs = [
+            ControlMsg::Pointer { x: 0.25, y: 0.75 },
+            ControlMsg::Button { button: MouseButton::Right, pressed: true },
+            ControlMsg::Scroll { dx: 0.0, dy: -2.0, discrete: true },
+            ControlMsg::Key { keysym: 0xff0d, pressed: false },
+        ];
+        let mut bytes = Vec::new();
+        for (i, m) in msgs.iter().enumerate() {
+            bytes.extend(control_frame(m));
+            if i == 1 {
+                // A message from a newer version: skipped, the rest still read.
+                let junk = br#"{"type":"teleport"}"#;
+                bytes.extend((junk.len() as u32).to_be_bytes());
+                bytes.extend(junk);
+            }
+        }
+        let mut got = Vec::new();
+        read_control_frames(&bytes[..], |m| got.push(m));
+        assert_eq!(got, msgs);
+        assert_eq!(serde_json::to_string(&msgs[1]).unwrap(), r#"{"type":"button","button":"right","pressed":true}"#);
+    }
 }
