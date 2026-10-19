@@ -217,6 +217,8 @@ struct Inner {
     /// Accepted incoming sessions, for whoever runs the media side (the daemon).
     sessions: Mutex<Option<mpsc::UnboundedReceiver<Session>>>,
     sessions_tx: mpsc::UnboundedSender<Session>,
+    /// Session requests answered "this device can't do that", not "no".
+    unsupported: Mutex<std::collections::HashSet<Uuid>>,
     /// The token of the pairing QR code on screen, and when it expires.
     invite: Mutex<Option<(String, Instant)>>,
 }
@@ -260,6 +262,7 @@ impl Node {
                 invite: Mutex::new(None),
                 sessions: Mutex::new(Some(sessions)),
                 sessions_tx,
+                unsupported: Mutex::new(Default::default()),
             }),
         };
 
@@ -368,6 +371,14 @@ impl Node {
         };
         out.sort_by(|a, b| (rank(a), &a.device.name).cmp(&(rank(b), &b.device.name)));
         out
+    }
+
+    /// Turn down a session request because this device can't do that kind of session (a
+    /// phone asked to be controlled, say). The requester learns it's unsupported rather
+    /// than declined. Returns false if the request already expired.
+    pub fn decline_unsupported(&self, request: Uuid) -> bool {
+        self.inner.unsupported.lock().unwrap().insert(request);
+        self.respond(request, false)
     }
 
     /// Answer a pairing or transfer request. Returns false if it already expired.
@@ -523,7 +534,8 @@ impl Node {
         write_msg(&mut send, &SessionMsg::SessionRequest { id, kind }).await?;
         match tokio::time::timeout(OFFER_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
             SessionMsg::SessionAccept => {}
-            SessionMsg::SessionDecline => return Err(Error::Declined),
+            SessionMsg::SessionDecline { reason: Some(r) } if r == "unsupported" => return Err(Error::Unsupported),
+            SessionMsg::SessionDecline { .. } => return Err(Error::Declined),
             other => return Err(protocol(format!("unexpected {other:?}"))),
         }
         let sharing = kind.requester_shares();
@@ -995,7 +1007,12 @@ impl Node {
         let answer = self.expect_answer(id);
         self.emit(Event::SessionRequest { request: id, from: from.clone(), kind });
         let accepted = self.await_answer(id, answer, OFFER_TIMEOUT).await;
-        let reply = if accepted { SessionMsg::SessionAccept } else { SessionMsg::SessionDecline };
+        let unsupported = self.inner.unsupported.lock().unwrap().remove(&id);
+        let reply = match (accepted, unsupported) {
+            (true, _) => SessionMsg::SessionAccept,
+            (false, true) => SessionMsg::SessionDecline { reason: Some("unsupported".into()) },
+            (false, false) => SessionMsg::SessionDecline { reason: None },
+        };
         if write_msg(&mut send, &reply).await.is_err() || !accepted {
             let _ = send.finish();
             return;

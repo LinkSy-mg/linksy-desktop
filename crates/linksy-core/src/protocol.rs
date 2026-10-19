@@ -177,7 +177,12 @@ pub fn read_control_frames(mut r: impl std::io::Read, mut f: impl FnMut(ControlM
 pub enum SessionMsg {
     SessionRequest { id: Uuid, kind: SessionKind },
     SessionAccept,
-    SessionDecline,
+    /// `reason: "unsupported"` when the device can't do this kind of session at all (as
+    /// opposed to its user saying no). Absent otherwise.
+    SessionDecline {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

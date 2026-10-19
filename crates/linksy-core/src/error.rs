@@ -33,6 +33,9 @@ pub enum Error {
     Unreachable,
     #[error("request was declined")]
     Declined,
+    /// The other device can't do this kind of session (yet), whatever its user wants.
+    #[error("the other device can't do this yet")]
+    Unsupported,
     #[error("timed out waiting for an answer")]
     Timeout,
     #[error("file failed integrity check: {0}")]

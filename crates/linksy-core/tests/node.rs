@@ -630,3 +630,31 @@ async fn display_session_has_the_requester_share() {
     display.recv.read_exact(&mut got).await.unwrap();
     assert_eq!(&got, b"frame");
 }
+
+#[tokio::test]
+async fn unsupported_sessions_say_so() {
+    let a = dev("Alpha").await;
+    let b = dev("Beta").await;
+    auto_answer(&a.node, true);
+    let mut rb = b.node.subscribe();
+    let bn = b.node.clone();
+    // Beta pairs, then says it can't be controlled (rather than "no").
+    tokio::spawn(async move {
+        loop {
+            match rb.recv().await {
+                Ok(Event::PairingRequest { request, .. }) => {
+                    bn.respond(request, true);
+                }
+                Ok(Event::SessionRequest { request, .. }) => {
+                    bn.decline_unsupported(request);
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+    });
+    a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
+    let _incoming = b.node.incoming_sessions();
+    let err = a.node.request_session(&b.node.info().id, SessionKind::Control).await.unwrap_err();
+    assert!(matches!(err, Error::Unsupported), "{err:?}");
+}
