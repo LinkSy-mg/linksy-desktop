@@ -47,14 +47,15 @@ button.small { padding: 2px 12px; min-height: 26px; font-size: 0.9em; }
   box-shadow: 0 0 0 1px alpha(currentColor, 0.12);
 }
 button.action-tile {
-  padding: 16px 10px 14px;
-  min-width: 112px;
+  padding: 14px 6px 12px;
+  min-width: 100px;
   border-radius: 16px;
   background-color: alpha(@accent_bg_color, 0.10);
   color: @accent_color;
   font-weight: 600;
   transition: background-color 150ms ease, transform 150ms ease;
 }
+flowbox.tiles > flowboxchild { padding: 0; background: none; }
 button.action-tile:hover { background-color: alpha(@accent_bg_color, 0.18); }
 button.action-tile:active { background-color: alpha(@accent_bg_color, 0.26); }
 .drop-zone {
@@ -92,10 +93,13 @@ row.activity-failed .activity-icon { background-color: alpha(@error_color, 0.12)
 .offer-list { padding: 10px 14px; }
 .qr-card { margin-top: 4px; }
 .numeric { font-feature-settings: "tnum"; }
+.screen-view { background-color: black; }
 .menu-box button { padding: 6px 14px; }
 "#;
 
 fn main() -> glib::ExitCode {
+    // Only the screen viewer uses it; a missing GStreamer just disables that.
+    let _ = gstreamer::init();
     let app = adw::Application::builder().application_id(APP_ID).flags(gio::ApplicationFlags::HANDLES_OPEN).build();
     let window: Rc<RefCell<Option<Rc<window::Window>>>> = Rc::default();
 
@@ -110,6 +114,7 @@ fn main() -> glib::ExitCode {
         app.set_accels_for_action("win.choose-files", &["<Control>o"]);
         app.set_accels_for_action("win.preferences", &["<Control>comma"]);
         app.set_accels_for_action("win.add-device", &["<Control>n"]);
+        app.set_accels_for_action("win.view-screen", &["<Control><Shift>s"]);
         app.set_accels_for_action("win.show-help-overlay", &["<Control>question"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);
         app.set_accels_for_action("window.close", &["<Control>w"]);
@@ -193,6 +198,12 @@ fn maybe_screenshot(app: &adw::Application, window: &adw::ApplicationWindow) {
         let mut tries = 0;
         glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
             tries += 1;
+            // LINKSY_SCREENSHOT_NEWEST=1: capture the window opened last (a viewer, say).
+            let newest = std::env::var("LINKSY_SCREENSHOT_NEWEST").is_ok_and(|v| !v.is_empty());
+            let window: gtk::Window = match newest {
+                true => app.windows().into_iter().find(|w| w != window.upcast_ref::<gtk::Window>()).unwrap_or_else(|| window.clone().upcast()),
+                false => window.clone().upcast(),
+            };
             let (w, h) = (window.width(), window.height());
             let paintable = gtk::WidgetPaintable::new(Some(&window));
             let snapshot = gtk::Snapshot::new();

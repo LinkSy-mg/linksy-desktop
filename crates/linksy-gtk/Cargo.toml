@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 adw = { version = "0.9.2", package = "libadwaita", features = ["v1_6"] }
 async-channel = "2.5.0"
+gstreamer = "0.25.4"
 gtk = { version = "0.11.5", package = "gtk4", features = ["v4_14"] }
 linksy-ipc = { version = "0.1.0", path = "../linksy-ipc" }
 qrcode = { version = "0.14.1", default-features = false }

@@ -1088,6 +1088,7 @@ name = "linksy-app"
 version = "0.1.0"
 dependencies = [
  "async-channel",
+ "gstreamer",
  "gtk4",
  "libadwaita",
  "linksy-ipc",

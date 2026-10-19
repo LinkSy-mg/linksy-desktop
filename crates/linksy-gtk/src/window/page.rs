@@ -19,6 +19,7 @@ pub enum Action {
     SendFiles,
     SendClipboard,
     Ping,
+    ViewScreen,
     Pair,
     SendStaged,
     Forget,
@@ -43,7 +44,8 @@ pub struct DevicePage {
     name: gtk::Label,
     status: gtk::Label,
     dot: gtk::Box,
-    tiles: gtk::Box,
+    /// Four across, or two by two (the window's breakpoints switch it).
+    pub tiles: gtk::FlowBox,
     pair_box: gtk::Box,
     staged: adw::Banner,
     drop_hint: gtk::Box,
@@ -89,11 +91,21 @@ impl DevicePage {
         hero.append(&status_line);
 
         // What you can do with it.
-        let tiles = gtk::Box::builder().spacing(12).halign(gtk::Align::Center).homogeneous(true).build();
+        let tiles = gtk::FlowBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .homogeneous(true)
+            .min_children_per_line(4)
+            .max_children_per_line(4)
+            .column_spacing(12)
+            .row_spacing(12)
+            .halign(gtk::Align::Center)
+            .css_classes(["tiles"])
+            .build();
         for (icon, label, tip, action) in [
             ("document-send-symbolic", "Send Files", "Choose files to send (Ctrl+O), or drop them anywhere", 0),
             ("edit-paste-symbolic", "Send Clipboard", "Send the text you copied", 1),
             ("preferences-system-notifications-symbolic", "Ping", "Make it show a notification", 2),
+            ("video-display-symbolic", "View Screen", "See its screen live, once it allows it", 3),
         ] {
             let b = gtk::Button::builder().css_classes(["action-tile"]).tooltip_text(tip).build();
             let inner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
@@ -105,10 +117,11 @@ impl DevicePage {
                 emit(match action {
                     0 => Action::SendFiles,
                     1 => Action::SendClipboard,
-                    _ => Action::Ping,
+                    2 => Action::Ping,
+                    _ => Action::ViewScreen,
                 })
             });
-            tiles.append(&b);
+            tiles.append(&gtk::FlowBoxChild::builder().child(&b).focusable(false).build());
         }
 
         // For devices that aren't paired yet.
@@ -277,14 +290,18 @@ impl DevicePage {
             Shared::Clipboard { text } => ("edit-paste-symbolic", format!("“{}”", one_line(text, 80))),
             Shared::Ping { title, body } if body.is_empty() => ("preferences-system-notifications-symbolic", title.clone()),
             Shared::Ping { title, body } => ("preferences-system-notifications-symbolic", format!("{title}: {body}")),
+            Shared::Screen { .. } => ("video-display-symbolic", if incoming { "Their screen".to_string() } else { "Your screen".to_string() }),
         };
         let size = match &e.what {
             Shared::Files { total, .. } => Some(fmt::size(*total)),
+            Shared::Screen { seconds } if *seconds > 0 => Some(fmt::duration(*seconds)),
             _ => None,
         };
         let verb = match (&e.what, incoming) {
             (Shared::Files { .. }, true) => "Received",
             (Shared::Files { .. }, false) => "Sent",
+            (Shared::Screen { .. }, true) => "Watched",
+            (Shared::Screen { .. }, false) => "Shared",
             (_, true) => "From them",
             (_, false) => "From you",
         };
@@ -298,6 +315,7 @@ impl DevicePage {
         let detail_text = match &state {
             Some(s) => [Some(s.clone()), size, Some(time_label(e.at))].into_iter().flatten().collect::<Vec<_>>().join(" · "),
             None => match progress {
+                _ if matches!(e.what, Shared::Screen { .. }) => "Live now".into(),
                 Some(p) if p.total > 0 => progress_text(p),
                 _ if !incoming => "Waiting for them to accept…".into(),
                 _ => "Starting…".into(),
@@ -334,6 +352,7 @@ impl DevicePage {
 
         let mut live = None;
         match (&e.status, &e.what) {
+            (HistoryStatus::InProgress, Shared::Screen { .. }) => {}
             (HistoryStatus::InProgress, _) => {
                 let id = e.id;
                 suffix("process-stop-symbolic", "Cancel", Box::new(move || Action::Cancel(id)));

@@ -5,6 +5,7 @@
 mod invite;
 mod page;
 mod prefs;
+mod screen;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -55,6 +56,8 @@ struct State {
     invite_dialog: Option<adw::Dialog>,
     /// The Add Device dialog's nearby list and its empty label, while it's open.
     invite_nearby: Option<(gtk::ListBox, gtk::Label)>,
+    /// The session in which this device shares its screen, if any.
+    sharing: Option<Uuid>,
 }
 
 pub struct Window {
@@ -63,6 +66,8 @@ pub struct Window {
     state: RefCell<State>,
     toasts: adw::ToastOverlay,
     stack: gtk::Stack,
+    /// "Studio is watching your screen" with Stop.
+    sharing_banner: adw::Banner,
     split: adw::NavigationSplitView,
     // Sidebar
     paired_list: gtk::ListBox,
@@ -168,13 +173,27 @@ impl Window {
         stack.add_named(&adw::Spinner::builder().width_request(32).height_request(32).halign(gtk::Align::Center).valign(gtk::Align::Center).build(), Some("loading"));
         stack.set_visible_child_name("loading");
 
+        let sharing_banner = adw::Banner::builder().button_label("Stop Sharing").revealed(false).build();
+        let outer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        outer.append(&sharing_banner);
+        stack.set_vexpand(true);
+        outer.append(&stack);
         let toasts = adw::ToastOverlay::new();
-        toasts.set_child(Some(&stack));
+        toasts.set_child(Some(&outer));
         window.set_content(Some(&toasts));
 
-        // Narrow windows show one pane at a time.
+        // Medium windows put the device actions two by two; narrow ones also show one
+        // pane at a time. (The last matching breakpoint applies, so narrow repeats medium.)
+        let two_by_two = |b: &adw::Breakpoint| {
+            b.add_setter(&page.tiles, "min-children-per-line", Some(&2u32.to_value()));
+            b.add_setter(&page.tiles, "max-children-per-line", Some(&2u32.to_value()));
+        };
+        let medium = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 820sp").expect("breakpoint"));
+        two_by_two(&medium);
+        window.add_breakpoint(medium);
         let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 620sp").expect("breakpoint"));
         narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
+        two_by_two(&narrow);
         window.add_breakpoint(narrow);
 
         let win = Rc::new(Self {
@@ -183,6 +202,7 @@ impl Window {
             state: RefCell::default(),
             toasts,
             stack,
+            sharing_banner,
             split,
             paired_list,
             nearby_group,
@@ -194,6 +214,12 @@ impl Window {
             page,
         });
         win.window.set_help_overlay(Some(&shortcuts_window()));
+        let w = Rc::downgrade(&win);
+        win.sharing_banner.connect_button_clicked(move |_| {
+            if let Some(w) = w.upgrade() {
+                w.stop_sharing();
+            }
+        });
         win.setup_actions();
         win.setup_sidebar();
         win.setup_page();
@@ -206,12 +232,16 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 5] = [
+        let actions: [(&str, Run); 6] = [
             ("choose-files", |w| w.choose_files()),
             ("start-service", |w| w.start_service()),
             ("preferences", |w| w.show_preferences()),
             ("add-device", |w| w.show_invite()),
             ("pair-address", |w| w.ask_pair_address()),
+            ("view-screen", |w| match w.selected_device().filter(|d| d.trusted) {
+                Some(d) => w.view_screen(d.device.id),
+                None => w.toast("Pick a device first"),
+            }),
         ];
         for (name, run) in actions {
             let action = gio::SimpleAction::new(name, None);
@@ -250,6 +280,7 @@ impl Window {
                 page::Action::SendFiles => w.choose_files(),
                 page::Action::SendClipboard => w.send_clipboard(id),
                 page::Action::Ping => w.ping(id),
+                page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Pair => w.pair(id),
                 page::Action::SendStaged => {
                     let staged = std::mem::take(&mut w.state.borrow_mut().staged);
@@ -467,7 +498,10 @@ impl Window {
                 self.state.borrow_mut().progress.remove(&transfer);
             }
             Event::SettingsChanged { .. } => self.refresh_status(),
-            Event::SessionRequest { .. } | Event::SessionStarted { .. } | Event::SessionEnded { .. } => {}
+            Event::SessionRequest { request, from, .. } => self.show_session_request(request, &from),
+            Event::SessionStarted { session, peer, sharing: true, .. } => self.sharing_started(session, &peer),
+            Event::SessionStarted { .. } => {}
+            Event::SessionEnded { session } => self.session_ended(session),
             Event::Notification { from, title, body } => {
                 let text = if body.is_empty() { format!("{}: {title}", from.name) } else { format!("{}: {title} — {body}", from.name) };
                 self.toast(&text);
@@ -1028,6 +1062,7 @@ fn shortcuts_window() -> gtk::ShortcutsWindow {
           <object class="GtkShortcutsGroup">
             <property name="title">Sharing</property>
             <child><object class="GtkShortcutsShortcut"><property name="title">Send Files to the Open Device</property><property name="accelerator">&lt;Control&gt;o</property></object></child>
+            <child><object class="GtkShortcutsShortcut"><property name="title">View the Open Device's Screen</property><property name="accelerator">&lt;Control&gt;&lt;Shift&gt;s</property></object></child>
             <child><object class="GtkShortcutsShortcut"><property name="title">Add Device</property><property name="accelerator">&lt;Control&gt;n</property></object></child>
           </object>
         </child>

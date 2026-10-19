@@ -94,3 +94,12 @@ pub fn measure(paths: &[PathBuf]) -> (usize, u64) {
     acc
 }
 
+
+/// "45 s", "4 min", "1 h 5 min".
+pub fn duration(seconds: u64) -> String {
+    match seconds {
+        0..60 => format!("{seconds} s"),
+        60..3600 => format!("{} min", seconds / 60),
+        _ => format!("{} h {} min", seconds / 3600, seconds % 3600 / 60),
+    }
+}
