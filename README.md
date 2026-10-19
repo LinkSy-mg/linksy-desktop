@@ -16,6 +16,7 @@ directly over the local network, with no account, cloud or server.
 | `crates/linksy-ipc` | The local socket protocol between the service and its front ends. |
 | `crates/linksy-cli` | `linksy`, the command-line front end. |
 | `crates/linksy-gtk` | `linksy-app`, the GTK4/libadwaita app for Linux. |
+| `crates/linksy-screen` | Screen capture and H.264 encoding (GStreamer, ScreenCast portal), started only while sharing. |
 | `brand/` | Logo and brand assets. |
 | `data/` | Desktop entry, icons, systemd user unit. |
 | `docs/protocol.md` | Handoff for the Android app: product, feature status and the exact wire protocol. |
@@ -52,13 +53,18 @@ cargo build --release      # linksyd + linksy
 cargo test                 # unit + end-to-end tests
 ```
 
-The GTK app needs GTK ≥ 4.14 and libadwaita ≥ 1.6 headers:
+The GTK app and the screen helper need GTK ≥ 4.14, libadwaita ≥ 1.6 and GStreamer ≥ 1.22
+headers:
 
 ```sh
-sudo dnf install gtk4-devel libadwaita-devel        # Fedora
-sudo apt install libgtk-4-dev libadwaita-1-dev      # Debian/Ubuntu (24.10+)
-cargo build --release -p linksy-app
+sudo dnf install gtk4-devel libadwaita-devel gstreamer1-devel gstreamer1-plugins-base-devel   # Fedora
+sudo apt install libgtk-4-dev libadwaita-1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+cargo build --release -p linksy-app -p linksy-screen
 ```
+
+At run time, screen mirroring uses GStreamer plugins: `pipewiresrc` (pipewire-gstreamer),
+an H.264 encoder (VA-API, x264 or OpenH264), an H.264 decoder (libav, VA-API or OpenH264)
+and `gtk4paintablesink` (gstreamer1-plugin-gtk4).
 
 Without root, a toolbox works: `toolbox create linksy-dev`, then
 `toolbox run -c linksy-dev sudo dnf install -y gtk4-devel libadwaita-devel gcc`, then
@@ -98,7 +104,10 @@ Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
 - [ ] Android app (Flutter; see `docs/protocol.md`)
 - [ ] QR-code pairing
 - [ ] macOS (AppKit) and Windows (WinUI) apps
-- [ ] Screen mirroring (optional module)
+- [x] Screen mirroring between computers (View Screen; the sharer always approves)
+- [ ] Remote control of a mirrored screen
+- [ ] Sidecar: another device as a second monitor
+- [ ] Phone as webcam (desktop side)
 
 ## Development aids
 

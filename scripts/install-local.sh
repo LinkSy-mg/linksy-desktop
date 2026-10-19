@@ -15,8 +15,8 @@ SHARE="${XDG_DATA_HOME:-$HOME/.local/share}"
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
 cargo build --release -p linksyd -p linksy
-if pkg-config --exists gtk4 libadwaita-1 2>/dev/null; then
-  cargo build --release -p linksy-app
+if pkg-config --exists gtk4 libadwaita-1 gstreamer-1.0 2>/dev/null; then
+  cargo build --release -p linksy-app -p linksy-screen
 fi
 WITH_APP=0
 if [ -x target/release/linksy-app ]; then
@@ -27,6 +27,12 @@ fi
 
 install -Dm755 target/release/linksyd "$BIN/linksyd"
 install -Dm755 target/release/linksy "$BIN/linksy"
+# Screen sharing helper (started by linksyd only while sharing).
+if [ -x target/release/linksy-screen ]; then
+  install -Dm755 target/release/linksy-screen "$BIN/linksy-screen"
+else
+  echo "No screen helper build (needs GStreamer headers): screen sharing from this device is off."
+fi
 if [ "$WITH_APP" = 1 ]; then
   install -Dm755 target/release/linksy-app "$BIN/linksy-app"
   # Absolute path: the desktop session's PATH may not include ~/.local/bin.

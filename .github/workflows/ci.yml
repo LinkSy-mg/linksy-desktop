@@ -38,10 +38,10 @@ jobs:
       - run: cargo test
 
   gtk:
-    name: GTK app (Fedora)
+    name: GTK app and screen helper (Fedora)
     runs-on: ubuntu-latest
     container: registry.fedoraproject.org/fedora:latest
     steps:
-      - run: dnf install -y --setopt=install_weak_deps=False gcc git gtk4-devel libadwaita-devel rust cargo clippy
+      - run: dnf install -y --setopt=install_weak_deps=False gcc git gtk4-devel libadwaita-devel gstreamer1-devel gstreamer1-plugins-base-devel rust cargo clippy
       - uses: actions/checkout@v5
-      - run: cargo clippy -p linksy-app -- -D warnings
+      - run: cargo clippy -p linksy-app -p linksy-screen -- -D warnings
