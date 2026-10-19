@@ -3,6 +3,11 @@
 Your devices, connected. Share files, notifications and more between nearby devices,
 directly over the local network, with no account, cloud or server.
 
+<p align="center">
+  <img src="docs/screenshots/received-files.png" width="380" alt="Linksy with a paired device and received files">
+  <img src="docs/screenshots/incoming-files.png" width="380" alt="Accepting files from another device">
+</p>
+
 ## Layout
 
 | Path | What it is |
