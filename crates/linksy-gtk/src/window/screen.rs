@@ -43,6 +43,22 @@ impl Window {
         });
     }
 
+    /// Use a device's camera as a webcam here; the service publishes it to PipeWire.
+    pub(super) fn use_camera(self: &Rc<Self>, id: Fingerprint) {
+        let Some(c) = self.client() else { return };
+        let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
+        self.toast(&format!("Asking {name} for its camera…"));
+        let call = self.bridge.call(&c, move |c| async move { c.start_session(id.to_string(), SessionKind::Camera).await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            match call.await {
+                Ok(_) => {}
+                Err(e) if e.contains("declined") => w.toast(&format!("{name} didn't allow it")),
+                Err(e) => w.toast_error(&e, Some(id)),
+            }
+        });
+    }
+
     /// Show any second display another device started here (also right after start-up,
     /// when the service opened the app for it).
     pub(super) fn join_pending_displays(self: &Rc<Self>) {
@@ -72,6 +88,10 @@ impl Window {
     /// Someone wants to see this screen.
     pub(super) fn show_session_request(self: &Rc<Self>, request: Uuid, from: &DeviceInfo, kind: SessionKind) {
         let (heading, body) = match kind {
+            SessionKind::Camera => (
+                format!("{} Wants to Use Your Camera", from.name),
+                format!("Your camera will turn on and {} will see it until you stop.", from.name),
+            ),
             SessionKind::Display => (
                 format!("{} Wants to Use This Screen", from.name),
                 format!("Linksy will fill this screen with {}'s second display; your mouse and keyboard here will work on it. Press F11 to leave full screen.", from.name),
@@ -103,16 +123,25 @@ impl Window {
         dialog.present(Some(&self.window));
     }
 
-    pub(super) fn sharing_started(self: &Rc<Self>, session: Uuid, peer: &DeviceInfo, kind: SessionKind) {
+    /// A session this device runs in the background started: show the banner with Stop.
+    pub(super) fn sharing_started(self: &Rc<Self>, session: Uuid, peer: &DeviceInfo, kind: SessionKind, sharing: bool) {
         self.close_offer_dialog(&session);
         self.state.borrow_mut().sharing = Some(session);
         let title = match kind {
+            SessionKind::Camera if sharing => format!("{} is using your camera", peer.name),
+            SessionKind::Camera => format!("{}'s camera is on: “Linksy Camera ({})” in your apps", peer.name, peer.name),
             SessionKind::Display => format!("{} is your second display", peer.name),
             SessionKind::Control => format!("{} is controlling your screen", peer.name),
             SessionKind::Screen => format!("{} is watching your screen", peer.name),
         };
-        self.sharing_banner.set_button_label(Some(if kind == SessionKind::Display { "Stop" } else { "Stop Sharing" }));
-        self.sharing_banner.set_title(&glib::markup_escape_text(&title));
+        // "Stop Sharing" only when this device's screen or camera is what's shared.
+        let label = match kind {
+            SessionKind::Screen | SessionKind::Control => "Stop Sharing",
+            SessionKind::Camera if sharing => "Stop Sharing",
+            SessionKind::Camera | SessionKind::Display => "Stop",
+        };
+        self.sharing_banner.set_button_label(Some(label));
+        self.sharing_banner.set_title(&title);
         self.sharing_banner.set_revealed(true);
     }
 
@@ -267,7 +296,7 @@ impl Viewer {
         let on = match self.kind.get() {
             SessionKind::Display => true,
             SessionKind::Control => self.control.is_active(),
-            SessionKind::Screen => false,
+            SessionKind::Screen | SessionKind::Camera => false,
         };
         on && self.input.borrow().is_some()
     }
@@ -374,7 +403,8 @@ impl Viewer {
         let Some(c) = owner.client() else { return };
         self.kind.set(kind);
         let (title, description) = match kind {
-            SessionKind::Display => (format!("Waiting for {}…", self.name), String::new()),
+            // Viewers never start these: the service runs both.
+            SessionKind::Display | SessionKind::Camera => (format!("Waiting for {}…", self.name), String::new()),
             SessionKind::Control => (format!("Asking to control {}…", self.name), format!("{} needs to allow control and pick a screen.", self.name)),
             SessionKind::Screen => (format!("Asking {}…", self.name), format!("{} needs to allow sharing and pick a screen.", self.name)),
         };

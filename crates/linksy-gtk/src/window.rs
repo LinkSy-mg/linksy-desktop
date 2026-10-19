@@ -175,7 +175,8 @@ impl Window {
         stack.add_named(&adw::Spinner::builder().width_request(32).height_request(32).halign(gtk::Align::Center).valign(gtk::Align::Center).build(), Some("loading"));
         stack.set_visible_child_name("loading");
 
-        let sharing_banner = adw::Banner::builder().button_label("Stop Sharing").revealed(false).build();
+        // Device names go in as plain text.
+        let sharing_banner = adw::Banner::builder().button_label("Stop Sharing").use_markup(false).revealed(false).build();
         let outer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         outer.append(&sharing_banner);
         stack.set_vexpand(true);
@@ -284,6 +285,7 @@ impl Window {
                 page::Action::Ping => w.ping(id),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
+                page::Action::Webcam => w.use_camera(id),
                 page::Action::Pair => w.pair(id),
                 page::Action::SendStaged => {
                     let staged = std::mem::take(&mut w.state.borrow_mut().staged);
@@ -503,7 +505,9 @@ impl Window {
             }
             Event::SettingsChanged { .. } => self.refresh_status(),
             Event::SessionRequest { request, from, kind } => self.show_session_request(request, &from, kind),
-            Event::SessionStarted { session, peer, kind, sharing: true } => self.sharing_started(session, &peer, kind),
+            Event::SessionStarted { session, peer, kind, sharing } if sharing || kind == SessionKind::Camera => {
+                self.sharing_started(session, &peer, kind, sharing)
+            }
             Event::SessionStarted { kind: SessionKind::Display, .. } => self.join_pending_displays(),
             Event::SessionStarted { .. } => {}
             Event::SessionEnded { session } => self.session_ended(session),

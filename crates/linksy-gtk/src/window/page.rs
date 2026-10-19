@@ -21,6 +21,7 @@ pub enum Action {
     Ping,
     ViewScreen,
     Extend,
+    Webcam,
     Pair,
     SendStaged,
     Forget,
@@ -47,9 +48,10 @@ pub struct DevicePage {
     dot: gtk::Box,
     /// Four across, or two by two (the window's breakpoints switch it).
     pub tiles: gtk::FlowBox,
-    /// "Use as Second Display".
+    /// "Use as Second Display" and "Use as Webcam".
     extend: gtk::ListBox,
     extend_row: adw::ActionRow,
+    webcam_row: adw::ActionRow,
     pair_box: gtk::Box,
     staged: adw::Banner,
     drop_hint: gtk::Box,
@@ -134,8 +136,14 @@ impl DevicePage {
         extend_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
         let e = emit.clone();
         extend_row.connect_activated(move |_| e(Action::Extend));
+        let webcam_row = adw::ActionRow::builder().title("Use as Webcam").activatable(true).build();
+        webcam_row.add_prefix(&gtk::Image::builder().icon_name("camera-web-symbolic").build());
+        webcam_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
+        let e = emit.clone();
+        webcam_row.connect_activated(move |_| e(Action::Webcam));
         let extend = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         extend.append(&extend_row);
+        extend.append(&webcam_row);
 
         // For devices that aren't paired yet.
         let pair = gtk::Button::builder().label("Pair").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
@@ -153,7 +161,7 @@ impl DevicePage {
         pair_box.append(&pair);
 
         // Files opened with Linksy before a device was picked.
-        let staged = adw::Banner::builder().button_label("Send").revealed(false).build();
+        let staged = adw::Banner::builder().button_label("Send").use_markup(false).revealed(false).build();
         let e = emit.clone();
         staged.connect_button_clicked(move |_| e(Action::SendStaged));
 
@@ -212,7 +220,7 @@ impl DevicePage {
             e(Action::Forget);
         });
 
-        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received }
+        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received }
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
@@ -241,6 +249,7 @@ impl DevicePage {
         self.tiles.set_visible(d.trusted);
         self.extend.set_visible(d.trusted);
         self.extend_row.set_subtitle(&glib::markup_escape_text(&format!("Extend this computer's desktop onto {}", d.device.name)));
+        self.webcam_row.set_subtitle(&glib::markup_escape_text(&format!("{}'s camera appears in your apps as “Linksy Camera”", d.device.name)));
         self.pair_box.set_visible(!d.trusted);
         self.menu.set_visible(d.trusted);
         self.drop_hint.set_visible(d.trusted);
@@ -254,7 +263,7 @@ impl DevicePage {
                 [one] => one.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                 _ => fmt::plural(count, "item"),
             };
-            self.staged.set_title(&glib::markup_escape_text(&format!("{what} ({}) ready to send to {}", fmt::size(bytes), d.device.name)));
+            self.staged.set_title(&format!("{what} ({}) ready to send to {}", fmt::size(bytes), d.device.name));
         }
         self.staged.set_revealed(ready);
     }
@@ -306,17 +315,20 @@ impl DevicePage {
             Shared::Clipboard { text } => ("edit-paste-symbolic", format!("“{}”", one_line(text, 80))),
             Shared::Ping { title, body } if body.is_empty() => ("preferences-system-notifications-symbolic", title.clone()),
             Shared::Ping { title, body } => ("preferences-system-notifications-symbolic", format!("{title}: {body}")),
+            Shared::Camera { .. } => ("camera-web-symbolic", if incoming { "Their camera".to_string() } else { "Your camera".to_string() }),
             Shared::Screen { display: true, .. } => ("video-joined-displays-symbolic", if incoming { "Their second display".to_string() } else { "Second display".to_string() }),
             Shared::Screen { .. } => ("video-display-symbolic", if incoming { "Their screen".to_string() } else { "Your screen".to_string() }),
         };
         let size = match &e.what {
             Shared::Files { total, .. } => Some(fmt::size(*total)),
-            Shared::Screen { seconds, .. } if *seconds > 0 => Some(fmt::duration(*seconds)),
+            Shared::Screen { seconds, .. } | Shared::Camera { seconds } if *seconds > 0 => Some(fmt::duration(*seconds)),
             _ => None,
         };
         let verb = match (&e.what, incoming) {
             (Shared::Files { .. }, true) => "Received",
             (Shared::Files { .. }, false) => "Sent",
+            (Shared::Camera { .. }, true) => "Used",
+            (Shared::Camera { .. }, false) => "Shared",
             (Shared::Screen { .. }, true) => "Watched",
             (Shared::Screen { .. }, false) => "Shared",
             (_, true) => "From them",
@@ -332,7 +344,7 @@ impl DevicePage {
         let detail_text = match &state {
             Some(s) => [Some(s.clone()), size, Some(time_label(e.at))].into_iter().flatten().collect::<Vec<_>>().join(" · "),
             None => match progress {
-                _ if matches!(e.what, Shared::Screen { .. }) => "Live now".into(),
+                _ if matches!(e.what, Shared::Screen { .. } | Shared::Camera { .. }) => "Live now".into(),
                 Some(p) if p.total > 0 => progress_text(p),
                 _ if !incoming => "Waiting for them to accept…".into(),
                 _ => "Starting…".into(),
@@ -369,7 +381,7 @@ impl DevicePage {
 
         let mut live = None;
         match (&e.status, &e.what) {
-            (HistoryStatus::InProgress, Shared::Screen { .. }) => {}
+            (HistoryStatus::InProgress, Shared::Screen { .. } | Shared::Camera { .. }) => {}
             (HistoryStatus::InProgress, _) => {
                 let id = e.id;
                 suffix("process-stop-symbolic", "Cancel", Box::new(move || Action::Cancel(id)));
