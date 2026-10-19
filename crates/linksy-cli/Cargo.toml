@@ -1,0 +1,9 @@
+[package]
+name = "linksy"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+linksy-ipc = { version = "0.1.0", path = "../linksy-ipc" }
+tokio = { version = "1.53.3", features = ["rt", "macros", "io-std", "io-util"] }
