@@ -489,3 +489,58 @@ async fn several_addresses_give_one_connection() {
     let connects = events.iter().filter(|e| matches!(e, Event::Connected { .. })).count();
     assert_eq!(connects, 1, "{events:?}");
 }
+
+/// An invite from `node` that points at its loopback address (test nodes listen there).
+fn local_invite(node: &Node) -> linksy_core::invite::Invite {
+    let mut invite = node.create_invite().unwrap();
+    invite.addrs = vec![node.local_addr().unwrap()];
+    invite
+}
+
+#[tokio::test]
+async fn qr_invite_pairs_without_asking() {
+    let a = dev("Alpha").await;
+    let b = dev("Beta").await;
+    let (mut ra, mut rb) = (a.node.subscribe(), b.node.subscribe());
+    let invite = local_invite(&b.node);
+    let device = a.node.pair_with_invite(&invite.to_uri()).await.unwrap();
+    assert_eq!(device.name, "Beta");
+    for rx in [&mut ra, &mut rb] {
+        let asked = wait_for(rx, |e| match e {
+            Event::PairingRequest { .. } => Some(true),
+            Event::Paired { .. } => Some(false),
+            _ => None,
+        })
+        .await;
+        assert!(!asked, "an invite pairing asked for a code");
+    }
+    assert!(a.node.trusted().iter().any(|t| t.device.name == "Beta"));
+    assert!(b.node.trusted().iter().any(|t| t.device.name == "Alpha"));
+}
+
+#[tokio::test]
+async fn invite_works_once_and_bad_tokens_ask_instead() {
+    let a = dev("Alpha").await;
+    let b = dev("Beta").await;
+    let c = dev("Gamma").await;
+    let invite = local_invite(&b.node);
+    a.node.pair_with_invite(&invite.to_uri()).await.unwrap();
+
+    // The same code again (say, a photo of it): Beta falls back to asking, and says no.
+    auto_answer(&b.node, false);
+    let mut rb = b.node.subscribe();
+    let reused = c.node.pair_with_invite(&invite.to_uri()).await;
+    assert!(reused.is_err());
+    wait_for(&mut rb, |e| matches!(e, Event::PairingRequest { device, .. } if device.name == "Gamma").then_some(())).await;
+    assert!(!b.node.trusted().iter().any(|t| t.device.name == "Gamma"));
+
+    // A cancelled invite is dead too.
+    let fresh = local_invite(&b.node);
+    b.node.cancel_invite();
+    assert!(c.node.pair_with_invite(&fresh.to_uri()).await.is_err());
+
+    // And an invite whose id isn't the device at that address is refused before pairing.
+    let mut wrong = local_invite(&b.node);
+    wrong.id = a.node.info().id;
+    assert!(c.node.pair_with_invite(&wrong.to_uri()).await.is_err());
+}

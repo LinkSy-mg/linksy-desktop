@@ -34,6 +34,10 @@ pub enum Handshake {
         intent: Intent,
         #[serde(default)]
         stay_connected: bool,
+        /// Token from a pairing invite (QR code) the dialer scanned; pairing then needs no
+        /// code comparison.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        invite: Option<String>,
     },
     Welcome {
         device: DeviceInfo,

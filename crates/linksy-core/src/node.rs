@@ -25,6 +25,7 @@ use uuid::Uuid;
 use crate::discovery::{Discovery, DiscoveryEvent};
 use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
+use crate::invite::{self, Invite};
 use crate::settings::Settings;
 use crate::protocol::{
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, TransferMsg, read_msg, write_msg,
@@ -41,6 +42,8 @@ pub const MAX_CLIPBOARD: usize = 256 * 1024;
 const RECONNECT_EVERY: Duration = Duration::from_secs(15);
 /// Per-address dial budget. LAN handshakes take milliseconds; a dead address never answers.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(3);
+/// How long a pairing QR code stays valid.
+const INVITE_TTL: Duration = Duration::from_secs(300);
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -179,6 +182,8 @@ struct Inner {
     discovery: Mutex<Option<Discovery>>,
     /// One dial at a time per device, so concurrent sends share a connection.
     dialing: Mutex<HashMap<Fingerprint, Arc<tokio::sync::Mutex<()>>>>,
+    /// The token of the pairing QR code on screen, and when it expires.
+    invite: Mutex<Option<(String, Instant)>>,
 }
 
 #[derive(Clone)]
@@ -216,6 +221,7 @@ impl Node {
                 events,
                 discovery: Mutex::new(None),
                 dialing: Mutex::new(HashMap::new()),
+                invite: Mutex::new(None),
             }),
         };
 
@@ -356,6 +362,66 @@ impl Node {
             }
         }
         Err(last)
+    }
+
+    /// A pairing invite for a QR code: whoever scans it and connects within five minutes
+    /// pairs without comparing codes. One at a time; a new one replaces the old.
+    pub fn create_invite(&self) -> Result<Invite> {
+        let port = self.local_addr()?.port();
+        // Container and VM bridges only reach this machine; they'd just bloat the QR code.
+        const VIRTUAL: [&str; 10] = ["docker", "br-", "veth", "virbr", "lxc", "lxd", "podman", "cni", "vmnet", "vboxnet"];
+        let mut addrs: Vec<(u8, SocketAddr)> = if_addrs::get_if_addrs()?
+            .into_iter()
+            .filter(|i| !i.is_loopback() && !VIRTUAL.iter().any(|v| i.name.starts_with(v)))
+            .map(|i| i.ip())
+            // Link-local IPv6 needs an interface scope the other device can't know.
+            .filter(|ip| !matches!(ip, IpAddr::V6(v6) if v6.segments()[0] & 0xffc0 == 0xfe80))
+            .map(|ip| {
+                // Home and office LANs first, then other IPv4 (VPNs), then IPv6.
+                let rank = match ip {
+                    IpAddr::V4(v4) if v4.is_private() => 0,
+                    IpAddr::V4(_) => 1,
+                    IpAddr::V6(_) => 2,
+                };
+                (rank, SocketAddr::new(ip, port))
+            })
+            .collect();
+        addrs.sort();
+        addrs.dedup();
+        let addrs: Vec<SocketAddr> = addrs.into_iter().map(|(_, a)| a).take(4).collect();
+        if addrs.is_empty() {
+            return Err(invalid("this device isn't connected to a network"));
+        }
+        let token = Uuid::new_v4().simple().to_string();
+        *self.inner.invite.lock().unwrap() = Some((token.clone(), Instant::now() + INVITE_TTL));
+        Ok(Invite { id: self.inner.id, name: self.info().name, addrs, token })
+    }
+
+    /// Stop accepting the current invite (the QR code was closed).
+    pub fn cancel_invite(&self) {
+        self.inner.invite.lock().unwrap().take();
+    }
+
+    /// Pair with the device whose invite (QR code) was scanned.
+    pub async fn pair_with_invite(&self, uri: &str) -> Result<DeviceInfo> {
+        let invite = Invite::parse(uri)?;
+        if invite.id == self.inner.id {
+            return Err(invalid("that's this device's own code"));
+        }
+        let conn = self.race_connect(&invite.addrs, &invite.id).await?;
+        tokio::time::timeout(PAIR_TIMEOUT, self.handshake(conn, Intent::Pair, Some(invite.token))).await.map_err(|_| Error::Timeout)?
+    }
+
+    /// Use up the current invite if `token` is its token.
+    fn redeem_invite(&self, token: &str) -> bool {
+        let mut slot = self.inner.invite.lock().unwrap();
+        match slot.as_ref() {
+            Some((t, expires)) if Instant::now() < *expires && invite::same_token(t, token) => {
+                slot.take();
+                true
+            }
+            _ => false,
+        }
     }
 
     pub fn forget(&self, id: &Fingerprint) -> Result<bool> {
@@ -515,10 +581,17 @@ impl Node {
         }
         let mut addrs = self.nearby_addrs(id);
         addrs.extend(last_addr.filter(|a| !addrs.contains(a)));
-        // Race the QUIC handshakes only. Running our own handshake on several connections
-        // at once would register duplicates that close each other.
+        let conn = self.race_connect(&addrs, id).await?;
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Connect, None)).await.map_err(|_| Error::Timeout)??;
+        self.live(id).ok_or(Error::Unreachable)
+    }
+
+    /// Open a QUIC connection to `id` at whichever address answers first. Only the QUIC
+    /// handshakes race: running ours on several connections at once would register
+    /// duplicates that close each other.
+    async fn race_connect(&self, addrs: &[SocketAddr], id: &Fingerprint) -> Result<quinn::Connection> {
         let mut dials = JoinSet::new();
-        for addr in addrs {
+        for &addr in addrs {
             let endpoint = self.inner.endpoint.clone();
             dials.spawn(async move {
                 let connecting = endpoint.connect(addr, "linksy")?;
@@ -541,9 +614,7 @@ impl Node {
         }
         // Dropping the set aborts slower attempts; any that already connected close.
         drop(dials);
-        let conn = winner.ok_or(Error::Unreachable)?;
-        tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Connect)).await.map_err(|_| Error::Timeout)??;
-        self.live(id).ok_or(Error::Unreachable)
+        winner.ok_or(Error::Unreachable)
     }
 
     fn peer_info(&self, id: &Fingerprint) -> Option<DeviceInfo> {
@@ -587,14 +658,14 @@ impl Node {
         let conn = incoming.await?;
         let fp = tls::peer_fingerprint(&conn)?;
         let (mut send, mut recv) = tokio::time::timeout(HANDSHAKE_TIMEOUT, conn.accept_bi()).await.map_err(|_| Error::Timeout)??;
-        let (device, intent, peer_stays) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
-            Handshake::Hello { version, device, intent, stay_connected } => {
+        let (device, intent, peer_stays, invite) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
+            Handshake::Hello { version, device, intent, stay_connected, invite } => {
                 if version != PROTOCOL_VERSION {
                     write_msg(&mut send, &Handshake::Reject { reason: RejectReason::IncompatibleVersion }).await?;
                     send.finish()?;
                     return Err(protocol(format!("peer speaks protocol v{version}")));
                 }
-                (device, intent, stay_connected)
+                (device, intent, stay_connected, invite)
             }
             other => return Err(protocol(format!("expected hello, got {other:?}"))),
         };
@@ -615,8 +686,11 @@ impl Node {
                 let _ = tokio::time::timeout(Duration::from_secs(2), conn.closed()).await;
             }
             Intent::Pair => {
+                // Scanned our QR code: the scanner checked our certificate, the token proves
+                // it's them. Unknown or stale tokens fall back to comparing codes.
+                let preapproved = invite.as_deref().is_some_and(|t| self.redeem_invite(t));
                 write_msg(&mut send, &self.welcome()).await?;
-                self.run_pairing(&conn, &mut send, &mut recv, &device, true).await?;
+                self.run_pairing(&conn, &mut send, &mut recv, &device, true, preapproved).await?;
                 self.register(conn, device, fp, peer_stays);
             }
         }
@@ -625,11 +699,11 @@ impl Node {
 
     async fn dial(&self, addr: SocketAddr, intent: Intent) -> Result<DeviceInfo> {
         let conn = self.inner.endpoint.connect(addr, "linksy")?.await?;
-        self.handshake(conn, intent).await
+        self.handshake(conn, intent, None).await
     }
 
     /// Our side of the handshake on a connection we opened.
-    async fn handshake(&self, conn: quinn::Connection, intent: Intent) -> Result<DeviceInfo> {
+    async fn handshake(&self, conn: quinn::Connection, intent: Intent, invite: Option<String>) -> Result<DeviceInfo> {
         let fp = tls::peer_fingerprint(&conn)?;
         if fp == self.inner.id {
             conn.close(0u32.into(), b"self");
@@ -640,7 +714,8 @@ impl Node {
             return Err(Error::NotPaired);
         }
         let (mut send, mut recv) = conn.open_bi().await?;
-        let hello = Handshake::Hello { version: PROTOCOL_VERSION, device: self.info(), intent, stay_connected: self.stays() };
+        let scanned = invite.is_some();
+        let hello = Handshake::Hello { version: PROTOCOL_VERSION, device: self.info(), intent, stay_connected: self.stays(), invite };
         write_msg(&mut send, &hello).await?;
         let (device, peer_stays) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
             Handshake::Welcome { device, stay_connected } if device.id == fp => (device, stay_connected),
@@ -650,7 +725,7 @@ impl Node {
             other => return Err(protocol(format!("unexpected {other:?}"))),
         };
         if intent == Intent::Pair {
-            self.run_pairing(&conn, &mut send, &mut recv, &device, false).await?;
+            self.run_pairing(&conn, &mut send, &mut recv, &device, false, scanned).await?;
         }
         let _ = send.finish();
         self.register(conn, device.clone(), self.inner.id, peer_stays);
@@ -658,7 +733,8 @@ impl Node {
     }
 
     /// Both sides show the same code and each user confirms; pairing succeeds only if
-    /// both accept. A decline on either side ends it on both.
+    /// both accept. A decline on either side ends it on both. `preapproved` (QR invite)
+    /// skips the question on this side.
     async fn run_pairing(
         &self,
         conn: &quinn::Connection,
@@ -666,7 +742,16 @@ impl Node {
         recv: &mut quinn::RecvStream,
         device: &DeviceInfo,
         incoming: bool,
+        preapproved: bool,
     ) -> Result<()> {
+        if preapproved {
+            write_msg(send, &Handshake::PairDecision { accept: true }).await?;
+            let remote = match tokio::time::timeout(PAIR_TIMEOUT, read_msg(recv)).await.map_err(|_| Error::Timeout)?? {
+                Handshake::PairDecision { accept } => accept,
+                other => return Err(protocol(format!("unexpected {other:?}"))),
+            };
+            return self.finish_pairing(conn, send, device, true, remote).await;
+        }
         let code = tls::pairing_code(conn)?;
         let request = Uuid::new_v4();
         let answer = self.expect_answer(request);
@@ -709,6 +794,17 @@ impl Node {
             None => tokio::time::timeout(PAIR_TIMEOUT, read_remote).await.map_err(|_| Error::Timeout)??,
         };
 
+        self.finish_pairing(conn, send, device, local, remote).await
+    }
+
+    async fn finish_pairing(
+        &self,
+        conn: &quinn::Connection,
+        send: &mut quinn::SendStream,
+        device: &DeviceInfo,
+        local: bool,
+        remote: bool,
+    ) -> Result<()> {
         if local && remote {
             self.inner.trust.lock().unwrap().add(device.clone(), Some(conn.remote_address()))?;
             self.emit(Event::Paired { device: device.clone() });
