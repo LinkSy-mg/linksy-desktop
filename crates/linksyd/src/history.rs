@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use linksy_core::{DeviceInfo, Direction, Event, FileEntry, Fingerprint, Node, Uuid};
+use linksy_core::{DeviceInfo, Direction, Event, FileEntry, Fingerprint, Node, SessionKind, Uuid};
 use linksy_ipc::{HistoryEntry, HistoryStatus, Shared};
 use tokio::sync::broadcast::{self, error::RecvError};
 use tracing::warn;
@@ -164,7 +164,7 @@ impl History {
                 }
                 Event::Clipboard { from, text } => self.upsert(incoming(&from, Shared::Clipboard { text })),
                 Event::Notification { from, title, body } => self.upsert(incoming(&from, Shared::Ping { title, body })),
-                Event::SessionStarted { session, peer, sharing, .. } => {
+                Event::SessionStarted { session, peer, sharing, kind } => {
                     started.insert(session, std::time::Instant::now());
                     self.upsert(HistoryEntry {
                         id: session,
@@ -173,7 +173,7 @@ impl History {
                         peer_name: peer.name,
                         // Incoming: their screen came to us.
                         direction: if sharing { Direction::Outgoing } else { Direction::Incoming },
-                        what: Shared::Screen { seconds: 0 },
+                        what: Shared::Screen { seconds: 0, display: kind == SessionKind::Display },
                         status: HistoryStatus::InProgress,
                     });
                 }
@@ -181,7 +181,9 @@ impl History {
                     let seconds = started.remove(&session).map(|t| t.elapsed().as_secs()).unwrap_or(0);
                     self.update(session, |e| {
                         e.status = HistoryStatus::Done;
-                        e.what = Shared::Screen { seconds };
+                        if let Shared::Screen { seconds: s, .. } = &mut e.what {
+                            *s = seconds;
+                        }
                     });
                 }
                 Event::DeviceUpdated { device } => {

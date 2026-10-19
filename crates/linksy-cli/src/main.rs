@@ -191,8 +191,9 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                     Shared::Clipboard { text } if text.is_empty() => "clipboard text".into(),
                     Shared::Clipboard { text } => format!("clipboard: {}", text.chars().take(40).collect::<String>()),
                     Shared::Ping { title, .. } => format!("ping: {title}"),
-                    Shared::Screen { seconds } if e.direction == Direction::Incoming => format!("watched their screen ({seconds} s)"),
-                    Shared::Screen { seconds } => format!("shared this screen ({seconds} s)"),
+                    Shared::Screen { seconds, display: true } => format!("second display ({seconds} s)"),
+                    Shared::Screen { seconds, .. } if e.direction == Direction::Incoming => format!("watched their screen ({seconds} s)"),
+                    Shared::Screen { seconds, .. } => format!("shared this screen ({seconds} s)"),
                 };
                 let status = match &e.status {
                     HistoryStatus::InProgress => "in progress".to_string(),

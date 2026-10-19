@@ -102,7 +102,13 @@ pub enum Shared {
     Clipboard { #[serde(default)] text: String },
     Ping { title: String, body: String },
     /// A screen shared one way or the other; `seconds` once it ended.
-    Screen { #[serde(default)] seconds: u64 },
+    Screen {
+        #[serde(default)]
+        seconds: u64,
+        /// A second display (Sidecar) rather than a mirrored screen.
+        #[serde(default)]
+        display: bool,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
