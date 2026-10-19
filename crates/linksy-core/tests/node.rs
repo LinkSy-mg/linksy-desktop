@@ -82,8 +82,9 @@ async fn paired_with(tweak: impl Fn(&mut Config)) -> (Dev, Dev) {
     auto_answer(&b.node, true);
     let mut rb = b.node.subscribe();
     let mut addr = b.node.local_addr().unwrap();
+    // Bound to [::]: dial IPv6 loopback (Windows sockets don't take IPv4 there by default).
     if addr.ip().is_unspecified() {
-        addr.set_ip(Ipv4Addr::LOCALHOST.into());
+        addr.set_ip(std::net::Ipv6Addr::LOCALHOST.into());
     }
     let got = a.node.pair(addr).await.unwrap();
     assert_eq!(got.name, "Beta");
