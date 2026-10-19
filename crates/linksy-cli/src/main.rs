@@ -16,6 +16,7 @@ Usage:
   linksy pair <linksy://pair?…>      pair using another device's QR code link
   linksy invite                      show a QR code another device can scan to pair
   linksy history [device]            what was shared, newest first
+  linksy extend <device>             use another device as a second display
   linksy screen <device> --record FILE [--seconds N]
                                      save another device's screen as H.264
   linksy send <device> <files…>      send files or folders
@@ -203,6 +204,24 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                 println!("{arrow} {:<18} {what}  {status}", e.peer_name);
             }
         }
+        ("extend", [to]) => {
+            println!("Asking {to} to be a second display…");
+            let info = c.start_session(to.clone(), linksy_ipc::linksy_core::SessionKind::Display).await.map_err(err)?;
+            println!("{to} is now a second display. Press Ctrl+C to stop.");
+            let mut events = c.events();
+            let ended = async {
+                while let Ok(e) = events.recv().await {
+                    if matches!(e, Event::SessionEnded { session } if session == info.session) {
+                        return;
+                    }
+                }
+            };
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = ended => println!("{to} stopped showing it."),
+            }
+            let _ = c.end_session(info.session).await;
+        }
         ("screen", [to, flag, file, rest @ ..]) if flag == "--record" => {
             let seconds: u64 = match rest {
                 [] => 10,
@@ -211,7 +230,8 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             };
             println!("Asking {to} to share its screen…");
             let info = c.start_session(to.clone(), linksy_ipc::linksy_core::SessionKind::Screen).await.map_err(err)?;
-            let mut stream = tokio::net::UnixStream::connect(&info.socket).await.map_err(|e| e.to_string())?;
+            let socket = info.socket.ok_or("no stream to record")?;
+            let mut stream = tokio::net::UnixStream::connect(&socket).await.map_err(|e| e.to_string())?;
             let mut out = tokio::fs::File::create(file).await.map_err(|e| format!("{file}: {e}"))?;
             println!("Recording for {seconds} s…");
             let copied = tokio::time::timeout(std::time::Duration::from_secs(seconds), tokio::io::copy(&mut stream, &mut out)).await;
@@ -310,6 +330,7 @@ async fn watch(c: &Client) -> Result<(), String> {
                 match kind {
                     linksy_ipc::linksy_core::SessionKind::Control => println!("{} wants to control your screen (mouse and keyboard).", from.name),
                     linksy_ipc::linksy_core::SessionKind::Screen => println!("{} wants to see your screen.", from.name),
+                    linksy_ipc::linksy_core::SessionKind::Display => println!("{} wants to use this screen as a second display.", from.name),
                 }
                 let ok = ask("Allow?").await;
                 let _ = c.respond(request, ok).await;
