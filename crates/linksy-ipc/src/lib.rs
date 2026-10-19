@@ -42,8 +42,12 @@ pub enum Request {
     CancelInvite,
     /// Activity, newest first; only with one device when `with` is given.
     History { with: Option<String> },
-    /// Ask a device to share (its screen…). Replies with a [`SessionInfo`] once allowed.
+    /// Start a session with a device (see its screen, control it, or use it as a second
+    /// display). Replies with a [`SessionInfo`] once its user allowed it.
     StartSession { with: String, kind: SessionKind },
+    /// Sessions this device should show (a second display another device started),
+    /// waiting for the app.
+    PendingSessions,
     /// Stop a running session, from either side.
     EndSession { session: Uuid },
     ClearHistory { with: Option<String> },
@@ -58,10 +62,20 @@ pub struct Status {
 }
 
 /// A session the app can join: read the media from `socket` (a Unix socket; connect
-/// within 30 seconds) and write control messages to it.
+/// within 60 seconds) and write control messages to it. No socket when this device is the
+/// one sharing: the service runs that side itself.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionInfo {
     pub session: Uuid,
+    pub socket: Option<PathBuf>,
+}
+
+/// A session waiting for the app to show it.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PendingSession {
+    pub session: Uuid,
+    pub peer: DeviceInfo,
+    pub kind: SessionKind,
     pub socket: PathBuf,
 }
 
@@ -285,6 +299,10 @@ impl Client {
 
     pub async fn start_session(&self, with: impl Into<String>, kind: SessionKind) -> Result<SessionInfo, ClientError> {
         self.call(Request::StartSession { with: with.into(), kind }).await
+    }
+
+    pub async fn pending_sessions(&self) -> Result<Vec<PendingSession>, ClientError> {
+        self.call(Request::PendingSessions).await
     }
 
     pub async fn end_session(&self, session: Uuid) -> Result<bool, ClientError> {

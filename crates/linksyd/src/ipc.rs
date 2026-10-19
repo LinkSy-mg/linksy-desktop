@@ -157,9 +157,16 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, req: Reques
             let id = resolve(node, &with)?;
             let session = node.request_session(&id, kind).await.map_err(|e| e.to_string())?;
             let id = session.id;
-            let socket = sessions.view(session).map_err(|e| e.to_string())?;
+            // A second display: this device shares, the service runs that side.
+            let socket = if session.sharing {
+                sessions.spawn_share(session);
+                None
+            } else {
+                Some(sessions.view(session).map_err(|e| e.to_string())?)
+            };
             json(serde_json::to_value(SessionInfo { session: id, socket }))
         }
+        Request::PendingSessions => json(serde_json::to_value(sessions.pending())),
         Request::EndSession { session } => Ok(Value::Bool(sessions.end(session))),
         Request::Settings => json(serde_json::to_value(node.settings())),
         Request::UpdateSettings { settings } => {

@@ -121,7 +121,7 @@ async fn main() -> ExitCode {
     let history = history::History::load(data_dir.join("history.json"));
     tokio::spawn(history.clone().run(node.clone()));
     let socket = args.socket.clone();
-    let sessions = sessions::Sessions::new(data_dir.clone());
+    let sessions = sessions::Sessions::new(data_dir.clone(), socket.clone());
     tokio::spawn(sessions.clone().run(node.clone()));
     let server = tokio::spawn(ipc::serve(node.clone(), history, sessions, socket.clone()));
 
