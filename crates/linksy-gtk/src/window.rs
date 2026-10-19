@@ -59,6 +59,7 @@ pub struct Window {
     searching: gtk::Box,
     transfers_group: gtk::Box,
     transfers: gtk::ListBox,
+    clear_done: gtk::Button,
 }
 
 impl Window {
@@ -132,7 +133,11 @@ impl Window {
         // Transfers
         let transfers = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         let transfers_group = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).visible(false).build();
-        transfers_group.append(&gtk::Label::builder().label("Transfers").xalign(0.0).css_classes(["heading"]).build());
+        let clear_done = gtk::Button::builder().label("Clear").css_classes(["flat"]).valign(gtk::Align::Center).visible(false).build();
+        let transfers_header = gtk::Box::builder().build();
+        transfers_header.append(&gtk::Label::builder().label("Transfers").xalign(0.0).hexpand(true).css_classes(["heading"]).build());
+        transfers_header.append(&clear_done);
+        transfers_group.append(&transfers_header);
         transfers_group.append(&transfers);
 
         let content = gtk::Box::builder()
@@ -189,6 +194,7 @@ impl Window {
             searching,
             transfers_group,
             transfers,
+            clear_done,
         });
         win.window.set_help_overlay(Some(&shortcuts_window()));
         win.setup_actions();
@@ -235,6 +241,23 @@ impl Window {
             }
         });
         self.window.add_action(&start);
+
+        let w = Rc::downgrade(self);
+        self.clear_done.connect_clicked(move |_| {
+            if let Some(w) = w.upgrade() {
+                w.clear_finished();
+            }
+        });
+
+        // A finished incoming transfer opens what it received.
+        let w = Rc::downgrade(self);
+        self.transfers.connect_row_activated(move |_, row| {
+            let Some(w) = w.upgrade() else { return };
+            let saved = w.state.borrow().transfers.values().find(|t| &t.row == row).map(|t| t.saved.clone());
+            if let Some(saved) = saved {
+                w.open_received(&saved);
+            }
+        });
 
         let w = Rc::downgrade(self);
         self.clear_button.connect_clicked(move |_| {
@@ -860,6 +883,9 @@ impl Window {
                 if t.direction == Direction::Incoming {
                     t.action.set_icon_name("folder-open-symbolic");
                     t.action.set_tooltip_text(Some("Show in Folder"));
+                    t.row.set_activatable(true);
+                    t.row.set_tooltip_text(Some(if saved.len() == 1 { "Open, or drag it anywhere" } else { "Open the folder, or drag the files anywhere" }));
+                    t.row.add_controller(drag_files(&saved));
                     t.saved = saved;
                 } else {
                     t.action.set_icon_name("object-select-symbolic");
@@ -879,6 +905,37 @@ impl Window {
                 t.action.set_tooltip_text(Some("Remove"));
             }
         }
+        drop(state);
+        self.update_transfers_header();
+    }
+
+    fn open_received(&self, saved: &[PathBuf]) {
+        let target = match saved {
+            [one] => one.clone(),
+            many => match many.first().and_then(|p| p.parent()) {
+                Some(dir) => dir.to_path_buf(),
+                None => return,
+            },
+        };
+        gtk::FileLauncher::new(Some(&gio::File::for_path(target))).launch(Some(&self.window), gio::Cancellable::NONE, |_| {});
+    }
+
+    fn clear_finished(&self) {
+        let rows: Vec<gtk::ListBoxRow> = {
+            let mut state = self.state.borrow_mut();
+            let done: Vec<Uuid> = state.transfers.iter().filter(|(_, t)| t.done).map(|(id, _)| *id).collect();
+            done.iter().filter_map(|id| state.transfers.remove(id)).map(|t| t.row).collect()
+        };
+        for row in rows {
+            self.transfers.remove(&row);
+        }
+        self.update_transfers_header();
+    }
+
+    fn update_transfers_header(&self) {
+        let state = self.state.borrow();
+        self.transfers_group.set_visible(!state.transfers.is_empty());
+        self.clear_done.set_visible(state.transfers.values().any(|t| t.done));
     }
 
     fn transfer_action(self: &Rc<Self>, id: Uuid) {
@@ -900,8 +957,8 @@ impl Window {
             let removed = self.state.borrow_mut().transfers.remove(&id);
             if let Some(t) = removed {
                 self.transfers.remove(&t.row);
-                self.transfers_group.set_visible(self.transfers.first_child().is_some());
             }
+            self.update_transfers_header();
         }
     }
 
@@ -949,6 +1006,19 @@ fn shortcuts_window() -> gtk::ShortcutsWindow {
   </object>
 </interface>"#;
     gtk::Builder::from_string(UI).object("shortcuts").expect("shortcuts window")
+}
+
+/// Lets received files be dragged into a file manager, an email, a chat…
+fn drag_files(paths: &[PathBuf]) -> gtk::DragSource {
+    let files: Vec<gio::File> = paths.iter().map(gio::File::for_path).collect();
+    let source = gtk::DragSource::builder().actions(gdk::DragAction::COPY).build();
+    source.connect_prepare(move |_, _, _| Some(gdk::ContentProvider::for_value(&gdk::FileList::from_array(&files).to_value())));
+    source.connect_drag_begin(|source, _| {
+        let icon = gtk::IconTheme::for_display(&source.widget().expect("drag source widget").display())
+            .lookup_icon("text-x-generic", &[], 32, 1, gtk::TextDirection::None, gtk::IconLookupFlags::empty());
+        source.set_icon(Some(&icon), 0, 0);
+    });
+    source
 }
 
 fn kind_icon(kind: DeviceKind) -> &'static str {
