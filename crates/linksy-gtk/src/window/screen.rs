@@ -13,7 +13,7 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gtk::glib::translate::IntoGlib;
 use gtk::{gdk, glib};
-use linksy_ipc::SessionInfo;
+use linksy_ipc::{PendingSession, SessionInfo};
 use linksy_ipc::linksy_core::protocol::control_frame;
 use linksy_ipc::linksy_core::{ControlMsg, DeviceInfo, Fingerprint, MouseButton, SessionKind, Uuid};
 
@@ -26,9 +26,56 @@ impl Window {
         Viewer::open(self, id, &name).start(SessionKind::Screen);
     }
 
+    /// Use a device as a second display: this computer gets a new virtual monitor that
+    /// the device shows full screen. The service runs this side; the banner tracks it.
+    pub(super) fn extend_to(self: &Rc<Self>, id: Fingerprint) {
+        let Some(c) = self.client() else { return };
+        let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
+        self.toast(&format!("Asking {name} to be a second display…"));
+        let call = self.bridge.call(&c, move |c| async move { c.start_session(id.to_string(), SessionKind::Display).await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            match call.await {
+                Ok(_) => {}
+                Err(e) if e.contains("declined") => w.toast(&format!("{name} didn't allow it")),
+                Err(e) => w.toast_error(&e, Some(id)),
+            }
+        });
+    }
+
+    /// Show any second display another device started here (also right after start-up,
+    /// when the service opened the app for it).
+    pub(super) fn join_pending_displays(self: &Rc<Self>) {
+        let Some(c) = self.client() else { return };
+        let call = self.bridge.call(&c, |c| async move { c.pending_sessions().await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            for pending in call.await.unwrap_or_default() {
+                if pending.kind == SessionKind::Display && !w.state.borrow().showing.contains(&pending.session) {
+                    w.show_display(pending);
+                }
+            }
+        });
+    }
+
+    fn show_display(self: &Rc<Self>, pending: PendingSession) {
+        self.state.borrow_mut().showing.push(pending.session);
+        let viewer = Viewer::open(self, pending.peer.id, &pending.peer.name);
+        viewer.kind.set(SessionKind::Display);
+        viewer.control.set_visible(false);
+        viewer.again.set_visible(false);
+        viewer.disconnect.set_visible(true);
+        viewer.window.set_title(Some(&format!("Second Display for {}", pending.peer.name)));
+        viewer.play(SessionInfo { session: pending.session, socket: Some(pending.socket) });
+    }
+
     /// Someone wants to see this screen.
     pub(super) fn show_session_request(self: &Rc<Self>, request: Uuid, from: &DeviceInfo, kind: SessionKind) {
         let (heading, body) = match kind {
+            SessionKind::Display => (
+                format!("{} Wants to Use This Screen", from.name),
+                format!("Linksy will fill this screen with {}'s second display; your mouse and keyboard here will work on it. Press F11 to leave full screen.", from.name),
+            ),
             SessionKind::Control => (
                 format!("{} Wants to Control Your Screen", from.name),
                 format!("{} will see your screen and use your mouse and keyboard until you stop. You'll pick which screen next.", from.name),
@@ -56,16 +103,23 @@ impl Window {
         dialog.present(Some(&self.window));
     }
 
-    pub(super) fn sharing_started(self: &Rc<Self>, session: Uuid, peer: &DeviceInfo) {
+    pub(super) fn sharing_started(self: &Rc<Self>, session: Uuid, peer: &DeviceInfo, kind: SessionKind) {
         self.close_offer_dialog(&session);
         self.state.borrow_mut().sharing = Some(session);
-        self.sharing_banner.set_title(&glib::markup_escape_text(&format!("{} is watching your screen", peer.name)));
+        let title = match kind {
+            SessionKind::Display => format!("{} is your second display", peer.name),
+            SessionKind::Control => format!("{} is controlling your screen", peer.name),
+            SessionKind::Screen => format!("{} is watching your screen", peer.name),
+        };
+        self.sharing_banner.set_button_label(Some(if kind == SessionKind::Display { "Stop" } else { "Stop Sharing" }));
+        self.sharing_banner.set_title(&glib::markup_escape_text(&title));
         self.sharing_banner.set_revealed(true);
     }
 
     pub(super) fn session_ended(self: &Rc<Self>, session: Uuid) {
         self.close_offer_dialog(&session);
         let mut state = self.state.borrow_mut();
+        state.showing.retain(|s| *s != session);
         if state.sharing == Some(session) {
             state.sharing = None;
             self.sharing_banner.set_revealed(false);
@@ -98,7 +152,11 @@ struct Viewer {
     picture: gtk::Picture,
     ended: adw::StatusPage,
     toolbar: adw::ToolbarView,
+    toasts: adw::ToastOverlay,
     control: gtk::ToggleButton,
+    again: gtk::Button,
+    /// Second displays: leave (the requester keeps its other screens).
+    disconnect: gtk::Button,
     pipeline: Rc<RefCell<Option<gst::Element>>>,
     /// Kept alive with the pipeline: its bus watch, and the socket fdsrc reads.
     watch: Rc<RefCell<Option<gst::bus::BusWatchGuard>>>,
@@ -129,10 +187,14 @@ impl Viewer {
         let control = gtk::ToggleButton::builder().tooltip_text("Use your mouse and keyboard on this screen").sensitive(false).build();
         control.set_child(Some(&adw::ButtonContent::builder().icon_name("input-mouse-symbolic").label("Take Control").build()));
         let fullscreen = gtk::Button::builder().icon_name("view-fullscreen-symbolic").tooltip_text("Full Screen (F11)").build();
+        let disconnect = gtk::Button::builder().label("Disconnect").css_classes(["destructive-action"]).visible(false).build();
         let header = adw::HeaderBar::new();
         header.pack_start(&control);
+        header.pack_start(&disconnect);
         header.pack_end(&fullscreen);
-        let toolbar = adw::ToolbarView::builder().content(&stack).build();
+        let toasts = adw::ToastOverlay::new();
+        toasts.set_child(Some(&stack));
+        let toolbar = adw::ToolbarView::builder().content(&toasts).build();
         toolbar.add_top_bar(&header);
         let window = adw::Window::builder()
             .title(format!("{name}'s Screen"))
@@ -156,7 +218,10 @@ impl Viewer {
             picture: picture.clone(),
             ended,
             toolbar: toolbar.clone(),
+            toasts,
             control: control.clone(),
+            again: again.clone(),
+            disconnect: disconnect.clone(),
             pipeline: Rc::default(),
             watch: Rc::default(),
             socket: Rc::default(),
@@ -185,6 +250,8 @@ impl Viewer {
 
         let v = viewer.clone();
         again.connect_clicked(move |_| v.restart(v.kind.get()));
+        let w = window.clone();
+        disconnect.connect_clicked(move |_| w.close());
 
         // Closing the window stops the session on both devices.
         let v = viewer.clone();
@@ -197,7 +264,12 @@ impl Viewer {
     }
 
     fn controlling(&self) -> bool {
-        self.kind.get() == SessionKind::Control && self.control.is_active() && self.input.borrow().is_some()
+        let on = match self.kind.get() {
+            SessionKind::Display => true,
+            SessionKind::Control => self.control.is_active(),
+            SessionKind::Screen => false,
+        };
+        on && self.input.borrow().is_some()
     }
 
     fn send(&self, msg: ControlMsg) {
@@ -302,6 +374,7 @@ impl Viewer {
         let Some(c) = owner.client() else { return };
         self.kind.set(kind);
         let (title, description) = match kind {
+            SessionKind::Display => (format!("Waiting for {}…", self.name), String::new()),
             SessionKind::Control => (format!("Asking to control {}…", self.name), format!("{} needs to allow control and pick a screen.", self.name)),
             SessionKind::Screen => (format!("Asking {}…", self.name), format!("{} needs to allow sharing and pick a screen.", self.name)),
         };
@@ -332,11 +405,12 @@ impl Viewer {
     /// Connect to the session's socket and decode the stream into the picture.
     fn play(&self, info: SessionInfo) {
         self.session.set(Some(info.session));
-        let stream = match UnixStream::connect(&info.socket) {
+        let Some(path) = info.socket else { return self.ended("Couldn't Connect", "The service sent no stream.") };
+        let stream = match UnixStream::connect(&path) {
             Ok(s) => s,
             Err(e) => return self.ended("Couldn't Connect", &e.to_string()),
         };
-        if self.kind.get() == SessionKind::Control
+        if self.kind.get().has_input()
             && let Ok(input) = stream.try_clone()
         {
             let _ = input.set_nonblocking(true);
@@ -381,6 +455,13 @@ impl Viewer {
 
     fn playing(&self) {
         self.stack.set_visible_child_name("video");
+        if self.kind.get() == SessionKind::Display {
+            // A second display fills this screen; F11 gets back to the window.
+            self.window.fullscreen();
+            self.picture.grab_focus();
+            self.toasts.add_toast(adw::Toast::builder().title("Press F11 to leave full screen").timeout(4).build());
+            return;
+        }
         self.control.set_sensitive(true);
         let controlling = self.kind.get() == SessionKind::Control;
         // Granted control starts switched on; the button turns it off and on.
@@ -392,7 +473,14 @@ impl Viewer {
     }
 
     fn ended(&self, title: &str, description: &str) {
+        let display = self.kind.get() == SessionKind::Display;
         self.stop();
+        let (title, description) = if display && title == "Sharing Stopped" {
+            ("Second Display Ended".to_string(), format!("{} stopped using this screen.", self.name))
+        } else {
+            (title.to_string(), description.to_string())
+        };
+        let (title, description) = (title.as_str(), description.as_str());
         self.window.unfullscreen();
         self.toolbar.set_reveal_top_bars(true);
         self.ended.set_title(title);
@@ -411,7 +499,9 @@ impl Viewer {
         self.socket.borrow_mut().take();
         self.control.set_active(false);
         self.control.set_sensitive(false);
-        self.window.set_title(Some(&format!("{}'s Screen", self.name)));
+        if self.kind.get() != SessionKind::Display {
+            self.window.set_title(Some(&format!("{}'s Screen", self.name)));
+        }
         if let (Some(owner), Some(session)) = (self.owner.upgrade(), self.session.take()) {
             owner.end_session(session);
         }

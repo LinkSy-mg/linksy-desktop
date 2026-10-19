@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use linksy_ipc::linksy_core::{DeviceInfo, DeviceKind, DeviceView, Event, FileEntry, Fingerprint, Uuid};
+use linksy_ipc::linksy_core::{DeviceInfo, DeviceKind, DeviceView, Event, FileEntry, Fingerprint, SessionKind, Uuid};
 use linksy_ipc::{Client, HistoryEntry};
 
 use crate::bridge::{Bridge, Update};
@@ -58,6 +58,8 @@ struct State {
     invite_nearby: Option<(gtk::ListBox, gtk::Label)>,
     /// The session in which this device shares its screen, if any.
     sharing: Option<Uuid>,
+    /// Second displays shown here, so each opens one viewer.
+    showing: Vec<Uuid>,
 }
 
 pub struct Window {
@@ -281,6 +283,7 @@ impl Window {
                 page::Action::SendClipboard => w.send_clipboard(id),
                 page::Action::Ping => w.ping(id),
                 page::Action::ViewScreen => w.view_screen(id),
+                page::Action::Extend => w.extend_to(id),
                 page::Action::Pair => w.pair(id),
                 page::Action::SendStaged => {
                     let staged = std::mem::take(&mut w.state.borrow_mut().staged);
@@ -351,6 +354,7 @@ impl Window {
                     w.stack.set_visible_child_name("main");
                     w.refresh_status();
                     w.refresh_devices();
+                    w.join_pending_displays();
                     while let Ok(update) = updates.recv().await {
                         match update {
                             Update::Event(ev) => w.handle_event(ev),
@@ -499,7 +503,8 @@ impl Window {
             }
             Event::SettingsChanged { .. } => self.refresh_status(),
             Event::SessionRequest { request, from, kind } => self.show_session_request(request, &from, kind),
-            Event::SessionStarted { session, peer, sharing: true, .. } => self.sharing_started(session, &peer),
+            Event::SessionStarted { session, peer, kind, sharing: true } => self.sharing_started(session, &peer, kind),
+            Event::SessionStarted { kind: SessionKind::Display, .. } => self.join_pending_displays(),
             Event::SessionStarted { .. } => {}
             Event::SessionEnded { session } => self.session_ended(session),
             Event::Notification { from, title, body } => {

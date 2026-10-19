@@ -20,6 +20,7 @@ pub enum Action {
     SendClipboard,
     Ping,
     ViewScreen,
+    Extend,
     Pair,
     SendStaged,
     Forget,
@@ -46,6 +47,9 @@ pub struct DevicePage {
     dot: gtk::Box,
     /// Four across, or two by two (the window's breakpoints switch it).
     pub tiles: gtk::FlowBox,
+    /// "Use as Second Display".
+    extend: gtk::ListBox,
+    extend_row: adw::ActionRow,
     pair_box: gtk::Box,
     staged: adw::Banner,
     drop_hint: gtk::Box,
@@ -124,6 +128,15 @@ impl DevicePage {
             tiles.append(&gtk::FlowBoxChild::builder().child(&b).focusable(false).build());
         }
 
+        // Sidecar, as a settings-style row under the main actions.
+        let extend_row = adw::ActionRow::builder().title("Use as Second Display").activatable(true).build();
+        extend_row.add_prefix(&gtk::Image::builder().icon_name("video-joined-displays-symbolic").build());
+        extend_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
+        let e = emit.clone();
+        extend_row.connect_activated(move |_| e(Action::Extend));
+        let extend = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
+        extend.append(&extend_row);
+
         // For devices that aren't paired yet.
         let pair = gtk::Button::builder().label("Pair").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
         let e = emit.clone();
@@ -177,6 +190,7 @@ impl DevicePage {
         let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(22).margin_top(8).margin_bottom(28).margin_start(16).margin_end(16).build();
         content.append(&hero);
         content.append(&tiles);
+        content.append(&extend);
         content.append(&pair_box);
         content.append(&drop_hint);
         content.append(&activity_box);
@@ -198,7 +212,7 @@ impl DevicePage {
             e(Action::Forget);
         });
 
-        Self { root, menu, avatar, kind, name, status, dot, tiles, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received }
+        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received }
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
@@ -225,6 +239,8 @@ impl DevicePage {
             self.dot.add_css_class("away");
         }
         self.tiles.set_visible(d.trusted);
+        self.extend.set_visible(d.trusted);
+        self.extend_row.set_subtitle(&glib::markup_escape_text(&format!("Extend this computer's desktop onto {}", d.device.name)));
         self.pair_box.set_visible(!d.trusted);
         self.menu.set_visible(d.trusted);
         self.drop_hint.set_visible(d.trusted);
@@ -290,11 +306,12 @@ impl DevicePage {
             Shared::Clipboard { text } => ("edit-paste-symbolic", format!("“{}”", one_line(text, 80))),
             Shared::Ping { title, body } if body.is_empty() => ("preferences-system-notifications-symbolic", title.clone()),
             Shared::Ping { title, body } => ("preferences-system-notifications-symbolic", format!("{title}: {body}")),
+            Shared::Screen { display: true, .. } => ("video-joined-displays-symbolic", if incoming { "Their second display".to_string() } else { "Second display".to_string() }),
             Shared::Screen { .. } => ("video-display-symbolic", if incoming { "Their screen".to_string() } else { "Your screen".to_string() }),
         };
         let size = match &e.what {
             Shared::Files { total, .. } => Some(fmt::size(*total)),
-            Shared::Screen { seconds } if *seconds > 0 => Some(fmt::duration(*seconds)),
+            Shared::Screen { seconds, .. } if *seconds > 0 => Some(fmt::duration(*seconds)),
             _ => None,
         };
         let verb = match (&e.what, incoming) {

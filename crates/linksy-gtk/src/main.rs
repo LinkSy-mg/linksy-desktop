@@ -100,7 +100,13 @@ row.activity-failed .activity-icon { background-color: alpha(@error_color, 0.12)
 fn main() -> glib::ExitCode {
     // Only the screen viewer uses it; a missing GStreamer just disables that.
     let _ = gstreamer::init();
-    let app = adw::Application::builder().application_id(APP_ID).flags(gio::ApplicationFlags::HANDLES_OPEN).build();
+    let mut flags = gio::ApplicationFlags::HANDLES_OPEN;
+    // Pointed at a specific service (development, or two devices on one machine): its
+    // own instance, instead of handing over to the usual one.
+    if std::env::var_os("LINKSY_SOCKET").is_some() {
+        flags |= gio::ApplicationFlags::NON_UNIQUE;
+    }
+    let app = adw::Application::builder().application_id(APP_ID).flags(flags).build();
     let window: Rc<RefCell<Option<Rc<window::Window>>>> = Rc::default();
 
     app.connect_startup(|app| {
