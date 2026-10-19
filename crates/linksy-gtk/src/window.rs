@@ -873,7 +873,9 @@ impl Window {
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).margin_top(12).margin_bottom(12).margin_start(12).margin_end(12).build();
         body.append(&top);
         body.append(&bar);
-        let row = gtk::ListBoxRow::builder().child(&body).activatable(false).build();
+        // Slide new transfers in rather than popping them into the list.
+        let reveal = gtk::Revealer::builder().transition_type(gtk::RevealerTransitionType::SlideDown).transition_duration(220).child(&body).build();
+        let row = gtk::ListBoxRow::builder().child(&reveal).activatable(false).build();
 
         let w = Rc::downgrade(self);
         action.connect_clicked(move |_| {
@@ -883,6 +885,7 @@ impl Window {
 
         self.transfers.prepend(&row);
         self.transfers_group.set_visible(true);
+        glib::idle_add_local_once(move || reveal.set_reveal_child(true));
         self.state.borrow_mut().transfers.insert(
             id,
             TransferRow { row, detail, bar, action, total, direction, samples: Vec::new(), saved: Vec::new(), done: false },
