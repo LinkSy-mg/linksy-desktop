@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use linksy_core::{DeviceInfo, DeviceView, Event, Uuid};
+use linksy_core::{DeviceInfo, DeviceView, Event, Settings, Uuid};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -34,6 +34,8 @@ pub enum Request {
     Cancel { transfer: Uuid },
     Notify { to: String, title: String, body: String },
     Clipboard { to: String, text: String },
+    Settings,
+    UpdateSettings { settings: Settings },
     Forget { target: String },
 }
 
@@ -195,6 +197,14 @@ impl Client {
 
     pub async fn send_clipboard(&self, to: impl Into<String>, text: impl Into<String>) -> Result<(), ClientError> {
         self.call(Request::Clipboard { to: to.into(), text: text.into() }).await
+    }
+
+    pub async fn settings(&self) -> Result<Settings, ClientError> {
+        self.call(Request::Settings).await
+    }
+
+    pub async fn update_settings(&self, settings: Settings) -> Result<Settings, ClientError> {
+        self.call(Request::UpdateSettings { settings }).await
     }
 
     pub async fn forget(&self, target: impl Into<String>) -> Result<bool, ClientError> {

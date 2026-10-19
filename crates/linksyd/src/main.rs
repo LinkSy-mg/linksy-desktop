@@ -39,6 +39,7 @@ fn parse_args() -> Result<Args, String> {
             "--download-dir" => config.download_dir = value("--download-dir")?.into(),
             "--socket" => socket = value("--socket")?.into(),
             "--no-discovery" => config.discovery = false,
+            "--stay-connected" => config.stay_connected = true,
             "--no-notifications" => notifications = false,
             "-h" | "--help" => {
                 println!(
@@ -49,6 +50,7 @@ fn parse_args() -> Result<Args, String> {
                      --download-dir DIR   where received files go\n  \
                      --socket PATH        IPC socket\n  \
                      --no-discovery       don't advertise or browse the network\n  \
+                     --stay-connected     keep paired devices connected (default: on demand)\n  \
                      --no-notifications   don't show desktop notifications"
                 );
                 std::process::exit(0);
@@ -79,7 +81,6 @@ async fn main() -> ExitCode {
     }
     let _ = std::fs::remove_file(&args.socket);
 
-    let download_dir = args.config.download_dir.clone();
     let mut config = args.config;
     let node = match Node::start(config.clone()).await {
         Ok(n) => n,
@@ -100,14 +101,14 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    info!("{} ({}) ready, saving files to {}", node.info().name, node.info().id.short(), download_dir.display());
+    info!("{} ({}) ready, saving files to {}", node.info().name, node.info().id.short(), node.settings().download_dir.display());
 
     if args.notifications {
         tokio::spawn(notify::run(node.clone()));
     }
     tokio::spawn(clipboard::run(node.clone(), args.notifications));
     let socket = args.socket.clone();
-    let server = tokio::spawn(ipc::serve(node.clone(), socket.clone(), download_dir));
+    let server = tokio::spawn(ipc::serve(node.clone(), socket.clone()));
 
     tokio::select! {
         r = server => if let Ok(Err(e)) = r { error!("IPC server stopped: {e}") },

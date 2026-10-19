@@ -2,7 +2,7 @@
 //! the user), events pushed to every client.
 
 use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use linksy_core::{Fingerprint, Node};
 use linksy_ipc::{Envelope, Request, ServerMsg, Status};
@@ -12,7 +12,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
-pub async fn serve(node: Node, socket: PathBuf, download_dir: PathBuf) -> std::io::Result<()> {
+pub async fn serve(node: Node, socket: PathBuf) -> std::io::Result<()> {
     let listener = UnixListener::bind(&socket)?;
     #[cfg(unix)]
     {
@@ -21,11 +21,11 @@ pub async fn serve(node: Node, socket: PathBuf, download_dir: PathBuf) -> std::i
     }
     loop {
         let (stream, _) = listener.accept().await?;
-        tokio::spawn(client(node.clone(), stream, download_dir.clone()));
+        tokio::spawn(client(node.clone(), stream));
     }
 }
 
-async fn client(node: Node, stream: UnixStream, download_dir: PathBuf) {
+async fn client(node: Node, stream: UnixStream) {
     let (read, mut write) = stream.into_split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
 
@@ -63,9 +63,9 @@ async fn client(node: Node, stream: UnixStream, download_dir: PathBuf) {
                 continue;
             }
         };
-        let (node, tx, dl) = (node.clone(), tx.clone(), download_dir.clone());
+        let (node, tx) = (node.clone(), tx.clone());
         tokio::spawn(async move {
-            let msg = match handle(&node, env.request, &dl).await {
+            let msg = match handle(&node, env.request).await {
                 Ok(v) => ServerMsg::Reply { id: env.id, ok: Some(v), error: None },
                 Err(e) => ServerMsg::Reply { id: env.id, ok: None, error: Some(e) },
             };
@@ -76,13 +76,13 @@ async fn client(node: Node, stream: UnixStream, download_dir: PathBuf) {
     writer.abort();
 }
 
-async fn handle(node: &Node, req: Request, download_dir: &Path) -> Result<Value, String> {
+async fn handle(node: &Node, req: Request) -> Result<Value, String> {
     let json = |v: serde_json::Result<Value>| v.map_err(|e| e.to_string());
     match req {
         Request::Status => json(serde_json::to_value(Status {
-            device: node.info().clone(),
+            device: node.info(),
             port: node.local_addr().map(|a| a.port()).unwrap_or(0),
-            download_dir: download_dir.to_path_buf(),
+            download_dir: node.settings().download_dir,
         })),
         Request::Devices => json(serde_json::to_value(node.devices())),
         Request::Pair { target } => {
@@ -109,6 +109,11 @@ async fn handle(node: &Node, req: Request, download_dir: &Path) -> Result<Value,
             let id = resolve(node, &to)?;
             node.send_clipboard(&id, &text).await.map_err(|e| e.to_string())?;
             Ok(Value::Null)
+        }
+        Request::Settings => json(serde_json::to_value(node.settings())),
+        Request::UpdateSettings { settings } => {
+            let applied = node.update_settings(settings).await.map_err(|e| e.to_string())?;
+            json(serde_json::to_value(applied))
         }
         Request::Forget { target } => {
             let id = resolve(node, &target)?;
