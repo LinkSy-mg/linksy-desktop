@@ -17,6 +17,7 @@ Usage:
   linksy invite                      show a QR code another device can scan to pair
   linksy history [device]            what was shared, newest first
   linksy extend <device>             use another device as a second display
+  linksy camera <device>             use another device's camera as a webcam here
   linksy screen <device> --record FILE [--seconds N]
                                      save another device's screen as H.264
   linksy send <device> <files…>      send files or folders
@@ -191,6 +192,8 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                     Shared::Clipboard { text } if text.is_empty() => "clipboard text".into(),
                     Shared::Clipboard { text } => format!("clipboard: {}", text.chars().take(40).collect::<String>()),
                     Shared::Ping { title, .. } => format!("ping: {title}"),
+                    Shared::Camera { seconds } if e.direction == Direction::Incoming => format!("used their camera ({seconds} s)"),
+                    Shared::Camera { seconds } => format!("shared this camera ({seconds} s)"),
                     Shared::Screen { seconds, display: true } => format!("second display ({seconds} s)"),
                     Shared::Screen { seconds, .. } if e.direction == Direction::Incoming => format!("watched their screen ({seconds} s)"),
                     Shared::Screen { seconds, .. } => format!("shared this screen ({seconds} s)"),
@@ -205,10 +208,15 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                 println!("{arrow} {:<18} {what}  {status}", e.peer_name);
             }
         }
-        ("extend", [to]) => {
-            println!("Asking {to} to be a second display…");
-            let info = c.start_session(to.clone(), linksy_ipc::linksy_core::SessionKind::Display).await.map_err(err)?;
-            println!("{to} is now a second display. Press Ctrl+C to stop.");
+        ("extend" | "camera", [to]) => {
+            use linksy_ipc::linksy_core::SessionKind;
+            let kind = if cmd == "camera" { SessionKind::Camera } else { SessionKind::Display };
+            println!("Asking {to}…");
+            let info = c.start_session(to.clone(), kind).await.map_err(err)?;
+            match kind {
+                SessionKind::Camera => println!("{to}'s camera is on: pick \"Linksy Camera ({to})\" in your apps. Press Ctrl+C to stop."),
+                _ => println!("{to} is now a second display. Press Ctrl+C to stop."),
+            }
             let mut events = c.events();
             let ended = async {
                 while let Ok(e) = events.recv().await {
@@ -217,9 +225,13 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                     }
                 }
             };
+            // Stopped by Ctrl+C or by a SIGTERM: either way, end the session first.
+            // I hope this doesn't break. It hasn't yet.
+            let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).map_err(|e| e.to_string())?;
             tokio::select! {
                 _ = tokio::signal::ctrl_c() => {}
-                _ = ended => println!("{to} stopped showing it."),
+                _ = term.recv() => {}
+                _ = ended => println!("{to} stopped."),
             }
             let _ = c.end_session(info.session).await;
         }
@@ -332,6 +344,7 @@ async fn watch(c: &Client) -> Result<(), String> {
                     linksy_ipc::linksy_core::SessionKind::Control => println!("{} wants to control your screen (mouse and keyboard).", from.name),
                     linksy_ipc::linksy_core::SessionKind::Screen => println!("{} wants to see your screen.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Display => println!("{} wants to use this screen as a second display.", from.name),
+                    linksy_ipc::linksy_core::SessionKind::Camera => println!("{} wants to use your camera.", from.name),
                 }
                 let ok = ask("Allow?").await;
                 let _ = c.respond(request, ok).await;
