@@ -48,7 +48,7 @@ Decisions already made with the owner:
 | Rename device (live to peers) | ✅ | ⬜ | `Renamed` message |
 | Connect on demand / idle close / stay connected | ✅ | ⬜ | §4.6 |
 | Desktop notifications with Accept/Decline | ✅ | ⬜ | Android: notification actions |
-| QR-code pairing | ⬜ | ⬜ | planned; phone scans desktop |
+| QR-code pairing | ✅ shows QR | ⬜ | phone scans desktop, §4.7 |
 | Automatic clipboard sync | ⬜ | ⬜ | planned |
 | Images/files on the clipboard | ⬜ | ⬜ | planned |
 | Phone notifications mirrored to desktop | ⬜ | ⬜ | planned; Android NotificationListenerService |
@@ -237,6 +237,40 @@ and close the other with reason `duplicate`.
 - Listening costs nothing; incoming connections are always accepted, so a phone can be
   reached while the app's service is running.
 
+### 4.7 QR-code pairing (invites) — `src/invite.rs`
+
+The desktop shows a QR code (menu → "Pair with QR Code…", or `linksy invite`). It
+encodes a link:
+
+```
+linksy://pair?v=1&id=<64 hex>&n=<name>&a=<ip:port>,<ip:port>&t=<token>
+```
+
+- Values are percent-encoded (RFC 3986 unreserved characters stay as is); `+` decodes
+  to a space. Unknown keys must be ignored. `v` must be `1`.
+- `a`: up to four addresses, best first (private IPv4 LAN, then other IPv4 such as VPNs,
+  then IPv6). IPv6 is in brackets: `[fd00::1]:47200`.
+- `t`: one-time token (32 hex chars). Valid **five minutes**, used up by the first
+  successful pairing, and cancelled when the dialog closes (the desktop shows a fresh
+  one every 4.5 minutes while open).
+
+The phone, after scanning:
+
+1. Races QUIC connections to the addresses (§4.6) and keeps the first one whose
+   **certificate fingerprint equals `id`**. Any other certificate: close, try the rest,
+   fail with "That's not the device in the QR code" if none matches.
+2. Sends `hello` with `"intent":"pair"` and **`"invite":"<token>"`**.
+3. After `welcome`, sends `{"type":"pair_decision","accept":true}` straight away (no code
+   shown; scanning is the user's consent) and reads the desktop's decision.
+
+The desktop, on a `hello` whose `invite` matches its current token, also skips the
+prompt and answers `accept: true`. If the token is wrong, reused or expired it falls back
+to the normal flow: it shows the 6-digit code and asks its user. The phone should then
+show the code too (§4.3) — so a phone must still support the code flow.
+
+Security: the phone authenticates the desktop by the pinned `id`; the desktop
+authenticates the phone by the token, which only someone who saw the screen has.
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -249,6 +283,8 @@ node.send_clipboard(id, text)               node.notify(id, title, body)
 node.settings() / node.update_settings(s)   Settings { name, download_dir, stay_connected, auto_accept }
 node.forget(id)                             node.shutdown()
 node.device_found(device, addrs)            node.device_lost(id)        // platform discovery
+node.create_invite() -> Invite (.to_uri())  node.cancel_invite()        // show a QR code
+node.pair_with_invite(uri)                                              // after scanning one
 ```
 
 Events (JSON-serializable, same shapes as the desktop IPC):
@@ -283,8 +319,9 @@ or the notification).
 - [ ] Core: send from file descriptors / readers (for `content://` URIs).
 - [ ] Core: receive through a callback or into a caller-provided sink (MediaStore).
 - [x] Core: inject discovered devices from the platform (`device_found` / `device_lost`).
-- [ ] QR pairing: desktop shows a QR with `linksy://pair?id=<id>&addr=<ip:port>&name=…`;
-      phone scans and dials with `intent: pair`. Format not final.
+- [x] QR pairing format and desktop side (§4.7). The phone side (scanner) is to build.
+- [ ] Phone showing a QR for a desktop to scan: no desktop camera flow planned; use the
+      phone as the scanner.
 - [ ] Brand color choice.
 
 ## Changelog
@@ -297,3 +334,5 @@ or the notification).
   connecting on demand to a device with several addresses could fail (parallel `hello`s);
   now only QUIC handshakes race (§4.6). After a rename, the old name's late mDNS goodbye
   no longer hides the device. Desktop app: open/drag/clear received files.
+- **2026-10-19** — QR-code pairing (§4.7): `linksy://pair` invite links with a one-time
+  token, `invite` field in `hello`, desktop dialog and `linksy invite`.
