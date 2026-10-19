@@ -413,6 +413,12 @@ Earlier notes, still valid:
   address there, for "Pair by Address".
 - When no device is around, the empty state offers "Pair with QR Code" and "Pair by
   Address" right there. On the phone: a big "Scan QR Code" button belongs in that state.
+- Screen windows fit the shared screen's shape (a phone's screen gets a tall, narrow
+  window, refitted on rotation), like iPhone Mirroring. A phone sharing its screen should
+  keep sending its real aspect ratio and orientation; don't letterbox on the phone side.
+- When the desktop uses the phone's camera, the desktop shows "Camera Is On · Click to
+  preview" with Preview / Stop. The phone side should show a matching persistent
+  "<desktop> is using your camera" notification with Stop.
 - An outgoing transfer says "Waiting for <device> to accept…" until the other side
   answers, then shows progress.
 - Received files can be opened by tapping the finished transfer (desktop also allows
@@ -452,3 +458,4 @@ Earlier notes, still valid:
   virtual monitor and the receiver shows it full screen and sends input back.
 - **2026-10-19** — Phone as webcam, desktop side (§4.8): session kind `camera`; the
   desktop publishes the stream as a PipeWire camera. Media: 720p30 Constrained Baseline.
+- **2026-10-19** — Desktop UX: screen windows fit the shared screen's shape; camera preview card. No protocol change.
