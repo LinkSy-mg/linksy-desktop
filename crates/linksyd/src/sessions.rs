@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use linksy_core::{Node, Session, Uuid};
+use linksy_core::{Node, Session, SessionKind, Uuid};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::task::AbortHandle;
@@ -53,6 +53,9 @@ impl Sessions {
         let listener = bind(&path)?;
         let mut cmd = tokio::process::Command::new(helper());
         cmd.arg("share").arg("--socket").arg(&path).arg("--token-file").arg(self.data_dir.join("screencast-token"));
+        if session.kind == SessionKind::Control {
+            cmd.arg("--control");
+        }
         if self.test_pattern {
             cmd.arg("--test");
         }
