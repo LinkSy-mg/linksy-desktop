@@ -44,6 +44,26 @@ small process (about 6 MB on disk, 7 MB of memory, no CPU when idle).
   through a desktop notification with Accept/Decline buttons, unless "Accept From Paired
   Devices" is on.
 
+## Install
+
+Download the latest Linux release from
+[LinkSy-mg/linksy-releases](https://github.com/LinkSy-mg/linksy-releases/releases)
+(`linux-v…` tags), then:
+
+```sh
+tar xzf linksy-0.1.0-linux-x86_64.tar.gz
+cd linksy-0.1.0-linux-x86_64
+./install.sh        # into ~/.local, starts the background service; ./uninstall.sh removes it
+```
+
+Needs x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.6+ (Fedora 41+, Ubuntu 24.10+,
+Debian 13+).
+
+To cut a release: add the version's section to `CHANGELOG.md`, bump `version` in
+`Cargo.toml`, run `scripts/package-linux.sh`, tag `vX.Y.Z` here and publish the tarball on
+this repo and, as `linux-vX.Y.Z` (not marked latest, which belongs to the Android APKs),
+on linksy-releases.
+
 ## Build
 
 Rust stable (edition 2024). The service, CLI and core build anywhere:
