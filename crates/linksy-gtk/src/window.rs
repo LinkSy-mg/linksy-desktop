@@ -498,7 +498,7 @@ impl Window {
                 self.state.borrow_mut().progress.remove(&transfer);
             }
             Event::SettingsChanged { .. } => self.refresh_status(),
-            Event::SessionRequest { request, from, .. } => self.show_session_request(request, &from),
+            Event::SessionRequest { request, from, kind } => self.show_session_request(request, &from, kind),
             Event::SessionStarted { session, peer, sharing: true, .. } => self.sharing_started(session, &peer),
             Event::SessionStarted { .. } => {}
             Event::SessionEnded { session } => self.session_ended(session),

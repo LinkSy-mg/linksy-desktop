@@ -32,11 +32,18 @@ impl Window {
     }
 
     /// Someone wants to see this screen.
-    pub(super) fn show_session_request(self: &Rc<Self>, request: Uuid, from: &DeviceInfo) {
-        let dialog = adw::AlertDialog::new(
-            Some(&format!("{} Wants to See Your Screen", from.name)),
-            Some(&format!("{} will see everything on your screen until you stop sharing. You'll pick which screen next.", from.name)),
-        );
+    pub(super) fn show_session_request(self: &Rc<Self>, request: Uuid, from: &DeviceInfo, kind: SessionKind) {
+        let (heading, body) = match kind {
+            SessionKind::Control => (
+                format!("{} Wants to Control Your Screen", from.name),
+                format!("{} will see your screen and use your mouse and keyboard until you stop. You'll pick which screen next.", from.name),
+            ),
+            SessionKind::Screen => (
+                format!("{} Wants to See Your Screen", from.name),
+                format!("{} will see everything on your screen until you stop sharing. You'll pick which screen next.", from.name),
+            ),
+        };
+        let dialog = adw::AlertDialog::new(Some(&heading), Some(&body));
         dialog.add_responses(&[("deny", "Don't Allow"), ("allow", "Allow")]);
         dialog.set_response_appearance("allow", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("deny"));
