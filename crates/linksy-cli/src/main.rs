@@ -13,6 +13,8 @@ const HELP: &str = "linksy — share between your devices
 Usage:
   linksy devices                     paired and nearby devices
   linksy pair <device|ip:port>       pair with a device (both screens show a code)
+  linksy pair <linksy://pair?…>      pair using another device's QR code link
+  linksy invite                      show a QR code another device can scan to pair
   linksy send <device> <files…>      send files or folders
   linksy notify <device> <title> [body]
   linksy clip <device> [text]        share text to its clipboard (default: stdin)
@@ -137,6 +139,37 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             };
             c.send_clipboard(to.clone(), text).await.map_err(err)?;
             println!("Shared clipboard with {to}.");
+        }
+        ("invite", []) => {
+            let uri = c.create_invite().await.map_err(err)?;
+            let code = qrcode::QrCode::new(uri.as_bytes()).map_err(|e| e.to_string())?;
+            let art = code
+                .render::<qrcode::render::unicode::Dense1x2>()
+                .dark_color(qrcode::render::unicode::Dense1x2::Light)
+                .light_color(qrcode::render::unicode::Dense1x2::Dark)
+                .quiet_zone(true)
+                .build();
+            println!("{art}\nScan with Linksy on your phone, or on another computer run:\n  linksy pair '{uri}'\n");
+            println!("Waiting (valid 5 minutes). Press Ctrl+C to cancel.");
+            let mut events = c.events();
+            let outcome = tokio::select! {
+                _ = tokio::signal::ctrl_c() => None,
+                _ = tokio::time::sleep(std::time::Duration::from_secs(300)) => None,
+                d = async {
+                    loop {
+                        match events.recv().await {
+                            Ok(Event::Paired { device }) => return Some(device),
+                            Err(tokio::sync::broadcast::error::RecvError::Closed) => return None,
+                            _ => {}
+                        }
+                    }
+                } => d,
+            };
+            let _ = c.cancel_invite().await;
+            match outcome {
+                Some(d) => println!("Paired with {}.", d.name),
+                None => return Err("No device paired.".into()),
+            }
         }
         ("settings", []) => {
             let s = c.settings().await.map_err(err)?;
