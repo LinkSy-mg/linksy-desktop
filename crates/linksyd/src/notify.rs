@@ -35,6 +35,10 @@ pub async fn run(node: Node) {
                 let body = format!("{what} · {}", human_size(total));
                 prompt(node.clone(), transfer, format!("{} wants to send you files", from.name), body, "Accept");
             }
+            Event::SessionRequest { request, from, .. } => {
+                let body = format!("{} will see everything on your screen until you stop sharing.", from.name);
+                prompt(node.clone(), request, format!("{} wants to see your screen", from.name), body, "Allow");
+            }
             Event::TransferStarted { transfer, peer, direction: Direction::Incoming, .. } => {
                 incoming.insert(transfer, peer.name);
             }

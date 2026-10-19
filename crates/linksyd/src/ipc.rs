@@ -7,14 +7,15 @@ use std::path::PathBuf;
 use linksy_core::{Fingerprint, Node};
 
 use crate::history::History;
-use linksy_ipc::{Envelope, Request, ServerMsg, Shared, Status};
+use crate::sessions::Sessions;
+use linksy_ipc::{Envelope, Request, ServerMsg, SessionInfo, Shared, Status};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
-pub async fn serve(node: Node, history: History, socket: PathBuf) -> std::io::Result<()> {
+pub async fn serve(node: Node, history: History, sessions: Sessions, socket: PathBuf) -> std::io::Result<()> {
     let listener = UnixListener::bind(&socket)?;
     #[cfg(unix)]
     {
@@ -23,11 +24,11 @@ pub async fn serve(node: Node, history: History, socket: PathBuf) -> std::io::Re
     }
     loop {
         let (stream, _) = listener.accept().await?;
-        tokio::spawn(client(node.clone(), history.clone(), stream));
+        tokio::spawn(client(node.clone(), history.clone(), sessions.clone(), stream));
     }
 }
 
-async fn client(node: Node, history: History, stream: UnixStream) {
+async fn client(node: Node, history: History, sessions: Sessions, stream: UnixStream) {
     let (read, mut write) = stream.into_split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
 
@@ -80,9 +81,9 @@ async fn client(node: Node, history: History, stream: UnixStream) {
                 continue;
             }
         };
-        let (node, history, tx) = (node.clone(), history.clone(), tx.clone());
+        let (node, history, sessions, tx) = (node.clone(), history.clone(), sessions.clone(), tx.clone());
         tokio::spawn(async move {
-            let msg = match handle(&node, &history, env.request).await {
+            let msg = match handle(&node, &history, &sessions, env.request).await {
                 Ok(v) => ServerMsg::Reply { id: env.id, ok: Some(v), error: None },
                 Err(e) => ServerMsg::Reply { id: env.id, ok: None, error: Some(e) },
             };
@@ -94,7 +95,7 @@ async fn client(node: Node, history: History, stream: UnixStream) {
     writer.abort();
 }
 
-async fn handle(node: &Node, history: &History, req: Request) -> Result<Value, String> {
+async fn handle(node: &Node, history: &History, sessions: &Sessions, req: Request) -> Result<Value, String> {
     let json = |v: serde_json::Result<Value>| v.map_err(|e| e.to_string());
     match req {
         Request::Status => json(serde_json::to_value(Status {
@@ -152,6 +153,14 @@ async fn handle(node: &Node, history: &History, req: Request) -> Result<Value, S
             history.clear(with);
             Ok(Value::Null)
         }
+        Request::StartSession { with, kind } => {
+            let id = resolve(node, &with)?;
+            let session = node.request_session(&id, kind).await.map_err(|e| e.to_string())?;
+            let id = session.id;
+            let socket = sessions.view(session).map_err(|e| e.to_string())?;
+            json(serde_json::to_value(SessionInfo { session: id, socket }))
+        }
+        Request::EndSession { session } => Ok(Value::Bool(sessions.end(session))),
         Request::Settings => json(serde_json::to_value(node.settings())),
         Request::UpdateSettings { settings } => {
             let applied = node.update_settings(settings).await.map_err(|e| e.to_string())?;

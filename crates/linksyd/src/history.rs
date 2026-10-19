@@ -113,6 +113,7 @@ impl History {
         let mut events = node.subscribe();
         // Offers waiting for an answer, so a decline can still be recorded.
         let mut offers: HashMap<Uuid, (DeviceInfo, Vec<FileEntry>, u64)> = HashMap::new();
+        let mut started: HashMap<Uuid, std::time::Instant> = HashMap::new();
         loop {
             let event = match events.recv().await {
                 Ok(e) => e,
@@ -163,6 +164,26 @@ impl History {
                 }
                 Event::Clipboard { from, text } => self.upsert(incoming(&from, Shared::Clipboard { text })),
                 Event::Notification { from, title, body } => self.upsert(incoming(&from, Shared::Ping { title, body })),
+                Event::SessionStarted { session, peer, sharing, .. } => {
+                    started.insert(session, std::time::Instant::now());
+                    self.upsert(HistoryEntry {
+                        id: session,
+                        at: now_ms(),
+                        peer: peer.id,
+                        peer_name: peer.name,
+                        // Incoming: their screen came to us.
+                        direction: if sharing { Direction::Outgoing } else { Direction::Incoming },
+                        what: Shared::Screen { seconds: 0 },
+                        status: HistoryStatus::InProgress,
+                    });
+                }
+                Event::SessionEnded { session } => {
+                    let seconds = started.remove(&session).map(|t| t.elapsed().as_secs()).unwrap_or(0);
+                    self.update(session, |e| {
+                        e.status = HistoryStatus::Done;
+                        e.what = Shared::Screen { seconds };
+                    });
+                }
                 Event::DeviceUpdated { device } => {
                     // Keep names current in past entries too.
                     let mut entries = self.inner.entries.lock().unwrap();

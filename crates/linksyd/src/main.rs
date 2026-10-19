@@ -5,6 +5,7 @@
 mod clipboard;
 mod history;
 mod ipc;
+mod sessions;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
 // their own native notifications with their apps.
 #[cfg(target_os = "linux")]
@@ -120,7 +121,9 @@ async fn main() -> ExitCode {
     let history = history::History::load(data_dir.join("history.json"));
     tokio::spawn(history.clone().run(node.clone()));
     let socket = args.socket.clone();
-    let server = tokio::spawn(ipc::serve(node.clone(), history, socket.clone()));
+    let sessions = sessions::Sessions::new(data_dir.clone());
+    tokio::spawn(sessions.clone().run(node.clone()));
+    let server = tokio::spawn(ipc::serve(node.clone(), history, sessions, socket.clone()));
 
     tokio::select! {
         r = server => if let Ok(Err(e)) = r { error!("IPC server stopped: {e}") },
