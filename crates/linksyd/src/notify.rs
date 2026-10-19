@@ -41,6 +41,10 @@ pub async fn run(node: Node) {
                         format!("{} wants to control your screen", from.name),
                         format!("{} will see your screen and use your mouse and keyboard until you stop.", from.name),
                     ),
+                    SessionKind::Camera => (
+                        format!("{} wants to use your camera", from.name),
+                        format!("Your camera will be on and {} will see it until you stop.", from.name),
+                    ),
                     SessionKind::Display => (
                         format!("{} wants to use this screen as a second display", from.name),
                         format!("Linksy will fill this screen with {}'s second display, and your mouse and keyboard here will work on it.", from.name),

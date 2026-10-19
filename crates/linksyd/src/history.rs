@@ -173,7 +173,10 @@ impl History {
                         peer_name: peer.name,
                         // Incoming: their screen came to us.
                         direction: if sharing { Direction::Outgoing } else { Direction::Incoming },
-                        what: Shared::Screen { seconds: 0, display: kind == SessionKind::Display },
+                        what: match kind {
+                            SessionKind::Camera => Shared::Camera { seconds: 0 },
+                            _ => Shared::Screen { seconds: 0, display: kind == SessionKind::Display },
+                        },
                         status: HistoryStatus::InProgress,
                     });
                 }
@@ -181,7 +184,7 @@ impl History {
                     let seconds = started.remove(&session).map(|t| t.elapsed().as_secs()).unwrap_or(0);
                     self.update(session, |e| {
                         e.status = HistoryStatus::Done;
-                        if let Shared::Screen { seconds: s, .. } = &mut e.what {
+                        if let Shared::Screen { seconds: s, .. } | Shared::Camera { seconds: s } = &mut e.what {
                             *s = seconds;
                         }
                     });

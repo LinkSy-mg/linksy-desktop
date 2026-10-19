@@ -101,6 +101,11 @@ pub enum Shared {
     /// The text is kept in memory only, never written to disk (it may be a password).
     Clipboard { #[serde(default)] text: String },
     Ping { title: String, body: String },
+    /// A camera used as a webcam, one way or the other; `seconds` once it ended.
+    Camera {
+        #[serde(default)]
+        seconds: u64,
+    },
     /// A screen shared one way or the other; `seconds` once it ended.
     Screen {
         #[serde(default)]

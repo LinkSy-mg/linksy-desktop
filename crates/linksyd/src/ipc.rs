@@ -157,9 +157,13 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, req: Reques
             let id = resolve(node, &with)?;
             let session = node.request_session(&id, kind).await.map_err(|e| e.to_string())?;
             let id = session.id;
-            // A second display: this device shares, the service runs that side.
+            // A second display: this device shares, the service runs that side. A camera:
+            // the service turns it into a webcam here. Otherwise the app shows it.
             let socket = if session.sharing {
                 sessions.spawn_share(session);
+                None
+            } else if kind == linksy_core::SessionKind::Camera {
+                sessions.spawn_webcam(session);
                 None
             } else {
                 Some(sessions.view(session).map_err(|e| e.to_string())?)

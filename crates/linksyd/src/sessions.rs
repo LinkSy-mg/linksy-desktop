@@ -53,24 +53,42 @@ impl Sessions {
 
     /// Run the sharing side of `session` until it ends.
     pub fn spawn_share(&self, session: Session) {
+        self.spawn_helper(session, false);
+    }
+
+    /// Use the camera `session` receives as a webcam on this device until it ends.
+    pub fn spawn_webcam(&self, session: Session) {
+        self.spawn_helper(session, true);
+    }
+
+    fn spawn_helper(&self, session: Session, webcam: bool) {
         let id = session.id;
         let this = self.clone();
         let task = tokio::spawn(async move {
-            if let Err(e) = this.share(session).await {
-                warn!("screen sharing ended: {e}");
+            if let Err(e) = this.run_helper(session, webcam).await {
+                warn!("session ended: {e}");
             }
             this.running.lock().unwrap().remove(&id);
         });
         self.running.lock().unwrap().insert(id, task.abort_handle());
     }
 
-    async fn share(&self, mut session: Session) -> std::io::Result<()> {
-        let path = socket_path("share", session.id);
+    /// Start `linksy-screen` for this side of the session and relay its socket.
+    async fn run_helper(&self, mut session: Session, webcam: bool) -> std::io::Result<()> {
+        let path = socket_path(if webcam { "webcam" } else { "share" }, session.id);
         let listener = bind(&path)?;
         let mut cmd = tokio::process::Command::new(helper("linksy-screen"));
-        cmd.arg("share").arg("--socket").arg(&path);
+        if webcam {
+            cmd.arg("webcam").arg("--socket").arg(&path).arg("--name").arg(format!("Linksy Camera ({})", session.peer.name));
+        } else {
+            cmd.arg("share").arg("--socket").arg(&path);
+        }
         match session.kind {
+            _ if webcam => {}
             SessionKind::Screen => {}
+            SessionKind::Camera => {
+                cmd.arg("--camera");
+            }
             SessionKind::Control => {
                 cmd.arg("--control");
             }
@@ -81,12 +99,14 @@ impl Sessions {
         }
         // Each kind remembers its own answer to the desktop's dialog.
         let kind = format!("{:?}", session.kind).to_lowercase();
-        cmd.arg("--token-file").arg(self.data_dir.join(format!("{kind}-token")));
-        if self.test_pattern {
+        if !webcam {
+            cmd.arg("--token-file").arg(self.data_dir.join(format!("{kind}-token")));
+        }
+        if self.test_pattern && !webcam {
             cmd.arg("--test");
         }
         let mut child = cmd.kill_on_drop(true).spawn()?;
-        info!("sharing the screen with {} ({kind})", session.peer.name);
+        info!("{} session with {} ({kind})", if webcam { "webcam" } else { "sharing" }, session.peer.name);
         let accepted = tokio::select! {
             a = tokio::time::timeout(PICK_TIMEOUT, listener.accept()) => a,
             // The helper gave up (dialog cancelled, no portal): nothing will connect.
