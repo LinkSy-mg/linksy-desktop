@@ -154,6 +154,7 @@ bytes of UTF-8 JSON. Maximum frame 1 MiB. Enums are tagged with `"type"` in snak
 - `intent`: `connect` (already paired) or `pair` (start pairing).
 - `stay_connected` (optional, default `false`): the sender keeps links open, so the
   receiver must not close this connection for being idle.
+- `invite` (optional, omitted when unused): the token from a scanned QR code (§4.7).
 
 The listener checks `device.id` equals the fingerprint of the TLS certificate (else
 closes with "identity mismatch") and answers:
