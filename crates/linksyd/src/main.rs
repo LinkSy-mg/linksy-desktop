@@ -4,6 +4,9 @@
 
 mod clipboard;
 mod ipc;
+// Accept/Decline buttons need the freedesktop notification spec; other platforms get
+// their own native notifications with their apps.
+#[cfg(target_os = "linux")]
 mod notify;
 mod system;
 
@@ -107,6 +110,7 @@ async fn main() -> ExitCode {
     };
     info!("{} ({}) ready, saving files to {}", node.info().name, node.info().id.short(), node.settings().download_dir.display());
 
+    #[cfg(target_os = "linux")]
     if args.notifications {
         tokio::spawn(notify::run(node.clone()));
     }

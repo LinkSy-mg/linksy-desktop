@@ -23,14 +23,18 @@ pub async fn run(node: Node, notifications: bool) {
                 Ok(()) => info!("copied clipboard from {from}"),
                 Err(e) => debug!("copy failed: {e}"),
             }
+            #[cfg(target_os = "linux")]
             if notifications {
                 announce(&from, &text, copied.is_ok());
             }
+            #[cfg(not(target_os = "linux"))]
+            let _ = notifications;
         });
     }
 }
 
 /// "Copied from X", or, when no clipboard tool worked, a Copy button to try again.
+#[cfg(target_os = "linux")]
 fn announce(from: &str, text: &str, copied: bool) {
     let mut preview: String = text.chars().take(120).collect();
     if preview.len() < text.len() {
