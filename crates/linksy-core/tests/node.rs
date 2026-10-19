@@ -615,3 +615,18 @@ async fn declined_screen_session_starts_nothing() {
     assert!(matches!(err, Error::Declined), "{err:?}");
     assert!(incoming.try_recv().is_err());
 }
+
+#[tokio::test]
+async fn display_session_has_the_requester_share() {
+    let (a, b) = paired().await;
+    let mut incoming = b.node.incoming_sessions().unwrap();
+    let mut sharer = a.node.request_session(&b.node.info().id, SessionKind::Display).await.unwrap();
+    assert!(sharer.sharing, "the requester of a second display sends its screen");
+    let mut display = incoming.recv().await.unwrap();
+    assert!(!display.sharing);
+    assert_eq!(display.kind, SessionKind::Display);
+    sharer.send.write_all(b"frame").await.unwrap();
+    let mut got = [0u8; 5];
+    display.recv.read_exact(&mut got).await.unwrap();
+    assert_eq!(&got, b"frame");
+}

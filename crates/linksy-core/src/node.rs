@@ -511,8 +511,9 @@ impl Node {
         }
     }
 
-    /// Ask `to` to start a media session; for [`SessionKind::Screen`], to share its screen
-    /// with us. Resolves once its user allowed it (or fails if they declined).
+    /// Ask `to` to start a media session: for [`SessionKind::Screen`], to share its screen
+    /// with us; for [`SessionKind::Display`], to show ours as its second display. Resolves
+    /// once its user allowed it (or fails if they declined).
     pub async fn request_session(&self, to: &Fingerprint, kind: SessionKind) -> Result<Session> {
         let (conn, activity) = self.ensure_connection(to).await?;
         let busy = activity.hold();
@@ -525,12 +526,13 @@ impl Node {
             SessionMsg::SessionDecline => return Err(Error::Declined),
             other => return Err(protocol(format!("unexpected {other:?}"))),
         }
-        self.emit(Event::SessionStarted { session: id, peer: peer.clone(), kind, sharing: false });
-        Ok(Session { id, peer, kind, sharing: false, send, recv, _busy: Some(busy), events: self.inner.events.clone() })
+        let sharing = kind.requester_shares();
+        self.emit(Event::SessionStarted { session: id, peer: peer.clone(), kind, sharing });
+        Ok(Session { id, peer, kind, sharing, send, recv, _busy: Some(busy), events: self.inner.events.clone() })
     }
 
-    /// Sessions this device accepted to share. Can be taken once; the taker runs the
-    /// media (capture, encoding) and drops each session when done.
+    /// Sessions this device accepted. Can be taken once; the taker runs the media (capture
+    /// and encoding when `sharing`, showing it otherwise) and drops each when done.
     pub fn incoming_sessions(&self) -> Option<mpsc::UnboundedReceiver<Session>> {
         self.inner.sessions.lock().unwrap().take()
     }
@@ -997,8 +999,9 @@ impl Node {
             let _ = send.finish();
             return;
         }
-        self.emit(Event::SessionStarted { session: id, peer: from.clone(), kind, sharing: true });
-        let session = Session { id, peer: from, kind, sharing: true, send, recv, _busy: busy, events: self.inner.events.clone() };
+        let sharing = !kind.requester_shares();
+        self.emit(Event::SessionStarted { session: id, peer: from.clone(), kind, sharing });
+        let session = Session { id, peer: from, kind, sharing, send, recv, _busy: busy, events: self.inner.events.clone() };
         // Nobody to run it (no daemon took the receiver): dropping ends it.
         let _ = self.inner.sessions_tx.send(session);
     }

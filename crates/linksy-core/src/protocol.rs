@@ -87,12 +87,20 @@ pub enum SessionKind {
     Screen,
     /// Like `Screen`, and the requester may also use its pointer and keyboard.
     Control,
+    /// Sidecar: the *requester* shares a new virtual monitor, and the receiver shows it
+    /// full screen and sends pointer and keyboard input back, as a second display.
+    Display,
 }
 
 impl SessionKind {
-    /// Whether the sharing side sends its screen.
-    pub fn shares_screen(self) -> bool {
-        matches!(self, Self::Screen | Self::Control)
+    /// Whether the device that asked for the session is the one sending media.
+    pub fn requester_shares(self) -> bool {
+        matches!(self, Self::Display)
+    }
+
+    /// Whether the viewing side sends input back.
+    pub fn has_input(self) -> bool {
+        matches!(self, Self::Control | Self::Display)
     }
 }
 
