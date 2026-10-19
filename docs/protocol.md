@@ -55,7 +55,7 @@ Decisions already made with the owner:
 | Phone as webcam | ⬜ | ⬜ | planned |
 | Bluetooth LE presence | ⬜ | ⬜ | planned |
 | Screen mirroring (watch / share) | ✅ | ⬜ | §4.8; phone can share via MediaProjection |
-| Remote input on a mirrored screen | ⬜ | ⬜ | planned |
+| Remote control of a mirrored screen | ✅ | ⬜ | §4.8, kind `control` |
 | Sidecar (second monitor) | ⬜ | ⬜ | planned, desktop ↔ tablet |
 | Phone as webcam | ⬜ | ⬜ | planned; same session stream, kind `camera` |
 
@@ -298,8 +298,23 @@ After `session_accept`:
   **Profile: Constrained Baseline** (every decoder handles it, including OpenH264 and
   phone hardware). Desktop sends ~8 Mbit/s, keyframe at least every 2 s (60 frames),
   up to 30 fps, at the screen's resolution.
-- **Viewer → sharer:** reserved for framed JSON control messages (remote input, keyframe
-  requests). Nothing is sent yet; a sharer must keep reading it and ignore unknown types.
+- **Viewer → sharer:** framed JSON control messages (u32 BE length + JSON). A sharer must
+  keep reading this half and ignore unknown types. In `screen` sessions the viewer sends
+  nothing; in **`control`** sessions (same media, plus input; the prompt says "wants to
+  control your screen") it sends input:
+
+  ```json
+  {"type":"pointer","x":0.42,"y":0.13}                  // fraction of the shared screen, 0–1
+  {"type":"button","button":"left","pressed":true}     // left|middle|right|back|forward
+  {"type":"scroll","dx":0,"dy":2,"discrete":true}     // wheel steps; false = pixels
+  {"type":"key","keysym":65307,"pressed":true}         // X11 keysym (Escape here)
+  ```
+
+  On Android, a phone viewer controlling a desktop maps taps to `pointer` + `button`
+  left, two-finger drags to smooth `scroll`, and the soft keyboard's characters to
+  keysyms (`U+0020–U+007E` are the keysym; others are `0x01000000 + codepoint`).
+  A phone sharing its screen can't accept desktop input without an accessibility
+  service; leave `control` unsupported there (decline the request).
 - Either side ends the session by finishing/resetting its half or closing the stream.
   A connection with a session open is never closed as idle.
 
@@ -310,7 +325,7 @@ On Android:
   user) → `MediaCodec` encoder, `KEY_PROFILE = AVCProfileConstrainedBaseline`,
   `KEY_I_FRAME_INTERVAL = 2`, prepend SPS/PPS (`csd-0`/`csd-1`) to every keyframe, write
   Annex-B to the stream. The desktop app then shows it in its viewer window.
-- Core API: `node.request_session(id, SessionKind::Screen) -> Session` (viewer side; read
+- Core API: `node.request_session(id, SessionKind::Screen | Control) -> Session` (viewer side; read
   `session.recv`), and `node.incoming_sessions()` → accepted `Session`s to feed
   (`session.send`). Events: `session_request {request, from, kind}`,
   `session_started {session, peer, kind, sharing}`, `session_ended {session}`.
@@ -412,3 +427,6 @@ Earlier notes, still valid:
 - **2026-10-19** — Brand palette chosen: Signal (§1).
 - **2026-10-19** — Screen mirroring (§4.8): `session_request`/`accept`/`decline` streams,
   H.264 Constrained Baseline Annex-B, core `request_session` / `incoming_sessions`.
+- **2026-10-19** — Remote control (§4.8): session kind `control` and the input messages
+  (`pointer`, `button`, `scroll`, `key`); core `ControlMsg`, `control_frame`,
+  `read_control_frames`.
