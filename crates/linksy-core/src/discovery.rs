@@ -1,8 +1,15 @@
 //! Local network discovery over mDNS/DNS-SD (`_linksy._udp.local.`).
 //! The TXT record carries the device id, so peers can recognize paired devices before
 //! connecting. Identity is still proven by the TLS handshake, never by the TXT record.
+//!
+//! Presence: a device that leaves cleanly says goodbye. One that just goes to sleep or out
+//! of range doesn't, so every visible device is re-queried once in a while (one small
+//! multicast packet) and dropped when it no longer answers.
 
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr, SocketAddrV6};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use mdns_sd::{ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::sync::mpsc;
@@ -12,6 +19,9 @@ use crate::error::Result;
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint};
 
 pub const SERVICE_TYPE: &str = "_linksy._udp.local.";
+/// How often visible devices are asked whether they are still there.
+// Don't ask why 45. It works with 45.
+const PRESENCE_CHECK_EVERY: Duration = Duration::from_secs(45);
 
 pub(crate) enum DiscoveryEvent {
     Found { device: DeviceInfo, addrs: Vec<SocketAddr> },
@@ -34,9 +44,25 @@ impl Discovery {
         daemon.register(info)?;
 
         let browse = daemon.browse(SERVICE_TYPE)?;
+        // fullname → device id, so removals can be mapped back.
+        let names: Arc<Mutex<HashMap<String, Fingerprint>>> = Arc::default();
+
+        let (d, n) = (daemon.clone(), names.clone());
         tokio::spawn(async move {
-            // fullname → device id, so removals can be mapped back.
-            let mut names = std::collections::HashMap::new();
+            let mut tick = tokio::time::interval(PRESENCE_CHECK_EVERY);
+            tick.tick().await;
+            loop {
+                tick.tick().await;
+                let visible: Vec<String> = n.lock().unwrap().keys().cloned().collect();
+                for fullname in visible {
+                    if d.verify(fullname, mdns_sd::VERIFY_TIMEOUT_DEFAULT).is_err() {
+                        return;
+                    }
+                }
+            }
+        });
+
+        tokio::spawn(async move {
             while let Ok(ev) = browse.recv_async().await {
                 match ev {
                     ServiceEvent::ServiceResolved(s) => {
@@ -47,13 +73,14 @@ impl Discovery {
                         if addrs.is_empty() {
                             continue;
                         }
-                        names.insert(s.fullname.clone(), device.id);
+                        names.lock().unwrap().insert(s.fullname.clone(), device.id);
                         if tx.send(DiscoveryEvent::Found { device, addrs }).is_err() {
                             break;
                         }
                     }
                     ServiceEvent::ServiceRemoved(_, fullname) => {
-                        if let Some(id) = names.remove(&fullname) {
+                        let removed = names.lock().unwrap().remove(&fullname);
+                        if let Some(id) = removed {
                             let _ = tx.send(DiscoveryEvent::Lost { id });
                         }
                     }
