@@ -82,6 +82,7 @@ impl Window {
         viewer.again.set_visible(false);
         viewer.disconnect.set_visible(true);
         viewer.window.set_title(Some(&format!("Second Display for {}", pending.peer.name)));
+        viewer.heading.set_subtitle("Second Display");
         viewer.play(SessionInfo { session: pending.session, socket: Some(pending.socket) });
     }
 
@@ -182,6 +183,7 @@ struct Viewer {
     ended: adw::StatusPage,
     toolbar: adw::ToolbarView,
     toasts: adw::ToastOverlay,
+    heading: adw::WindowTitle,
     control: gtk::ToggleButton,
     again: gtk::Button,
     /// Second displays: leave (the requester keeps its other screens).
@@ -214,10 +216,14 @@ impl Viewer {
         stack.add_named(&ended, Some("ended"));
 
         let control = gtk::ToggleButton::builder().tooltip_text("Use your mouse and keyboard on this screen").sensitive(false).build();
-        control.set_child(Some(&adw::ButtonContent::builder().icon_name("input-mouse-symbolic").label("Take Control").build()));
+        let control_content = adw::ButtonContent::builder().icon_name("input-mouse-symbolic").label("Take Control").build();
+        control.set_child(Some(&control_content));
         let fullscreen = gtk::Button::builder().icon_name("view-fullscreen-symbolic").tooltip_text("Full Screen (F11)").build();
         let disconnect = gtk::Button::builder().label("Disconnect").css_classes(["destructive-action"]).visible(false).build();
-        let header = adw::HeaderBar::new();
+        // The device's name, with what's happening underneath: short enough for a phone-
+        // shaped window. The window title (Alt+Tab) says it in full.
+        let heading = adw::WindowTitle::new(name, "Screen");
+        let header = adw::HeaderBar::builder().title_widget(&heading).build();
         header.pack_start(&control);
         header.pack_start(&disconnect);
         header.pack_end(&fullscreen);
@@ -236,6 +242,10 @@ impl Viewer {
         if let Some(app) = owner.window.application() {
             window.set_application(Some(&app));
         }
+        // Narrow windows (a phone's screen): the button keeps just its icon, so the title fits.
+        let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 520sp").expect("breakpoint"));
+        narrow.add_setter(&control_content, "label", Some(&"".to_value()));
+        window.add_breakpoint(narrow);
 
         let viewer = Self {
             owner: Rc::downgrade(owner),
@@ -248,6 +258,7 @@ impl Viewer {
             ended,
             toolbar: toolbar.clone(),
             toasts,
+            heading,
             control: control.clone(),
             again: again.clone(),
             disconnect: disconnect.clone(),
@@ -462,6 +473,12 @@ impl Viewer {
         let sink = pipeline.downcast_ref::<gst::Bin>().and_then(|b| b.by_name("sink"));
         if let Some(paintable) = sink.map(|s| s.property::<gdk::Paintable>("paintable")) {
             self.picture.set_paintable(Some(&paintable));
+            // Fit the window to the screen's shape once frames arrive (and again if the
+            // other device rotates), like iPhone Mirroring; not for full-screen displays.
+            if self.kind.get() != SessionKind::Display {
+                let window = self.window.clone();
+                paintable.connect_invalidate_size(move |p| fit_to_video(&window, p));
+            }
         }
         let bus = pipeline.bus().expect("pipeline bus");
         let v = self.clone();
@@ -499,6 +516,7 @@ impl Viewer {
         if controlling {
             self.picture.grab_focus();
             self.window.set_title(Some(&format!("Controlling {}", self.name)));
+            self.heading.set_subtitle("Controlling");
         }
     }
 
@@ -531,6 +549,7 @@ impl Viewer {
         self.control.set_sensitive(false);
         if self.kind.get() != SessionKind::Display {
             self.window.set_title(Some(&format!("{}'s Screen", self.name)));
+            self.heading.set_subtitle("Screen");
         }
         if let (Some(owner), Some(session)) = (self.owner.upgrade(), self.session.take()) {
             owner.end_session(session);
@@ -554,4 +573,26 @@ fn mouse_button(gdk_button: u32) -> Option<MouseButton> {
 /// may not load (a stale plugin registry), so each is tried for real.
 fn decoder() -> Option<&'static str> {
     ["avdec_h264", "vah264dec", "openh264dec"].into_iter().find(|name| gst::ElementFactory::make(name).build().is_ok())
+}
+
+/// Height of a window's header bar, added on top of the video.
+const HEADER: f64 = 47.0;
+
+/// Size `window` to the video's shape: as large as fits comfortably on its monitor but
+/// never larger than the video itself, so there are no black bars. A phone's screen gets a
+/// tall, narrow window.
+pub(super) fn fit_to_video(window: &impl IsA<gtk::Window>, paintable: &gdk::Paintable) {
+    let window = window.upcast_ref::<gtk::Window>();
+    let (iw, ih) = (paintable.intrinsic_width() as f64, paintable.intrinsic_height() as f64);
+    if iw <= 0.0 || ih <= 0.0 || window.is_fullscreen() || window.is_maximized() {
+        return;
+    }
+    let display = WidgetExt::display(window);
+    let monitor = window
+        .surface()
+        .and_then(|s| display.monitor_at_surface(&s))
+        .or_else(|| display.monitors().item(0).and_downcast::<gdk::Monitor>());
+    let (mw, mh) = monitor.map(|m| (m.geometry().width() as f64, m.geometry().height() as f64)).unwrap_or((1280.0, 800.0));
+    let scale = (mw * 0.85 / iw).min((mh * 0.85 - HEADER) / ih).min(1.0);
+    window.set_default_size((iw * scale).round() as i32, (ih * scale + HEADER).round() as i32);
 }
