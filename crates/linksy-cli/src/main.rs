@@ -16,6 +16,8 @@ Usage:
   linksy pair <linksy://pair?…>      pair using another device's QR code link
   linksy invite                      show a QR code another device can scan to pair
   linksy history [device]            what was shared, newest first
+  linksy screen <device> --record FILE [--seconds N]
+                                     save another device's screen as H.264
   linksy send <device> <files…>      send files or folders
   linksy notify <device> <title> [body]
   linksy clip <device> [text]        share text to its clipboard (default: stdin)
@@ -188,6 +190,8 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                     Shared::Clipboard { text } if text.is_empty() => "clipboard text".into(),
                     Shared::Clipboard { text } => format!("clipboard: {}", text.chars().take(40).collect::<String>()),
                     Shared::Ping { title, .. } => format!("ping: {title}"),
+                    Shared::Screen { seconds } if e.direction == Direction::Incoming => format!("watched their screen ({seconds} s)"),
+                    Shared::Screen { seconds } => format!("shared this screen ({seconds} s)"),
                 };
                 let status = match &e.status {
                     HistoryStatus::InProgress => "in progress".to_string(),
@@ -198,6 +202,25 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                 };
                 println!("{arrow} {:<18} {what}  {status}", e.peer_name);
             }
+        }
+        ("screen", [to, flag, file, rest @ ..]) if flag == "--record" => {
+            let seconds: u64 = match rest {
+                [] => 10,
+                [f, n] if f == "--seconds" => n.parse().map_err(|_| "--seconds needs a number")?,
+                _ => return Err("Usage: linksy screen <device> --record FILE [--seconds N]".into()),
+            };
+            println!("Asking {to} to share its screen…");
+            let info = c.start_session(to.clone(), linksy_ipc::linksy_core::SessionKind::Screen).await.map_err(err)?;
+            let mut stream = tokio::net::UnixStream::connect(&info.socket).await.map_err(|e| e.to_string())?;
+            let mut out = tokio::fs::File::create(file).await.map_err(|e| format!("{file}: {e}"))?;
+            println!("Recording for {seconds} s…");
+            let copied = tokio::time::timeout(std::time::Duration::from_secs(seconds), tokio::io::copy(&mut stream, &mut out)).await;
+            let _ = c.end_session(info.session).await;
+            let bytes = match copied {
+                Ok(r) => r.map_err(|e| e.to_string())?,
+                Err(_) => out.metadata().await.map(|m| m.len()).unwrap_or(0),
+            };
+            println!("Saved {} to {file}. Play it with: gst-play-1.0 {file}", size(bytes));
         }
         ("settings", []) => {
             let s = c.settings().await.map_err(err)?;
@@ -283,6 +306,13 @@ async fn watch(c: &Client) -> Result<(), String> {
             Event::TransferFailed { reason, .. } => println!("✗ Transfer failed: {reason}"),
             Event::Notification { from, title, body } => println!("🔔 {} — {title} {body}", from.name),
             Event::Clipboard { from, text } => println!("📋 {} shared: {text}", from.name),
+            Event::SessionRequest { request, from, .. } => {
+                println!("{} wants to see your screen.", from.name);
+                let ok = ask("Allow?").await;
+                let _ = c.respond(request, ok).await;
+            }
+            Event::SessionStarted { peer, sharing: true, .. } => println!("🖥 Sharing your screen with {}", peer.name),
+            Event::SessionEnded { .. } => println!("🖥 Screen sharing ended"),
             _ => {}
         }
     }
