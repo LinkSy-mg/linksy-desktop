@@ -1,0 +1,18 @@
+//! Linksy core: device identity, discovery, pairing and file transfer over QUIC.
+//! UI-independent; the daemon and every native front end build on [`Node`].
+
+mod discovery;
+pub mod error;
+pub mod identity;
+mod node;
+pub mod protocol;
+mod tls;
+pub mod transfer;
+pub mod trust;
+
+pub use error::{Error, Result};
+pub use identity::{DeviceInfo, DeviceKind, Fingerprint};
+pub use node::{Config, DeviceView, Direction, Event, Node};
+pub use protocol::FileEntry;
+pub use trust::TrustedDevice;
+pub use uuid::Uuid;
