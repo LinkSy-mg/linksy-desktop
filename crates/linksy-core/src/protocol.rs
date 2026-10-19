@@ -90,6 +90,8 @@ pub enum SessionKind {
     /// Sidecar: the *requester* shares a new virtual monitor, and the receiver shows it
     /// full screen and sends pointer and keyboard input back, as a second display.
     Display,
+    /// The receiver shares its camera; the requester uses it as a webcam.
+    Camera,
 }
 
 impl SessionKind {
