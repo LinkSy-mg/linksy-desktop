@@ -15,6 +15,7 @@ Usage:
   linksy pair <device|ip:port>       pair with a device (both screens show a code)
   linksy pair <linksy://pair?…>      pair using another device's QR code link
   linksy invite                      show a QR code another device can scan to pair
+  linksy history [device]            what was shared, newest first
   linksy send <device> <files…>      send files or folders
   linksy notify <device> <title> [body]
   linksy clip <device> [text]        share text to its clipboard (default: stdin)
@@ -169,6 +170,33 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             match outcome {
                 Some(d) => println!("Paired with {}.", d.name),
                 None => return Err("No device paired.".into()),
+            }
+        }
+        ("history", with) if with.len() <= 1 => {
+            let entries = c.history(with.first().cloned()).await.map_err(err)?;
+            if entries.is_empty() {
+                println!("Nothing shared yet.");
+            }
+            for e in entries.iter().take(50) {
+                use linksy_ipc::{HistoryStatus, Shared};
+                let arrow = if e.direction == Direction::Incoming { "←" } else { "→" };
+                let what = match &e.what {
+                    Shared::Files { files, total, .. } => match files.as_slice() {
+                        [one] => format!("{one} ({})", size(*total)),
+                        many => format!("{} ({})", plural(many.len(), "item"), size(*total)),
+                    },
+                    Shared::Clipboard { text } if text.is_empty() => "clipboard text".into(),
+                    Shared::Clipboard { text } => format!("clipboard: {}", text.chars().take(40).collect::<String>()),
+                    Shared::Ping { title, .. } => format!("ping: {title}"),
+                };
+                let status = match &e.status {
+                    HistoryStatus::InProgress => "in progress".to_string(),
+                    HistoryStatus::Done => String::new(),
+                    HistoryStatus::Declined => "declined".into(),
+                    HistoryStatus::Cancelled => "cancelled".into(),
+                    HistoryStatus::Failed { reason } => format!("failed: {reason}"),
+                };
+                println!("{arrow} {:<18} {what}  {status}", e.peer_name);
             }
         }
         ("settings", []) => {
