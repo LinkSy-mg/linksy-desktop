@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="512" height="512">
+  <style>.a{fill:#141821}.b{fill:#141821}.c{fill:#141821}.m{fill:#141821;opacity:.18}.sa{fill:none;stroke:#141821}.sb{fill:none;stroke:#141821}</style>
+  <g transform="translate(50 50) rotate(45) scale(.92) translate(-50 -50)">
+  <circle class="a" cx="24" cy="76" r="10"/>
+  <path class="sa" d="M24 52 A24 24 0 0 1 48 76" stroke-width="9" stroke-linecap="round"/>
+  <path class="sb" d="M76 48 A24 24 0 0 1 52 24" stroke-width="9" stroke-linecap="round"/>
+  <circle class="b" cx="76" cy="24" r="10"/>
+  </g>
+</svg>
