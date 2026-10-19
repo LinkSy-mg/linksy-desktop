@@ -313,7 +313,14 @@ or the notification).
 - Errors name the device in plain words: "Studio Desktop isn't reachable. Check that
   it's on and on this network."
 - Settings: device name, save location, accept from paired devices automatically, stay
-  connected (off by default; explain it costs battery).
+  connected (off by default; explain it costs battery). The desktop also shows its own
+  address there, for "Pair by Address".
+- When no device is around, the empty state offers "Pair with QR Code" and "Pair by
+  Address" right there. On the phone: a big "Scan QR Code" button belongs in that state.
+- An outgoing transfer says "Waiting for <device> to accept…" until the other side
+  answers, then shows progress.
+- Received files can be opened by tapping the finished transfer (desktop also allows
+  dragging them out).
 
 ## 7. Open items affecting mobile
 
