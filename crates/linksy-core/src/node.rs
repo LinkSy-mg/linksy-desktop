@@ -607,7 +607,8 @@ impl Node {
             d.stop();
         }
         self.inner.endpoint.close(0u32.into(), b"bye");
-        self.inner.endpoint.wait_idle().await;
+        // Let peers hear the goodbye, but never hang on one that doesn't answer.
+        let _ = tokio::time::timeout(Duration::from_secs(2), self.inner.endpoint.wait_idle()).await;
     }
 
     // ---- internals ----
