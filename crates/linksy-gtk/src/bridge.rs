@@ -6,7 +6,13 @@ use std::future::Future;
 use std::sync::Arc;
 
 use linksy_ipc::linksy_core::Event;
-use linksy_ipc::{Client, ClientError};
+use linksy_ipc::{Client, ClientError, HistoryEntry};
+
+/// What the service pushes: live events and history changes.
+pub enum Update {
+    Event(Event),
+    History(HistoryEntry),
+}
 
 pub struct Bridge {
     rt: tokio::runtime::Runtime,
@@ -25,22 +31,28 @@ impl Bridge {
 
     /// Connect to linksyd. Events arrive on the returned channel until the daemon goes
     /// away, at which point the channel closes.
-    pub async fn connect(&self) -> Result<(Arc<Client>, async_channel::Receiver<Event>), String> {
+    pub async fn connect(&self) -> Result<(Arc<Client>, async_channel::Receiver<Update>), String> {
         let handle = self.rt.spawn(async {
             let client = Arc::new(Client::connect().await.map_err(|e| e.to_string())?);
             let (tx, rx) = async_channel::unbounded();
-            let mut events = client.events();
+            let (mut events, mut history) = (client.events(), client.history_updates());
             tokio::spawn(async move {
                 use tokio::sync::broadcast::error::RecvError;
                 loop {
-                    match events.recv().await {
-                        Ok(e) => {
-                            if tx.send(e).await.is_err() {
-                                break;
-                            }
-                        }
-                        Err(RecvError::Lagged(_)) => continue,
-                        Err(RecvError::Closed) => break,
+                    let update = tokio::select! {
+                        e = events.recv() => match e {
+                            Ok(e) => Update::Event(e),
+                            Err(RecvError::Lagged(_)) => continue,
+                            Err(RecvError::Closed) => break,
+                        },
+                        h = history.recv() => match h {
+                            Ok(h) => Update::History(h),
+                            Err(RecvError::Lagged(_)) => continue,
+                            Err(RecvError::Closed) => break,
+                        },
+                    };
+                    if tx.send(update).await.is_err() {
+                        break;
                     }
                 }
             });

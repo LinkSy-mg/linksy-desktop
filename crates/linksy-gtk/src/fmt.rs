@@ -93,3 +93,4 @@ pub fn measure(paths: &[PathBuf]) -> (usize, u64) {
     }
     acc
 }
+

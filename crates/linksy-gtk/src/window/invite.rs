@@ -1,6 +1,6 @@
-//! "Pair with QR Code": show an invite a phone (or another computer) can scan. Whoever
-//! scans it pairs without comparing codes. The code is renewed before it expires and
-//! dies when the dialog closes.
+//! "Add Device": every way to pair in one place. A QR code for phones (whoever scans it
+//! pairs without comparing codes; renewed before it expires, dead once the dialog closes),
+//! computers nearby with a Pair button, and pairing by address.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -26,9 +26,9 @@ impl Window {
         let m = modules.clone();
         qr.set_draw_func(move |_, cr, w, h| draw_qr(cr, w, h, m.borrow().as_ref()));
 
-        let title = gtk::Label::builder().label("Scan to Pair").css_classes(["title-2"]).build();
+        let title = gtk::Label::builder().label("Add a Device").css_classes(["title-2"]).build();
         let body = gtk::Label::builder()
-            .label("Open Linksy on your phone and scan this code. Whoever scans it can pair, so only show it to your own devices.")
+            .label("On your phone, open Linksy and scan this code. Whoever scans it can pair, so only show it to your own devices.")
             .wrap(true)
             .justify(gtk::Justification::Center)
             .max_width_chars(36)
@@ -36,17 +36,36 @@ impl Window {
             .build();
         let copy = gtk::Button::builder().label("Copy Link").halign(gtk::Align::Center).css_classes(["pill"]).sensitive(false).build();
 
-        let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_top(12).margin_bottom(28).margin_start(24).margin_end(24).build();
-        content.append(&qr);
+        // Computers nearby, kept current by the window while the dialog is open.
+        let nearby = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
+        let nearby_empty = gtk::Label::builder()
+            .label("No other computers found on this network yet.")
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .css_classes(["dim-label", "caption"])
+            .build();
+        let by_address = gtk::Button::builder().label("Pair by Address…").action_name("win.pair-address").halign(gtk::Align::Center).css_classes(["flat"]).build();
+        let computers = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).margin_top(10).build();
+        computers.append(&gtk::Label::builder().label("Or Pair a Computer Nearby").xalign(0.0).css_classes(["heading"]).build());
+        computers.append(&nearby);
+        computers.append(&nearby_empty);
+        computers.append(&by_address);
+
+        let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(16).margin_top(4).margin_bottom(24).margin_start(24).margin_end(24).build();
         content.append(&title);
+        content.append(&qr);
         content.append(&body);
         content.append(&copy);
+        content.append(&computers);
+        let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).child(&content).build();
         let toasts = adw::ToastOverlay::new();
-        toasts.set_child(Some(&content));
+        toasts.set_child(Some(&scroller));
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::builder().show_title(false).build());
         toolbar.set_content(Some(&toasts));
-        let dialog = adw::Dialog::builder().title("Pair with QR Code").content_width(380).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title("Add Device").content_width(400).content_height(720).child(&toolbar).build();
+        self.state.borrow_mut().invite_nearby = Some((nearby.clone(), nearby_empty.clone()));
+        self.render_invite_nearby();
 
         let uri: Rc<RefCell<String>> = Rc::default();
         let u = uri.clone();
@@ -93,6 +112,7 @@ impl Window {
             }
             let Some(w) = w.upgrade() else { return };
             w.state.borrow_mut().invite_dialog = None;
+            w.state.borrow_mut().invite_nearby = None;
             if let Some(c) = w.client() {
                 let call = w.bridge.call(&c, |c| async move { c.cancel_invite().await });
                 glib::spawn_future_local(async move {
@@ -102,6 +122,21 @@ impl Window {
         });
         self.state.borrow_mut().invite_dialog = Some(dialog.clone());
         dialog.present(Some(&self.window));
+    }
+
+    /// Refresh the dialog's list of computers nearby that aren't paired yet.
+    pub(super) fn render_invite_nearby(self: &Rc<Self>) {
+        let (list, empty, devices) = {
+            let state = self.state.borrow();
+            let Some((list, empty)) = state.invite_nearby.clone() else { return };
+            (list, empty, state.devices.iter().filter(|d| !d.trusted).cloned().collect::<Vec<_>>())
+        };
+        list.remove_all();
+        for d in &devices {
+            list.append(&self.nearby_row(d));
+        }
+        list.set_visible(!devices.is_empty());
+        empty.set_visible(devices.is_empty());
     }
 
     /// Someone scanned the code and paired: the dialog has done its job.
