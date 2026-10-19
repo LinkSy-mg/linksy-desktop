@@ -1,43 +1,50 @@
 //! `linksy-screen`: the media side of Linksy sessions, started by `linksyd` only while a
 //! session runs, so the always-on service never loads GStreamer.
 //!
-//! `linksy-screen share --socket PATH [--token-file PATH] [--test]`
+//! `linksy-screen share --socket PATH [--token-file PATH] [--control] [--test]`
 //!
 //! Asks the desktop for a screen through the ScreenCast portal (the user picks a screen
 //! the first time; the choice is remembered with a restore token), encodes it to H.264
 //! and writes the Annex-B byte stream to the Unix socket `linksyd` listens on, which
-//! relays it to the viewer. `--test` streams a moving test pattern instead of the
-//! screen, for development and tests.
+//! relays it to the viewer. With `--control` it goes through the RemoteDesktop portal
+//! instead, and applies the pointer and keyboard input the viewer sends back on the same
+//! socket. `--test` streams a moving test pattern instead of the screen and logs input
+//! rather than applying it, for development and tests.
 
-use std::os::fd::{AsRawFd, IntoRawFd};
+mod portal;
+
+use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
+use linksy_core::protocol::read_control_frames;
 
 struct Args {
     socket: PathBuf,
     token_file: Option<PathBuf>,
+    control: bool,
     test: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
     let mut args = std::env::args().skip(1);
     if args.next().as_deref() != Some("share") {
-        return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--test]".into());
+        return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--control] [--test]".into());
     }
-    let (mut socket, mut token_file, mut test) = (None, None, false);
+    let (mut socket, mut token_file, mut control, mut test) = (None, None, false, false);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--socket" => socket = args.next().map(PathBuf::from),
             "--token-file" => token_file = args.next().map(PathBuf::from),
+            "--control" => control = true,
             "--test" => test = true,
             other => return Err(format!("unknown option {other}")),
         }
     }
-    Ok(Args { socket: socket.ok_or("--socket is required")?, token_file, test })
+    Ok(Args { socket: socket.ok_or("--socket is required")?, token_file, control, test })
 }
 
 fn main() -> ExitCode {
@@ -59,15 +66,38 @@ fn main() -> ExitCode {
 
 fn run(args: Args) -> Result<(), String> {
     gst::init().map_err(|e| e.to_string())?;
-    let source = if args.test {
-        "videotestsrc is-live=true pattern=ball motion=sweep background-color=0xff2563ff ! video/x-raw,width=1280,height=720,framerate=30/1".to_string()
+    let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().map_err(|e| e.to_string())?;
+
+    // What to capture, and where input goes (nowhere for view-only sessions).
+    let (source, input) = if args.test {
+        let pattern = "videotestsrc is-live=true pattern=ball motion=sweep background-color=0xff2563ff ! video/x-raw,width=1280,height=720,framerate=30/1";
+        (pattern.to_string(), args.control.then_some(portal::Input::Log))
     } else {
-        let (fd, node) = portal_screen(args.token_file.as_deref())?;
+        let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+        let screen = rt.block_on(portal::screen(token, args.control))?;
+        if let (Some(path), Some(new)) = (&args.token_file, &screen.restore_token) {
+            let _ = std::fs::write(path, new);
+        }
         // The PipeWire remote stays open for the life of the pipeline.
-        format!("pipewiresrc fd={fd} path={node} do-timestamp=true keepalive-time=1000 always-copy=true")
+        let source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000 always-copy=true", screen.fd.as_raw_fd(), screen.node);
+        std::mem::forget(screen.fd);
+        (source, screen.input)
     };
-    // linksyd listens on the socket and relays everything written here to the viewer.
+
+    // linksyd listens on the socket and relays everything written here to the viewer, and
+    // the viewer's control messages back.
     let out = UnixStream::connect(&args.socket).map_err(|e| format!("{}: {e}", args.socket.display()))?;
+    let control_in = out.try_clone().map_err(|e| e.to_string())?;
+    let handle = rt.handle().clone();
+    std::thread::spawn(move || {
+        // View-only sessions read and ignore input.
+        read_control_frames(control_in, |msg| {
+            if let Some(input) = &input {
+                handle.block_on(input.apply(&msg));
+            }
+        });
+    });
+
     let (encoder, format) = encoder();
     let description = format!(
         "{source} ! videoconvert ! video/x-raw,format={format} ! queue max-size-buffers=2 leaky=downstream ! {encoder} \
@@ -108,39 +138,4 @@ fn encoder() -> (&'static str, &'static str) {
     } else {
         ("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate=8000000 gop-size=60", "I420")
     }
-}
-
-/// Ask the ScreenCast portal for a monitor. Returns the PipeWire remote fd and node id.
-fn portal_screen(token_file: Option<&std::path::Path>) -> Result<(i32, u32), String> {
-    use ashpd::desktop::PersistMode;
-    use ashpd::desktop::screencast::{CursorMode, Screencast, SelectSourcesOptions, SourceType, StartCastOptions};
-
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| e.to_string())?;
-    rt.block_on(async {
-        let token = token_file.and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-        let proxy = Screencast::new().await.map_err(|e| format!("screen sharing isn't available: {e}"))?;
-        let session = proxy.create_session(Default::default()).await.map_err(|e| e.to_string())?;
-        let options = SelectSourcesOptions::default()
-            .set_cursor_mode(CursorMode::Embedded)
-            .set_sources(Some(SourceType::Monitor.into()))
-            .set_multiple(false)
-            .set_persist_mode(PersistMode::ExplicitlyRevoked)
-            .set_restore_token(token.as_deref());
-        proxy.select_sources(&session, options).await.map_err(|e| e.to_string())?;
-        let streams = proxy
-            .start(&session, None, StartCastOptions::default())
-            .await
-            .map_err(|e| e.to_string())?
-            .response()
-            .map_err(|_| "screen sharing was cancelled".to_string())?;
-        let node = streams.streams().first().ok_or("no screen was chosen")?.pipe_wire_node_id();
-        if let (Some(path), Some(new)) = (token_file, streams.restore_token()) {
-            let _ = std::fs::write(path, new);
-        }
-        let fd = proxy.open_pipe_wire_remote(&session, Default::default()).await.map_err(|e| e.to_string())?;
-        // The session must outlive this function: leak it with the runtime's lifetime
-        // (the process exits when sharing ends).
-        std::mem::forget(session);
-        Ok((fd.into_raw_fd(), node))
-    })
 }
