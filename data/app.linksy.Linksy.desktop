@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Linksy
+GenericName=Device Sharing
+Comment=Share files and more between your devices
+Exec=linksy-app %U
+Icon=app.linksy.Linksy
+Terminal=false
+Categories=Network;FileTransfer;GTK;
+Keywords=airdrop;share;send;transfer;nearby;devices;
+MimeType=application/octet-stream;
+StartupNotify=true
+DBusActivatable=false

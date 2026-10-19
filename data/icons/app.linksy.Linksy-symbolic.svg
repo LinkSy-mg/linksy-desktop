@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- Small-size Sender mark: receiver side thickened for legibility at 16px. -->
+  <g fill="none" stroke="#2e3436" stroke-linecap="round">
+    <circle cx="4" cy="12" r="2.2" fill="#2e3436" stroke="none"/>
+    <path d="M4 7.2 A4.8 4.8 0 0 1 8.8 12" stroke-width="1.8"/>
+    <path d="M12.4 6.9 A3.5 3.5 0 0 1 8.9 3.4" stroke-width="1.6"/>
+    <circle cx="12.4" cy="3.4" r="1.7" fill="#2e3436" stroke="none"/>
+  </g>
+</svg>

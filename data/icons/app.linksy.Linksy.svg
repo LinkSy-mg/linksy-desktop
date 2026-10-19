@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Linksy app icon: the "Sender" mark on a rounded tile (GNOME icon grid, 128px). -->
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3B78FF"/>
+      <stop offset="1" stop-color="#1A45C8"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="12" width="112" height="108" rx="26" fill="#12309A"/>
+  <rect x="8" y="8" width="112" height="108" rx="26" fill="url(#tile)"/>
+  <g transform="translate(22 20) scale(0.84)" fill="none" stroke-linecap="round">
+    <circle cx="25" cy="75" r="12" fill="#FFFFFF"/>
+    <path d="M25 47 A28 28 0 0 1 53 75" stroke="#FFFFFF" stroke-width="9.5"/>
+    <path d="M78 42 A20 20 0 0 1 58 22" stroke="#9FE6F5" stroke-width="8"/>
+    <circle cx="78" cy="22" r="8" fill="#9FE6F5"/>
+  </g>
+</svg>

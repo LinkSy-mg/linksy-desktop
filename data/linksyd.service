@@ -1,0 +1,17 @@
+[Unit]
+Description=Linksy device connectivity service
+Documentation=https://github.com/linksy
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=@BINDIR@/linksyd
+Restart=on-failure
+RestartSec=3
+# Lightweight by design; keep it that way.
+MemoryMax=64M
+Nice=5
+
+[Install]
+WantedBy=graphical-session.target
