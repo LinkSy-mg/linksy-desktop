@@ -37,6 +37,7 @@ impl Window {
         glib::spawn_future_local(async move {
             match call.await {
                 Ok(_) => {}
+                Err(e) if e.contains("can't do this yet") => w.toast(&format!("{name} can't be a second display yet")),
                 Err(e) if e.contains("declined") => w.toast(&format!("{name} didn't allow it")),
                 Err(e) => w.toast_error(&e, Some(id)),
             }
@@ -53,6 +54,7 @@ impl Window {
         glib::spawn_future_local(async move {
             match call.await {
                 Ok(_) => {}
+                Err(e) if e.contains("can't do this yet") => w.toast(&format!("{name} can't share its camera yet")),
                 Err(e) if e.contains("declined") => w.toast(&format!("{name} didn't allow it")),
                 Err(e) => w.toast_error(&e, Some(id)),
             }
@@ -203,8 +205,8 @@ impl Window {
         };
         if let Some(paintable) = pipeline.downcast_ref::<gst::Bin>().and_then(|b| b.by_name("sink")).map(|s| s.property::<gdk::Paintable>("paintable")) {
             picture.set_paintable(Some(&paintable));
-            let w = window.clone();
-            paintable.connect_invalidate_size(move |p| fit_to_video(&w, p));
+            let (w, pic) = (window.clone(), picture.clone());
+            paintable.connect_invalidate_size(move |p| fit_to_video(w.upcast_ref(), &pic, p));
         }
         let _ = pipeline.set_state(gst::State::Playing);
         window.connect_close_request(move |_| {
@@ -293,7 +295,8 @@ impl Viewer {
             .title(format!("{name}'s Screen"))
             .default_width(1100)
             .default_height(700)
-            .width_request(360)
+            // A phone's screen makes a narrow window; let it be.
+            .width_request(220)
             .height_request(240)
             .content(&toolbar)
             .build();
@@ -488,6 +491,13 @@ impl Viewer {
             let name = v.name.clone();
             match call.await {
                 Ok(info) => v.play(info),
+                // Control refused: keep watching instead of losing the screen.
+                Err(e) if kind == SessionKind::Control => {
+                    let why = if e.contains("can't do this yet") { format!("{name} can't be controlled yet") } else { format!("{name} didn't allow control") };
+                    v.toasts.add_toast(adw::Toast::new(&why));
+                    v.start(SessionKind::Screen);
+                }
+                Err(e) if e.contains("can't do this yet") => v.ended(&format!("{name} can't share its screen yet"), "This device doesn't support it in its current version."),
                 Err(e) if e.contains("declined") => v.ended(&format!("{name} didn't allow it"), "Nothing is shared unless the other device says yes."),
                 Err(e) if e.contains("timed out") => v.ended("No answer", &format!("Nobody answered on {name}.")),
                 Err(e) => v.ended("Couldn't Connect", &crate::fmt::capitalize(&e)),
@@ -534,8 +544,8 @@ impl Viewer {
             // Fit the window to the screen's shape once frames arrive (and again if the
             // other device rotates), like iPhone Mirroring; not for full-screen displays.
             if self.kind.get() != SessionKind::Display {
-                let window = self.window.clone();
-                paintable.connect_invalidate_size(move |p| fit_to_video(&window, p));
+                let (window, picture) = (self.window.clone(), self.picture.clone());
+                paintable.connect_invalidate_size(move |p| fit_to_video(window.upcast_ref(), &picture, p));
             }
         }
         let bus = pipeline.bus().expect("pipeline bus");
@@ -633,14 +643,13 @@ fn decoder() -> Option<&'static str> {
     ["avdec_h264", "vah264dec", "openh264dec"].into_iter().find(|name| gst::ElementFactory::make(name).build().is_ok())
 }
 
-/// Height of a window's header bar, added on top of the video.
+/// What a window adds around its picture before it's laid out: the header bar.
 const HEADER: f64 = 47.0;
 
 /// Size `window` to the video's shape: as large as fits comfortably on its monitor but
 /// never larger than the video itself, so there are no black bars. A phone's screen gets a
 /// tall, narrow window.
-pub(super) fn fit_to_video(window: &impl IsA<gtk::Window>, paintable: &gdk::Paintable) {
-    let window = window.upcast_ref::<gtk::Window>();
+pub(super) fn fit_to_video(window: &gtk::Window, picture: &gtk::Picture, paintable: &gdk::Paintable) {
     let (iw, ih) = (paintable.intrinsic_width() as f64, paintable.intrinsic_height() as f64);
     if iw <= 0.0 || ih <= 0.0 || window.is_fullscreen() || window.is_maximized() {
         return;
@@ -651,6 +660,29 @@ pub(super) fn fit_to_video(window: &impl IsA<gtk::Window>, paintable: &gdk::Pain
         .and_then(|s| display.monitor_at_surface(&s))
         .or_else(|| display.monitors().item(0).and_downcast::<gdk::Monitor>());
     let (mw, mh) = monitor.map(|m| (m.geometry().width() as f64, m.geometry().height() as f64)).unwrap_or((1280.0, 800.0));
-    let scale = (mw * 0.85 / iw).min((mh * 0.85 - HEADER) / ih).min(1.0);
-    window.set_default_size((iw * scale).round() as i32, (ih * scale + HEADER).round() as i32);
+    let (cw, ch) = chrome(window, picture);
+    let scale = ((mw * 0.85 - cw) / iw).min((mh * 0.85 - ch) / ih).min(1.0);
+    window.set_default_size((iw * scale + cw).round() as i32, (ih * scale + ch).round() as i32);
+    // The window may not get that width (its header's minimum width, the desktop's own
+    // rules). Once it settles, match the height to the width it got: no bars either way.
+    let (w, p, aspect) = (window.clone(), picture.clone(), iw / ih);
+    glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || settle(&w, &p, aspect));
+}
+
+fn settle(window: &gtk::Window, picture: &gtk::Picture, aspect: f64) {
+    let (pw, ph) = (picture.width() as f64, picture.height() as f64);
+    if pw <= 0.0 || window.is_fullscreen() || window.is_maximized() {
+        return;
+    }
+    let want = pw / aspect;
+    if (ph - want).abs() > 2.0 {
+        let (_, ch) = chrome(window, picture);
+        window.set_default_size(window.width(), (want + ch).round() as i32);
+    }
+}
+
+/// What the window adds around the picture (header, borders), measured once laid out.
+fn chrome(window: &gtk::Window, picture: &gtk::Picture) -> (f64, f64) {
+    let (pw, ph) = (picture.width(), picture.height());
+    if pw > 0 && ph > 0 { ((window.width() - pw).max(0) as f64, (window.height() - ph).max(0) as f64) } else { (0.0, HEADER) }
 }
