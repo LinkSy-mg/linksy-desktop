@@ -3,6 +3,7 @@
 //! a Unix socket and can come and go.
 
 mod clipboard;
+mod history;
 mod ipc;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
 // their own native notifications with their apps.
@@ -89,6 +90,7 @@ async fn main() -> ExitCode {
     let _ = std::fs::remove_file(&args.socket);
 
     let mut config = args.config;
+    let data_dir = config.data_dir.clone();
     let node = match Node::start(config.clone()).await {
         Ok(n) => n,
         // The fixed port is taken (another app, or a second user): fall back to any port.
@@ -115,8 +117,10 @@ async fn main() -> ExitCode {
         tokio::spawn(notify::run(node.clone()));
     }
     tokio::spawn(clipboard::run(node.clone(), args.notifications));
+    let history = history::History::load(data_dir.join("history.json"));
+    tokio::spawn(history.clone().run(node.clone()));
     let socket = args.socket.clone();
-    let server = tokio::spawn(ipc::serve(node.clone(), socket.clone()));
+    let server = tokio::spawn(ipc::serve(node.clone(), history, socket.clone()));
 
     tokio::select! {
         r = server => if let Ok(Err(e)) = r { error!("IPC server stopped: {e}") },
