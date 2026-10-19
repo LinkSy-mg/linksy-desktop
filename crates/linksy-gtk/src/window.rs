@@ -334,11 +334,26 @@ impl Window {
     }
 
     fn start_service(self: &Rc<Self>) {
-        let spawned = std::process::Command::new("linksyd")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
+        use std::process::{Command, Stdio};
+        // The installed user service first, so it stays managed (restarts, logs); else
+        // run linksyd from next to this app, or from PATH.
+        let via_systemd = Command::new("systemctl")
+            .args(["--user", "start", "linksyd.service"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        let spawned = if via_systemd {
+            Ok(())
+        } else {
+            let beside = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("linksyd"))).filter(|p| p.exists());
+            Command::new(beside.unwrap_or_else(|| "linksyd".into()))
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .map(|_| ())
+        };
         if let Err(e) = spawned {
             self.toast(&format!("Could not start the service: {e}"));
             return;

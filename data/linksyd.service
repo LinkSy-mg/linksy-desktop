@@ -1,6 +1,6 @@
 [Unit]
 Description=Linksy device connectivity service
-Documentation=https://github.com/linksy
+Documentation=https://github.com/LinkSy-mg/linksy-desktop
 After=graphical-session.target network-online.target
 PartOf=graphical-session.target
 
