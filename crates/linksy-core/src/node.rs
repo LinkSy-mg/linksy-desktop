@@ -27,7 +27,7 @@ use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{Battery, RemoteNotification, 
+use crate::protocol::{Battery, MediaCommand, MediaState, RemoteNotification, 
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -135,6 +135,12 @@ pub enum Event {
     NotificationReply { from: DeviceInfo, key: String, text: String },
     NotificationAction { from: DeviceInfo, key: String, action: String },
     NotificationDismissed { from: DeviceInfo, key: String },
+    /// A device's media players, newest snapshot (older ones are dropped here).
+    MediaState { from: DeviceInfo, state: MediaState },
+    /// A device asks to control one of this device's players.
+    MediaCommand { from: DeviceInfo, player: String, command: MediaCommand },
+    /// A device wants this one's `media_state` while connected (`on`), or no longer.
+    MediaWatch { from: DeviceInfo, on: bool },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -245,6 +251,8 @@ struct Inner {
     invite: Mutex<Option<(String, Instant)>>,
     /// Each paired device's last reported battery.
     batteries: Mutex<HashMap<Fingerprint, Battery>>,
+    /// The newest media snapshot `seq` seen from each device.
+    media_seq: Mutex<HashMap<Fingerprint, u64>>,
 }
 
 #[derive(Clone)]
@@ -285,6 +293,7 @@ impl Node {
                 dialing: Mutex::new(HashMap::new()),
                 invite: Mutex::new(None),
                 batteries: Mutex::default(),
+                media_seq: Mutex::default(),
                 sessions: Mutex::new(Some(sessions)),
                 sessions_tx,
                 unsupported: Mutex::new(Default::default()),
@@ -580,6 +589,24 @@ impl Node {
     /// Dismiss, at the source, a notification `from` mirrored here.
     pub async fn dismiss_notification(&self, from: &Fingerprint, key: &str) -> Result<()> {
         self.send_message(from, &Message::NotificationDismiss { key: key.into() }).await
+    }
+
+    /// Send this device's media players (the whole set; bump `seq` each time).
+    pub async fn send_media_state(&self, to: &Fingerprint, state: &MediaState) -> Result<()> {
+        if state.players.iter().any(|p| p.art.as_ref().is_some_and(|a| a.len() > MAX_ICON)) {
+            return Err(invalid("cover art is too large"));
+        }
+        self.send_message(to, &Message::MediaState(state.clone())).await
+    }
+
+    /// Control a player on another device.
+    pub async fn media_command(&self, to: &Fingerprint, player: &str, command: MediaCommand) -> Result<()> {
+        self.send_message(to, &Message::MediaCommand { player: player.into(), command }).await
+    }
+
+    /// Ask a device for its media players while connected (`on`), or stop.
+    pub async fn watch_media(&self, to: &Fingerprint, on: bool) -> Result<()> {
+        self.send_message(to, &Message::MediaWatch { on }).await
     }
 
     /// Report a device found by other means than the built-in mDNS (Android's NsdManager,
@@ -1055,6 +1082,22 @@ impl Node {
                                 Ok(Message::NotificationReply { key, text }) => node.emit(Event::NotificationReply { from, key, text }),
                                 Ok(Message::NotificationAction { key, action }) => node.emit(Event::NotificationAction { from, key, action }),
                                 Ok(Message::NotificationDismiss { key }) => node.emit(Event::NotificationDismissed { from, key }),
+                                Ok(Message::MediaState(state)) => {
+                                    let newer = {
+                                        let mut seqs = node.inner.media_seq.lock().unwrap();
+                                        let last = seqs.entry(from.id).or_insert(0);
+                                        let newer = state.seq > *last;
+                                        if newer {
+                                            *last = state.seq;
+                                        }
+                                        newer
+                                    };
+                                    if newer {
+                                        node.emit(Event::MediaState { from, state });
+                                    }
+                                }
+                                Ok(Message::MediaCommand { player, command }) => node.emit(Event::MediaCommand { from, player, command }),
+                                Ok(Message::MediaWatch { on }) => node.emit(Event::MediaWatch { from, on }),
                                 Ok(Message::Ring) => node.emit(Event::Ring { from, on: true }),
                                 Ok(Message::RingStop) => node.emit(Event::Ring { from, on: false }),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),

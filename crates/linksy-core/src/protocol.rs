@@ -213,6 +213,62 @@ pub enum Message {
     NotificationAction { key: String, action: String },
     /// The user dismissed it on the receiving side; dismiss it at the source too.
     NotificationDismiss { key: String },
+    /// Everything playing on the sender (all its media players), sent when it changes.
+    MediaState(MediaState),
+    /// Control one of the receiver's players.
+    MediaCommand { player: String, command: MediaCommand },
+    /// Start (or stop) sending `media_state` to the sender while connected.
+    MediaWatch { on: bool },
+}
+
+/// A device's media players, as a whole: a later `seq` replaces an earlier one (messages
+/// can arrive out of order), and a player missing from it has gone. `seq` is the time it
+/// was taken, in milliseconds since 1970, so it keeps growing across restarts.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaState {
+    pub seq: u64,
+    pub players: Vec<MediaPlayer>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaPlayer {
+    /// Stable id on the sender, for commands.
+    pub id: String,
+    /// The app playing ("Spotify").
+    pub app: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artist: String,
+    #[serde(default)]
+    pub album: String,
+    pub playing: bool,
+    /// Where it is and how long it is, in milliseconds, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length_ms: Option<u64>,
+    #[serde(default)]
+    pub can_next: bool,
+    #[serde(default)]
+    pub can_previous: bool,
+    #[serde(default)]
+    pub can_seek: bool,
+    /// Cover art, a small JPEG or PNG (≤ 64 KiB) in standard base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub art: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum MediaCommand {
+    Play,
+    Pause,
+    PlayPause,
+    Next,
+    Previous,
+    /// Jump to this position.
+    Seek { position_ms: u64 },
 }
 
 /// A notification mirrored from another device (a phone's WhatsApp message…).

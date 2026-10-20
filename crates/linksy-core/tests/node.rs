@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Battery, Config, Error, Event, Node, NotificationButton, RemoteNotification, SessionKind};
+use linksy_core::{Battery, Config, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -382,6 +382,57 @@ async fn mirrored_notifications_go_both_ways() {
     let huge = RemoteNotification { icon: Some("A".repeat(200_000)), ..n.clone() };
     assert!(phone.node.post_notification(&pc_id, huge).await.is_err());
     assert!(phone.node.post_notification(&pc_id, RemoteNotification { key: String::new(), ..n }).await.is_err());
+}
+
+#[tokio::test]
+async fn media_state_keeps_the_newest_and_commands_arrive() {
+    let (phone, pc) = paired().await;
+    let mut on_pc = pc.node.subscribe();
+    let mut on_phone = phone.node.subscribe();
+    let (pc_id, phone_id) = (pc.node.info().id, phone.node.info().id);
+    let song = |seq: u64, playing: bool| MediaState {
+        seq,
+        players: vec![MediaPlayer {
+            id: "spotify".into(),
+            app: "Spotify".into(),
+            title: "Song".into(),
+            artist: "Band".into(),
+            album: String::new(),
+            playing,
+            position_ms: Some(1000),
+            length_ms: Some(180_000),
+            can_next: true,
+            can_previous: true,
+            can_seek: true,
+            art: None,
+        }],
+    };
+    phone.node.send_media_state(&pc_id, &song(20, true)).await.unwrap();
+    let got = wait_for(&mut on_pc, |e| match e {
+        Event::MediaState { state, .. } => Some(state.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, song(20, true));
+    // An older snapshot arriving late is dropped; the next newer one comes through.
+    phone.node.send_media_state(&pc_id, &song(10, false)).await.unwrap();
+    phone.node.send_media_state(&pc_id, &song(30, false)).await.unwrap();
+    let next = wait_for(&mut on_pc, |e| match e {
+        Event::MediaState { state, .. } => Some(state.seq),
+        _ => None,
+    })
+    .await;
+    assert_eq!(next, 30);
+
+    pc.node.media_command(&phone_id, "spotify", MediaCommand::Seek { position_ms: 5000 }).await.unwrap();
+    let cmd = wait_for(&mut on_phone, |e| match e {
+        Event::MediaCommand { player, command, .. } => Some((player.clone(), *command)),
+        _ => None,
+    })
+    .await;
+    assert_eq!(cmd, ("spotify".to_string(), MediaCommand::Seek { position_ms: 5000 }));
+    pc.node.watch_media(&phone_id, true).await.unwrap();
+    wait_for(&mut on_phone, |e| matches!(e, Event::MediaWatch { on: true, .. }).then_some(())).await;
 }
 
 #[tokio::test]
