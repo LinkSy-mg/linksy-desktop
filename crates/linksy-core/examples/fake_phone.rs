@@ -4,13 +4,17 @@
 //! it's asked to do.
 //!
 //! cargo run -p linksy-core --example fake_phone -- --data-dir DIR [--port N] [--name NAME]
-//!     [--battery PERCENT] [--charging] [--notify "TITLE" "BODY"] [--display FILE] [--seconds N]
+//!     [--battery PERCENT] [--charging] [--notify "TITLE" "BODY"] [--display FILE]
+//!     [--media "TITLE" "ARTIST"] [--watch-media] [--seconds N]
 //!
 //! `--display FILE` accepts "Use as Second Display" and saves the H.264 it receives.
+//! `--media "TITLE" "ARTIST"` plays a song (as far as the computer can tell);
+//! `--watch-media` prints what the computer plays; `--press play-pause|next|previous`
+//! presses that button on the first player it hears about.
 
 use std::time::Duration;
 
-use linksy_core::{Battery, Config, DeviceKind, Event, Node, NotificationButton, RemoteNotification};
+use linksy_core::{Battery, Config, DeviceKind, Event, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification};
 
 #[tokio::main]
 async fn main() {
@@ -19,6 +23,8 @@ async fn main() {
     let (mut level, mut charging, mut seconds) = (None, false, 60);
     let mut notify = None;
     let mut display: Option<std::path::PathBuf> = None;
+    let (mut media, mut watch_media) = (None, false);
+    let mut press: Option<linksy_core::MediaCommand> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -29,6 +35,18 @@ async fn main() {
             "--charging" => charging = true,
             "--seconds" => seconds = value().parse().expect("--seconds N"),
             "--display" => display = Some(value().into()),
+            "--watch-media" => watch_media = true,
+            "--press" => {
+                press = Some(match value().as_str() {
+                    "next" => linksy_core::MediaCommand::Next,
+                    "previous" => linksy_core::MediaCommand::Previous,
+                    _ => linksy_core::MediaCommand::PlayPause,
+                })
+            }
+            "--media" => {
+                let title = value();
+                media = Some((title, value()));
+            }
             "--notify" => {
                 let title = value();
                 notify = Some((title, value()));
@@ -70,6 +88,34 @@ async fn main() {
             }
         }
     }
+    let seq = || std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    let mut playing = true;
+    let song = |title: &str, artist: &str, playing: bool| MediaState {
+        seq: seq(),
+        players: vec![MediaPlayer {
+            id: "music".into(),
+            app: "Music".into(),
+            title: title.into(),
+            artist: artist.into(),
+            album: String::new(),
+            playing,
+            position_ms: Some(42_000),
+            length_ms: Some(215_000),
+            can_next: true,
+            can_previous: true,
+            can_seek: true,
+            art: None,
+        }],
+    };
+    for t in node.trusted() {
+        if let Some((title, artist)) = &media {
+            let r = node.send_media_state(&t.device.id, &song(title, artist, playing)).await;
+            println!("media to {}: {}", t.device.name, r.map(|_| "sent".to_string()).unwrap_or_else(|e| e.to_string()));
+        }
+        if watch_media {
+            let _ = node.watch_media(&t.device.id, true).await;
+        }
+    }
     if let Some(path) = display.clone() {
         let mut sessions = node.incoming_sessions().expect("sessions");
         tokio::spawn(async move {
@@ -91,6 +137,30 @@ async fn main() {
                 Ok(Event::NotificationReply { from, key, text }) => println!("REPLY to {key} from {}: {text}", from.name),
                 Ok(Event::NotificationAction { key, action, .. }) => println!("ACTION {action} on {key}"),
                 Ok(Event::NotificationDismissed { key, .. }) => println!("DISMISSED {key}"),
+                Ok(Event::MediaCommand { from, player, command }) => {
+                    println!("MEDIA {command:?} on {player} from {}", from.name);
+                    // Act like a player: play/pause flips, and the computer hears about it.
+                    if let (Some((title, artist)), linksy_core::MediaCommand::PlayPause | linksy_core::MediaCommand::Pause | linksy_core::MediaCommand::Play) = (&media, command) {
+                        playing = match command {
+                            linksy_core::MediaCommand::Play => true,
+                            linksy_core::MediaCommand::Pause => false,
+                            _ => !playing,
+                        };
+                        let _ = node.send_media_state(&from.id, &song(title, artist, playing)).await;
+                    }
+                }
+                Ok(Event::MediaState { from, state }) => {
+                    for p in &state.players {
+                        println!("{} plays: {} – {} ({}) [{}]", from.name, p.artist, p.title, p.app, if p.playing { "playing" } else { "paused" });
+                    }
+                    if state.players.is_empty() {
+                        println!("{} plays nothing", from.name);
+                    }
+                    if let (Some(command), Some(p)) = (press.take(), state.players.first()) {
+                        println!("pressing {command:?} on {}", p.app);
+                        let _ = node.media_command(&from.id, &p.id, command).await;
+                    }
+                }
                 Ok(Event::SessionRequest { request, from, kind }) if display.is_some() => {
                     println!("{kind:?} requested by {}: accepting", from.name);
                     node.respond(request, true);
