@@ -48,21 +48,23 @@ small process (about 6 MB on disk, 7 MB of memory, no CPU when idle).
 
 Download the latest Linux release from
 [LinkSy-mg/linksy-releases](https://github.com/LinkSy-mg/linksy-releases/releases)
-(`linux-v…` tags), then:
+(`linux-v…` tags), in the format that suits your system:
 
 ```sh
-tar xzf linksy-0.1.0-linux-x86_64.tar.gz
-cd linksy-0.1.0-linux-x86_64
-./install.sh        # into ~/.local, starts the background service; ./uninstall.sh removes it
+flatpak install --user linksy-0.1.1.flatpak          # any distribution
+sudo apt install ./linksy_0.1.1_amd64.deb             # Ubuntu 24.10+, Debian 13+
+sudo dnf install ./linksy-0.1.1-1.x86_64.rpm          # Fedora 41+
+tar xzf linksy-0.1.1-linux-x86_64.tar.gz && linksy-0.1.1-linux-x86_64/install.sh  # into ~/.local
 ```
 
-Needs x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.6+ (Fedora 41+, Ubuntu 24.10+,
-Debian 13+).
+The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.6+. The
+background service starts with your session; the Flatpak sets that up the first time it opens.
 
-To cut a release: add the version's section to `CHANGELOG.md`, bump `version` in
-`Cargo.toml`, run `scripts/package-linux.sh`, tag `vX.Y.Z` here and publish the tarball on
-this repo and, as `linux-vX.Y.Z` (not marked latest, which belongs to the Android APKs),
-on linksy-releases.
+To cut a release: add the version's section to `CHANGELOG.md` and the metainfo's
+`<releases>`, bump `version` in `Cargo.toml`, run `scripts/package-linux.sh` (tarball, .deb,
+.rpm) and `scripts/package-flatpak.sh`, tag `vX.Y.Z` here and publish the files on this repo
+and, as `linux-vX.Y.Z` (not marked latest, which belongs to the Android APKs), on
+linksy-releases. Flathub builds from the tag with `packaging/flatpak/app.linksy.Linksy.yml`.
 
 ## Build
 

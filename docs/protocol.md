@@ -496,3 +496,5 @@ Phone-side fixes found testing with a realme 15 Pro 5G (2026-10-19):
 - **2026-10-19** — `session_decline` may carry `reason: "unsupported"`; core
   `decline_unsupported`. Phone-side to-dos from real-device testing in §7 (screen aspect,
   control via AccessibilityService, display mode).
+- **2026-10-20** — Desktop 0.1.1 ships as Flatpak, .deb and .rpm too. No protocol or core
+  API change; a phone sees a Flatpak desktop exactly like any other.
