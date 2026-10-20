@@ -10,6 +10,7 @@ mod sessions;
 // their own native notifications with their apps.
 #[cfg(target_os = "linux")]
 mod links;
+mod mirror;
 mod notify;
 mod system;
 
@@ -131,7 +132,12 @@ async fn main() -> ExitCode {
     let socket = args.socket.clone();
     let sessions = sessions::Sessions::new(data_dir.clone(), socket.clone());
     tokio::spawn(sessions.clone().run(node.clone()));
-    let server = tokio::spawn(ipc::serve(node.clone(), history, sessions, socket.clone()));
+    let icons = linksy_ipc::runtime_dir().unwrap_or_else(std::env::temp_dir).join("linksy-icons");
+    let mirror = mirror::Mirror::load(data_dir.join("notifications.json"), icons, socket.clone());
+    if args.notifications {
+        tokio::spawn(mirror.clone().run(node.clone()));
+    }
+    let server = tokio::spawn(ipc::serve(node.clone(), history, sessions, mirror, socket.clone()));
 
     tokio::select! {
         r = server => if let Ok(Err(e)) = r { error!("IPC server stopped: {e}") },
@@ -139,7 +145,9 @@ async fn main() -> ExitCode {
     }
     node.shutdown().await;
     let _ = std::fs::remove_file(&socket);
-    ExitCode::SUCCESS
+    // Notifications still on screen each have a thread waiting for a click, which would
+    // keep the runtime (and so the process) alive; everything that matters is done.
+    std::process::exit(0)
 }
 
 async fn shutdown_signal() {
