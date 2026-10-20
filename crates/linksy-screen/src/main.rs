@@ -178,7 +178,9 @@ fn encoder() -> (&'static str, &'static str) {
     } else if has("vah264enc") {
         ("vah264enc rate-control=cbr bitrate=8000 key-int-max=60 target-usage=7", "NV12")
     } else if has("x264enc") {
-        ("x264enc tune=zerolatency speed-preset=superfast bitrate=8000 key-int-max=60 bframes=0", "I420")
+        // One slice per frame: zerolatency would cut each frame into a slice per thread,
+        // which decoders fed a NAL unit at a time (phones) never assemble into a picture.
+        ("x264enc tune=zerolatency speed-preset=superfast bitrate=8000 key-int-max=60 bframes=0 sliced-threads=false threads=1", "I420")
     } else {
         ("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate=8000000 gop-size=60", "I420")
     }
