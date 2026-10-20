@@ -2,6 +2,20 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.1.1
+
+### Added
+- **Packages**: Linksy now comes as a Flatpak, a .deb (Ubuntu, Debian) and an .rpm
+  (Fedora), besides the tarball.
+- **Camera preview** right in the app: click Preview on a device's camera card.
+
+### Changed
+- Screen windows fit the shape of the shared screen, phones included, with no black bars.
+- When the other device can't do something yet, Linksy says so, instead of "declined".
+
+### Fixed
+- Quitting never hangs on a device that went quiet.
+
 ## 0.1.0
 
 First release of Linksy for Linux: share between your own devices, directly over your
