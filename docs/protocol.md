@@ -54,6 +54,7 @@ Decisions already made with the owner:
 | Photo auto-import | Done | To do | offer with `"import":true`, §4.5 |
 | Phone as touchpad, keyboard, presentation remote | Done | To do | session kind `input`, §4.8 |
 | Texting from the desktop | Done | To do | `sms_*`, §4.5; READ_SMS / SEND_SMS |
+| Phone in the computer's Files sidebar | Done | To do | `fs` streams, §4.9; storage access |
 | Connect on demand / idle close / stay connected | Done | To do | §4.6 |
 | Desktop notifications with Accept/Decline | Done | To do | Android: notification actions |
 | QR-code pairing | Done (shows the QR) | To do | phone scans desktop, §4.7 |
@@ -487,6 +488,42 @@ plus the usual `button`, `scroll` (two fingers) and `key` (X11 keysyms: Right 0x
 Left 0xff51 or Page_Down 0xff56 / Page_Up 0xff55 for slides, Return 0xff0d, BackSpace
 0xff08, Escape 0xff1b). Absolute `pointer` messages are ignored (there's no screen).
 The computer shows "<phone> is your touchpad and keyboard" with Stop.
+
+### 4.9 Browsing files ("phone in the Files sidebar") — `src/fs.rs`
+
+A computer browses the phone's files with one request per **bidirectional stream**. The
+first frame is the request, tagged `"type":"fs"` and an `op`:
+
+```json
+{"type":"fs","op":"list","path":"/DCIM"}
+{"type":"fs","op":"stat","path":"/DCIM/IMG_1.jpg"}
+{"type":"fs","op":"read","path":"/DCIM/IMG_1.jpg","offset":0,"length":1048576}
+{"type":"fs","op":"write","path":"/Download/a.pdf","offset":0,"length":1048576,"truncate":true}
+// …followed by exactly `length` raw bytes
+{"type":"fs","op":"mkdir","path":"/Download/New"}
+{"type":"fs","op":"delete","path":"/Download/New"}        // folders with their contents
+{"type":"fs","op":"rename","path":"/a.txt","to":"/b.txt"}
+```
+
+The phone answers one frame (then, for `fs_data`, exactly that many raw bytes) and
+finishes the stream:
+
+```json
+{"type":"fs_entries","entries":[{"name":"DCIM","dir":true,"size":0,"modified_ms":0}]}
+{"type":"fs_entry","entry":{"name":"IMG_1.jpg","dir":false,"size":2400000,"modified_ms":1760945000000}}
+{"type":"fs_data","length":1048576}
+{"type":"fs_ok"}
+{"type":"fs_error","message":"Permission denied","not_found":false}
+```
+
+Paths are absolute within what the phone shares, `/` its root (shared storage,
+`/storage/emulated/0`). Reads and writes are at most 4 MiB; the computer uses 1 MiB.
+`stat "/"` must answer a folder. A phone that doesn't call `node.incoming_fs()` answers
+"this device doesn't share its files" automatically, and the computer tells the user to
+turn sharing on in the phone app. In Rust: `node.incoming_fs()` gives `FsCall`s; answer
+each with `entries` / `entry` / `data` / `ok` / `error`, and read a write's bytes with
+`body()` first.
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -735,3 +772,12 @@ robust against any encoder (GPU ones may slice too):
   `sms_sent`; a `RECEIVE_SMS` receiver (or ContentObserver) pushes `sms_message`. Try it
   against a computer: `fake_phone` answers with a made-up inbox, and the computer's
   `linksy texts <phone>` / `linksy text <phone> <number> <message>` exercise the rest.
+- **2026-10-20** — **Phone in the Files sidebar** (desktop 0.5.1): `fs` request streams
+  (§4.9), core `node.fs()` / `node.incoming_fs()`. The computer mounts the phone as a
+  WebDAV place (GVfs) named after it, so it's in Files and every file dialog. Phone
+  to-do: a "Let <computer> browse my files" switch (off by default) that starts serving
+  `incoming_fs()`; `MANAGE_EXTERNAL_STORAGE` ("All files access") is the simplest for a
+  GitHub APK, or the storage access framework for chosen folders only; map `/` to shared
+  storage; answer reads with `RandomAccessFile` (videos seek); run it from the foreground
+  service while a computer has it open. Try against a computer with
+  `fake_phone --files <folder>` and its "Browse Files" row.
