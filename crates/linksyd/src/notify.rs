@@ -10,7 +10,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tracing::debug;
 
 const APP: &str = "Linksy";
-const DESKTOP_ENTRY: &str = "mg.diary.linksy.Linksy";
+pub(crate) const DESKTOP_ENTRY: &str = "mg.diary.linksy.Linksy";
 /// Battery level, in percent, at which a device's low battery is announced (once).
 const LOW_BATTERY: u8 = 15;
 

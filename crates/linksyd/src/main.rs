@@ -11,6 +11,8 @@ mod sessions;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
 // their own native notifications with their apps.
 #[cfg(target_os = "linux")]
+mod media;
+#[cfg(target_os = "linux")]
 mod notify;
 mod system;
 
@@ -133,6 +135,8 @@ async fn main() -> ExitCode {
     let sessions = sessions::Sessions::new(data_dir.clone(), socket.clone());
     tokio::spawn(sessions.clone().run(node.clone()));
     let icons = linksy_ipc::runtime_dir().unwrap_or_else(std::env::temp_dir).join("linksy-icons");
+    #[cfg(target_os = "linux")]
+    tokio::spawn(media::run(node.clone(), icons.join("art")));
     let mirror = mirror::Mirror::load(data_dir.join("notifications.json"), icons, socket.clone());
     if args.notifications {
         tokio::spawn(mirror.clone().run(node.clone()));
