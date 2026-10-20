@@ -319,6 +319,7 @@ impl Window {
                 page::Action::SendFiles => w.choose_files(),
                 page::Action::SendClipboard => w.send_clipboard(id),
                 page::Action::Ping => w.ping(id),
+                page::Action::Ring => w.ring(id, true),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
                 page::Action::Webcam => w.use_camera(id),
@@ -612,6 +613,9 @@ impl Window {
             }
             // The service opens it; the timeline shows it.
             Event::OpenUrl { .. } => {}
+            Event::Battery { .. } => self.refresh_devices(),
+            Event::Ring { from, on: true } => self.toast(&format!("{} is looking for this computer", from.name)),
+            Event::Ring { on: false, .. } => {}
         }
     }
 
@@ -842,6 +846,26 @@ impl Window {
         glib::spawn_future_local(async move {
             match call.await {
                 Ok(()) => w.toast(&format!("Pinged {name}")),
+                Err(e) => w.toast_error(&e, Some(id)),
+            }
+        });
+    }
+
+    /// Ring a phone (with a Stop button while it rings), or stop it.
+    fn ring(self: &Rc<Self>, id: Fingerprint, on: bool) {
+        let Some(c) = self.client() else { return };
+        let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
+        let call = self.bridge.call(&c, move |c| async move { c.ring(id.to_string(), on).await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            match call.await {
+                Ok(()) if on => {
+                    let toast = adw::Toast::builder().title(glib::markup_escape_text(&format!("Ringing {name}…"))).button_label("Stop").timeout(30).build();
+                    let w2 = w.clone();
+                    toast.connect_button_clicked(move |_| w2.ring(id, false));
+                    w.toasts.add_toast(toast);
+                }
+                Ok(()) => {}
                 Err(e) => w.toast_error(&e, Some(id)),
             }
         });
@@ -1083,7 +1107,11 @@ fn sidebar_row(d: &DeviceView) -> gtk::ListBoxRow {
     }
     badge.add_overlay(&dot);
     let name = gtk::Label::builder().label(&d.device.name).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).build();
-    let status = gtk::Label::builder().label(status_text(d)).xalign(0.0).css_classes(["caption", "dim-label"]).build();
+    let state = match fmt::battery(d) {
+        Some(b) => format!("{} · {b}", status_text(d)),
+        None => status_text(d).to_string(),
+    };
+    let status = gtk::Label::builder().label(&state).xalign(0.0).css_classes(["caption", "dim-label"]).build();
     let labels = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).hexpand(true).build();
     labels.append(&name);
     labels.append(&status);

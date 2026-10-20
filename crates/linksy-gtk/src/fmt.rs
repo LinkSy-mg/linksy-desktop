@@ -103,3 +103,10 @@ pub fn duration(seconds: u64) -> String {
         _ => format!("{} h {} min", seconds / 3600, seconds % 3600 / 60),
     }
 }
+
+/// "82%", or "82%, charging", for a device that's around; nothing for one that's away,
+/// whose last reading may be old.
+pub fn battery(d: &linksy_ipc::linksy_core::DeviceView) -> Option<String> {
+    let b = d.battery.filter(|_| d.connected || d.nearby)?;
+    Some(if b.charging { format!("{}%, charging", b.level) } else { format!("{}%", b.level) })
+}

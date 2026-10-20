@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use linksy_ipc::linksy_core::{DeviceView, Direction, Uuid};
+use linksy_ipc::linksy_core::{DeviceKind, DeviceView, Direction, Uuid};
 use linksy_ipc::{HistoryEntry, HistoryStatus, Shared};
 
 use super::{LiveRow, Progress, drag_files, kind_icon, kind_name, progress_text, status_text};
@@ -33,6 +33,7 @@ pub enum Action {
     ShowInFolder(PathBuf),
     Copy(String),
     OpenLink(String),
+    Ring,
 }
 
 type Handler = Rc<RefCell<Option<Rc<dyn Fn(Action)>>>>;
@@ -55,6 +56,8 @@ pub struct DevicePage {
     extend: gtk::ListBox,
     extend_row: adw::ActionRow,
     webcam_row: adw::ActionRow,
+    /// "Ring", for phones and tablets.
+    ring_row: adw::ActionRow,
     pair_box: gtk::Box,
     staged: adw::Banner,
     drop_hint: gtk::Box,
@@ -147,7 +150,13 @@ impl DevicePage {
         webcam_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
         let e = emit.clone();
         webcam_row.connect_activated(move |_| e(Action::Webcam));
+        let ring_row = adw::ActionRow::builder().title("Ring").activatable(true).build();
+        ring_row.add_prefix(&gtk::Image::builder().icon_name("audio-volume-high-symbolic").build());
+        ring_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
+        let e = emit.clone();
+        ring_row.connect_activated(move |_| e(Action::Ring));
         let extend = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
+        extend.append(&ring_row);
         extend.append(&extend_row);
         extend.append(&webcam_row);
 
@@ -242,7 +251,7 @@ impl DevicePage {
             e(Action::Forget);
         });
 
-        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
+        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, ring_row, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
@@ -270,7 +279,8 @@ impl DevicePage {
         self.avatar.set_text(Some(&d.device.name));
         self.kind.set_icon_name(Some(kind_icon(d.device.kind)));
         self.name.set_label(&d.device.name);
-        self.status.set_label(&format!("{} · {}", status_text(d), kind_name(&d.device)));
+        let battery = fmt::battery(d).map(|b| format!(" · {b}")).unwrap_or_default();
+        self.status.set_label(&format!("{} · {}{battery}", status_text(d), kind_name(&d.device)));
         if available {
             self.dot.remove_css_class("away");
         } else {
@@ -280,6 +290,8 @@ impl DevicePage {
         self.extend.set_visible(d.trusted);
         self.extend_row.set_subtitle(&glib::markup_escape_text(&format!("Extend this computer's desktop onto {}", d.device.name)));
         self.webcam_row.set_subtitle(&glib::markup_escape_text(&format!("{}'s camera appears in your apps as “Linksy Camera”", d.device.name)));
+        self.ring_row.set_visible(matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet));
+        self.ring_row.set_subtitle(&glib::markup_escape_text(&format!("Play a loud sound on {} to find it, even on silent", d.device.name)));
         self.pair_box.set_visible(!d.trusted);
         self.menu.set_visible(d.trusted);
         self.drop_hint.set_visible(d.trusted);
