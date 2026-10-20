@@ -339,6 +339,7 @@ impl Window {
                 page::Action::Ping => w.ping(id),
                 page::Action::Ring => w.ring(id, true),
                 page::Action::Messages => w.open_messages(id),
+                page::Action::BrowseFiles => w.browse_files(id),
                 page::Action::LockWhenAway(on) => w.lock_when_away(id, on),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
@@ -927,6 +928,20 @@ impl Window {
                 }
                 Ok(()) => {}
                 Err(e) => w.toast_error(&e, Some(id)),
+            }
+        });
+    }
+
+    /// Open the phone in the file manager (it stays in the sidebar afterwards).
+    fn browse_files(self: &Rc<Self>, id: Fingerprint) {
+        let Some(c) = self.client() else { return };
+        let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
+        self.toast(&format!("Opening {name}…"));
+        let call = self.bridge.call(&c, move |c| async move { c.browse_files(id.to_string()).await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            if let Err(e) = call.await {
+                w.toast_error(&e, Some(id));
             }
         });
     }
