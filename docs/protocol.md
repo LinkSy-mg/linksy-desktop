@@ -51,6 +51,7 @@ Decisions already made with the owner:
 | Media controls, both ways | Done | To do | `media_*`, §4.5; Android MediaSessionManager |
 | Pause the computer's media during calls | Done | To do | `call_state`, §4.5; Android TelephonyCallback |
 | Lock the computer when the phone leaves | Done | To do | `heartbeat`, §4.5; needs a foreground service |
+| Photo auto-import | Done | To do | offer with `"import":true`, §4.5 |
 | Connect on demand / idle close / stay connected | Done | To do | §4.6 |
 | Desktop notifications with Accept/Decline | Done | To do | Android: notification actions |
 | QR-code pairing | Done (shows the QR) | To do | phone scans desktop, §4.7 |
@@ -296,6 +297,10 @@ and close the other with reason `duplicate`.
 - **Bidirectional stream = one file transfer** (`TransferMsg`), opened by the sender:
 
   1. Sender → `{"type":"offer","id":"<uuid>","files":[{"path":"Photos/a.jpg","size":123}]}`
+     Add `"import":true` for **photo auto-import**: the computer saves the files under
+     its Pictures folder, in `Pictures/<phone name>/<path>`, without asking, or answers
+     `decline` right away when it doesn't take imports (the user turned it off there).
+     Use paths like `2026-10/IMG_0001.jpg` so photos sort by month.
      Paths are relative, `/`-separated. Folders are sent as their files, with the folder
      name as the first component.
   2. Receiver asks the user (or auto-accepts), then answers
@@ -452,6 +457,7 @@ node.info() -> DeviceInfo                   node.subscribe() -> stream of Event
 node.devices() -> [DeviceView]              DeviceView { device, trusted, connected, nearby }
 node.pair_device(id) / node.pair(addr)      node.respond(request_id, accept)
 node.send_files(id, paths) -> transfer_id   node.cancel(transfer_id)
+node.import_files(id, paths) -> transfer_id // photo auto-import (offer with "import")
 node.send_clipboard(id, text)               node.notify(id, title, body)
 node.open_url(id, url)                      // Event::OpenUrl { from, url } on the receiver
 node.send_battery(id, Battery { level, charging })   node.ring(id, on)   // Event::Battery / Event::Ring
@@ -662,3 +668,12 @@ robust against any encoder (GPU ones may slice too):
   `heartbeat_watch` with a foreground service (see §4.5 on Doze), one schedule per
   computer. Test with `fake_phone --leave-after 30` and the switch on the phone's page
   (the computer really locks; set `LINKSY_LOCK_COMMAND` on a test service to fake it).
+- **2026-10-20** — **Photo auto-import** (desktop 0.4.0): offers can carry
+  `"import": true` (§4.5); core `import_files`. The computer takes imports by default
+  (Preferences, "Import Photos From Phones"). Phone to-do: a setting per computer
+  ("Back up new photos to fedora"); watch `MediaStore` (images and videos) with a
+  `ContentObserver` or a periodic `WorkManager` job; when that computer is around and the
+  phone is on Wi-Fi (optionally only while charging), send what's new with
+  `import_files`, paths `YYYY-MM/<name>`; remember what went where so nothing is sent
+  twice (resume makes retries cheap). A declined import means that computer doesn't
+  want them: say so in the setting. Try with `fake_phone --import <folder>`.

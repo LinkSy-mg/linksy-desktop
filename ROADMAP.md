@@ -10,7 +10,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 |---|---|---|
 | 0.2 | Everyday basics | Open on PC (desktop done in 0.2.0) · Battery & Ring (desktop done in 0.2.1) · Notifications with reply (desktop done in 0.2.2) |
 | 0.3 | Feels like one device | Media controls (desktop done in 0.3.0) · Pause on calls (desktop done in 0.3.1) · Lock when you walk away (desktop done in 0.3.2) |
-| 0.4 | Phone as a tool | Photo auto-import · Touchpad, keyboard & presentation remote |
+| 0.4 | Phone as a tool | Photo auto-import (desktop done in 0.4.0) · Touchpad, keyboard & presentation remote |
 | 0.5 | Phone on the desktop | Texting from the desktop · Phone in the Files sidebar |
 
 Later: direct links that skip the router — USB tethering first (likely little code:
