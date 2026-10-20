@@ -2,6 +2,16 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.2.1
+
+### Added
+- **Phone battery**: your phone's battery level shows next to it in the sidebar and on its
+  page, and Linksy tells you once when it drops to 15%.
+- **Ring**: make your phone ring loudly, even on silent, to find it (with a Stop button).
+  When your phone looks for this computer, it shows an urgent notification with a sound.
+- Both need the Linksy for Android update that adds them; `linksy ring <device>` works
+  from the terminal.
+
 ## 0.2.0
 
 ### Added

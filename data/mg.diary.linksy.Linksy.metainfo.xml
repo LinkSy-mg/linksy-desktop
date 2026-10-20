@@ -69,6 +69,14 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.2.1" date="2026-10-20">
+      <description>
+        <ul>
+          <li>Your phone's battery level, with a heads-up when it runs low</li>
+          <li>Ring your phone to find it, even on silent</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-20">
       <description>
         <ul>
