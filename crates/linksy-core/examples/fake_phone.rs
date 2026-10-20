@@ -6,9 +6,10 @@
 //! cargo run -p linksy-core --example fake_phone -- --data-dir DIR [--port N] [--name NAME]
 //!     [--battery PERCENT] [--charging] [--notify "TITLE" "BODY"] [--display FILE]
 //!     [--media "TITLE" "ARTIST"] [--watch-media] [--call SECONDS] [--leave-after SECONDS]
-//!     [--import PATH] [--touchpad] [--seconds N]
+//!     [--import PATH] [--touchpad] [--files DIR] [--seconds N]
 //!
-//! It always answers texting requests from a small made-up inbox.
+//! It always answers texting requests from a small made-up inbox. `--files DIR` shares
+//! that folder as the phone's storage (for "Browse Files").
 //!
 //! `--display FILE` accepts "Use as Second Display" and saves the H.264 it receives.
 //! `--media "TITLE" "ARTIST"` plays a song (as far as the computer can tell);
@@ -37,6 +38,7 @@ async fn main() {
     let mut leave_after: Option<u64> = None;
     let mut import: Option<std::path::PathBuf> = None;
     let mut touchpad = false;
+    let mut files: Option<std::path::PathBuf> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -51,6 +53,7 @@ async fn main() {
             "--call" => call = Some(value().parse().expect("--call SECONDS")),
             "--import" => import = Some(value().into()),
             "--touchpad" => touchpad = true,
+            "--files" => files = Some(value().into()),
             "--leave-after" => leave_after = Some(value().parse().expect("--leave-after SECONDS")),
             "--press" => {
                 press = Some(match value().as_str() {
@@ -157,6 +160,14 @@ async fn main() {
         if watch_media {
             let _ = node.watch_media(&t.device.id, true).await;
         }
+    }
+    if let Some(root) = files {
+        let mut calls = node.incoming_fs().expect("file requests");
+        tokio::spawn(async move {
+            while let Some(call) = calls.recv().await {
+                serve(call, &root).await;
+            }
+        });
     }
     if let Some(seconds) = call {
         let node = node.clone();
@@ -282,4 +293,55 @@ fn fake_messages(thread: &str) -> Vec<linksy_core::SmsMessage> {
         body: (*body).into(),
         date_ms: now - (lines.len() - i) as u64 * 600_000,
     }).collect()
+}
+
+/// Answer a file request from `root`, as a phone serves its storage.
+async fn serve(mut call: linksy_core::fs::FsCall, root: &std::path::Path) {
+    use linksy_core::{FsEntry, FsRequest};
+    use std::io::{Read, Seek, Write};
+    let at = |p: &str| root.join(p.trim_start_matches('/'));
+    let entry = |p: &std::path::Path| {
+        let m = std::fs::metadata(p).ok()?;
+        let modified_ms = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
+        Some(FsEntry { name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), dir: m.is_dir(), size: m.len(), modified_ms })
+    };
+    println!("files: {:?}", call.request);
+    let body = call.body().await.unwrap_or_default();
+    // Do it, then answer: entries, an entry, data, done, or what went wrong.
+    enum Answer {
+        Entries(Vec<FsEntry>),
+        Entry(FsEntry),
+        Data(Vec<u8>),
+        Ok,
+    }
+    let done: std::io::Result<Answer> = (|| match call.request.clone() {
+        FsRequest::List { path } => Ok(Answer::Entries(std::fs::read_dir(at(&path))?.flatten().filter_map(|e| entry(&e.path())).collect())),
+        FsRequest::Stat { path } => entry(&at(&path)).map(Answer::Entry).ok_or_else(|| std::io::ErrorKind::NotFound.into()),
+        FsRequest::Read { path, offset, length } => {
+            let mut f = std::fs::File::open(at(&path))?;
+            f.seek(std::io::SeekFrom::Start(offset))?;
+            let mut buf = Vec::new();
+            f.take(length).read_to_end(&mut buf)?;
+            Ok(Answer::Data(buf))
+        }
+        FsRequest::Write { path, offset, truncate, .. } => {
+            let mut f = std::fs::OpenOptions::new().create(true).write(true).truncate(truncate).open(at(&path))?;
+            f.seek(std::io::SeekFrom::Start(offset))?;
+            f.write_all(&body)?;
+            Ok(Answer::Ok)
+        }
+        FsRequest::Mkdir { path } => std::fs::create_dir_all(at(&path)).map(|_| Answer::Ok),
+        FsRequest::Delete { path } => {
+            let p = at(&path);
+            if p.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) }.map(|_| Answer::Ok)
+        }
+        FsRequest::Rename { path, to } => std::fs::rename(at(&path), at(&to)).map(|_| Answer::Ok),
+    })();
+    let _ = match done {
+        Ok(Answer::Entries(e)) => call.entries(e).await,
+        Ok(Answer::Entry(e)) => call.entry(e).await,
+        Ok(Answer::Data(d)) => call.data(&d).await,
+        Ok(Answer::Ok) => call.ok().await,
+        Err(e) => call.error(&e.to_string(), e.kind() == std::io::ErrorKind::NotFound).await,
+    };
 }
