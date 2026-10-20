@@ -1,0 +1,57 @@
+app-id: app.linksy.Linksy
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: linksy-app
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  # This computer's camera, for a device that uses it as a webcam (V4L2 has no portal yet).
+  - --device=all
+  # Received files land in Downloads.
+  - --filesystem=xdg-download
+  # "Use as Webcam": a phone's camera is published as a PipeWire camera for other apps.
+  - --filesystem=xdg-run/pipewire-0
+  # The service's notifications: incoming files, pings, pairing codes, with actions.
+  - --talk-name=org.freedesktop.Notifications
+cleanup:
+  - /include
+  - /lib/pkgconfig
+  - /share/man
+modules:
+  # Puts text a device shares on the clipboard while Linksy's window isn't focused.
+  - name: wl-clipboard
+    buildsystem: meson
+    config-opts:
+      - -Dzshcompletiondir=no
+      - -Dfishcompletiondir=no
+    sources:
+      - type: archive
+        url: https://github.com/bugaevc/wl-clipboard/archive/refs/tags/v2.2.1.tar.gz
+        sha256: 6eb8081207fb5581d1d82c4bcd9587205a31a3d47bea3ebeb7f41aa1143783eb
+
+  - name: linksy
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/linksy/cargo
+        CARGO_NET_OFFLINE: 'true'
+    build-commands:
+      - cargo build --release --offline -p linksyd -p linksy -p linksy-app -p linksy-screen
+      - install -Dm755 -t /app/bin target/release/linksyd target/release/linksy target/release/linksy-app target/release/linksy-screen
+      - install -Dm644 data/app.linksy.Linksy.desktop /app/share/applications/app.linksy.Linksy.desktop
+      - install -Dm644 data/app.linksy.Linksy.metainfo.xml /app/share/metainfo/app.linksy.Linksy.metainfo.xml
+      - install -Dm644 data/icons/app.linksy.Linksy.svg /app/share/icons/hicolor/scalable/apps/app.linksy.Linksy.svg
+      - install -Dm644 data/icons/app.linksy.Linksy-symbolic.svg /app/share/icons/hicolor/symbolic/apps/app.linksy.Linksy-symbolic.svg
+    sources:
+      # @SOURCE@ (scripts/package-flatpak.sh builds from this checkout instead)
+      - type: git
+        url: https://github.com/LinkSy-mg/linksy-desktop.git
+        tag: v0.1.1
+      - cargo-sources.json
