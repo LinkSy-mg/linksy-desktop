@@ -23,6 +23,7 @@
       <li>Open links from your phone, see its battery, and ring it to find it</li>
       <li>Control your phone's music from here, and this computer's from your phone</li>
       <li>Import your phone's photos automatically</li>
+      <li>Use your phone as a touchpad, keyboard and presentation remote</li>
       <li>Ping a device, and see everything you shared as a timeline</li>
     </ul>
     <p>
@@ -73,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.4.1" date="2026-10-20">
+      <description>
+        <p>Use your phone as a touchpad, keyboard and presentation remote.</p>
+      </description>
+    </release>
     <release version="0.4.0" date="2026-10-20">
       <description>
         <p>Photo auto-import: your phone's new photos land in your Pictures folder.</p>

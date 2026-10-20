@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.4.1
+
+### Added
+- **Phone as touchpad, keyboard and presentation remote**: your phone can move this
+  computer's pointer, click, scroll and type, and turn slides with its volume keys,
+  after you allow it here. It doesn't see your screen. Needs the Linksy for Android
+  update that adds it.
+
 ## 0.4.0
 
 ### Added
