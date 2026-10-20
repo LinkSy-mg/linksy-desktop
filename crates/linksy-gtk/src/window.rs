@@ -64,6 +64,8 @@ struct State {
     camera: Option<(Uuid, Fingerprint)>,
     /// The camera preview on screen: whose camera, and the pipeline reading it.
     preview: Option<(Fingerprint, gstreamer::Element)>,
+    /// Opening Linksy starts its service once, if it isn't running.
+    started_service: bool,
 }
 
 pub struct Window {
@@ -407,7 +409,16 @@ impl Window {
                     w.state.borrow_mut().client = None;
                     w.stack.set_visible_child_name("offline");
                 }
-                Err(_) => w.stack.set_visible_child_name("offline"),
+                Err(_) => {
+                    // Not when pointed at a particular service (development): that one is
+                    // started by hand.
+                    let start = std::env::var_os("LINKSY_SOCKET").is_none() && !std::mem::replace(&mut w.state.borrow_mut().started_service, true);
+                    if start {
+                        w.start_service();
+                    } else {
+                        w.stack.set_visible_child_name("offline");
+                    }
+                }
             }
         });
     }
