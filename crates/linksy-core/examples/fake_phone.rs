@@ -4,7 +4,9 @@
 //! it's asked to do.
 //!
 //! cargo run -p linksy-core --example fake_phone -- --data-dir DIR [--port N] [--name NAME]
-//!     [--battery PERCENT] [--charging] [--notify "TITLE" "BODY"] [--seconds N]
+//!     [--battery PERCENT] [--charging] [--notify "TITLE" "BODY"] [--display FILE] [--seconds N]
+//!
+//! `--display FILE` accepts "Use as Second Display" and saves the H.264 it receives.
 
 use std::time::Duration;
 
@@ -16,6 +18,7 @@ async fn main() {
     let (mut data_dir, mut port, mut name) = (None, 0, "Test Phone".to_string());
     let (mut level, mut charging, mut seconds) = (None, false, 60);
     let mut notify = None;
+    let mut display: Option<std::path::PathBuf> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -25,6 +28,7 @@ async fn main() {
             "--battery" => level = Some(value().parse::<u8>().expect("--battery PERCENT")),
             "--charging" => charging = true,
             "--seconds" => seconds = value().parse().expect("--seconds N"),
+            "--display" => display = Some(value().into()),
             "--notify" => {
                 let title = value();
                 notify = Some((title, value()));
@@ -66,6 +70,16 @@ async fn main() {
             }
         }
     }
+    if let Some(path) = display.clone() {
+        let mut sessions = node.incoming_sessions().expect("sessions");
+        tokio::spawn(async move {
+            while let Some(mut s) = sessions.recv().await {
+                let mut file = tokio::fs::File::create(&path).await.expect("display file");
+                let n = tokio::io::copy(&mut s.recv, &mut file).await.unwrap_or(0);
+                println!("display from {} ended: {n} bytes saved", s.peer.name);
+            }
+        });
+    }
     let deadline = tokio::time::sleep(Duration::from_secs(seconds));
     tokio::pin!(deadline);
     loop {
@@ -77,6 +91,10 @@ async fn main() {
                 Ok(Event::NotificationReply { from, key, text }) => println!("REPLY to {key} from {}: {text}", from.name),
                 Ok(Event::NotificationAction { key, action, .. }) => println!("ACTION {action} on {key}"),
                 Ok(Event::NotificationDismissed { key, .. }) => println!("DISMISSED {key}"),
+                Ok(Event::SessionRequest { request, from, kind }) if display.is_some() => {
+                    println!("{kind:?} requested by {}: accepting", from.name);
+                    node.respond(request, true);
+                }
                 Ok(_) => {}
                 Err(_) => break,
             },
