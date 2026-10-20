@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Battery, CallState, Config, ControlMsg, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind};
+use linksy_core::{Battery, CallState, Config, ControlMsg, SmsThread, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -479,6 +479,41 @@ async fn photo_imports_go_to_the_device_folder_or_are_refused() {
     assert!(import);
     wait_for(&mut on_pc, |e| matches!(e, Event::TransferComplete { transfer, .. } if *transfer == id).then_some(())).await;
     assert_eq!(std::fs::read(pictures.join("Alpha/2026-10/IMG_1.jpg")).unwrap(), b"jpeg");
+}
+
+#[tokio::test]
+async fn texting_asks_answers_and_sends() {
+    let (phone, pc) = paired().await;
+    let (phone_id, pc_id) = (phone.node.info().id, pc.node.info().id);
+    let mut on_phone = phone.node.subscribe();
+    let mut on_pc = pc.node.subscribe();
+
+    pc.node.sms_list_threads(&phone_id, 500).await.unwrap();
+    let limit = wait_for(&mut on_phone, |e| match e {
+        Event::SmsListThreads { limit, .. } => Some(*limit),
+        _ => None,
+    })
+    .await;
+    assert_eq!(limit, 100, "capped");
+    let thread = SmsThread { id: "7".into(), addresses: vec!["+261340000000".into()], names: vec!["Alice".into()], snippet: "Lunch?".into(), date_ms: 1, unread: true };
+    phone.node.sms_threads(&pc_id, vec![thread.clone()]).await.unwrap();
+    let got = wait_for(&mut on_pc, |e| match e {
+        Event::SmsThreads { threads, .. } => Some(threads.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, vec![thread]);
+
+    pc.node.sms_send(&phone_id, "c1", &["+261340000000".to_string()], "Sure!").await.unwrap();
+    let (id, text) = wait_for(&mut on_phone, |e| match e {
+        Event::SmsSend { client_id, text, .. } => Some((client_id.clone(), text.clone())),
+        _ => None,
+    })
+    .await;
+    assert_eq!((id.as_str(), text.as_str()), ("c1", "Sure!"));
+    phone.node.sms_sent(&pc_id, "c1", true, None).await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::SmsSent { client_id, ok: true, .. } if client_id == "c1").then_some(())).await;
+    assert!(pc.node.sms_send(&phone_id, "c2", &[], "x").await.is_err());
 }
 
 #[tokio::test]

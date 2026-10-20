@@ -245,6 +245,55 @@ pub enum Message {
     Heartbeat,
     /// Ask the receiver for a `heartbeat` every `every_s` seconds (`on`), or to stop.
     HeartbeatWatch { on: bool, every_s: u32 },
+    /// Texting from the computer. Requests (computer → phone):
+    SmsListThreads { limit: u32 },
+    SmsListMessages {
+        thread: String,
+        /// Only messages older than this (paging back); newest first.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before_ms: Option<u64>,
+        limit: u32,
+    },
+    /// Send `text` to `to` (one address, or several for a group); `client_id` comes back
+    /// in `sms_sent`.
+    SmsSend { client_id: String, to: Vec<String>, text: String },
+    /// Answers and news (phone → computer):
+    SmsThreads { threads: Vec<SmsThread> },
+    SmsMessages { thread: String, messages: Vec<SmsMessage>, more: bool },
+    /// A message arrived or was sent on the phone (by Linksy or not).
+    SmsMessage { thread: String, message: SmsMessage },
+    SmsSent {
+        client_id: String,
+        ok: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+}
+
+/// A conversation, newest first in lists.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SmsThread {
+    pub id: String,
+    /// Phone numbers, and what the phone's contacts call them (same order; may be empty).
+    pub addresses: Vec<String>,
+    #[serde(default)]
+    pub names: Vec<String>,
+    #[serde(default)]
+    pub snippet: String,
+    pub date_ms: u64,
+    #[serde(default)]
+    pub unread: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SmsMessage {
+    pub id: String,
+    pub from_me: bool,
+    /// Who sent it (for messages from others, in groups).
+    #[serde(default)]
+    pub address: String,
+    pub body: String,
+    pub date_ms: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

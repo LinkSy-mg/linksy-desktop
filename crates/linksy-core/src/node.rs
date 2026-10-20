@@ -27,7 +27,7 @@ use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{Battery, CallState, MediaCommand, MediaState, RemoteNotification, 
+use crate::protocol::{Battery, CallState, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, 
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -40,6 +40,8 @@ const OFFER_TIMEOUT: Duration = Duration::from_secs(120);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Clipboard text limit; well under the protocol frame cap even after JSON escaping.
 pub const MAX_CLIPBOARD: usize = 256 * 1024;
+/// Most conversations or messages in one texting answer.
+const MAX_SMS: u32 = 100;
 /// Longest link accepted for "Open on PC".
 const MAX_URL: usize = 8 * 1024;
 /// Mirrored notifications: longest key, and largest icon (base64 of a 64 KiB PNG).
@@ -148,6 +150,15 @@ pub enum Event {
     Heartbeat { from: DeviceInfo },
     /// A device wants this one to check in every `every_s` seconds (`on`), or no longer.
     HeartbeatWatch { from: DeviceInfo, on: bool, every_s: u32 },
+    /// Texting: what a computer asks of this phone…
+    SmsListThreads { from: DeviceInfo, limit: u32 },
+    SmsListMessages { from: DeviceInfo, thread: String, before_ms: Option<u64>, limit: u32 },
+    SmsSend { from: DeviceInfo, client_id: String, to: Vec<String>, text: String },
+    /// …and what a phone tells this computer.
+    SmsThreads { from: DeviceInfo, threads: Vec<SmsThread> },
+    SmsMessages { from: DeviceInfo, thread: String, messages: Vec<SmsMessage>, more: bool },
+    SmsMessage { from: DeviceInfo, thread: String, message: SmsMessage },
+    SmsSent { from: DeviceInfo, client_id: String, ok: bool, error: Option<String> },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -632,6 +643,46 @@ impl Node {
     /// Ask a device to check in every `every_s` seconds (`on`), or to stop.
     pub async fn watch_heartbeat(&self, to: &Fingerprint, on: bool, every_s: u32) -> Result<()> {
         self.send_message(to, &Message::HeartbeatWatch { on, every_s: every_s.max(5) }).await
+    }
+
+    /// Texting from a computer: ask a phone for its conversations (answer: `SmsThreads`).
+    pub async fn sms_list_threads(&self, phone: &Fingerprint, limit: u32) -> Result<()> {
+        self.send_message(phone, &Message::SmsListThreads { limit: limit.clamp(1, MAX_SMS) }).await
+    }
+
+    /// Ask for a conversation's messages, newest first, older than `before_ms` if given
+    /// (answer: `SmsMessages`).
+    pub async fn sms_list_messages(&self, phone: &Fingerprint, thread: &str, before_ms: Option<u64>, limit: u32) -> Result<()> {
+        self.send_message(phone, &Message::SmsListMessages { thread: thread.into(), before_ms, limit: limit.clamp(1, MAX_SMS) }).await
+    }
+
+    /// Have a phone send a text; its outcome comes back as `SmsSent` with `client_id`.
+    pub async fn sms_send(&self, phone: &Fingerprint, client_id: &str, to: &[String], text: &str) -> Result<()> {
+        if to.is_empty() || text.trim().is_empty() {
+            return Err(invalid("a text needs someone to send it to and something to say"));
+        }
+        self.send_message(phone, &Message::SmsSend { client_id: client_id.into(), to: to.to_vec(), text: text.into() }).await
+    }
+
+    /// Phones: answer `SmsListThreads` (at most 100 threads).
+    pub async fn sms_threads(&self, to: &Fingerprint, threads: Vec<SmsThread>) -> Result<()> {
+        self.send_message(to, &Message::SmsThreads { threads: threads.into_iter().take(MAX_SMS as usize).collect() }).await
+    }
+
+    /// Phones: answer `SmsListMessages` (at most 100 messages; `more` if older exist).
+    pub async fn sms_messages(&self, to: &Fingerprint, thread: &str, messages: Vec<SmsMessage>, more: bool) -> Result<()> {
+        let messages = messages.into_iter().take(MAX_SMS as usize).collect();
+        self.send_message(to, &Message::SmsMessages { thread: thread.into(), messages, more }).await
+    }
+
+    /// Phones: a message came in or went out.
+    pub async fn sms_message(&self, to: &Fingerprint, thread: &str, message: SmsMessage) -> Result<()> {
+        self.send_message(to, &Message::SmsMessage { thread: thread.into(), message }).await
+    }
+
+    /// Phones: how sending `client_id` went.
+    pub async fn sms_sent(&self, to: &Fingerprint, client_id: &str, ok: bool, error: Option<&str>) -> Result<()> {
+        self.send_message(to, &Message::SmsSent { client_id: client_id.into(), ok, error: error.map(Into::into) }).await
     }
 
     /// Report a device found by other means than the built-in mDNS (Android's NsdManager,
@@ -1140,6 +1191,15 @@ impl Node {
                                 Ok(Message::MediaWatch { on }) => node.emit(Event::MediaWatch { from, on }),
                                 Ok(Message::CallState { state, contact }) => node.emit(Event::CallState { from, state, contact }),
                                 Ok(Message::Heartbeat) => node.emit(Event::Heartbeat { from }),
+                                Ok(Message::SmsListThreads { limit }) => node.emit(Event::SmsListThreads { from, limit }),
+                                Ok(Message::SmsListMessages { thread, before_ms, limit }) => {
+                                    node.emit(Event::SmsListMessages { from, thread, before_ms, limit })
+                                }
+                                Ok(Message::SmsSend { client_id, to, text }) => node.emit(Event::SmsSend { from, client_id, to, text }),
+                                Ok(Message::SmsThreads { threads }) => node.emit(Event::SmsThreads { from, threads }),
+                                Ok(Message::SmsMessages { thread, messages, more }) => node.emit(Event::SmsMessages { from, thread, messages, more }),
+                                Ok(Message::SmsMessage { thread, message }) => node.emit(Event::SmsMessage { from, thread, message }),
+                                Ok(Message::SmsSent { client_id, ok, error }) => node.emit(Event::SmsSent { from, client_id, ok, error }),
                                 Ok(Message::HeartbeatWatch { on, every_s }) => node.emit(Event::HeartbeatWatch { from, on, every_s: every_s.max(5) }),
                                 Ok(Message::Ring) => node.emit(Event::Ring { from, on: true }),
                                 Ok(Message::RingStop) => node.emit(Event::Ring { from, on: false }),
