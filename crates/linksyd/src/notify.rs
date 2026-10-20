@@ -121,7 +121,7 @@ pub fn base(summary: &str, body: &str) -> Notification {
     n
 }
 
-fn show(summary: String, body: String) {
+pub(crate) fn show(summary: String, body: String) {
     tokio::task::spawn_blocking(move || {
         if let Err(e) = base(&summary, &body).show() {
             debug!("notification failed: {e}");

@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use linksy_core::{Fingerprint, Node};
 
 use crate::history::History;
+use crate::lock::Away;
 use crate::mirror::Mirror;
 use crate::sessions::Sessions;
 use linksy_ipc::{Envelope, Request, ServerMsg, SessionInfo, Shared, Status};
@@ -16,7 +17,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
-pub async fn serve(node: Node, history: History, sessions: Sessions, mirror: Mirror, socket: PathBuf) -> std::io::Result<()> {
+pub async fn serve(node: Node, history: History, sessions: Sessions, mirror: Mirror, away: Away, socket: PathBuf) -> std::io::Result<()> {
     let listener = UnixListener::bind(&socket)?;
     #[cfg(unix)]
     {
@@ -25,11 +26,11 @@ pub async fn serve(node: Node, history: History, sessions: Sessions, mirror: Mir
     }
     loop {
         let (stream, _) = listener.accept().await?;
-        tokio::spawn(client(node.clone(), history.clone(), sessions.clone(), mirror.clone(), stream));
+        tokio::spawn(client(node.clone(), history.clone(), sessions.clone(), mirror.clone(), away.clone(), stream));
     }
 }
 
-async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror, stream: UnixStream) {
+async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror, away: Away, stream: UnixStream) {
     let (read, mut write) = stream.into_split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
 
@@ -82,9 +83,9 @@ async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror
                 continue;
             }
         };
-        let (node, history, sessions, mirror, tx) = (node.clone(), history.clone(), sessions.clone(), mirror.clone(), tx.clone());
+        let (node, history, sessions, mirror, away, tx) = (node.clone(), history.clone(), sessions.clone(), mirror.clone(), away.clone(), tx.clone());
         tokio::spawn(async move {
-            let msg = match handle(&node, &history, &sessions, &mirror, env.request).await {
+            let msg = match handle(&node, &history, &sessions, &mirror, &away, env.request).await {
                 Ok(v) => ServerMsg::Reply { id: env.id, ok: Some(v), error: None },
                 Err(e) => ServerMsg::Reply { id: env.id, ok: None, error: Some(e) },
             };
@@ -96,7 +97,7 @@ async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror
     writer.abort();
 }
 
-async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mirror, req: Request) -> Result<Value, String> {
+async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mirror, away: &Away, req: Request) -> Result<Value, String> {
     let json = |v: serde_json::Result<Value>| v.map_err(|e| e.to_string());
     match req {
         Request::Status => json(serde_json::to_value(Status {
@@ -166,6 +167,11 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
         Request::NotificationPrefs => serde_json::to_value(mirror.prefs()).map_err(|e| e.to_string()),
         Request::SetNotificationPrefs { prefs } => {
             mirror.set_prefs(prefs).map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
+        Request::LockPrefs => serde_json::to_value(away.prefs()).map_err(|e| e.to_string()),
+        Request::SetLockPrefs { prefs } => {
+            away.set_prefs(node, prefs).await?;
             Ok(Value::Null)
         }
         Request::CreateInvite => Ok(Value::String(node.create_invite().map_err(|e| e.to_string())?.to_uri())),

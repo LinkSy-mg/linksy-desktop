@@ -205,6 +205,7 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                     Shared::Clipboard { text } => format!("clipboard: {}", text.chars().take(40).collect::<String>()),
                     Shared::Ping { title, .. } => format!("ping: {title}"),
                     Shared::Link { url } => format!("link: {url}"),
+                    Shared::Locked => "locked this computer when it left".into(),
                     Shared::Camera { seconds } if e.direction == Direction::Incoming => format!("used their camera ({seconds} s)"),
                     Shared::Camera { seconds } => format!("shared this camera ({seconds} s)"),
                     Shared::Screen { seconds, display: true } => format!("second display ({seconds} s)"),

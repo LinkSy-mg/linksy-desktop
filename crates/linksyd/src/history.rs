@@ -66,6 +66,11 @@ impl History {
         });
     }
 
+    /// Record something a device caused here that has no core event of its own.
+    pub fn record_incoming(&self, from: &DeviceInfo, what: Shared) {
+        self.upsert(incoming(from, what));
+    }
+
     fn upsert(&self, entry: HistoryEntry) {
         {
             let mut entries = self.inner.entries.lock().unwrap();

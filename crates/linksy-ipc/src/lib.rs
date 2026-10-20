@@ -46,6 +46,9 @@ pub enum Request {
     /// Whether phone notifications show here, and which apps are muted.
     NotificationPrefs,
     SetNotificationPrefs { prefs: NotificationPrefs },
+    /// Which devices lock this computer when they leave, and after how long.
+    LockPrefs,
+    SetLockPrefs { prefs: LockPrefs },
     Settings,
     UpdateSettings { settings: Settings },
     /// A pairing QR code (`linksy://pair?…`); valid five minutes or until cancelled.
@@ -125,6 +128,8 @@ pub enum Shared {
     Ping { title: String, body: String },
     /// A web link opened on the receiving device ("Open on PC").
     Link { url: String },
+    /// This computer locked itself because the device left.
+    Locked,
     /// A camera used as a webcam, one way or the other; `seconds` once it ended.
     Camera {
         #[serde(default)]
@@ -138,6 +143,21 @@ pub enum Shared {
         #[serde(default)]
         display: bool,
     },
+}
+
+/// "Lock when you walk away": this computer locks when one of `devices` hasn't checked in
+/// for `grace_s` seconds. It never unlocks by itself.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LockPrefs {
+    pub devices: Vec<Fingerprint>,
+    pub grace_s: u32,
+}
+
+impl Default for LockPrefs {
+    fn default() -> Self {
+        Self { devices: Vec::new(), grace_s: 60 }
+    }
 }
 
 /// How phone notifications show on this computer.
@@ -369,6 +389,14 @@ impl Client {
 
     pub async fn set_notification_prefs(&self, prefs: NotificationPrefs) -> Result<(), ClientError> {
         self.call(Request::SetNotificationPrefs { prefs }).await
+    }
+
+    pub async fn lock_prefs(&self) -> Result<LockPrefs, ClientError> {
+        self.call(Request::LockPrefs).await
+    }
+
+    pub async fn set_lock_prefs(&self, prefs: LockPrefs) -> Result<(), ClientError> {
+        self.call(Request::SetLockPrefs { prefs }).await
     }
 
     pub async fn create_invite(&self) -> Result<String, ClientError> {
