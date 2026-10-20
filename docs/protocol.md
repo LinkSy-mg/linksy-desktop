@@ -48,6 +48,7 @@ Decisions already made with the owner:
 | Open on PC (share a link from the phone) | Done | To do | `open_url`, §4.5; Android share sheet |
 | Phone battery on the desktop | Done | To do | `battery`, §4.5; Android BatteryManager |
 | Ring my phone / find my laptop | Done | To do | `ring` / `ring_stop`, §4.5 |
+| Media controls, both ways | Done | To do | `media_*`, §4.5; Android MediaSessionManager |
 | Connect on demand / idle close / stay connected | Done | To do | §4.6 |
 | Desktop notifications with Accept/Decline | Done | To do | Android: notification actions |
 | QR-code pairing | Done (shows the QR) | To do | phone scans desktop, §4.7 |
@@ -216,6 +217,13 @@ and close the other with reason `duplicate`.
   {"type":"notification_reply","key":"…","text":"Sure!"}
   {"type":"notification_action","key":"…","action":"read"}
   {"type":"notification_dismiss","key":"…"}
+  // Media controls, both ways:
+  {"type":"media_watch","on":true}              // "send me your media_state while connected"
+  {"type":"media_state","seq":1760945000123,"players":[{"id":"spotify","app":"Spotify",
+   "title":"…","artist":"…","album":"…","playing":true,"position_ms":42000,
+   "length_ms":215000,"can_next":true,"can_previous":true,"can_seek":true,"art":"<base64>"}]}
+  {"type":"media_command","player":"spotify","command":{"action":"play_pause"}}
+  // actions: play, pause, play_pause, next, previous, seek (+ "position_ms")
   ```
 
   Receiving any of these counts as activity on the connection. Unknown types are
@@ -248,6 +256,20 @@ and close the other with reason `duplicate`.
     it on the phone (`NotificationListenerService.cancelNotification(key)`).
   Send `notification_removed` when it goes away on the phone (read, swiped, answered), so
   it goes away on the computer too. Nothing of it is stored on either side.
+
+  **Media.** `media_state` is always the sender's *whole* set of players; a player missing
+  from it has stopped. `seq` is the time it was taken in ms since 1970: receivers keep the
+  newest and drop late, older ones (streams can arrive out of order). `art` is optional,
+  JPEG or PNG, at most 64 KiB raw.
+  - **Phone → computer:** send `media_state` whenever playback changes (play/pause,
+    track, every few seconds isn't needed: position is extrapolated) and after
+    connecting. The computer shows each player in GNOME's media controls as
+    "<app> on <phone>", and the keyboard's media keys work on it; buttons come back as
+    `media_command`.
+  - **Computer → phone:** send `media_watch {on: true}` while the phone shows the
+    computer's player (its media notification / page), `{on: false}` when it stops. The
+    computer then sends `media_state` on every change while the connection lives, and
+    acts on `media_command` for its players.
 
 - **Bidirectional stream = one file transfer** (`TransferMsg`), opened by the sender:
 
@@ -413,6 +435,8 @@ node.open_url(id, url)                      // Event::OpenUrl { from, url } on t
 node.send_battery(id, Battery { level, charging })   node.ring(id, on)   // Event::Battery / Event::Ring
 DeviceView.battery: Option<Battery>         // last level each device reported
 node.post_notification(id, RemoteNotification{…})   node.remove_notification(id, key)
+node.send_media_state(id, &MediaState{ seq, players })   node.media_command(id, player, cmd)
+node.watch_media(id, on)                    // Event::MediaState / MediaCommand / MediaWatch
 Event::NotificationReply / NotificationAction / NotificationDismissed { from, key, … }   // to act on
 node.settings() / node.update_settings(s)   Settings { name, download_dir, stay_connected, auto_accept }
 node.forget(id)                             node.shutdown()
@@ -595,3 +619,12 @@ robust against any encoder (GPU ones may slice too):
   `fake_phone --notify "Alice" "Lunch?"` against a computer to see the desktop side.
 - **2026-10-20** — Desktop 0.2.3: x264 now sends one slice per frame (the black second
   display on the realme). §7 has the receiver change that makes this robust.
+- **2026-10-20** — **Media controls** (desktop 0.3.0): `media_state`, `media_command`,
+  `media_watch` (§4.5) and their core calls. Phone to-do: with notification access
+  (already needed for notifications), `MediaSessionManager.getActiveSessions` +
+  `MediaController.Callback` give the phone's players: send `media_state` on changes,
+  act on `media_command` via `MediaController.transportControls`. For the computer's
+  players, a media-style notification ("Spotify on fedora") with play/pause/next, shown
+  while `media_watch` is on. Try it against a computer with
+  `fake_phone --media "Song" "Artist"` (appears in GNOME's media controls) and
+  `fake_phone --watch-media --press play-pause`.
