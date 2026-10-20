@@ -98,6 +98,10 @@ impl Sessions {
             SessionKind::Display => {
                 cmd.arg("--control").arg("--virtual");
             }
+            // A phone as touchpad and keyboard: input only, nothing shared.
+            SessionKind::Input => {
+                cmd.arg("--input-only");
+            }
         }
         // Each kind remembers its own answer to the desktop's dialog.
         let kind = format!("{:?}", session.kind).to_lowercase();

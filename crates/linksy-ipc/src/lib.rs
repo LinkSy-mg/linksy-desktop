@@ -141,6 +141,11 @@ pub enum Shared {
     Link { url: String },
     /// This computer locked itself because the device left.
     Locked,
+    /// A phone used as this computer's touchpad and keyboard; `seconds` once it ended.
+    Remote {
+        #[serde(default)]
+        seconds: u64,
+    },
     /// A camera used as a webcam, one way or the other; `seconds` once it ended.
     Camera {
         #[serde(default)]

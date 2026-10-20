@@ -207,6 +207,7 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                     Shared::Ping { title, .. } => format!("ping: {title}"),
                     Shared::Link { url } => format!("link: {url}"),
                     Shared::Locked => "locked this computer when it left".into(),
+                    Shared::Remote { seconds } => format!("touchpad and keyboard ({seconds} s)"),
                     Shared::Camera { seconds } if e.direction == Direction::Incoming => format!("used their camera ({seconds} s)"),
                     Shared::Camera { seconds } => format!("shared this camera ({seconds} s)"),
                     Shared::Screen { seconds, display: true } => format!("second display ({seconds} s)"),
@@ -372,12 +373,14 @@ async fn watch(c: &Client) -> Result<(), String> {
                     linksy_ipc::linksy_core::SessionKind::Screen => println!("{} wants to see your screen.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Display => println!("{} wants to use this screen as a second display.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Camera => println!("{} wants to use your camera.", from.name),
+                    linksy_ipc::linksy_core::SessionKind::Input => println!("{} wants to use your mouse and keyboard.", from.name),
                 }
                 let ok = ask("Allow?").await;
                 let _ = c.respond(request, ok).await;
             }
+            Event::SessionStarted { peer, kind: linksy_ipc::linksy_core::SessionKind::Input, .. } => println!("{} is your touchpad and keyboard", peer.name),
             Event::SessionStarted { peer, sharing: true, .. } => println!("Sharing your screen with {}", peer.name),
-            Event::SessionEnded { .. } => println!("Screen sharing ended"),
+            Event::SessionEnded { .. } => println!("Session ended"),
             _ => {}
         }
     }
