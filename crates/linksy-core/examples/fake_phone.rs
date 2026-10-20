@@ -5,12 +5,13 @@
 //!
 //! cargo run -p linksy-core --example fake_phone -- --data-dir DIR [--port N] [--name NAME]
 //!     [--battery PERCENT] [--charging] [--notify "TITLE" "BODY"] [--display FILE]
-//!     [--media "TITLE" "ARTIST"] [--watch-media] [--seconds N]
+//!     [--media "TITLE" "ARTIST"] [--watch-media] [--call SECONDS] [--seconds N]
 //!
 //! `--display FILE` accepts "Use as Second Display" and saves the H.264 it receives.
 //! `--media "TITLE" "ARTIST"` plays a song (as far as the computer can tell);
 //! `--watch-media` prints what the computer plays; `--press play-pause|next|previous`
-//! presses that button on the first player it hears about.
+//! presses that button on the first player it hears about. `--call SECONDS` rings, answers
+//! two seconds later, and hangs up after that many seconds.
 
 use std::time::Duration;
 
@@ -25,6 +26,7 @@ async fn main() {
     let mut display: Option<std::path::PathBuf> = None;
     let (mut media, mut watch_media) = (None, false);
     let mut press: Option<linksy_core::MediaCommand> = None;
+    let mut call: Option<u64> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -36,6 +38,7 @@ async fn main() {
             "--seconds" => seconds = value().parse().expect("--seconds N"),
             "--display" => display = Some(value().into()),
             "--watch-media" => watch_media = true,
+            "--call" => call = Some(value().parse().expect("--call SECONDS")),
             "--press" => {
                 press = Some(match value().as_str() {
                     "next" => linksy_core::MediaCommand::Next,
@@ -115,6 +118,19 @@ async fn main() {
         if watch_media {
             let _ = node.watch_media(&t.device.id, true).await;
         }
+    }
+    if let Some(seconds) = call {
+        let node = node.clone();
+        tokio::spawn(async move {
+            use linksy_core::CallState::*;
+            for (state, wait) in [(Ringing, 2), (Active, seconds), (Idle, 0)] {
+                for t in node.trusted() {
+                    let _ = node.send_call_state(&t.device.id, state, Some("Alice")).await;
+                }
+                println!("call: {state:?}");
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+            }
+        });
     }
     if let Some(path) = display.clone() {
         let mut sessions = node.incoming_sessions().expect("sessions");
