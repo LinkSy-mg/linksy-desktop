@@ -147,6 +147,11 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, req: Reques
             }
             Ok(Value::Null)
         }
+        Request::Ring { to, on } => {
+            let id = resolve(node, &to)?;
+            node.ring(&id, on).await.map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
         Request::CreateInvite => Ok(Value::String(node.create_invite().map_err(|e| e.to_string())?.to_uri())),
         Request::CancelInvite => {
             node.cancel_invite();

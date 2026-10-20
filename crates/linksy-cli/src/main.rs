@@ -24,6 +24,7 @@ Usage:
   linksy notify <device> <title> [body]
   linksy clip <device> [text]        share text to its clipboard (default: stdin)
   linksy open <device> <url>         open a web link in its browser
+  linksy ring <device> [--stop]      make it ring so you can find it
   linksy forget <device>             unpair a device
   linksy settings [key value]        show or change: name, download-dir,
                                      auto-accept on|off, stay-connected on|off
@@ -80,7 +81,8 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                     (true, false, false) => "paired · away",
                     (false, _, _) => "nearby · not paired",
                 };
-                println!("{} {:<24} {}  {}", icon(d.device.kind), d.device.name, d.device.id.short(), state);
+                let battery = d.battery.map(|b| format!(" · {}%{}", b.level, if b.charging { " charging" } else { "" })).unwrap_or_default();
+                println!("{} {:<24} {}  {state}{battery}", icon(d.device.kind), d.device.name, d.device.id.short());
             }
         }
         ("pair", [target]) => {
@@ -135,6 +137,11 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
         ("notify", [to, title, body @ ..]) if body.len() <= 1 => {
             c.notify(to.clone(), title.clone(), body.first().cloned().unwrap_or_default()).await.map_err(err)?;
         }
+        ("ring", [to]) => {
+            c.ring(to.clone(), true).await.map_err(err)?;
+            println!("Ringing {to}. Stop it with: linksy ring {to} --stop");
+        }
+        ("ring", [to, stop]) if stop == "--stop" => c.ring(to.clone(), false).await.map_err(err)?,
         ("open", [to, url]) => {
             c.open_url(to.clone(), url.clone()).await.map_err(err)?;
             println!("Opened on {to}.");
@@ -346,6 +353,10 @@ async fn watch(c: &Client) -> Result<(), String> {
             Event::Notification { from, title, body } => println!("🔔 {} — {title} {body}", from.name),
             Event::Clipboard { from, text } => println!("📋 {} shared: {text}", from.name),
             Event::OpenUrl { from, url } => println!("🔗 {} opened {url}", from.name),
+            Event::Battery { from, battery } => {
+                println!("🔋 {} at {}%{}", from.name, battery.level, if battery.charging { ", charging" } else { "" })
+            }
+            Event::Ring { from, on: true } => println!("🔔 {} is looking for this device", from.name),
             Event::SessionRequest { request, from, kind } => {
                 match kind {
                     linksy_ipc::linksy_core::SessionKind::Control => println!("{} wants to control your screen (mouse and keyboard).", from.name),

@@ -4,18 +4,22 @@
 
 use std::path::{Path, PathBuf};
 
-use linksy_core::{Direction, Event, Node, SessionKind, Uuid};
+use linksy_core::{Direction, Event, Fingerprint, Node, SessionKind, Uuid};
 use notify_rust::{Hint, Notification, Timeout, Urgency};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::debug;
 
 const APP: &str = "Linksy";
 const DESKTOP_ENTRY: &str = "mg.diary.linksy.Linksy";
+/// Battery level, in percent, at which a device's low battery is announced (once).
+const LOW_BATTERY: u8 = 15;
 
 pub async fn run(node: Node) {
     let mut events = node.subscribe();
     // Incoming transfers: remember who sent what so completion can say it.
     let mut incoming: std::collections::HashMap<Uuid, String> = Default::default();
+    // Devices already warned about a low battery; cleared once they charge or recover.
+    let mut warned: std::collections::HashSet<Fingerprint> = Default::default();
     loop {
         let event = match events.recv().await {
             Ok(e) => e,
@@ -75,6 +79,23 @@ pub async fn run(node: Node) {
             Event::Notification { from, title, body } => {
                 let body = if body.is_empty() { format!("From {}", from.name) } else { format!("{body}\nFrom {}", from.name) };
                 show(title, body);
+            }
+            Event::Battery { from, battery } if battery.level <= LOW_BATTERY && !battery.charging => {
+                if warned.insert(from.id) {
+                    show(format!("{} is low on battery", from.name), format!("{}% left", battery.level));
+                }
+            }
+            Event::Battery { from, battery } if battery.charging || battery.level > LOW_BATTERY + 5 => {
+                warned.remove(&from.id);
+            }
+            Event::Ring { from, on: true } => {
+                tokio::task::spawn_blocking(move || {
+                    let mut n = base(&format!("{} is looking for this computer", from.name), "Here it is!");
+                    n.urgency(Urgency::Critical).hint(Hint::SoundName("phone-incoming-call".into()));
+                    if let Err(e) = n.show() {
+                        debug!("notification failed: {e}");
+                    }
+                });
             }
             _ => {}
         }

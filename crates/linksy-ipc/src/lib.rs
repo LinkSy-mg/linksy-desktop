@@ -37,6 +37,8 @@ pub enum Request {
     Clipboard { to: String, text: String },
     /// Open a web link in the device's browser.
     OpenUrl { to: String, url: String },
+    /// Make a device ring so it can be found (`on`), or stop it.
+    Ring { to: String, on: bool },
     Settings,
     UpdateSettings { settings: Settings },
     /// A pairing QR code (`linksy://pair?…`); valid five minutes or until cancelled.
@@ -319,6 +321,10 @@ impl Client {
 
     pub async fn open_url(&self, to: impl Into<String>, url: impl Into<String>) -> Result<(), ClientError> {
         self.call(Request::OpenUrl { to: to.into(), url: url.into() }).await
+    }
+
+    pub async fn ring(&self, to: impl Into<String>, on: bool) -> Result<(), ClientError> {
+        self.call(Request::Ring { to: to.into(), on }).await
     }
 
     pub async fn create_invite(&self) -> Result<String, ClientError> {
