@@ -365,6 +365,7 @@ impl DevicePage {
     fn entry_row(&self, e: &HistoryEntry, progress: Option<&Progress>) -> (gtk::ListBoxRow, Option<LiveRow>) {
         let incoming = e.direction == Direction::Incoming;
         let (icon, title) = match &e.what {
+            Shared::Files { files, import: true, .. } => ("image-x-generic-symbolic", fmt::plural(files.len(), "photo")),
             Shared::Files { files, .. } => (
                 if incoming { "folder-download-symbolic" } else { "document-send-symbolic" },
                 match files.as_slice() {
@@ -388,6 +389,7 @@ impl DevicePage {
             _ => None,
         };
         let verb = match (&e.what, incoming) {
+            (Shared::Files { import: true, .. }, _) => "Imported",
             (Shared::Files { .. }, true) => "Received",
             (Shared::Files { .. }, false) => "Sent",
             (Shared::Camera { .. }, true) => "Used",

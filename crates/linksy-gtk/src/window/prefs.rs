@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use linksy_ipc::NotificationPrefs;
+use linksy_ipc::{NotificationPrefs, PhotoPrefs};
 use linksy_ipc::linksy_core::Settings;
 
 use super::Window;
@@ -17,16 +17,16 @@ impl Window {
     pub(super) fn show_preferences(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
         let w = self.clone();
-        let call = self.bridge.call(&c, |c| async move { Ok((c.settings().await?, c.notification_prefs().await?)) });
+        let call = self.bridge.call(&c, |c| async move { Ok((c.settings().await?, c.notification_prefs().await?, c.photo_prefs().await?)) });
         glib::spawn_future_local(async move {
             match call.await {
-                Ok((s, n)) => w.present_preferences(s, n),
+                Ok((s, n, p)) => w.present_preferences(s, n, p),
                 Err(e) => w.toast_error(&e, None),
             }
         });
     }
 
-    fn present_preferences(self: &Rc<Self>, settings: Settings, notifications: NotificationPrefs) {
+    fn present_preferences(self: &Rc<Self>, settings: Settings, notifications: NotificationPrefs, photos: PhotoPrefs) {
         let dialog = adw::PreferencesDialog::builder().title("Preferences").search_enabled(false).build();
         let current = Rc::new(RefCell::new(settings.clone()));
         // Set while a widget is being reset after a failed save, so it doesn't save again.
@@ -62,6 +62,7 @@ impl Window {
         let receiving = adw::PreferencesGroup::builder().title("Receiving").build();
         receiving.add(&folder);
         receiving.add(&auto);
+        receiving.add(&self.photo_import_row(&dialog, photos));
 
         let stay = adw::SwitchRow::builder()
             .title("Stay Connected")
@@ -196,5 +197,27 @@ impl Window {
             });
         }
         group
+    }
+
+    /// "Import Photos From Phones": on or off; they go to Pictures/<phone name>.
+    fn photo_import_row(self: &Rc<Self>, dialog: &adw::PreferencesDialog, prefs: PhotoPrefs) -> adw::SwitchRow {
+        let row = adw::SwitchRow::builder()
+            .title("Import Photos From Phones")
+            .subtitle(format!("New photos from your phone go to {}, in a folder named after it, without asking.", fmt::home_relative(&prefs.folder)))
+            .active(prefs.import)
+            .build();
+        let (w, dialog) = (self.clone(), dialog.clone());
+        row.connect_active_notify(move |row| {
+            let Some(c) = w.client() else { return };
+            let next = PhotoPrefs { import: row.is_active(), ..prefs.clone() };
+            let call = w.bridge.call(&c, move |c| async move { c.set_photo_prefs(next).await });
+            let dialog = dialog.clone();
+            glib::spawn_future_local(async move {
+                if let Err(e) = call.await {
+                    dialog.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e))));
+                }
+            });
+        });
+        row
     }
 }
