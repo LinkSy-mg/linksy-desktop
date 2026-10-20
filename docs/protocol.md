@@ -45,6 +45,7 @@ Decisions already made with the owner:
 | Clipboard text sharing (on demand) | ✅ | ⬜ | up to 256 KiB |
 | Device-to-device notifications ("ping") | ✅ | ⬜ | |
 | Rename device (live to peers) | ✅ | ⬜ | `Renamed` message |
+| Open on PC (share a link from the phone) | ✅ | ⬜ | `open_url`, §4.5; Android share sheet |
 | Connect on demand / idle close / stay connected | ✅ | ⬜ | §4.6 |
 | Desktop notifications with Accept/Decline | ✅ | ⬜ | Android: notification actions |
 | QR-code pairing | ✅ shows QR | ⬜ | phone scans desktop, §4.7 |
@@ -201,9 +202,15 @@ and close the other with reason `duplicate`.
   {"type":"clipboard","text":"…"}             // ≤ 256 KiB of UTF-8, else ignored
   {"type":"renamed","name":"Living Room PC"}    // sender's new name
   {"type":"ping"}
+  {"type":"open_url","url":"https://…"}        // "Open on PC": open in the browser
   ```
 
-  Receiving any of these counts as activity on the connection.
+  Receiving any of these counts as activity on the connection. Unknown types are
+  ignored, so a newer device can send messages an older one doesn't know yet.
+
+  `open_url`: only `http://` and `https://` links, at most 8 KiB, no control characters;
+  receivers drop anything else (the core enforces this both ways). The desktop opens it
+  in the default browser at once and lists it in the activity timeline.
 
 - **Bidirectional stream = one file transfer** (`TransferMsg`), opened by the sender:
 
@@ -365,6 +372,7 @@ node.devices() -> [DeviceView]              DeviceView { device, trusted, connec
 node.pair_device(id) / node.pair(addr)      node.respond(request_id, accept)
 node.send_files(id, paths) -> transfer_id   node.cancel(transfer_id)
 node.send_clipboard(id, text)               node.notify(id, title, body)
+node.open_url(id, url)                      // Event::OpenUrl { from, url } on the receiver
 node.settings() / node.update_settings(s)   Settings { name, download_dir, stay_connected, auto_accept }
 node.forget(id)                             node.shutdown()
 node.device_found(device, addrs)            node.device_lost(id)        // platform discovery
@@ -502,3 +510,8 @@ Phone-side fixes found testing with a realme 15 Pro 5G (2026-10-19):
   Nothing on the wire changes. If the phone app has no ID yet, `mg.diary.linksy` fits.
 - **2026-10-20** — `ROADMAP.md` lists the next features (0.2–0.5) with the phone-side
   work for each. Nothing to build yet; protocol details land here as each one starts.
+- **2026-10-20** — **Open on PC** (desktop 0.2.0): `open_url` message (§4.5), core
+  `node.open_url(id, url)` and `Event::OpenUrl`. Phone to-do: an "Open on PC" target in
+  the Android share sheet for `text/plain` shares that are links (`ACTION_SEND`), with a
+  device picker when several computers are paired; plain text can go as `clipboard`.
+  The phone may also open links a computer sends (`Event::OpenUrl`), with a tap to confirm.
