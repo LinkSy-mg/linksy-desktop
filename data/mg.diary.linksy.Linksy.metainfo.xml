@@ -21,6 +21,7 @@
       <li>Use your phone's camera as a webcam in any app</li>
       <li>See your phone's notifications here, and reply to messages</li>
       <li>Open links from your phone, see its battery, and ring it to find it</li>
+      <li>Control your phone's music from here, and this computer's from your phone</li>
       <li>Ping a device, and see everything you shared as a timeline</li>
     </ul>
     <p>
@@ -71,6 +72,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.3.0" date="2026-10-20">
+      <description>
+        <p>Media controls both ways: your phone's music in GNOME's media controls, and this computer's music on your phone.</p>
+      </description>
+    </release>
     <release version="0.2.3" date="2026-10-20">
       <description>
         <p>Using a phone as a second display no longer shows a black screen.</p>

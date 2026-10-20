@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.3.0
+
+### Added
+- **Media controls, both ways**: what plays on your phone shows in GNOME's media controls
+  ("Spotify on realme"), and the play, pause and skip buttons and your keyboard's media
+  keys control it. Your phone can control what plays on this computer, too. Needs the
+  Linksy for Android update that adds it.
+
 ## 0.2.3
 
 ### Fixed
