@@ -21,7 +21,7 @@ fi
 
 rm -rf "$STAGE"; mkdir -p "$STAGE/bin" "$STAGE/share/icons"
 for b in linksyd linksy linksy-app linksy-screen; do install -m755 "target/release/$b" "$STAGE/bin/$b"; done
-cp data/app.linksy.Linksy.desktop data/linksyd.service "data/nautilus/Send with Linksy" "$STAGE/share/"
+cp data/mg.diary.linksy.Linksy.desktop data/linksyd.service "data/nautilus/Send with Linksy" "$STAGE/share/"
 cp data/icons/*.svg "$STAGE/share/icons/"
 install -m755 packaging/linux/install.sh packaging/linux/uninstall.sh "$STAGE/"
 cp packaging/linux/README.txt LICENSE* "$STAGE/" 2>/dev/null || cp packaging/linux/README.txt "$STAGE/"
@@ -33,10 +33,10 @@ ROOT="$DIST/root"
 rm -rf "$ROOT"
 for b in linksyd linksy linksy-app linksy-screen; do install -Dm755 "target/release/$b" "$ROOT/usr/bin/$b"; done
 sed "s|@BINDIR@|/usr/bin|" data/linksyd.service | install -Dm644 /dev/stdin "$ROOT/usr/lib/systemd/user/linksyd.service"
-install -Dm644 data/app.linksy.Linksy.desktop "$ROOT/usr/share/applications/app.linksy.Linksy.desktop"
-install -Dm644 data/app.linksy.Linksy.metainfo.xml "$ROOT/usr/share/metainfo/app.linksy.Linksy.metainfo.xml"
-install -Dm644 data/icons/app.linksy.Linksy.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/app.linksy.Linksy.svg"
-install -Dm644 data/icons/app.linksy.Linksy-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/app.linksy.Linksy-symbolic.svg"
+install -Dm644 data/mg.diary.linksy.Linksy.desktop "$ROOT/usr/share/applications/mg.diary.linksy.Linksy.desktop"
+install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml "$ROOT/usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml"
+install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
+install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
 install -Dm644 LICENSE "$ROOT/usr/share/licenses/linksy/LICENSE"
 
 DEB="$DIST/deb"

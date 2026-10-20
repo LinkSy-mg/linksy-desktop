@@ -13,7 +13,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-const APP_ID: &str = "app.linksy.Linksy";
+const APP_ID: &str = "mg.diary.linksy.Linksy";
 
 const CSS: &str = r#"
 /* Brand: Signal blue as Linksy's accent; libadwaita derives the rest. */

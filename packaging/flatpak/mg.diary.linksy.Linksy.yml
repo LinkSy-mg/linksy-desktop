@@ -1,4 +1,4 @@
-app-id: app.linksy.Linksy
+app-id: mg.diary.linksy.Linksy
 runtime: org.gnome.Platform
 runtime-version: '50'
 sdk: org.gnome.Sdk
@@ -45,10 +45,10 @@ modules:
     build-commands:
       - cargo build --release --offline -p linksyd -p linksy -p linksy-app -p linksy-screen
       - install -Dm755 -t /app/bin target/release/linksyd target/release/linksy target/release/linksy-app target/release/linksy-screen
-      - install -Dm644 data/app.linksy.Linksy.desktop /app/share/applications/app.linksy.Linksy.desktop
-      - install -Dm644 data/app.linksy.Linksy.metainfo.xml /app/share/metainfo/app.linksy.Linksy.metainfo.xml
-      - install -Dm644 data/icons/app.linksy.Linksy.svg /app/share/icons/hicolor/scalable/apps/app.linksy.Linksy.svg
-      - install -Dm644 data/icons/app.linksy.Linksy-symbolic.svg /app/share/icons/hicolor/symbolic/apps/app.linksy.Linksy-symbolic.svg
+      - install -Dm644 data/mg.diary.linksy.Linksy.desktop /app/share/applications/mg.diary.linksy.Linksy.desktop
+      - install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml /app/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
+      - install -Dm644 data/icons/mg.diary.linksy.Linksy.svg /app/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg
+      - install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg /app/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg
     sources:
       # @SOURCE@ (scripts/package-flatpak.sh builds from this checkout instead)
       - type: git

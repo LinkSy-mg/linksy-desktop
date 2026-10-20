@@ -12,11 +12,13 @@ UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 for b in linksyd linksy linksy-app linksy-screen; do
   install -Dm755 "bin/$b" "$BIN/$b"
 done
+# Before 0.1.2 the app ID was app.linksy.Linksy.
+rm -f "$SHARE/applications/app.linksy.Linksy.desktop" "$SHARE/icons/hicolor/scalable/apps/app.linksy.Linksy.svg" "$SHARE/icons/hicolor/symbolic/apps/app.linksy.Linksy-symbolic.svg"
 mkdir -p "$SHARE/applications"
 # Absolute path: the desktop session's PATH may not include ~/.local/bin.
-sed "s|^Exec=linksy-app|Exec=$BIN/linksy-app|" share/app.linksy.Linksy.desktop > "$SHARE/applications/app.linksy.Linksy.desktop"
-install -Dm644 share/icons/app.linksy.Linksy.svg "$SHARE/icons/hicolor/scalable/apps/app.linksy.Linksy.svg"
-install -Dm644 share/icons/app.linksy.Linksy-symbolic.svg "$SHARE/icons/hicolor/symbolic/apps/app.linksy.Linksy-symbolic.svg"
+sed "s|^Exec=linksy-app|Exec=$BIN/linksy-app|" share/mg.diary.linksy.Linksy.desktop > "$SHARE/applications/mg.diary.linksy.Linksy.desktop"
+install -Dm644 share/icons/mg.diary.linksy.Linksy.svg "$SHARE/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
+install -Dm644 share/icons/mg.diary.linksy.Linksy-symbolic.svg "$SHARE/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
 mkdir -p "$SHARE/nautilus/scripts"
 sed "s|@BINDIR@|$BIN|" "share/Send with Linksy" > "$SHARE/nautilus/scripts/Send with Linksy"
 chmod 755 "$SHARE/nautilus/scripts/Send with Linksy"

@@ -10,7 +10,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tracing::debug;
 
 const APP: &str = "Linksy";
-const DESKTOP_ENTRY: &str = "app.linksy.Linksy";
+const DESKTOP_ENTRY: &str = "mg.diary.linksy.Linksy";
 
 pub async fn run(node: Node) {
     let mut events = node.subscribe();

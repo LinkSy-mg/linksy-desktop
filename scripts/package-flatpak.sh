@@ -16,11 +16,11 @@ awk -v root="$(pwd)" '
   /# @SOURCE@/ { print "      - type: dir"; print "        path: " root; print "        skip: [target, dist, .git]"; skip = 3; next }
   skip > 0 { skip--; next }
   { print }
-' packaging/flatpak/app.linksy.Linksy.yml > "$WORK/app.linksy.Linksy.yml"
+' packaging/flatpak/mg.diary.linksy.Linksy.yml > "$WORK/mg.diary.linksy.Linksy.yml"
 
 flatpak run --filesystem="$(pwd)" org.flatpak.Builder --user --install-deps-from=flathub --disable-rofiles-fuse \
   --state-dir="$WORK/state" --repo="$WORK/repo" --force-clean ${1:+--install} \
-  "$WORK/build" "$WORK/app.linksy.Linksy.yml"
+  "$WORK/build" "$WORK/mg.diary.linksy.Linksy.yml"
 flatpak build-bundle --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo \
-  "$WORK/repo" "dist/v$V/linksy-$V.flatpak" app.linksy.Linksy
+  "$WORK/repo" "dist/v$V/linksy-$V.flatpak" mg.diary.linksy.Linksy
 echo "dist/v$V/linksy-$V.flatpak"

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>app.linksy.Linksy</id>
+  <id>mg.diary.linksy.Linksy</id>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>GPL-3.0-or-later</project_license>
   <name>Linksy</name>
   <summary>Your devices, connected</summary>
-  <developer id="app.linksy">
+  <developer id="mg.diary.linksy">
     <name>Linksy</name>
   </developer>
   <description>
@@ -26,8 +26,8 @@
       when there is something to share, to save battery.
     </p>
   </description>
-  <launchable type="desktop-id">app.linksy.Linksy.desktop</launchable>
-  <url type="homepage">https://github.com/LinkSy-mg/linksy-releases</url>
+  <launchable type="desktop-id">mg.diary.linksy.Linksy.desktop</launchable>
+  <url type="homepage">https://linksy.diary.mg</url>
   <url type="bugtracker">https://github.com/LinkSy-mg/linksy-releases/issues</url>
   <screenshots>
     <screenshot type="default">

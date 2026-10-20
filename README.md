@@ -64,7 +64,7 @@ To cut a release: add the version's section to `CHANGELOG.md` and the metainfo's
 `<releases>`, bump `version` in `Cargo.toml`, run `scripts/package-linux.sh` (tarball, .deb,
 .rpm) and `scripts/package-flatpak.sh`, tag `vX.Y.Z` here and publish the files on this repo
 and, as `linux-vX.Y.Z` (not marked latest, which belongs to the Android APKs), on
-linksy-releases. Flathub builds from the tag with `packaging/flatpak/app.linksy.Linksy.yml`.
+linksy-releases. Flathub builds from the tag with `packaging/flatpak/mg.diary.linksy.Linksy.yml`.
 
 ## Build
 

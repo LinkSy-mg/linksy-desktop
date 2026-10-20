@@ -35,17 +35,19 @@ else
 fi
 if [ "$WITH_APP" = 1 ]; then
   install -Dm755 target/release/linksy-app "$BIN/linksy-app"
+  # Before 0.1.2 the app ID was app.linksy.Linksy.
+  rm -f "$SHARE/applications/app.linksy.Linksy.desktop" "$SHARE/icons/hicolor/scalable/apps/app.linksy.Linksy.svg" "$SHARE/icons/hicolor/symbolic/apps/app.linksy.Linksy-symbolic.svg"
   # Absolute path: the desktop session's PATH may not include ~/.local/bin.
   mkdir -p "$SHARE/applications"
-  sed "s|^Exec=linksy-app|Exec=$BIN/linksy-app|" data/app.linksy.Linksy.desktop > "$SHARE/applications/app.linksy.Linksy.desktop"
+  sed "s|^Exec=linksy-app|Exec=$BIN/linksy-app|" data/mg.diary.linksy.Linksy.desktop > "$SHARE/applications/mg.diary.linksy.Linksy.desktop"
   command -v update-desktop-database >/dev/null && update-desktop-database -q "$SHARE/applications" || true
   # Files: right-click → Scripts → Send with Linksy.
   mkdir -p "$SHARE/nautilus/scripts"
   sed "s|@BINDIR@|$BIN|" "data/nautilus/Send with Linksy" > "$SHARE/nautilus/scripts/Send with Linksy"
   chmod 755 "$SHARE/nautilus/scripts/Send with Linksy"
 fi
-install -Dm644 data/icons/app.linksy.Linksy.svg "$SHARE/icons/hicolor/scalable/apps/app.linksy.Linksy.svg"
-install -Dm644 data/icons/app.linksy.Linksy-symbolic.svg "$SHARE/icons/hicolor/symbolic/apps/app.linksy.Linksy-symbolic.svg"
+install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$SHARE/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
+install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$SHARE/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t -f "$SHARE/icons/hicolor" || true
 
 mkdir -p "$UNITS"

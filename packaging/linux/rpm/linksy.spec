@@ -38,7 +38,7 @@ if [ $1 -eq 0 ]; then systemctl --global disable linksyd.service >/dev/null 2>&1
 /usr/bin/linksy-app
 /usr/bin/linksy-screen
 /usr/lib/systemd/user/linksyd.service
-/usr/share/applications/app.linksy.Linksy.desktop
-/usr/share/metainfo/app.linksy.Linksy.metainfo.xml
-/usr/share/icons/hicolor/scalable/apps/app.linksy.Linksy.svg
-/usr/share/icons/hicolor/symbolic/apps/app.linksy.Linksy-symbolic.svg
+/usr/share/applications/mg.diary.linksy.Linksy.desktop
+/usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
+/usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg
+/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg
