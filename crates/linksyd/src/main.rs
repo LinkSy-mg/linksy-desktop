@@ -5,12 +5,12 @@
 mod clipboard;
 mod history;
 mod ipc;
+mod links;
+mod mirror;
 mod sessions;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
 // their own native notifications with their apps.
 #[cfg(target_os = "linux")]
-mod links;
-mod mirror;
 mod notify;
 mod system;
 
