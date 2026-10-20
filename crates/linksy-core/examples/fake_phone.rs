@@ -6,7 +6,7 @@
 //! cargo run -p linksy-core --example fake_phone -- --data-dir DIR [--port N] [--name NAME]
 //!     [--battery PERCENT] [--charging] [--notify "TITLE" "BODY"] [--display FILE]
 //!     [--media "TITLE" "ARTIST"] [--watch-media] [--call SECONDS] [--leave-after SECONDS]
-//!     [--seconds N]
+//!     [--import PATH] [--seconds N]
 //!
 //! `--display FILE` accepts "Use as Second Display" and saves the H.264 it receives.
 //! `--media "TITLE" "ARTIST"` plays a song (as far as the computer can tell);
@@ -14,6 +14,7 @@
 //! presses that button on the first player it hears about. `--call SECONDS` rings, answers
 //! two seconds later, and hangs up after that many seconds. It checks in when a computer
 //! asks (lock when away); `--leave-after SECONDS` stops that, as if it walked away.
+//! `--import PATH` imports photos (a file or folder) into the computer's pictures.
 
 use std::time::Duration;
 
@@ -30,6 +31,7 @@ async fn main() {
     let mut press: Option<linksy_core::MediaCommand> = None;
     let mut call: Option<u64> = None;
     let mut leave_after: Option<u64> = None;
+    let mut import: Option<std::path::PathBuf> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -42,6 +44,7 @@ async fn main() {
             "--display" => display = Some(value().into()),
             "--watch-media" => watch_media = true,
             "--call" => call = Some(value().parse().expect("--call SECONDS")),
+            "--import" => import = Some(value().into()),
             "--leave-after" => leave_after = Some(value().parse().expect("--leave-after SECONDS")),
             "--press" => {
                 press = Some(match value().as_str() {
@@ -119,6 +122,10 @@ async fn main() {
             let r = node.send_media_state(&t.device.id, &song(title, artist, playing)).await;
             println!("media to {}: {}", t.device.name, r.map(|_| "sent".to_string()).unwrap_or_else(|e| e.to_string()));
         }
+        if let Some(path) = &import {
+            let r = node.import_files(&t.device.id, vec![path.clone()]).await;
+            println!("import to {}: {}", t.device.name, r.map(|_| "started".to_string()).unwrap_or_else(|e| e.to_string()));
+        }
         if watch_media {
             let _ = node.watch_media(&t.device.id, true).await;
         }
@@ -153,6 +160,8 @@ async fn main() {
             _ = &mut deadline => break,
             e = events.recv() => match e {
                 Ok(Event::Ring { from, on }) => println!("{} {}", if on { "RING from" } else { "ring stopped by" }, from.name),
+                Ok(Event::TransferComplete { .. }) if import.is_some() => println!("import done"),
+                Ok(Event::TransferFailed { reason, .. }) if import.is_some() => println!("import failed: {reason}"),
                 Ok(Event::OpenUrl { from, url }) => println!("open {url} (from {})", from.name),
                 Ok(Event::NotificationReply { from, key, text }) => println!("REPLY to {key} from {}: {text}", from.name),
                 Ok(Event::NotificationAction { key, action, .. }) => println!("ACTION {action} on {key}"),
