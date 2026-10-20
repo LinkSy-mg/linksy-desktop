@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Battery, Config, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind};
+use linksy_core::{Battery, CallState, Config, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -433,6 +433,14 @@ async fn media_state_keeps_the_newest_and_commands_arrive() {
     assert_eq!(cmd, ("spotify".to_string(), MediaCommand::Seek { position_ms: 5000 }));
     pc.node.watch_media(&phone_id, true).await.unwrap();
     wait_for(&mut on_phone, |e| matches!(e, Event::MediaWatch { on: true, .. }).then_some(())).await;
+
+    phone.node.send_call_state(&pc_id, CallState::Ringing, Some("Alice")).await.unwrap();
+    let call = wait_for(&mut on_pc, |e| match e {
+        Event::CallState { state, contact, .. } => Some((*state, contact.clone())),
+        _ => None,
+    })
+    .await;
+    assert_eq!(call, (CallState::Ringing, Some("Alice".to_string())));
 }
 
 #[tokio::test]

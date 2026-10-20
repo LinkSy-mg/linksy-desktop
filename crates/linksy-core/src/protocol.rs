@@ -219,6 +219,21 @@ pub enum Message {
     MediaCommand { player: String, command: MediaCommand },
     /// Start (or stop) sending `media_state` to the sender while connected.
     MediaWatch { on: bool },
+    /// The sender (a phone) has a call coming in, going on, or none any more.
+    CallState {
+        state: CallState,
+        /// Who's calling, when the phone may say.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        contact: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallState {
+    Ringing,
+    Active,
+    Idle,
 }
 
 /// A device's media players, as a whole: a later `seq` replaces an earlier one (messages

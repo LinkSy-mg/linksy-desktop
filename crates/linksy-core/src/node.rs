@@ -27,7 +27,7 @@ use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{Battery, MediaCommand, MediaState, RemoteNotification, 
+use crate::protocol::{Battery, CallState, MediaCommand, MediaState, RemoteNotification, 
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -141,6 +141,8 @@ pub enum Event {
     MediaCommand { from: DeviceInfo, player: String, command: MediaCommand },
     /// A device wants this one's `media_state` while connected (`on`), or no longer.
     MediaWatch { from: DeviceInfo, on: bool },
+    /// A phone's call: ringing, answered, or over.
+    CallState { from: DeviceInfo, state: CallState, contact: Option<String> },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -607,6 +609,11 @@ impl Node {
     /// Ask a device for its media players while connected (`on`), or stop.
     pub async fn watch_media(&self, to: &Fingerprint, on: bool) -> Result<()> {
         self.send_message(to, &Message::MediaWatch { on }).await
+    }
+
+    /// Tell a device about a call on this one (phones), so it can pause its media.
+    pub async fn send_call_state(&self, to: &Fingerprint, state: CallState, contact: Option<&str>) -> Result<()> {
+        self.send_message(to, &Message::CallState { state, contact: contact.map(Into::into) }).await
     }
 
     /// Report a device found by other means than the built-in mDNS (Android's NsdManager,
@@ -1098,6 +1105,7 @@ impl Node {
                                 }
                                 Ok(Message::MediaCommand { player, command }) => node.emit(Event::MediaCommand { from, player, command }),
                                 Ok(Message::MediaWatch { on }) => node.emit(Event::MediaWatch { from, on }),
+                                Ok(Message::CallState { state, contact }) => node.emit(Event::CallState { from, state, contact }),
                                 Ok(Message::Ring) => node.emit(Event::Ring { from, on: true }),
                                 Ok(Message::RingStop) => node.emit(Event::Ring { from, on: false }),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
