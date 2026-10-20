@@ -69,6 +69,13 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.2.0" date="2026-10-20">
+      <description>
+        <ul>
+          <li>Open on PC: links shared from your phone open in this computer's browser</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.2" date="2026-10-20">
       <description>
         <ul>

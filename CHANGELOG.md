@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.2.0
+
+### Added
+- **Open on PC**: a link shared from your phone opens in this computer's browser, and
+  shows in the device's activity with a button to open it again. Only web links
+  (http/https) are ever opened. Needs the Linksy for Android update that adds it to the
+  share menu; between computers, `linksy open <device> <url>` does it today.
+
 ## 0.1.2
 
 ### Fixed
