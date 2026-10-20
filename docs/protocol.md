@@ -53,8 +53,8 @@ Decisions already made with the owner:
 | QR-code pairing | ✅ shows QR | ⬜ | phone scans desktop, §4.7 |
 | Automatic clipboard sync | ⬜ | ⬜ | planned |
 | Images/files on the clipboard | ⬜ | ⬜ | planned |
-| Phone notifications mirrored to desktop | ⬜ | ⬜ | planned; Android NotificationListenerService |
-| Reply to messages from desktop | ⬜ | ⬜ | planned; via notification RemoteInput |
+| Phone notifications mirrored to desktop | ✅ | ⬜ | `notification_*`, §4.5; Android NotificationListenerService |
+| Reply to messages from desktop | ✅ | ⬜ | `notification_reply`; via the notification's RemoteInput |
 | Phone as webcam | ⬜ | ⬜ | planned |
 | Bluetooth LE presence | ⬜ | ⬜ | planned |
 | Screen mirroring (watch / share) | ✅ | ⬜ | §4.8; phone can share via MediaProjection |
@@ -208,6 +208,15 @@ and close the other with reason `duplicate`.
   {"type":"battery","level":82,"charging":false} // sender's battery, percent 0–100
   {"type":"ring"}                               // ring loudly so the user finds you
   {"type":"ring_stop"}
+  // Phone notifications mirrored to the computer (phone → computer):
+  {"type":"notification_posted","key":"0|com.whatsapp|1|null|10123","app":"com.whatsapp",
+   "app_name":"WhatsApp","title":"Alice","body":"Lunch?","can_reply":true,
+   "actions":[{"id":"read","label":"Mark as read"}],"icon":"<base64 PNG, optional>"}
+  {"type":"notification_removed","key":"…"}
+  // …and what the computer asks back (computer → phone):
+  {"type":"notification_reply","key":"…","text":"Sure!"}
+  {"type":"notification_action","key":"…","action":"read"}
+  {"type":"notification_dismiss","key":"…"}
   ```
 
   Receiving any of these counts as activity on the connection. Unknown types are
@@ -225,6 +234,21 @@ and close the other with reason `duplicate`.
   `ring_stop` travel on separate streams and may arrive out of order; ignore a
   `ring_stop` that comes before its `ring` within a second. A desktop that receives
   `ring` shows an urgent notification with a sound ("find my laptop").
+
+  **Notifications.** `key` is the phone's stable id for the notification (Android:
+  `StatusBarNotification.getKey()`), 1–1024 bytes; posting the same key again updates it
+  in place. `icon` is a small PNG of the app's icon (96 px is plenty), base64, at most
+  64 KiB raw; send it every time or only the first time per app (the desktop caches it
+  per `app`). The desktop shows each one as a native notification with up to three
+  buttons: Reply (when `can_reply`), the first of `actions`, and "Mute <app>" (muting is
+  stored on the computer; the phone needn't know). What comes back:
+  - `notification_reply`: answer through the notification's `RemoteInput` action.
+  - `notification_action`: fire the action with that `id` (use the action's index or a
+    stable label as the id).
+  - `notification_dismiss`: the user clicked it or swiped it away on the computer: cancel
+    it on the phone (`NotificationListenerService.cancelNotification(key)`).
+  Send `notification_removed` when it goes away on the phone (read, swiped, answered), so
+  it goes away on the computer too. Nothing of it is stored on either side.
 
 - **Bidirectional stream = one file transfer** (`TransferMsg`), opened by the sender:
 
@@ -389,6 +413,8 @@ node.send_clipboard(id, text)               node.notify(id, title, body)
 node.open_url(id, url)                      // Event::OpenUrl { from, url } on the receiver
 node.send_battery(id, Battery { level, charging })   node.ring(id, on)   // Event::Battery / Event::Ring
 DeviceView.battery: Option<Battery>         // last level each device reported
+node.post_notification(id, RemoteNotification{…})   node.remove_notification(id, key)
+Event::NotificationReply / NotificationAction / NotificationDismissed { from, key, … }   // to act on
 node.settings() / node.update_settings(s)   Settings { name, download_dir, stay_connected, auto_accept }
 node.forget(id)                             node.shutdown()
 node.device_found(device, addrs)            node.device_lost(id)        // platform discovery
@@ -539,3 +565,14 @@ Phone-side fixes found testing with a realme 15 Pro 5G (2026-10-19):
   `ring_stop` or after 30 s); a "Find my computer" button that sends `ring`. Test against
   a desktop without the phone: `cargo run -p linksy-core --example fake_phone` acts as a
   phone (see the file).
+- **2026-10-20** — **Phone notifications with reply** (desktop 0.2.2): `notification_posted`,
+  `notification_removed` (phone → computer), `notification_reply`, `notification_action`,
+  `notification_dismiss` (computer → phone), §4.5; core `post_notification`,
+  `remove_notification` and the matching events. Phone to-do: a
+  `NotificationListenerService` (onboarding explains and opens the special-access
+  setting); for each posted notification that isn't ongoing, a group summary, low
+  importance or Linksy's own, send `notification_posted` to paired computers that are
+  around (send `notification_removed` from `onNotificationRemoved`); answer replies via the
+  `RemoteInput` action, actions via their `PendingIntent`, dismissals via
+  `cancelNotification(key)`. A per-app on/off list on the phone is a nice extra. Test with
+  `fake_phone --notify "Alice" "Lunch?"` against a computer to see the desktop side.
