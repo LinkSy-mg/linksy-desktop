@@ -3,6 +3,7 @@
 //! service's events and history.
 
 mod invite;
+mod messages;
 mod page;
 mod prefs;
 mod screen;
@@ -62,6 +63,8 @@ struct State {
     showing: Vec<Uuid>,
     /// The camera session in use here (another device's camera as a webcam) and whose.
     camera: Option<(Uuid, Fingerprint)>,
+    /// The phone whose texts are on screen.
+    messages_open: Option<Fingerprint>,
     /// Devices that lock this computer when they leave, and after how long.
     lock: linksy_ipc::LockPrefs,
     /// The camera preview on screen: whose camera, and the pipeline reading it.
@@ -94,6 +97,8 @@ pub struct Window {
     camera_picture: gtk::Picture,
     camera_back: gtk::Button,
     camera_title: adw::WindowTitle,
+    // Texting through a phone
+    messages: Rc<messages::MessagesView>,
 }
 
 impl Window {
@@ -169,6 +174,8 @@ impl Window {
         // Covers the whole area (edges may be cropped), like a camera viewfinder.
         let camera_picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).hexpand(true).vexpand(true).css_classes(["screen-view"]).build();
         content_stack.add_named(&camera_picture, Some("camera"));
+        let messages = messages::MessagesView::new();
+        content_stack.add_named(&messages.root, Some("messages"));
         let camera_back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text("Back").visible(false).build();
         let camera_title = adw::WindowTitle::new("", "Camera Preview");
         let content_header = adw::HeaderBar::builder().show_title(false).title_widget(&camera_title).build();
@@ -210,6 +217,7 @@ impl Window {
         let two_by_two = |b: &adw::Breakpoint| {
             b.add_setter(&page.tiles, "min-children-per-line", Some(&2u32.to_value()));
             b.add_setter(&page.tiles, "max-children-per-line", Some(&2u32.to_value()));
+            b.add_setter(&messages.root, "collapsed", Some(&true.to_value()));
         };
         let medium = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 820sp").expect("breakpoint"));
         two_by_two(&medium);
@@ -239,11 +247,13 @@ impl Window {
             camera_picture,
             camera_back,
             camera_title,
+            messages,
         });
         let w = Rc::downgrade(&win);
         win.camera_back.connect_clicked(move |_| {
             if let Some(w) = w.upgrade() {
                 w.stop_preview();
+                w.close_messages();
                 w.render_page();
             }
         });
@@ -257,6 +267,7 @@ impl Window {
         win.setup_actions();
         win.setup_sidebar();
         win.setup_page();
+        win.setup_messages();
         win.setup_drop();
         win.connect();
         win
@@ -266,9 +277,14 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 7] = [
+        let actions: [(&str, Run); 8] = [
             ("choose-files", |w| w.choose_files()),
             ("start-service", |w| w.start_service()),
+            ("messages", |w| {
+                if let Some(d) = w.selected_device().filter(|d| d.trusted && d.device.kind == DeviceKind::Phone) {
+                    w.open_messages(d.device.id);
+                }
+            }),
             ("preferences", |w| w.show_preferences()),
             ("add-device", |w| w.show_invite()),
             ("pair-address", |w| w.ask_pair_address()),
@@ -322,6 +338,7 @@ impl Window {
                 page::Action::SendClipboard => w.send_clipboard(id),
                 page::Action::Ping => w.ping(id),
                 page::Action::Ring => w.ring(id, true),
+                page::Action::Messages => w.open_messages(id),
                 page::Action::LockWhenAway(on) => w.lock_when_away(id, on),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
@@ -636,6 +653,14 @@ impl Window {
             // Media players are the service's (MPRIS, so GNOME's own controls show them).
             Event::MediaState { .. } | Event::MediaCommand { .. } | Event::MediaWatch { .. } | Event::CallState { .. } => {}
             Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } => {}
+            Event::SmsMessage { from, thread, message } => self.sms_arrived(from.id, thread, message),
+            // Answers go to whoever asked (the service waits for them); requests are a phone's.
+            Event::SmsThreads { .. }
+            | Event::SmsMessages { .. }
+            | Event::SmsSent { .. }
+            | Event::SmsListThreads { .. }
+            | Event::SmsListMessages { .. }
+            | Event::SmsSend { .. } => {}
         }
     }
 
@@ -773,6 +798,10 @@ impl Window {
         if previewing.is_some() && (previewing != selected || previewing != camera) {
             self.stop_preview();
         }
+        let texting = self.state.borrow().messages_open;
+        if texting.is_some() && texting != selected {
+            self.close_messages();
+        }
         match self.selected_device() {
             Some(d) => {
                 self.content.set_title(&d.device.name);
@@ -784,7 +813,17 @@ impl Window {
                 if previewing {
                     self.page.menu.set_visible(false);
                 }
-                self.content_stack.set_visible_child_name(if previewing { "camera" } else { "device" });
+                let texting = self.state.borrow().messages_open.is_some();
+                if texting {
+                    self.page.menu.set_visible(false);
+                }
+                self.content_stack.set_visible_child_name(if previewing {
+                    "camera"
+                } else if texting {
+                    "messages"
+                } else {
+                    "device"
+                });
             }
             None => {
                 self.content.set_title("Linksy");

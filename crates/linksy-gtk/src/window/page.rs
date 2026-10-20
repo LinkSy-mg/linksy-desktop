@@ -35,6 +35,7 @@ pub enum Action {
     OpenLink(String),
     Ring,
     LockWhenAway(bool),
+    Messages,
 }
 
 type Handler = Rc<RefCell<Option<Rc<dyn Fn(Action)>>>>;
@@ -59,6 +60,8 @@ pub struct DevicePage {
     webcam_row: adw::ActionRow,
     /// "Ring", for phones and tablets.
     ring_row: adw::ActionRow,
+    /// "Messages": texting through a phone.
+    messages_row: adw::ActionRow,
     /// "Lock When Away", for phones; `syncing` while it's set from the service's state.
     lock_row: adw::SwitchRow,
     syncing: Rc<std::cell::Cell<bool>>,
@@ -159,6 +162,11 @@ impl DevicePage {
         ring_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
         let e = emit.clone();
         ring_row.connect_activated(move |_| e(Action::Ring));
+        let messages_row = adw::ActionRow::builder().title("Messages").activatable(true).build();
+        messages_row.add_prefix(&gtk::Image::builder().icon_name("chat-message-new-symbolic").build());
+        messages_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
+        let e = emit.clone();
+        messages_row.connect_activated(move |_| e(Action::Messages));
         let lock_row = adw::SwitchRow::builder().title("Lock When Away").build();
         lock_row.add_prefix(&gtk::Image::builder().icon_name("system-lock-screen-symbolic").build());
         let syncing: Rc<std::cell::Cell<bool>> = Rc::default();
@@ -169,6 +177,7 @@ impl DevicePage {
             }
         });
         let extend = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
+        extend.append(&messages_row);
         extend.append(&ring_row);
         extend.append(&lock_row);
         extend.append(&extend_row);
@@ -265,7 +274,7 @@ impl DevicePage {
             e(Action::Forget);
         });
 
-        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, ring_row, lock_row, syncing, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
+        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, ring_row, messages_row, lock_row, syncing, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
@@ -306,6 +315,8 @@ impl DevicePage {
         self.webcam_row.set_subtitle(&glib::markup_escape_text(&format!("{}'s camera appears in your apps as “Linksy Camera”", d.device.name)));
         self.ring_row.set_visible(matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet));
         self.lock_row.set_visible(d.device.kind == DeviceKind::Phone);
+        self.messages_row.set_visible(d.device.kind == DeviceKind::Phone);
+        self.messages_row.set_subtitle(&glib::markup_escape_text(&format!("Read and send {}'s texts here", d.device.name)));
         self.lock_row.set_subtitle(&glib::markup_escape_text(&format!("Lock this computer when {} leaves. It never unlocks it.", d.device.name)));
         self.syncing.set(true);
         self.lock_row.set_active(locks);

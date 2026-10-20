@@ -97,6 +97,12 @@ row.activity-failed .activity-icon { background-color: alpha(@error_color, 0.12)
 .screen-view { background-color: black; }
 .menu-box button { padding: 6px 14px; }
 .reply-message { padding: 12px 14px; }
+
+/* Messages */
+.bubble { padding: 8px 12px; border-radius: 18px; }
+.bubble.mine { background-color: @accent_bg_color; color: @accent_fg_color; }
+.bubble.theirs { background-color: alpha(currentColor, 0.08); }
+row.unread .title { font-weight: 700; }
 "#;
 
 /// Linksy's styles, for every window of the app.
