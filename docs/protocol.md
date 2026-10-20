@@ -53,6 +53,7 @@ Decisions already made with the owner:
 | Lock the computer when the phone leaves | Done | To do | `heartbeat`, §4.5; needs a foreground service |
 | Photo auto-import | Done | To do | offer with `"import":true`, §4.5 |
 | Phone as touchpad, keyboard, presentation remote | Done | To do | session kind `input`, §4.8 |
+| Texting from the desktop | Done | To do | `sms_*`, §4.5; READ_SMS / SEND_SMS |
 | Connect on demand / idle close / stay connected | Done | To do | §4.6 |
 | Desktop notifications with Accept/Decline | Done | To do | Android: notification actions |
 | QR-code pairing | Done (shows the QR) | To do | phone scans desktop, §4.7 |
@@ -231,6 +232,17 @@ and close the other with reason `duplicate`.
   {"type":"call_state","state":"ringing","contact":"Alice"}   // ringing | active | idle
   {"type":"heartbeat_watch","on":true,"every_s":20}            // computer → phone
   {"type":"heartbeat"}                                         // phone → computer, every every_s
+  // Texting from the computer: requests (computer → phone)…
+  {"type":"sms_list_threads","limit":50}
+  {"type":"sms_list_messages","thread":"7","before_ms":1760900000000,"limit":50}
+  {"type":"sms_send","client_id":"<uuid>","to":["+261340000000"],"text":"Sure!"}
+  // …answers and news (phone → computer):
+  {"type":"sms_threads","threads":[{"id":"7","addresses":["+261…"],"names":["Alice"],
+   "snippet":"Lunch?","date_ms":1760945000000,"unread":true}]}
+  {"type":"sms_messages","thread":"7","messages":[{"id":"312","from_me":false,
+   "address":"+261…","body":"Lunch?","date_ms":1760945000000}],"more":true}
+  {"type":"sms_message","thread":"7","message":{…}}        // new message, either way
+  {"type":"sms_sent","client_id":"<uuid>","ok":true}        // or "ok":false,"error":"…"
   ```
 
   Receiving any of these counts as activity on the connection. Unknown types are
@@ -294,6 +306,15 @@ and close the other with reason `duplicate`.
   quiet notification ("Keeping fedora locked when you leave") while any computer
   watches, or ask for the battery-optimization exemption. Heartbeats that stop while
   the phone is on the desk would lock the computer for nothing.
+
+  **Texting.** The computer asks; the phone answers with the matching message, within
+  15 s (60 s for `sms_send`), or the computer says the phone didn't answer. Threads
+  newest first; messages newest first, at most `limit` (≤ 100), `more` when older ones
+  exist (the computer pages back with `before_ms` = the oldest date it has). `names`
+  follow `addresses` (empty when unknown or without contacts permission). After sending,
+  answer `sms_sent` and also push the sent message as `sms_message`; push every incoming
+  text as `sms_message` to computers that are connected (no need to dial for it: the
+  computer asks again when its Messages page opens). Nothing is stored on the computer.
 
 - **Bidirectional stream = one file transfer** (`TransferMsg`), opened by the sender:
 
@@ -484,6 +505,9 @@ node.send_media_state(id, &MediaState{ seq, players })   node.media_command(id, 
 node.watch_media(id, on)                    // Event::MediaState / MediaCommand / MediaWatch
 node.send_call_state(id, CallState::Ringing | Active | Idle, contact)
 node.heartbeat(id)                          // Event::HeartbeatWatch { from, on, every_s } says when
+node.sms_threads(id, threads) / node.sms_messages(id, thread, messages, more)   // answers
+node.sms_message(id, thread, message) / node.sms_sent(id, client_id, ok, error)
+// to act on: Event::SmsListThreads / SmsListMessages / SmsSend
 Event::NotificationReply / NotificationAction / NotificationDismissed { from, key, … }   // to act on
 node.settings() / node.update_settings(s)   Settings { name, download_dir, stay_connected, auto_accept }
 node.forget(id)                             node.shutdown()
@@ -702,3 +726,12 @@ robust against any encoder (GPU ones may slice too):
   presentation mode where volume down/up send Right/Left and the screen stays on.
   Try with `fake_phone --touchpad` against a service started with `LINKSY_SCREEN_TEST=1`
   (it logs the input instead of applying it).
+- **2026-10-20** — **Texting from the desktop** (desktop 0.5.0): `sms_*` messages (§4.5)
+  and their core calls. Phone to-do: READ_SMS, SEND_SMS, RECEIVE_SMS (and READ_CONTACTS
+  for names) behind an onboarding switch, since APKs from GitHub may ask for them;
+  answer `sms_list_threads` from `Telephony.Threads`/`Sms.Conversations`,
+  `sms_list_messages` from `Telephony.Sms` (MMS text parts are a bonus); `sms_send` via
+  `SmsManager.sendMultipartTextMessage` with a sent `PendingIntent` that answers
+  `sms_sent`; a `RECEIVE_SMS` receiver (or ContentObserver) pushes `sms_message`. Try it
+  against a computer: `fake_phone` answers with a made-up inbox, and the computer's
+  `linksy texts <phone>` / `linksy text <phone> <number> <message>` exercise the rest.
