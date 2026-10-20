@@ -472,7 +472,7 @@ impl Window {
                 "/org/freedesktop/portal/desktop",
                 "org.freedesktop.portal.Background",
                 "RequestBackground",
-                Some(&("", options.end()).to_variant()),
+                Some(&glib::Variant::tuple_from_iter(["".to_variant(), options.end()])),
                 None,
                 gio::DBusCallFlags::NONE,
                 -1,
