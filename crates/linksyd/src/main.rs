@@ -8,6 +8,7 @@ mod ipc;
 mod links;
 mod lock;
 mod mirror;
+mod photos;
 mod sessions;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
 // their own native notifications with their apps.
@@ -142,9 +143,10 @@ async fn main() -> ExitCode {
     if args.notifications {
         tokio::spawn(mirror.clone().run(node.clone()));
     }
+    let photos = photos::Photos::load(data_dir.join("photos.json"), &node);
     let away = lock::Away::load(data_dir.join("lock.json"));
     tokio::spawn(away.clone().run(node.clone(), history.clone()));
-    let server = tokio::spawn(ipc::serve(node.clone(), history, sessions, mirror, away, socket.clone()));
+    let server = tokio::spawn(ipc::serve(node.clone(), history, sessions, mirror, away, photos, socket.clone()));
 
     tokio::select! {
         r = server => if let Ok(Err(e)) = r { error!("IPC server stopped: {e}") },

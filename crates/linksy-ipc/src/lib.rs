@@ -46,6 +46,9 @@ pub enum Request {
     /// Whether phone notifications show here, and which apps are muted.
     NotificationPrefs,
     SetNotificationPrefs { prefs: NotificationPrefs },
+    /// Whether phones' photos are imported here, and where.
+    PhotoPrefs,
+    SetPhotoPrefs { prefs: PhotoPrefs },
     /// Which devices lock this computer when they leave, and after how long.
     LockPrefs,
     SetLockPrefs { prefs: LockPrefs },
@@ -122,7 +125,15 @@ pub struct HistoryEntry {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Shared {
     /// `files` are relative paths as offered; `saved` where incoming ones landed.
-    Files { files: Vec<String>, total: u64, #[serde(default)] saved: Vec<PathBuf> },
+    /// `import`: photos a phone imported into the picture library.
+    Files {
+        files: Vec<String>,
+        total: u64,
+        #[serde(default)]
+        saved: Vec<PathBuf>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        import: bool,
+    },
     /// The text is kept in memory only, never written to disk (it may be a password).
     Clipboard { #[serde(default)] text: String },
     Ping { title: String, body: String },
@@ -143,6 +154,14 @@ pub enum Shared {
         #[serde(default)]
         display: bool,
     },
+}
+
+/// Photo auto-import: photos a phone sends as imports land in `folder/<phone name>/`
+/// without asking, while `import` is on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PhotoPrefs {
+    pub import: bool,
+    pub folder: PathBuf,
 }
 
 /// "Lock when you walk away": this computer locks when one of `devices` hasn't checked in
@@ -389,6 +408,14 @@ impl Client {
 
     pub async fn set_notification_prefs(&self, prefs: NotificationPrefs) -> Result<(), ClientError> {
         self.call(Request::SetNotificationPrefs { prefs }).await
+    }
+
+    pub async fn photo_prefs(&self) -> Result<PhotoPrefs, ClientError> {
+        self.call(Request::PhotoPrefs).await
+    }
+
+    pub async fn set_photo_prefs(&self, prefs: PhotoPrefs) -> Result<(), ClientError> {
+        self.call(Request::SetPhotoPrefs { prefs }).await
     }
 
     pub async fn lock_prefs(&self) -> Result<LockPrefs, ClientError> {

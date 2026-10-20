@@ -197,6 +197,7 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                 use linksy_ipc::{HistoryStatus, Shared};
                 let arrow = if e.direction == Direction::Incoming { "←" } else { "→" };
                 let what = match &e.what {
+                    Shared::Files { files, total, import: true, .. } => format!("imported {} photos ({})", files.len(), size(*total)),
                     Shared::Files { files, total, .. } => match files.as_slice() {
                         [one] => format!("{one} ({})", size(*total)),
                         many => format!("{} ({})", plural(many.len(), "item"), size(*total)),

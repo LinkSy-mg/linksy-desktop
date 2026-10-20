@@ -17,7 +17,7 @@ const LOW_BATTERY: u8 = 15;
 pub async fn run(node: Node) {
     let mut events = node.subscribe();
     // Incoming transfers: remember who sent what so completion can say it.
-    let mut incoming: std::collections::HashMap<Uuid, String> = Default::default();
+    let mut incoming: std::collections::HashMap<Uuid, (String, bool)> = Default::default();
     // Devices already warned about a low battery; cleared once they charge or recover.
     let mut warned: std::collections::HashSet<Fingerprint> = Default::default();
     loop {
@@ -60,16 +60,16 @@ pub async fn run(node: Node) {
                 };
                 prompt(node.clone(), request, summary, body, "Allow");
             }
-            Event::TransferStarted { transfer, peer, direction: Direction::Incoming, .. } => {
-                incoming.insert(transfer, peer.name);
+            Event::TransferStarted { transfer, peer, direction: Direction::Incoming, import, .. } => {
+                incoming.insert(transfer, (peer.name, import));
             }
-            Event::TransferComplete { transfer, saved } => {
-                if let Some(from) = incoming.remove(&transfer) {
-                    received(from, saved);
-                }
-            }
+            Event::TransferComplete { transfer, saved } => match incoming.remove(&transfer) {
+                Some((from, true)) => imported(from, saved),
+                Some((from, false)) => received(from, saved),
+                None => {}
+            },
             Event::TransferFailed { transfer, reason } => {
-                if let Some(from) = incoming.remove(&transfer)
+                if let Some((from, _)) = incoming.remove(&transfer)
                     && reason != "cancelled"
                 {
                     show(format!("Transfer from {from} failed"), capitalize(&reason));
@@ -148,6 +148,27 @@ fn prompt(node: Node, request: Uuid, summary: String, body: String, accept_label
                 }
                 // Clicking the body or dismissing leaves the decision to the app.
                 _ => {}
+            }),
+            Err(e) => debug!("notification failed: {e}"),
+        }
+    });
+}
+
+/// One notice per batch of imported photos, opening their folder.
+fn imported(from: String, saved: Vec<PathBuf>) {
+    if saved.is_empty() {
+        return;
+    }
+    tokio::task::spawn_blocking(move || {
+        let what = if saved.len() == 1 { "1 photo".to_string() } else { format!("{} photos", saved.len()) };
+        let folder = saved[0].parent().map(Path::to_path_buf).unwrap_or_default();
+        let mut n = base(&format!("Imported {what} from {from}"), &folder.display().to_string());
+        n.action("default", "Show Photos");
+        match n.show() {
+            Ok(handle) => handle.wait_for_action(|action| {
+                if action == "default" {
+                    let _ = std::process::Command::new("xdg-open").arg(&folder).spawn();
+                }
             }),
             Err(e) => debug!("notification failed: {e}"),
         }

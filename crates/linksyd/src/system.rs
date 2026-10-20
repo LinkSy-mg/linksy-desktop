@@ -19,19 +19,28 @@ pub fn data_dir() -> PathBuf {
 
 /// The user's Downloads folder, as configured in `user-dirs.dirs`.
 pub fn download_dir() -> PathBuf {
+    user_dir("XDG_DOWNLOAD_DIR", "Downloads")
+}
+
+/// The user's Pictures folder, where phones' photos are imported.
+pub fn pictures_dir() -> PathBuf {
+    user_dir("XDG_PICTURES_DIR", "Pictures")
+}
+
+fn user_dir(key: &str, fallback: &str) -> PathBuf {
     let config = xdg("XDG_CONFIG_HOME", ".config").join("user-dirs.dirs");
     if let Ok(text) = std::fs::read_to_string(config) {
         for line in text.lines() {
-            if let Some(v) = line.strip_prefix("XDG_DOWNLOAD_DIR=") {
+            if let Some(v) = line.strip_prefix(key).and_then(|v| v.strip_prefix('=')) {
                 let v = v.trim().trim_matches('"').replace("$HOME", &home().to_string_lossy());
                 return PathBuf::from(v);
             }
         }
     }
-    home().join("Downloads")
+    home().join(fallback)
 }
 
-/// The pretty hostname ("Axel's Laptop") if set, else the plain hostname.
+/// The pretty hostname ("Sam's Laptop") if set, else the plain hostname.
 pub fn device_name() -> String {
     if let Ok(info) = std::fs::read_to_string("/etc/machine-info") {
         for line in info.lines() {
