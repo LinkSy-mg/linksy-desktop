@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>app.linksy.Linksy</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Linksy</name>
+  <summary>Your devices, connected</summary>
+  <developer id="app.linksy">
+    <name>Linksy</name>
+  </developer>
+  <description>
+    <p>
+      Linksy connects your computer and phone directly over your own network. No account,
+      no cloud, no server: what you share goes straight from one device to the other.
+    </p>
+    <ul>
+      <li>Send files and folders, or drop them anywhere in the window</li>
+      <li>Send your clipboard to another device</li>
+      <li>See and control another device's screen</li>
+      <li>Use a tablet or phone as a second display</li>
+      <li>Use your phone's camera as a webcam in any app</li>
+      <li>Ping a device, and see everything you shared as a timeline</li>
+    </ul>
+    <p>
+      Pair once by scanning a QR code. Devices nearby show up on their own, and connect only
+      when there is something to share, to save battery.
+    </p>
+  </description>
+  <launchable type="desktop-id">app.linksy.Linksy.desktop</launchable>
+  <url type="homepage">https://github.com/LinkSy-mg/linksy-releases</url>
+  <url type="bugtracker">https://github.com/LinkSy-mg/linksy-releases/issues</url>
+  <screenshots>
+    <screenshot type="default">
+      <caption>A device page, with what you can do and what you shared</caption>
+      <image>https://raw.githubusercontent.com/LinkSy-mg/linksy-releases/main/screenshots/device.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Pair a device by scanning a QR code</caption>
+      <image>https://raw.githubusercontent.com/LinkSy-mg/linksy-releases/main/screenshots/pair.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>In dark style</caption>
+      <image>https://raw.githubusercontent.com/LinkSy-mg/linksy-releases/main/screenshots/device-dark.png</image>
+    </screenshot>
+  </screenshots>
+  <branding>
+    <color type="primary" scheme_preference="light">#a8c0ff</color>
+    <color type="primary" scheme_preference="dark">#1438b8</color>
+  </branding>
+  <content_rating type="oars-1.1"/>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+    <control>touch</control>
+  </supports>
+  <categories>
+    <category>Network</category>
+    <category>FileTransfer</category>
+  </categories>
+  <keywords>
+    <keyword>share</keyword>
+    <keyword>send</keyword>
+    <keyword>transfer</keyword>
+    <keyword>phone</keyword>
+    <keyword>android</keyword>
+    <keyword>nearby</keyword>
+  </keywords>
+  <releases>
+    <release version="0.1.1" date="2026-10-20">
+      <description>
+        <ul>
+          <li>Now also as Flatpak, .deb and .rpm packages</li>
+          <li>Screen windows fit the shared screen's shape, with no black bars</li>
+          <li>Preview a device's camera right in the app</li>
+          <li>Clearer messages when the other device can't do something yet</li>
+          <li>Closing Linksy never hangs on a device that went quiet</li>
+        </ul>
+      </description>
+    </release>
+    <release version="0.1.0" date="2026-10-19">
+      <description>
+        <p>First release.</p>
+      </description>
+    </release>
+  </releases>
+</component>
