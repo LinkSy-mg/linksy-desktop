@@ -291,6 +291,24 @@ async fn clipboard_text_arrives_and_limits_hold() {
 }
 
 #[tokio::test]
+async fn web_links_arrive_and_nothing_else_is_sent() {
+    let (a, b) = paired().await;
+    let mut rb = b.node.subscribe();
+    let to = b.node.info().id;
+    a.node.open_url(&to, " https://example.org/watch?v=1 ").await.unwrap();
+    let got = wait_for(&mut rb, |e| match e {
+        Event::OpenUrl { from, url } if from.name == "Alpha" => Some(url.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, "https://example.org/watch?v=1");
+    for bad in ["file:///etc/passwd", "javascript:alert(1)", "https://", "ftp://x", "http://a\nb", ""] {
+        assert!(a.node.open_url(&to, bad).await.is_err(), "{bad}");
+    }
+    a.node.open_url(&to, "HTTP://Example.org").await.unwrap();
+}
+
+#[tokio::test]
 async fn idle_connection_closes_and_next_send_reconnects() {
     let (a, b) = paired_with(|c| c.idle_after = Duration::from_millis(400)).await;
     let mut ra = a.node.subscribe();

@@ -40,6 +40,8 @@ const OFFER_TIMEOUT: Duration = Duration::from_secs(120);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Clipboard text limit; well under the protocol frame cap even after JSON escaping.
 pub const MAX_CLIPBOARD: usize = 256 * 1024;
+/// Longest link accepted for "Open on PC".
+const MAX_URL: usize = 8 * 1024;
 const RECONNECT_EVERY: Duration = Duration::from_secs(15);
 /// Per-address dial budget. LAN handshakes take milliseconds; a dead address never answers.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(3);
@@ -116,6 +118,8 @@ pub enum Event {
     DeviceUpdated { device: DeviceInfo },
     /// A paired device shared its clipboard; front ends decide where it goes.
     Clipboard { from: DeviceInfo, text: String },
+    /// A paired device asked to open a web link here (always `http` or `https`).
+    OpenUrl { from: DeviceInfo, url: String },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -493,6 +497,15 @@ impl Node {
             return Err(invalid("clipboard text is too large, send it as a file instead"));
         }
         self.send_message(to, &Message::Clipboard { text: text.into() }).await
+    }
+
+    /// Ask a connected device to open a web link in its browser.
+    pub async fn open_url(&self, to: &Fingerprint, url: &str) -> Result<()> {
+        let url = url.trim();
+        if !is_web_link(url) {
+            return Err(invalid("only http:// and https:// links can be opened"));
+        }
+        self.send_message(to, &Message::OpenUrl { url: url.into() }).await
     }
 
     /// Report a device found by other means than the built-in mDNS (Android's NsdManager,
@@ -949,6 +962,8 @@ impl Node {
                                 Ok(Message::Clipboard { .. }) => debug!("oversized clipboard from {}", from.name),
                                 Ok(Message::Renamed { name }) => node.peer_renamed(from.id, name),
                                 Ok(Message::Ping) => {}
+                                Ok(Message::OpenUrl { url }) if is_web_link(&url) => node.emit(Event::OpenUrl { from, url }),
+                                Ok(Message::OpenUrl { .. }) => debug!("refused a link from {} that isn't http(s)", from.name),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
                             }
                         });
@@ -1119,6 +1134,20 @@ impl Node {
             }
         }
     }
+}
+
+/// An `http(s)` link with something after the scheme, no longer than [`MAX_URL`]: the only
+/// kind a device may ask another to open.
+fn is_web_link(url: &str) -> bool {
+    let lower = url.get(..8).unwrap_or(url).to_ascii_lowercase();
+    let rest = if lower.starts_with("https://") {
+        &url[8..]
+    } else if lower.starts_with("http://") {
+        &url[7..]
+    } else {
+        return false;
+    };
+    !rest.is_empty() && url.len() <= MAX_URL && !url.chars().any(char::is_control)
 }
 
 fn bind_endpoint(identity: &Identity, addr: SocketAddr) -> Result<quinn::Endpoint> {

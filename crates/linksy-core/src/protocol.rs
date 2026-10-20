@@ -194,6 +194,9 @@ pub enum Message {
     /// The sender's new name, so connected devices update without reconnecting.
     Renamed { name: String },
     Ping,
+    /// A web link for the receiver to open in its browser ("Open on PC"). `http`/`https`
+    /// only; receivers drop anything else.
+    OpenUrl { url: String },
 }
 
 pub async fn write_msg<T: Serialize>(s: &mut quinn::SendStream, msg: &T) -> Result<()> {
