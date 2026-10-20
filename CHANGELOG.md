@@ -2,6 +2,17 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.1.2
+
+### Fixed
+- **Use as Webcam** works in OBS (Video Capture Device (PipeWire)) and other apps that pick
+  a camera's format: the camera is offered as YUY2 at 30 fps.
+- The Flatpak starts its background service by itself, and at every login.
+
+### Changed
+- The app ID is now `mg.diary.linksy.Linksy`. Installing over an older tarball install
+  cleans up the old menu entry.
+
 ## 0.1.1
 
 ### Added

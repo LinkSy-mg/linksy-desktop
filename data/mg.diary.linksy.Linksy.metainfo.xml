@@ -69,6 +69,14 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.1.2" date="2026-10-20">
+      <description>
+        <ul>
+          <li>Use as Webcam works in OBS and other apps that pick a camera's format</li>
+          <li>The Flatpak starts its background service by itself, and at every login</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-10-20">
       <description>
         <ul>
