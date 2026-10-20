@@ -24,10 +24,9 @@ finish-args:
   # Media controls both ways: this computer's players for the phone, the phone's in GNOME.
   - --talk-name=org.mpris.MediaPlayer2.*
   - --own-name=org.mpris.MediaPlayer2.Linksy.*
-  # A phone in the Files sidebar: mount it with GVfs, open it, and bookmark it by name.
+  # A phone in the Files sidebar: mount it with GVfs and open it.
   - --talk-name=org.gtk.vfs.*
   - --talk-name=org.freedesktop.FileManager1
-  - --filesystem=xdg-config/gtk-3.0
   # Lock when you walk away (it only ever locks).
   - --talk-name=org.gnome.ScreenSaver
   - --talk-name=org.freedesktop.ScreenSaver
