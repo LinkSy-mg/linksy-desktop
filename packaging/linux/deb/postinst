@@ -1,0 +1,6 @@
+#!/bin/sh
+set -e
+# Start the background service with every login (it starts now too, when Linksy opens).
+if [ "$1" = configure ] && command -v systemctl >/dev/null; then
+  systemctl --global enable linksyd.service >/dev/null 2>&1 || true
+fi

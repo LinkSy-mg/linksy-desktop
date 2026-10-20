@@ -1,0 +1,14 @@
+Package: linksy
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Linksy <https://github.com/LinkSy-mg/linksy-releases>
+Installed-Size: @SIZE@
+Depends: libc6 (>= 2.39), libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.6), libgstreamer1.0-0, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-pipewire, xdg-desktop-portal
+Recommends: gstreamer1.0-plugins-bad, gstreamer1.0-libav, wl-clipboard
+Section: net
+Priority: optional
+Homepage: https://github.com/LinkSy-mg/linksy-releases
+Description: Your devices, connected
+ Linksy connects your computer and phone directly over your own network, with no
+ account, cloud or server: send files and your clipboard, see and control another
+ device's screen, use a tablet as a second display, or a phone as a webcam.
