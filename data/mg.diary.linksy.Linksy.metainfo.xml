@@ -22,6 +22,7 @@
       <li>See your phone's notifications here, and reply to messages</li>
       <li>Open links from your phone, see its battery, and ring it to find it</li>
       <li>Control your phone's music from here, and this computer's from your phone</li>
+      <li>Import your phone's photos automatically</li>
       <li>Ping a device, and see everything you shared as a timeline</li>
     </ul>
     <p>
@@ -72,6 +73,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.4.0" date="2026-10-20">
+      <description>
+        <p>Photo auto-import: your phone's new photos land in your Pictures folder.</p>
+      </description>
+    </release>
     <release version="0.3.2" date="2026-10-20">
       <description>
         <p>Lock When Away: this computer locks itself when your phone leaves.</p>

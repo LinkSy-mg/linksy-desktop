@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.4.0
+
+### Added
+- **Photo auto-import**: new photos from your phone land in Pictures, in a folder named
+  after the phone, without asking, with one notification per batch. Turn it off in
+  Preferences. Needs the Linksy for Android update that adds it.
+
 ## 0.3.2
 
 ### Added
