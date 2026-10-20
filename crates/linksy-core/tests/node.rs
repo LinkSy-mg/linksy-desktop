@@ -441,6 +441,16 @@ async fn media_state_keeps_the_newest_and_commands_arrive() {
     })
     .await;
     assert_eq!(call, (CallState::Ringing, Some("Alice".to_string())));
+
+    pc.node.watch_heartbeat(&phone_id, true, 1).await.unwrap();
+    let every = wait_for(&mut on_phone, |e| match e {
+        Event::HeartbeatWatch { on: true, every_s, .. } => Some(*every_s),
+        _ => None,
+    })
+    .await;
+    assert_eq!(every, 5, "no faster than every 5 s");
+    phone.node.heartbeat(&pc_id).await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::Heartbeat { .. }).then_some(())).await;
 }
 
 #[tokio::test]

@@ -226,6 +226,11 @@ pub enum Message {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         contact: Option<String>,
     },
+    /// "Still here": sent every `every_s` seconds to a device that asked with
+    /// `heartbeat_watch` (lock when you walk away).
+    Heartbeat,
+    /// Ask the receiver for a `heartbeat` every `every_s` seconds (`on`), or to stop.
+    HeartbeatWatch { on: bool, every_s: u32 },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

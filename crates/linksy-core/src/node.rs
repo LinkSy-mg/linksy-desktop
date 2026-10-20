@@ -143,6 +143,10 @@ pub enum Event {
     MediaWatch { from: DeviceInfo, on: bool },
     /// A phone's call: ringing, answered, or over.
     CallState { from: DeviceInfo, state: CallState, contact: Option<String> },
+    /// A device checked in ("still here").
+    Heartbeat { from: DeviceInfo },
+    /// A device wants this one to check in every `every_s` seconds (`on`), or no longer.
+    HeartbeatWatch { from: DeviceInfo, on: bool, every_s: u32 },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -614,6 +618,16 @@ impl Node {
     /// Tell a device about a call on this one (phones), so it can pause its media.
     pub async fn send_call_state(&self, to: &Fingerprint, state: CallState, contact: Option<&str>) -> Result<()> {
         self.send_message(to, &Message::CallState { state, contact: contact.map(Into::into) }).await
+    }
+
+    /// Check in with a device that asked for heartbeats.
+    pub async fn heartbeat(&self, to: &Fingerprint) -> Result<()> {
+        self.send_message(to, &Message::Heartbeat).await
+    }
+
+    /// Ask a device to check in every `every_s` seconds (`on`), or to stop.
+    pub async fn watch_heartbeat(&self, to: &Fingerprint, on: bool, every_s: u32) -> Result<()> {
+        self.send_message(to, &Message::HeartbeatWatch { on, every_s: every_s.max(5) }).await
     }
 
     /// Report a device found by other means than the built-in mDNS (Android's NsdManager,
@@ -1106,6 +1120,8 @@ impl Node {
                                 Ok(Message::MediaCommand { player, command }) => node.emit(Event::MediaCommand { from, player, command }),
                                 Ok(Message::MediaWatch { on }) => node.emit(Event::MediaWatch { from, on }),
                                 Ok(Message::CallState { state, contact }) => node.emit(Event::CallState { from, state, contact }),
+                                Ok(Message::Heartbeat) => node.emit(Event::Heartbeat { from }),
+                                Ok(Message::HeartbeatWatch { on, every_s }) => node.emit(Event::HeartbeatWatch { from, on, every_s: every_s.max(5) }),
                                 Ok(Message::Ring) => node.emit(Event::Ring { from, on: true }),
                                 Ok(Message::RingStop) => node.emit(Event::Ring { from, on: false }),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
