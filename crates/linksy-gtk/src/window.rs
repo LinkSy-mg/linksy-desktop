@@ -62,6 +62,8 @@ struct State {
     showing: Vec<Uuid>,
     /// The camera session in use here (another device's camera as a webcam) and whose.
     camera: Option<(Uuid, Fingerprint)>,
+    /// Devices that lock this computer when they leave, and after how long.
+    lock: linksy_ipc::LockPrefs,
     /// The camera preview on screen: whose camera, and the pipeline reading it.
     preview: Option<(Fingerprint, gstreamer::Element)>,
     /// Opening Linksy starts its service once, if it isn't running.
@@ -320,6 +322,7 @@ impl Window {
                 page::Action::SendClipboard => w.send_clipboard(id),
                 page::Action::Ping => w.ping(id),
                 page::Action::Ring => w.ring(id, true),
+                page::Action::LockWhenAway(on) => w.lock_when_away(id, on),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
                 page::Action::Webcam => w.use_camera(id),
@@ -508,6 +511,14 @@ impl Window {
     fn refresh_status(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
         let w = self.clone();
+        let call = self.bridge.call(&c, |c| async move { c.lock_prefs().await });
+        glib::spawn_future_local(async move {
+            if let Ok(prefs) = call.await {
+                w.state.borrow_mut().lock = prefs;
+                w.refresh_devices();
+            }
+        });
+        let w = self.clone();
         let call = self.bridge.call(&c, |c| async move { c.status().await });
         glib::spawn_future_local(async move {
             if let Ok(s) = call.await {
@@ -624,6 +635,7 @@ impl Window {
             | Event::NotificationDismissed { .. } => {}
             // Media players are the service's (MPRIS, so GNOME's own controls show them).
             Event::MediaState { .. } | Event::MediaCommand { .. } | Event::MediaWatch { .. } | Event::CallState { .. } => {}
+            Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } => {}
         }
     }
 
@@ -764,7 +776,8 @@ impl Window {
         match self.selected_device() {
             Some(d) => {
                 self.content.set_title(&d.device.name);
-                self.page.show_device(&d, &staged);
+                let locks = self.state.borrow().lock.devices.contains(&d.device.id);
+                self.page.show_device(&d, &staged, locks);
                 let camera = self.state.borrow().camera.filter(|(_, id)| *id == d.device.id);
                 self.page.set_camera(camera.map(|_| format!("Linksy Camera ({})", d.device.name)).as_deref());
                 let previewing = self.state.borrow().preview.is_some();
@@ -876,6 +889,25 @@ impl Window {
                 Ok(()) => {}
                 Err(e) => w.toast_error(&e, Some(id)),
             }
+        });
+    }
+
+    fn lock_when_away(self: &Rc<Self>, id: Fingerprint, on: bool) {
+        let Some(c) = self.client() else { return };
+        let mut prefs = self.state.borrow().lock.clone();
+        prefs.devices.retain(|d| *d != id);
+        if on {
+            prefs.devices.push(id);
+        }
+        let next = prefs.clone();
+        let call = self.bridge.call(&c, move |c| async move { c.set_lock_prefs(next).await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            match call.await {
+                Ok(()) => w.state.borrow_mut().lock = prefs,
+                Err(e) => w.toast_error(&e, Some(id)),
+            }
+            w.refresh_devices();
         });
     }
 

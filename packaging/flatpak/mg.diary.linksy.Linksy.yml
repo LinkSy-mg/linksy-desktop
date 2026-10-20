@@ -22,6 +22,9 @@ finish-args:
   # Media controls both ways: this computer's players for the phone, the phone's in GNOME.
   - --talk-name=org.mpris.MediaPlayer2.*
   - --own-name=org.mpris.MediaPlayer2.Linksy.*
+  # Lock when you walk away (it only ever locks).
+  - --talk-name=org.gnome.ScreenSaver
+  - --talk-name=org.freedesktop.ScreenSaver
 cleanup:
   - /include
   - /lib/pkgconfig

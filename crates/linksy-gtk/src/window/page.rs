@@ -34,6 +34,7 @@ pub enum Action {
     Copy(String),
     OpenLink(String),
     Ring,
+    LockWhenAway(bool),
 }
 
 type Handler = Rc<RefCell<Option<Rc<dyn Fn(Action)>>>>;
@@ -58,6 +59,9 @@ pub struct DevicePage {
     webcam_row: adw::ActionRow,
     /// "Ring", for phones and tablets.
     ring_row: adw::ActionRow,
+    /// "Lock When Away", for phones; `syncing` while it's set from the service's state.
+    lock_row: adw::SwitchRow,
+    syncing: Rc<std::cell::Cell<bool>>,
     pair_box: gtk::Box,
     staged: adw::Banner,
     drop_hint: gtk::Box,
@@ -155,8 +159,18 @@ impl DevicePage {
         ring_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
         let e = emit.clone();
         ring_row.connect_activated(move |_| e(Action::Ring));
+        let lock_row = adw::SwitchRow::builder().title("Lock When Away").build();
+        lock_row.add_prefix(&gtk::Image::builder().icon_name("system-lock-screen-symbolic").build());
+        let syncing: Rc<std::cell::Cell<bool>> = Rc::default();
+        let (e, s) = (emit.clone(), syncing.clone());
+        lock_row.connect_active_notify(move |row| {
+            if !s.get() {
+                e(Action::LockWhenAway(row.is_active()));
+            }
+        });
         let extend = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         extend.append(&ring_row);
+        extend.append(&lock_row);
         extend.append(&extend_row);
         extend.append(&webcam_row);
 
@@ -251,7 +265,7 @@ impl DevicePage {
             e(Action::Forget);
         });
 
-        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, ring_row, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
+        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, ring_row, lock_row, syncing, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
@@ -274,7 +288,7 @@ impl DevicePage {
         }
     }
 
-    pub fn show_device(&self, d: &DeviceView, staged: &[PathBuf]) {
+    pub fn show_device(&self, d: &DeviceView, staged: &[PathBuf], locks: bool) {
         let available = d.connected || d.nearby;
         self.avatar.set_text(Some(&d.device.name));
         self.kind.set_icon_name(Some(kind_icon(d.device.kind)));
@@ -291,6 +305,11 @@ impl DevicePage {
         self.extend_row.set_subtitle(&glib::markup_escape_text(&format!("Extend this computer's desktop onto {}", d.device.name)));
         self.webcam_row.set_subtitle(&glib::markup_escape_text(&format!("{}'s camera appears in your apps as “Linksy Camera”", d.device.name)));
         self.ring_row.set_visible(matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet));
+        self.lock_row.set_visible(d.device.kind == DeviceKind::Phone);
+        self.lock_row.set_subtitle(&glib::markup_escape_text(&format!("Lock this computer when {} leaves. It never unlocks it.", d.device.name)));
+        self.syncing.set(true);
+        self.lock_row.set_active(locks);
+        self.syncing.set(false);
         self.ring_row.set_subtitle(&glib::markup_escape_text(&format!("Play a loud sound on {} to find it, even on silent", d.device.name)));
         self.pair_box.set_visible(!d.trusted);
         self.menu.set_visible(d.trusted);
@@ -358,6 +377,7 @@ impl DevicePage {
             Shared::Ping { title, body } if body.is_empty() => ("preferences-system-notifications-symbolic", title.clone()),
             Shared::Ping { title, body } => ("preferences-system-notifications-symbolic", format!("{title}: {body}")),
             Shared::Link { url } => ("web-browser-symbolic", one_line(url, 120)),
+            Shared::Locked => ("system-lock-screen-symbolic", "Locked this computer".to_string()),
             Shared::Camera { .. } => ("camera-web-symbolic", if incoming { "Their camera".to_string() } else { "Your camera".to_string() }),
             Shared::Screen { display: true, .. } => ("video-joined-displays-symbolic", if incoming { "Their second display".to_string() } else { "Second display".to_string() }),
             Shared::Screen { .. } => ("video-display-symbolic", if incoming { "Their screen".to_string() } else { "Your screen".to_string() }),
@@ -376,6 +396,7 @@ impl DevicePage {
             (Shared::Screen { .. }, false) => "Shared",
             (Shared::Link { .. }, true) => "Opened here",
             (Shared::Link { .. }, false) => "Opened there",
+            (Shared::Locked, _) => "When it left",
             (_, true) => "From them",
             (_, false) => "From you",
         };
