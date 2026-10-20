@@ -348,6 +348,7 @@ impl Window {
                     w.window.clipboard().set_text(&text);
                     w.toast("Copied");
                 }
+                page::Action::OpenLink(url) => gtk::UriLauncher::new(&url).launch(Some(&w.window), gio::Cancellable::NONE, |_| {}),
             }
         });
     }
@@ -609,6 +610,8 @@ impl Window {
                 }
                 self.toast(&format!("Copied from {}", from.name));
             }
+            // The service opens it; the timeline shows it.
+            Event::OpenUrl { .. } => {}
         }
     }
 

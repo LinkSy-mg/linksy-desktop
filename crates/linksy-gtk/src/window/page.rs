@@ -32,6 +32,7 @@ pub enum Action {
     Open(Vec<PathBuf>),
     ShowInFolder(PathBuf),
     Copy(String),
+    OpenLink(String),
 }
 
 type Handler = Rc<RefCell<Option<Rc<dyn Fn(Action)>>>>;
@@ -344,6 +345,7 @@ impl DevicePage {
             Shared::Clipboard { text } => ("edit-paste-symbolic", format!("“{}”", one_line(text, 80))),
             Shared::Ping { title, body } if body.is_empty() => ("preferences-system-notifications-symbolic", title.clone()),
             Shared::Ping { title, body } => ("preferences-system-notifications-symbolic", format!("{title}: {body}")),
+            Shared::Link { url } => ("web-browser-symbolic", one_line(url, 120)),
             Shared::Camera { .. } => ("camera-web-symbolic", if incoming { "Their camera".to_string() } else { "Your camera".to_string() }),
             Shared::Screen { display: true, .. } => ("video-joined-displays-symbolic", if incoming { "Their second display".to_string() } else { "Second display".to_string() }),
             Shared::Screen { .. } => ("video-display-symbolic", if incoming { "Their screen".to_string() } else { "Your screen".to_string() }),
@@ -360,6 +362,8 @@ impl DevicePage {
             (Shared::Camera { .. }, false) => "Shared",
             (Shared::Screen { .. }, true) => "Watched",
             (Shared::Screen { .. }, false) => "Shared",
+            (Shared::Link { .. }, true) => "Opened here",
+            (Shared::Link { .. }, false) => "Opened there",
             (_, true) => "From them",
             (_, false) => "From you",
         };
@@ -429,6 +433,10 @@ impl DevicePage {
                 row.add_controller(drag_files(saved));
                 row.set_widget_name(&e.id.to_string());
                 self.received.borrow_mut().insert(e.id.to_string(), saved.clone());
+            }
+            (_, Shared::Link { url }) => {
+                let url = url.clone();
+                suffix("adw-external-link-symbolic", "Open Link", Box::new(move || Action::OpenLink(url.clone())));
             }
             (_, Shared::Clipboard { text }) if !text.is_empty() => {
                 let text = text.clone();
