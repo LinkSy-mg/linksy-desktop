@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Battery, CallState, Config, ControlMsg, SmsThread, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind};
+use linksy_core::{Battery, CallState, Config, ControlMsg, FsEntry, FsRequest, SmsThread, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -514,6 +514,87 @@ async fn texting_asks_answers_and_sends() {
     phone.node.sms_sent(&pc_id, "c1", true, None).await.unwrap();
     wait_for(&mut on_pc, |e| matches!(e, Event::SmsSent { client_id, ok: true, .. } if client_id == "c1").then_some(())).await;
     assert!(pc.node.sms_send(&phone_id, "c2", &[], "x").await.is_err());
+}
+
+/// Serve `root` the way a phone would, for the file-browsing tests.
+fn serve_files(node: &Node, root: std::path::PathBuf) {
+    let mut calls = node.incoming_fs().unwrap();
+    tokio::spawn(async move {
+        while let Some(mut call) = calls.recv().await {
+            let at = |p: &str| root.join(p.trim_start_matches('/'));
+            let entry = |p: &std::path::Path| {
+                let m = std::fs::metadata(p).ok()?;
+                Some(FsEntry { name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), dir: m.is_dir(), size: m.len(), modified_ms: 0 })
+            };
+            let _: linksy_core::Result<()> = match call.request.clone() {
+                FsRequest::List { path } => match std::fs::read_dir(at(&path)) {
+                    Ok(rd) => call.entries(rd.flatten().filter_map(|e| entry(&e.path())).collect()).await,
+                    Err(_) => call.error("no such folder", true).await,
+                },
+                FsRequest::Stat { path } => match entry(&at(&path)) {
+                    Some(e) => call.entry(e).await,
+                    None => call.error("no such file", true).await,
+                },
+                FsRequest::Read { path, offset, length } => {
+                    let all = std::fs::read(at(&path)).unwrap_or_default();
+                    let start = (offset as usize).min(all.len());
+                    let end = (start + length as usize).min(all.len());
+                    call.data(&all[start..end]).await
+                }
+                FsRequest::Write { path, offset, truncate, .. } => {
+                    let body = call.body().await.unwrap();
+                    let mut all = if truncate { Vec::new() } else { std::fs::read(at(&path)).unwrap_or_default() };
+                    all.truncate(offset as usize);
+                    all.extend(body);
+                    std::fs::write(at(&path), all).unwrap();
+                    call.ok().await
+                }
+                FsRequest::Mkdir { path } => {
+                    std::fs::create_dir_all(at(&path)).unwrap();
+                    call.ok().await
+                }
+                FsRequest::Delete { path } => {
+                    let p = at(&path);
+                    let _ = if p.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) };
+                    call.ok().await
+                }
+                FsRequest::Rename { path, to } => {
+                    std::fs::rename(at(&path), at(&to)).unwrap();
+                    call.ok().await
+                }
+            };
+        }
+    });
+}
+
+#[tokio::test]
+async fn browsing_a_phones_files() {
+    use linksy_core::fs::FsAnswer;
+    let (phone, pc) = paired().await;
+    let phone_id = phone.node.info().id;
+    // Not sharing yet: a clear refusal.
+    let err = pc.node.fs(&phone_id, FsRequest::List { path: "/".into() }, &[]).await.unwrap_err();
+    assert!(err.to_string().contains("doesn't share"), "{err}");
+
+    let root = phone.dir.path().join("storage");
+    std::fs::create_dir_all(root.join("DCIM")).unwrap();
+    std::fs::write(root.join("DCIM/a.jpg"), b"0123456789").unwrap();
+    serve_files(&phone.node, root.clone());
+
+    let FsAnswer::Entries(top) = pc.node.fs(&phone_id, FsRequest::List { path: "/".into() }, &[]).await.unwrap() else { panic!() };
+    assert_eq!(top.iter().map(|e| (e.name.as_str(), e.dir)).collect::<Vec<_>>(), [("DCIM", true)]);
+    let FsAnswer::Data(d) = pc.node.fs(&phone_id, FsRequest::Read { path: "/DCIM/a.jpg".into(), offset: 3, length: 4 }, &[]).await.unwrap() else { panic!() };
+    assert_eq!(d, b"3456");
+    pc.node.fs(&phone_id, FsRequest::Mkdir { path: "/Docs".into() }, &[]).await.unwrap();
+    pc.node.fs(&phone_id, FsRequest::Write { path: "/Docs/n.txt".into(), offset: 0, length: 5, truncate: true }, b"hello").await.unwrap();
+    pc.node.fs(&phone_id, FsRequest::Rename { path: "/Docs/n.txt".into(), to: "/Docs/m.txt".into() }, &[]).await.unwrap();
+    assert_eq!(std::fs::read(root.join("Docs/m.txt")).unwrap(), b"hello");
+    let FsAnswer::Entry(e) = pc.node.fs(&phone_id, FsRequest::Stat { path: "/Docs/m.txt".into() }, &[]).await.unwrap() else { panic!() };
+    assert_eq!((e.size, e.dir), (5, false));
+    pc.node.fs(&phone_id, FsRequest::Delete { path: "/Docs".into() }, &[]).await.unwrap();
+    assert!(!root.join("Docs").exists());
+    let missing = pc.node.fs(&phone_id, FsRequest::Stat { path: "/nope".into() }, &[]).await.unwrap_err();
+    assert!(matches!(missing, Error::NotFound(_)));
 }
 
 #[tokio::test]

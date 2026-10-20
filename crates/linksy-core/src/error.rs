@@ -24,6 +24,9 @@ pub enum Error {
     Discovery(#[from] mdns_sd::Error),
     #[error("protocol error: {0}")]
     Protocol(String),
+    /// What was asked for isn't there (a file on another device); for the user.
+    #[error("{0}")]
+    NotFound(String),
     /// A request that can't be carried out as asked; the message is for the user.
     #[error("{0}")]
     Invalid(String),

@@ -270,6 +270,51 @@ pub enum Message {
     },
 }
 
+/// Browsing a device's files ("phone in the Files sidebar"): the first message of a
+/// bidirectional stream, one request per stream. Paths are absolute within what the
+/// serving device shares ("/" is its root), with `/` separators.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum FsRequest {
+    /// A folder's entries → `fs_entries`.
+    List { path: String },
+    /// One entry → `fs_entry`.
+    Stat { path: String },
+    /// Up to `length` bytes from `offset` → `fs_data` and then exactly that many raw bytes.
+    Read { path: String, offset: u64, length: u64 },
+    /// `length` raw bytes follow the request, to write at `offset` (`truncate`: the file
+    /// ends after them; creates it) → `fs_ok`.
+    Write { path: String, offset: u64, length: u64, truncate: bool },
+    Mkdir { path: String },
+    /// A file, or a folder with everything in it.
+    Delete { path: String },
+    Rename { path: String, to: String },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum FsReply {
+    FsEntries { entries: Vec<FsEntry> },
+    FsEntry { entry: FsEntry },
+    FsData { length: u64 },
+    FsOk,
+    FsError {
+        message: String,
+        #[serde(default)]
+        not_found: bool,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FsEntry {
+    pub name: String,
+    pub dir: bool,
+    #[serde(default)]
+    pub size: u64,
+    #[serde(default)]
+    pub modified_ms: u64,
+}
+
 /// A conversation, newest first in lists.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SmsThread {

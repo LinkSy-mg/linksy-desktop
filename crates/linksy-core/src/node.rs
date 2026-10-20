@@ -25,9 +25,10 @@ use uuid::Uuid;
 use crate::discovery::{Discovery, DiscoveryEvent};
 use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
+use crate::fs::FsCall;
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{Battery, CallState, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, 
+use crate::protocol::{Battery, CallState, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, 
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -263,6 +264,9 @@ struct Inner {
     /// Accepted incoming sessions, for whoever runs the media side (the daemon).
     sessions: Mutex<Option<mpsc::UnboundedReceiver<Session>>>,
     sessions_tx: mpsc::UnboundedSender<Session>,
+    /// File requests from other devices, for whoever serves this device's files (phones).
+    fs: Mutex<Option<mpsc::UnboundedReceiver<FsCall>>>,
+    fs_tx: mpsc::UnboundedSender<FsCall>,
     /// Session requests answered "this device can't do that", not "no".
     unsupported: Mutex<std::collections::HashSet<Uuid>>,
     /// The token of the pairing QR code on screen, and when it expires.
@@ -296,6 +300,7 @@ impl Node {
         let endpoint = bind_endpoint(&identity, SocketAddr::new(config.bind, config.port))?;
         let (events, _) = broadcast::channel(1024);
         let (sessions_tx, sessions) = mpsc::unbounded_channel();
+        let (fs_tx, fs) = mpsc::unbounded_channel();
         let node = Self {
             inner: Arc::new(Inner {
                 id: info.id,
@@ -317,6 +322,8 @@ impl Node {
                 media_seq: Mutex::default(),
                 sessions: Mutex::new(Some(sessions)),
                 sessions_tx,
+                fs: Mutex::new(Some(fs)),
+                fs_tx,
                 unsupported: Mutex::new(Default::default()),
             }),
         };
@@ -735,6 +742,19 @@ impl Node {
 
     /// Sessions this device accepted. Can be taken once; the taker runs the media (capture
     /// and encoding when `sharing`, showing it otherwise) and drops each when done.
+    /// File requests from other devices, for the code that serves this device's files.
+    /// Until something takes it, this device answers that it doesn't share files.
+    pub fn incoming_fs(&self) -> Option<mpsc::UnboundedReceiver<FsCall>> {
+        self.inner.fs.lock().unwrap().take()
+    }
+
+    /// A new bidirectional stream to a paired device, connecting if needed.
+    pub(crate) async fn open_stream(&self, to: &Fingerprint) -> Result<(quinn::SendStream, quinn::RecvStream)> {
+        let (conn, activity) = self.ensure_connection(to).await?;
+        activity.touch();
+        Ok(conn.open_bi().await?)
+    }
+
     pub fn incoming_sessions(&self) -> Option<mpsc::UnboundedReceiver<Session>> {
         self.inner.sessions.lock().unwrap().take()
     }
@@ -1251,6 +1271,21 @@ impl Node {
                 Ok(SessionMsg::SessionRequest { id, kind }) => self.handle_session(from, send, recv, id, kind).await,
                 _ => debug!("bad session request from {}", from.name),
             },
+            Some("fs") => {
+                let mut first = first;
+                if let Some(o) = first.as_object_mut() {
+                    o.remove("type");
+                }
+                let Ok(request) = serde_json::from_value::<FsRequest>(first) else {
+                    return debug!("bad file request from {}", from.name);
+                };
+                let call = FsCall::new(from, request, send, recv);
+                let served = self.inner.fs.lock().unwrap().is_none();
+                let unserved = if served { self.inner.fs_tx.send(call).err().map(|e| e.0) } else { Some(call) };
+                if let Some(call) = unserved {
+                    let _ = call.error("this device doesn't share its files", false).await;
+                }
+            }
             other => debug!("unknown stream {other:?} from {}", from.name),
         }
     }
