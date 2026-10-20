@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use linksy_core::{DeviceInfo, DeviceView, Direction, Event, Fingerprint, SessionKind, Settings, Uuid};
+use linksy_core::{DeviceInfo, DeviceView, Direction, Event, Fingerprint, RemoteNotification, SessionKind, Settings, Uuid};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -39,6 +39,13 @@ pub enum Request {
     OpenUrl { to: String, url: String },
     /// Make a device ring so it can be found (`on`), or stop it.
     Ring { to: String, on: bool },
+    /// A phone notification shown here (for the reply window).
+    PhoneNotification { from: String, key: String },
+    /// Reply to a phone notification shown here.
+    ReplyNotification { from: String, key: String, text: String },
+    /// Whether phone notifications show here, and which apps are muted.
+    NotificationPrefs,
+    SetNotificationPrefs { prefs: NotificationPrefs },
     Settings,
     UpdateSettings { settings: Settings },
     /// A pairing QR code (`linksy://pair?…`); valid five minutes or until cancelled.
@@ -131,6 +138,27 @@ pub enum Shared {
         #[serde(default)]
         display: bool,
     },
+}
+
+/// How phone notifications show on this computer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationPrefs {
+    pub show: bool,
+    pub muted: Vec<MutedApp>,
+}
+
+impl Default for NotificationPrefs {
+    fn default() -> Self {
+        Self { show: true, muted: Vec::new() }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MutedApp {
+    /// The app's id on the phone (Android package name).
+    pub app: String,
+    pub app_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -325,6 +353,22 @@ impl Client {
 
     pub async fn ring(&self, to: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::Ring { to: to.into(), on }).await
+    }
+
+    pub async fn phone_notification(&self, from: impl Into<String>, key: impl Into<String>) -> Result<(DeviceInfo, RemoteNotification), ClientError> {
+        self.call(Request::PhoneNotification { from: from.into(), key: key.into() }).await
+    }
+
+    pub async fn reply_notification(&self, from: impl Into<String>, key: impl Into<String>, text: impl Into<String>) -> Result<(), ClientError> {
+        self.call(Request::ReplyNotification { from: from.into(), key: key.into(), text: text.into() }).await
+    }
+
+    pub async fn notification_prefs(&self) -> Result<NotificationPrefs, ClientError> {
+        self.call(Request::NotificationPrefs).await
+    }
+
+    pub async fn set_notification_prefs(&self, prefs: NotificationPrefs) -> Result<(), ClientError> {
+        self.call(Request::SetNotificationPrefs { prefs }).await
     }
 
     pub async fn create_invite(&self) -> Result<String, ClientError> {

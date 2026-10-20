@@ -1141,6 +1141,7 @@ dependencies = [
 name = "linksyd"
 version = "0.2.1"
 dependencies = [
+ "base64",
  "linksy-core",
  "linksy-ipc",
  "notify-rust",
@@ -1149,6 +1150,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zbus",
 ]
 
 [[package]]

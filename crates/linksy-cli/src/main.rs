@@ -357,6 +357,7 @@ async fn watch(c: &Client) -> Result<(), String> {
                 println!("🔋 {} at {}%{}", from.name, battery.level, if battery.charging { ", charging" } else { "" })
             }
             Event::Ring { from, on: true } => println!("🔔 {} is looking for this device", from.name),
+            Event::NotificationPosted { from, notification: n } => println!("💬 {} ({} on {}): {}", n.title, n.app_name, from.name, n.body),
             Event::SessionRequest { request, from, kind } => {
                 match kind {
                     linksy_ipc::linksy_core::SessionKind::Control => println!("{} wants to control your screen (mouse and keyboard).", from.name),

@@ -223,6 +223,6 @@ fn bind(path: &Path) -> std::io::Result<UnixListener> {
 }
 
 /// A Linksy program next to this binary (installed or in target/), else from PATH.
-fn helper(name: &str) -> PathBuf {
+pub(crate) fn helper(name: &str) -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(name))).filter(|p| p.exists()).unwrap_or_else(|| PathBuf::from(name))
 }
