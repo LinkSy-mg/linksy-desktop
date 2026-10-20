@@ -5,13 +5,15 @@
 //!
 //! cargo run -p linksy-core --example fake_phone -- --data-dir DIR [--port N] [--name NAME]
 //!     [--battery PERCENT] [--charging] [--notify "TITLE" "BODY"] [--display FILE]
-//!     [--media "TITLE" "ARTIST"] [--watch-media] [--call SECONDS] [--seconds N]
+//!     [--media "TITLE" "ARTIST"] [--watch-media] [--call SECONDS] [--leave-after SECONDS]
+//!     [--seconds N]
 //!
 //! `--display FILE` accepts "Use as Second Display" and saves the H.264 it receives.
 //! `--media "TITLE" "ARTIST"` plays a song (as far as the computer can tell);
 //! `--watch-media` prints what the computer plays; `--press play-pause|next|previous`
 //! presses that button on the first player it hears about. `--call SECONDS` rings, answers
-//! two seconds later, and hangs up after that many seconds.
+//! two seconds later, and hangs up after that many seconds. It checks in when a computer
+//! asks (lock when away); `--leave-after SECONDS` stops that, as if it walked away.
 
 use std::time::Duration;
 
@@ -27,6 +29,7 @@ async fn main() {
     let (mut media, mut watch_media) = (None, false);
     let mut press: Option<linksy_core::MediaCommand> = None;
     let mut call: Option<u64> = None;
+    let mut leave_after: Option<u64> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -39,6 +42,7 @@ async fn main() {
             "--display" => display = Some(value().into()),
             "--watch-media" => watch_media = true,
             "--call" => call = Some(value().parse().expect("--call SECONDS")),
+            "--leave-after" => leave_after = Some(value().parse().expect("--leave-after SECONDS")),
             "--press" => {
                 press = Some(match value().as_str() {
                     "next" => linksy_core::MediaCommand::Next,
@@ -153,6 +157,21 @@ async fn main() {
                 Ok(Event::NotificationReply { from, key, text }) => println!("REPLY to {key} from {}: {text}", from.name),
                 Ok(Event::NotificationAction { key, action, .. }) => println!("ACTION {action} on {key}"),
                 Ok(Event::NotificationDismissed { key, .. }) => println!("DISMISSED {key}"),
+                Ok(Event::HeartbeatWatch { from, on: true, every_s }) => {
+                    println!("{} asks for a heartbeat every {every_s} s", from.name);
+                    let node = node.clone();
+                    let started = std::time::Instant::now();
+                    tokio::spawn(async move {
+                        loop {
+                            if leave_after.is_some_and(|s| started.elapsed().as_secs() >= s) {
+                                println!("walked away");
+                                break;
+                            }
+                            let _ = node.heartbeat(&from.id).await;
+                            tokio::time::sleep(Duration::from_secs(every_s.into())).await;
+                        }
+                    });
+                }
                 Ok(Event::MediaCommand { from, player, command }) => {
                     println!("MEDIA {command:?} on {player} from {}", from.name);
                     // Act like a player: play/pause flips, and the computer hears about it.
