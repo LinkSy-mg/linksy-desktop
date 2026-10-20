@@ -379,13 +379,14 @@ impl DevicePage {
             Shared::Ping { title, body } => ("preferences-system-notifications-symbolic", format!("{title}: {body}")),
             Shared::Link { url } => ("web-browser-symbolic", one_line(url, 120)),
             Shared::Locked => ("system-lock-screen-symbolic", "Locked this computer".to_string()),
+            Shared::Remote { .. } => ("input-touchpad-symbolic", "Touchpad and keyboard".to_string()),
             Shared::Camera { .. } => ("camera-web-symbolic", if incoming { "Their camera".to_string() } else { "Your camera".to_string() }),
             Shared::Screen { display: true, .. } => ("video-joined-displays-symbolic", if incoming { "Their second display".to_string() } else { "Second display".to_string() }),
             Shared::Screen { .. } => ("video-display-symbolic", if incoming { "Their screen".to_string() } else { "Your screen".to_string() }),
         };
         let size = match &e.what {
             Shared::Files { total, .. } => Some(fmt::size(*total)),
-            Shared::Screen { seconds, .. } | Shared::Camera { seconds } if *seconds > 0 => Some(fmt::duration(*seconds)),
+            Shared::Screen { seconds, .. } | Shared::Camera { seconds } | Shared::Remote { seconds } if *seconds > 0 => Some(fmt::duration(*seconds)),
             _ => None,
         };
         let verb = match (&e.what, incoming) {
@@ -399,6 +400,7 @@ impl DevicePage {
             (Shared::Link { .. }, true) => "Opened here",
             (Shared::Link { .. }, false) => "Opened there",
             (Shared::Locked, _) => "When it left",
+            (Shared::Remote { .. }, _) => "Used",
             (_, true) => "From them",
             (_, false) => "From you",
         };
@@ -412,7 +414,7 @@ impl DevicePage {
         let detail_text = match &state {
             Some(s) => [Some(s.clone()), size, Some(time_label(e.at))].into_iter().flatten().collect::<Vec<_>>().join(" · "),
             None => match progress {
-                _ if matches!(e.what, Shared::Screen { .. } | Shared::Camera { .. }) => "Live now".into(),
+                _ if matches!(e.what, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Remote { .. }) => "Live now".into(),
                 Some(p) if p.total > 0 => progress_text(p),
                 _ if !incoming => "Waiting for them to accept…".into(),
                 _ => "Starting…".into(),
@@ -449,7 +451,7 @@ impl DevicePage {
 
         let mut live = None;
         match (&e.status, &e.what) {
-            (HistoryStatus::InProgress, Shared::Screen { .. } | Shared::Camera { .. }) => {}
+            (HistoryStatus::InProgress, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Remote { .. }) => {}
             (HistoryStatus::InProgress, _) => {
                 let id = e.id;
                 suffix("process-stop-symbolic", "Cancel", Box::new(move || Action::Cancel(id)));
