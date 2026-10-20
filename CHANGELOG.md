@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.3.1
+
+### Added
+- **Pause on calls**: when your phone rings, what plays on this computer pauses, and it
+  picks up again when the call ends (only what Linksy paused). Ringing also shows who's
+  calling. Needs the Linksy for Android update that adds it.
+
 ## 0.3.0
 
 ### Added

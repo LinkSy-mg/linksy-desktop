@@ -72,6 +72,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.3.1" date="2026-10-20">
+      <description>
+        <p>Music and videos here pause while you're on a phone call, and resume after.</p>
+      </description>
+    </release>
     <release version="0.3.0" date="2026-10-20">
       <description>
         <p>Media controls both ways: your phone's music in GNOME's media controls, and this computer's music on your phone.</p>
