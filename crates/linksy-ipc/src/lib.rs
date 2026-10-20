@@ -51,6 +51,8 @@ pub enum Request {
     SmsThreads { phone: String },
     SmsMessages { phone: String, thread: String, before_ms: Option<u64> },
     SmsSend { phone: String, to: Vec<String>, text: String },
+    /// Show a phone's files in the file manager (and its sidebar); answers the location.
+    BrowseFiles { phone: String },
     /// Whether phones' photos are imported here, and where.
     PhotoPrefs,
     SetPhotoPrefs { prefs: PhotoPrefs },
@@ -431,6 +433,10 @@ impl Client {
 
     pub async fn sms_send(&self, phone: impl Into<String>, to: Vec<String>, text: impl Into<String>) -> Result<(), ClientError> {
         self.call(Request::SmsSend { phone: phone.into(), to, text: text.into() }).await
+    }
+
+    pub async fn browse_files(&self, phone: impl Into<String>) -> Result<String, ClientError> {
+        self.call(Request::BrowseFiles { phone: phone.into() }).await
     }
 
     pub async fn photo_prefs(&self) -> Result<PhotoPrefs, ClientError> {

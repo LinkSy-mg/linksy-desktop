@@ -202,6 +202,20 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
                 false => Err(error.unwrap_or_else(|| "the phone couldn't send it".into())),
             }
         }
+        Request::BrowseFiles { phone } => {
+            let id = resolve(node, &phone)?;
+            let name = device(node, &id).map(|d| d.name).unwrap_or_else(|| "The phone".into());
+            #[cfg(target_os = "linux")]
+            {
+                let bridges = crate::dav::BRIDGES.get().ok_or("not ready yet")?;
+                Ok(Value::String(bridges.browse(id, &name).await?))
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = (id, name);
+                Err("browsing a phone's files isn't available here yet".into())
+            }
+        }
         Request::PhotoPrefs => serde_json::to_value(photos.prefs()).map_err(|e| e.to_string()),
         Request::SetPhotoPrefs { prefs } => {
             photos.set_prefs(node, prefs)?;

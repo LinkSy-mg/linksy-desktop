@@ -25,6 +25,7 @@ Usage:
   linksy clip <device> [text]        share text to its clipboard (default: stdin)
   linksy open <device> <url>         open a web link in its browser
   linksy ring <device> [--stop]      make it ring so you can find it
+  linksy files <phone>               open a phone's files in the file manager
   linksy texts <phone> [thread]      a phone's conversations, or one conversation
   linksy text <phone> <number> <message…>
                                      send a text through a phone
@@ -139,6 +140,10 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
         }
         ("notify", [to, title, body @ ..]) if body.len() <= 1 => {
             c.notify(to.clone(), title.clone(), body.first().cloned().unwrap_or_default()).await.map_err(err)?;
+        }
+        ("files", [phone]) => {
+            let uri = c.browse_files(phone.clone()).await.map_err(err)?;
+            println!("{phone}'s files: {uri}");
         }
         ("texts", [phone]) => {
             for t in c.sms_threads(phone.clone()).await.map_err(err)? {

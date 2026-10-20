@@ -1146,6 +1146,7 @@ dependencies = [
  "linksy-core",
  "linksy-ipc",
  "notify-rust",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",

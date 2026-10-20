@@ -13,6 +13,8 @@ mod sessions;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
 // their own native notifications with their apps.
 #[cfg(target_os = "linux")]
+mod dav;
+#[cfg(target_os = "linux")]
 mod media;
 #[cfg(target_os = "linux")]
 mod notify;
@@ -143,6 +145,8 @@ async fn main() -> ExitCode {
     if args.notifications {
         tokio::spawn(mirror.clone().run(node.clone()));
     }
+    #[cfg(target_os = "linux")]
+    let _ = dav::BRIDGES.set(dav::Bridges::start(data_dir.join("files.json"), node.clone()).await);
     let photos = photos::Photos::load(data_dir.join("photos.json"), &node);
     let away = lock::Away::load(data_dir.join("lock.json"));
     tokio::spawn(away.clone().run(node.clone(), history.clone()));
