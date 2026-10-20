@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Battery, Config, Error, Event, Node, SessionKind};
+use linksy_core::{Battery, Config, Error, Event, Node, NotificationButton, RemoteNotification, SessionKind};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -338,6 +338,50 @@ async fn battery_shows_on_the_device_and_ring_arrives() {
     // Two uni streams may arrive in either order; both must arrive.
     rings.sort();
     assert_eq!(rings, [false, true]);
+}
+
+#[tokio::test]
+async fn mirrored_notifications_go_both_ways() {
+    let (phone, pc) = paired().await;
+    let mut on_pc = pc.node.subscribe();
+    let mut on_phone = phone.node.subscribe();
+    let (pc_id, phone_id) = (pc.node.info().id, phone.node.info().id);
+    let n = RemoteNotification {
+        key: "0|com.whatsapp|1|null|10123".into(),
+        app: "com.whatsapp".into(),
+        app_name: "WhatsApp".into(),
+        title: "Alice".into(),
+        body: "Lunch?".into(),
+        can_reply: true,
+        actions: vec![NotificationButton { id: "read".into(), label: "Mark as read".into() }],
+        icon: None,
+    };
+    phone.node.post_notification(&pc_id, n.clone()).await.unwrap();
+    let got = wait_for(&mut on_pc, |e| match e {
+        Event::NotificationPosted { notification, .. } => Some(notification.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, n);
+
+    pc.node.reply_notification(&phone_id, &n.key, "Sure!").await.unwrap();
+    let reply = wait_for(&mut on_phone, |e| match e {
+        Event::NotificationReply { key, text, .. } => Some((key.clone(), text.clone())),
+        _ => None,
+    })
+    .await;
+    assert_eq!(reply, (n.key.clone(), "Sure!".to_string()));
+    pc.node.notification_action(&phone_id, &n.key, "read").await.unwrap();
+    wait_for(&mut on_phone, |e| matches!(e, Event::NotificationAction { action, .. } if action == "read").then_some(())).await;
+    pc.node.dismiss_notification(&phone_id, &n.key).await.unwrap();
+    wait_for(&mut on_phone, |e| matches!(e, Event::NotificationDismissed { .. }).then_some(())).await;
+    phone.node.remove_notification(&pc_id, &n.key).await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::NotificationRemoved { key, .. } if *key == n.key).then_some(())).await;
+
+    assert!(pc.node.reply_notification(&phone_id, &n.key, "  ").await.is_err());
+    let huge = RemoteNotification { icon: Some("A".repeat(200_000)), ..n.clone() };
+    assert!(phone.node.post_notification(&pc_id, huge).await.is_err());
+    assert!(phone.node.post_notification(&pc_id, RemoteNotification { key: String::new(), ..n }).await.is_err());
 }
 
 #[tokio::test]

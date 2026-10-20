@@ -27,7 +27,7 @@ use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{Battery, 
+use crate::protocol::{Battery, RemoteNotification, 
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -42,6 +42,9 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const MAX_CLIPBOARD: usize = 256 * 1024;
 /// Longest link accepted for "Open on PC".
 const MAX_URL: usize = 8 * 1024;
+/// Mirrored notifications: longest key, and largest icon (base64 of a 64 KiB PNG).
+const MAX_KEY: usize = 1024;
+const MAX_ICON: usize = 64 * 1024 * 4 / 3 + 4;
 const RECONNECT_EVERY: Duration = Duration::from_secs(15);
 /// Per-address dial budget. LAN handshakes take milliseconds; a dead address never answers.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(3);
@@ -124,6 +127,14 @@ pub enum Event {
     Battery { from: DeviceInfo, battery: Battery },
     /// A paired device asks this one to ring so it can be found (`on`), or to stop.
     Ring { from: DeviceInfo, on: bool },
+    /// A paired device (a phone) shows a notification, new or changed (same `key`).
+    NotificationPosted { from: DeviceInfo, notification: RemoteNotification },
+    /// …and it's gone there.
+    NotificationRemoved { from: DeviceInfo, key: String },
+    /// Requests about this device's own notifications, from the device mirroring them.
+    NotificationReply { from: DeviceInfo, key: String, text: String },
+    NotificationAction { from: DeviceInfo, key: String, action: String },
+    NotificationDismissed { from: DeviceInfo, key: String },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -532,6 +543,43 @@ impl Node {
     /// Make a device ring so it can be found, or stop it ringing.
     pub async fn ring(&self, to: &Fingerprint, on: bool) -> Result<()> {
         self.send_message(to, if on { &Message::Ring } else { &Message::RingStop }).await
+    }
+
+    /// Mirror one of this device's notifications to a connected device (phones).
+    pub async fn post_notification(&self, to: &Fingerprint, notification: RemoteNotification) -> Result<()> {
+        if notification.key.is_empty() || notification.key.len() > MAX_KEY {
+            return Err(invalid("notification key must be 1 to 1024 bytes"));
+        }
+        if notification.icon.as_ref().is_some_and(|i| i.len() > MAX_ICON) {
+            return Err(invalid("notification icon is too large"));
+        }
+        self.send_message(to, &Message::NotificationPosted(notification)).await
+    }
+
+    /// The mirrored notification `key` is gone here.
+    pub async fn remove_notification(&self, to: &Fingerprint, key: &str) -> Result<()> {
+        self.send_message(to, &Message::NotificationRemoved { key: key.into() }).await
+    }
+
+    /// Reply to a notification `from` mirrored here.
+    pub async fn reply_notification(&self, from: &Fingerprint, key: &str, text: &str) -> Result<()> {
+        if text.trim().is_empty() {
+            return Err(invalid("the reply is empty"));
+        }
+        if text.len() > MAX_CLIPBOARD {
+            return Err(invalid("the reply is too long"));
+        }
+        self.send_message(from, &Message::NotificationReply { key: key.into(), text: text.into() }).await
+    }
+
+    /// Press a button of a notification `from` mirrored here.
+    pub async fn notification_action(&self, from: &Fingerprint, key: &str, action: &str) -> Result<()> {
+        self.send_message(from, &Message::NotificationAction { key: key.into(), action: action.into() }).await
+    }
+
+    /// Dismiss, at the source, a notification `from` mirrored here.
+    pub async fn dismiss_notification(&self, from: &Fingerprint, key: &str) -> Result<()> {
+        self.send_message(from, &Message::NotificationDismiss { key: key.into() }).await
     }
 
     /// Report a device found by other means than the built-in mDNS (Android's NsdManager,
@@ -997,6 +1045,16 @@ impl Node {
                                     }
                                 }
                                 Ok(Message::Battery(_)) => debug!("bad battery level from {}", from.name),
+                                Ok(Message::NotificationPosted(n))
+                                    if !n.key.is_empty() && n.key.len() <= MAX_KEY && n.icon.as_ref().is_none_or(|i| i.len() <= MAX_ICON) =>
+                                {
+                                    node.emit(Event::NotificationPosted { from, notification: n })
+                                }
+                                Ok(Message::NotificationPosted(_)) => debug!("bad notification from {}", from.name),
+                                Ok(Message::NotificationRemoved { key }) => node.emit(Event::NotificationRemoved { from, key }),
+                                Ok(Message::NotificationReply { key, text }) => node.emit(Event::NotificationReply { from, key, text }),
+                                Ok(Message::NotificationAction { key, action }) => node.emit(Event::NotificationAction { from, key, action }),
+                                Ok(Message::NotificationDismiss { key }) => node.emit(Event::NotificationDismissed { from, key }),
                                 Ok(Message::Ring) => node.emit(Event::Ring { from, on: true }),
                                 Ok(Message::RingStop) => node.emit(Event::Ring { from, on: false }),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),

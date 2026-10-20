@@ -202,6 +202,45 @@ pub enum Message {
     /// Play a loud sound until `ring_stop` or the user notices ("Ring my phone").
     Ring,
     RingStop,
+    /// A notification on the sender (a phone) to show here; sent again with the same `key`
+    /// when it changes.
+    NotificationPosted(RemoteNotification),
+    /// That notification is gone on the sender.
+    NotificationRemoved { key: String },
+    /// Answer a notification that `can_reply` with this text.
+    NotificationReply { key: String, text: String },
+    /// Press one of a notification's `actions`.
+    NotificationAction { key: String, action: String },
+    /// The user dismissed it on the receiving side; dismiss it at the source too.
+    NotificationDismiss { key: String },
+}
+
+/// A notification mirrored from another device (a phone's WhatsApp message…).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteNotification {
+    /// Stable id on the sender (Android: the StatusBarNotification key).
+    pub key: String,
+    /// The app's id (Android package name), for muting.
+    pub app: String,
+    pub app_name: String,
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    /// Whether `notification_reply` works on it.
+    #[serde(default)]
+    pub can_reply: bool,
+    /// Buttons the notification has, besides replying.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<NotificationButton>,
+    /// The app's icon, a small PNG (≤ 64 KiB) in standard base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotificationButton {
+    pub id: String,
+    pub label: String,
 }
 
 /// A device's battery as it reports it: `level` in percent (0–100).
