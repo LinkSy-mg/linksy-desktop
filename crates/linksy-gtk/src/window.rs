@@ -616,6 +616,12 @@ impl Window {
             Event::Battery { .. } => self.refresh_devices(),
             Event::Ring { from, on: true } => self.toast(&format!("{} is looking for this computer", from.name)),
             Event::Ring { on: false, .. } => {}
+            // Phone notifications are the service's to show, as desktop notifications.
+            Event::NotificationPosted { .. }
+            | Event::NotificationRemoved { .. }
+            | Event::NotificationReply { .. }
+            | Event::NotificationAction { .. }
+            | Event::NotificationDismissed { .. } => {}
         }
     }
 

@@ -1,11 +1,13 @@
-//! Preferences: device name, where files go, how files are received, and whether to stay
-//! connected. Every change is saved right away, like GNOME's own settings.
+//! Preferences: device name, where files go, how files are received, whether to stay
+//! connected, and phone notifications. Every change is saved right away, like GNOME's own
+//! settings.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
+use linksy_ipc::NotificationPrefs;
 use linksy_ipc::linksy_core::Settings;
 
 use super::Window;
@@ -15,16 +17,16 @@ impl Window {
     pub(super) fn show_preferences(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
         let w = self.clone();
-        let call = self.bridge.call(&c, |c| async move { c.settings().await });
+        let call = self.bridge.call(&c, |c| async move { Ok((c.settings().await?, c.notification_prefs().await?)) });
         glib::spawn_future_local(async move {
             match call.await {
-                Ok(s) => w.present_preferences(s),
+                Ok((s, n)) => w.present_preferences(s, n),
                 Err(e) => w.toast_error(&e, None),
             }
         });
     }
 
-    fn present_preferences(self: &Rc<Self>, settings: Settings) {
+    fn present_preferences(self: &Rc<Self>, settings: Settings, notifications: NotificationPrefs) {
         let dialog = adw::PreferencesDialog::builder().title("Preferences").search_enabled(false).build();
         let current = Rc::new(RefCell::new(settings.clone()));
         // Set while a widget is being reset after a failed save, so it doesn't save again.
@@ -73,6 +75,7 @@ impl Window {
         page.add(&device);
         page.add(&receiving);
         page.add(&connection);
+        page.add(&self.phone_notifications_group(&dialog, notifications));
         dialog.add(&page);
 
         // Save `change` applied to the current settings; `undo` resets the widget on failure.
@@ -149,5 +152,49 @@ impl Window {
         });
 
         dialog.present(Some(&self.window));
+    }
+
+    /// "Phone Notifications": on or off, and the apps muted from a notification's Mute.
+    fn phone_notifications_group(self: &Rc<Self>, dialog: &adw::PreferencesDialog, prefs: NotificationPrefs) -> adw::PreferencesGroup {
+        let group = adw::PreferencesGroup::builder()
+            .title("Phone Notifications")
+            .description("Messages and alerts from your phone show up here, and you can reply to them. Your phone asks for permission first.")
+            .build();
+        let show = adw::SwitchRow::builder().title("Show Phone Notifications").active(prefs.show).build();
+        group.add(&show);
+        let prefs = Rc::new(RefCell::new(prefs));
+        let save = {
+            let (w, dialog, prefs) = (self.clone(), dialog.clone(), prefs.clone());
+            Rc::new(move || {
+                let Some(c) = w.client() else { return };
+                let next = prefs.borrow().clone();
+                let call = w.bridge.call(&c, move |c| async move { c.set_notification_prefs(next).await });
+                let dialog = dialog.clone();
+                glib::spawn_future_local(async move {
+                    if let Err(e) = call.await {
+                        dialog.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e))));
+                    }
+                });
+            })
+        };
+        let (p, s) = (prefs.clone(), save.clone());
+        show.connect_active_notify(move |row| {
+            p.borrow_mut().show = row.is_active();
+            s();
+        });
+        let muted = prefs.borrow().muted.clone();
+        for app in muted {
+            let row = adw::ActionRow::builder().title(glib::markup_escape_text(&app.app_name)).subtitle("Muted").build();
+            let unmute = gtk::Button::builder().label("Unmute").valign(gtk::Align::Center).css_classes(["flat"]).build();
+            row.add_suffix(&unmute);
+            group.add(&row);
+            let (p, s, g) = (prefs.clone(), save.clone(), group.clone());
+            unmute.connect_clicked(move |_| {
+                p.borrow_mut().muted.retain(|m| m.app != app.app);
+                g.remove(&row);
+                s();
+            });
+        }
+        group
     }
 }

@@ -4,6 +4,7 @@
 mod bridge;
 mod fmt;
 mod mark;
+mod reply;
 mod window;
 
 use std::cell::RefCell;
@@ -13,7 +14,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 
-const APP_ID: &str = "mg.diary.linksy.Linksy";
+pub(crate) const APP_ID: &str = "mg.diary.linksy.Linksy";
 
 const CSS: &str = r#"
 /* Brand: Signal blue as Linksy's accent; libadwaita derives the rest. */
@@ -95,9 +96,24 @@ row.activity-failed .activity-icon { background-color: alpha(@error_color, 0.12)
 .numeric { font-feature-settings: "tnum"; }
 .screen-view { background-color: black; }
 .menu-box button { padding: 6px 14px; }
+.reply-message { padding: 12px 14px; }
 "#;
 
+/// Linksy's styles, for every window of the app.
+pub(crate) fn load_css() {
+    let css = gtk::CssProvider::new();
+    css.load_from_string(CSS);
+    gtk::style_context_add_provider_for_display(&gdk::Display::default().expect("display"), &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
 fn main() -> glib::ExitCode {
+    // A phone notification's Reply button: just the reply window.
+    let args: Vec<String> = std::env::args().collect();
+    if let [_, flag, from, key] = args.as_slice()
+        && flag == "--reply"
+    {
+        return reply::run(from.clone(), key.clone());
+    }
     // Only the screen viewer uses it; a missing GStreamer just disables that.
     let _ = gstreamer::init();
     let mut flags = gio::ApplicationFlags::HANDLES_OPEN;
@@ -110,13 +126,7 @@ fn main() -> glib::ExitCode {
     let window: Rc<RefCell<Option<Rc<window::Window>>>> = Rc::default();
 
     app.connect_startup(|app| {
-        let css = gtk::CssProvider::new();
-        css.load_from_string(CSS);
-        gtk::style_context_add_provider_for_display(
-            &gdk::Display::default().expect("display"),
-            &css,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
+        load_css();
         app.set_accels_for_action("win.choose-files", &["<Control>o"]);
         app.set_accels_for_action("win.preferences", &["<Control>comma"]);
         app.set_accels_for_action("win.add-device", &["<Control>n"]);
@@ -180,7 +190,7 @@ fn main() -> glib::ExitCode {
 /// Development aid: save the window as a PNG after a delay, then quit.
 /// `LINKSY_SCREENSHOT=out.png [LINKSY_SCREENSHOT_DELAY=ms] [LINKSY_SCREENSHOT_ACTION=win.x] [LINKSY_SCREENSHOT_SIZE=WxH] linksy-app`
 /// The action, if any, runs halfway through the delay (to open a dialog, say).
-fn maybe_screenshot(app: &adw::Application, window: &adw::ApplicationWindow) {
+pub(crate) fn maybe_screenshot(app: &adw::Application, window: &adw::ApplicationWindow) {
     let Ok(path) = std::env::var("LINKSY_SCREENSHOT") else { return };
     // Headless backends may never tick the frame clock; show end states directly.
     if let Some(s) = gtk::Settings::default() {
