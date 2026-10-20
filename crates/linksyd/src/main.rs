@@ -9,6 +9,7 @@ mod sessions;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
 // their own native notifications with their apps.
 #[cfg(target_os = "linux")]
+mod links;
 mod notify;
 mod system;
 
@@ -25,6 +26,7 @@ struct Args {
     config: Config,
     socket: PathBuf,
     notifications: bool,
+    open_links: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -33,6 +35,7 @@ fn parse_args() -> Result<Args, String> {
     config.port = DEFAULT_PORT;
     let mut socket = linksy_ipc::socket_path();
     let mut notifications = true;
+    let mut open_links = true;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -46,6 +49,7 @@ fn parse_args() -> Result<Args, String> {
             "--no-discovery" => config.discovery = false,
             "--stay-connected" => config.stay_connected = true,
             "--no-notifications" => notifications = false,
+            "--no-open-links" => open_links = false,
             "-h" | "--help" => {
                 println!(
                     "linksyd — Linksy background service\n\n\
@@ -56,7 +60,8 @@ fn parse_args() -> Result<Args, String> {
                      --socket PATH        IPC socket\n  \
                      --no-discovery       don't advertise or browse the network\n  \
                      --stay-connected     keep paired devices connected (default: on demand)\n  \
-                     --no-notifications   don't show desktop notifications"
+                     --no-notifications   don't show desktop notifications\n  \
+                     --no-open-links      don't open links devices send (they're still in the history)"
                 );
                 std::process::exit(0);
             }
@@ -67,7 +72,7 @@ fn parse_args() -> Result<Args, String> {
     for dir in [&mut config.data_dir, &mut config.download_dir] {
         *dir = std::path::absolute(&*dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    Ok(Args { config, socket, notifications })
+    Ok(Args { config, socket, notifications, open_links })
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -118,6 +123,9 @@ async fn main() -> ExitCode {
         tokio::spawn(notify::run(node.clone()));
     }
     tokio::spawn(clipboard::run(node.clone(), args.notifications));
+    if args.open_links {
+        tokio::spawn(links::run(node.clone()));
+    }
     let history = history::History::load(data_dir.join("history.json"));
     tokio::spawn(history.clone().run(node.clone()));
     let socket = args.socket.clone();

@@ -164,6 +164,7 @@ impl History {
                 }
                 Event::Clipboard { from, text } => self.upsert(incoming(&from, Shared::Clipboard { text })),
                 Event::Notification { from, title, body } => self.upsert(incoming(&from, Shared::Ping { title, body })),
+                Event::OpenUrl { from, url } => self.upsert(incoming(&from, Shared::Link { url })),
                 Event::SessionStarted { session, peer, sharing, kind } => {
                     started.insert(session, std::time::Instant::now());
                     self.upsert(HistoryEntry {

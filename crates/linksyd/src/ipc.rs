@@ -139,6 +139,14 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, req: Reques
             }
             Ok(Value::Null)
         }
+        Request::OpenUrl { to, url } => {
+            let id = resolve(node, &to)?;
+            node.open_url(&id, &url).await.map_err(|e| e.to_string())?;
+            if let Some(d) = device(node, &id) {
+                history.record_sent(&d, Shared::Link { url: url.trim().into() });
+            }
+            Ok(Value::Null)
+        }
         Request::CreateInvite => Ok(Value::String(node.create_invite().map_err(|e| e.to_string())?.to_uri())),
         Request::CancelInvite => {
             node.cancel_invite();

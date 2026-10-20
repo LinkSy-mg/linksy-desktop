@@ -35,6 +35,8 @@ pub enum Request {
     Cancel { transfer: Uuid },
     Notify { to: String, title: String, body: String },
     Clipboard { to: String, text: String },
+    /// Open a web link in the device's browser.
+    OpenUrl { to: String, url: String },
     Settings,
     UpdateSettings { settings: Settings },
     /// A pairing QR code (`linksy://pair?…`); valid five minutes or until cancelled.
@@ -112,6 +114,8 @@ pub enum Shared {
     /// The text is kept in memory only, never written to disk (it may be a password).
     Clipboard { #[serde(default)] text: String },
     Ping { title: String, body: String },
+    /// A web link opened on the receiving device ("Open on PC").
+    Link { url: String },
     /// A camera used as a webcam, one way or the other; `seconds` once it ended.
     Camera {
         #[serde(default)]
@@ -311,6 +315,10 @@ impl Client {
 
     pub async fn send_clipboard(&self, to: impl Into<String>, text: impl Into<String>) -> Result<(), ClientError> {
         self.call(Request::Clipboard { to: to.into(), text: text.into() }).await
+    }
+
+    pub async fn open_url(&self, to: impl Into<String>, url: impl Into<String>) -> Result<(), ClientError> {
+        self.call(Request::OpenUrl { to: to.into(), url: url.into() }).await
     }
 
     pub async fn create_invite(&self) -> Result<String, ClientError> {
