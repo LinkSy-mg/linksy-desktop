@@ -500,3 +500,5 @@ Phone-side fixes found testing with a realme 15 Pro 5G (2026-10-19):
   API change; a phone sees a Flatpak desktop exactly like any other.
 - **2026-10-20** — Desktop app ID is now `mg.diary.linksy.Linksy` (site: linksy.diary.mg).
   Nothing on the wire changes. If the phone app has no ID yet, `mg.diary.linksy` fits.
+- **2026-10-20** — `ROADMAP.md` lists the next features (0.2–0.5) with the phone-side
+  work for each. Nothing to build yet; protocol details land here as each one starts.
