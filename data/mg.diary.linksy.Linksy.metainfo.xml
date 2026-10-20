@@ -72,6 +72,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.3.2" date="2026-10-20">
+      <description>
+        <p>Lock When Away: this computer locks itself when your phone leaves.</p>
+      </description>
+    </release>
     <release version="0.3.1" date="2026-10-20">
       <description>
         <p>Music and videos here pause while you're on a phone call, and resume after.</p>

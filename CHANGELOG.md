@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.3.2
+
+### Added
+- **Lock When Away**: turn it on on your phone's page, and this computer locks itself
+  about a minute after your phone leaves. It locks once per departure and never unlocks
+  by itself. Needs the Linksy for Android update that adds it.
+
 ## 0.3.1
 
 ### Added
