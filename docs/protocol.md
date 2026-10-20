@@ -49,6 +49,7 @@ Decisions already made with the owner:
 | Phone battery on the desktop | Done | To do | `battery`, §4.5; Android BatteryManager |
 | Ring my phone / find my laptop | Done | To do | `ring` / `ring_stop`, §4.5 |
 | Media controls, both ways | Done | To do | `media_*`, §4.5; Android MediaSessionManager |
+| Pause the computer's media during calls | Done | To do | `call_state`, §4.5; Android TelephonyCallback |
 | Connect on demand / idle close / stay connected | Done | To do | §4.6 |
 | Desktop notifications with Accept/Decline | Done | To do | Android: notification actions |
 | QR-code pairing | Done (shows the QR) | To do | phone scans desktop, §4.7 |
@@ -224,6 +225,7 @@ and close the other with reason `duplicate`.
    "length_ms":215000,"can_next":true,"can_previous":true,"can_seek":true,"art":"<base64>"}]}
   {"type":"media_command","player":"spotify","command":{"action":"play_pause"}}
   // actions: play, pause, play_pause, next, previous, seek (+ "position_ms")
+  {"type":"call_state","state":"ringing","contact":"Alice"}   // ringing | active | idle
   ```
 
   Receiving any of these counts as activity on the connection. Unknown types are
@@ -270,6 +272,11 @@ and close the other with reason `duplicate`.
     computer's player (its media notification / page), `{on: false}` when it stops. The
     computer then sends `media_state` on every change while the connection lives, and
     acts on `media_command` for its players.
+
+  **Calls.** Send `call_state` to paired computers that are around when a call starts
+  ringing, is answered, and ends (`idle`). The computer pauses whatever plays when it
+  rings and resumes exactly those players at `idle`; ringing also shows "Call from
+  <contact>" for 20 s. `contact` is optional: only send it if the user allowed contacts.
 
 - **Bidirectional stream = one file transfer** (`TransferMsg`), opened by the sender:
 
@@ -437,6 +444,7 @@ DeviceView.battery: Option<Battery>         // last level each device reported
 node.post_notification(id, RemoteNotification{…})   node.remove_notification(id, key)
 node.send_media_state(id, &MediaState{ seq, players })   node.media_command(id, player, cmd)
 node.watch_media(id, on)                    // Event::MediaState / MediaCommand / MediaWatch
+node.send_call_state(id, CallState::Ringing | Active | Idle, contact)
 Event::NotificationReply / NotificationAction / NotificationDismissed { from, key, … }   // to act on
 node.settings() / node.update_settings(s)   Settings { name, download_dir, stay_connected, auto_accept }
 node.forget(id)                             node.shutdown()
@@ -628,3 +636,8 @@ robust against any encoder (GPU ones may slice too):
   while `media_watch` is on. Try it against a computer with
   `fake_phone --media "Song" "Artist"` (appears in GNOME's media controls) and
   `fake_phone --watch-media --press play-pause`.
+- **2026-10-20** — **Pause on calls** (desktop 0.3.1): `call_state` (§4.5), core
+  `send_call_state`. Phone to-do: `TelephonyCallback.CallStateListener`
+  (READ_PHONE_STATE) mapping RINGING → `ringing`, OFFHOOK → `active`, IDLE → `idle`;
+  include the contact's name only with contacts permission. Try with
+  `fake_phone --call 5` while something plays on the computer.
