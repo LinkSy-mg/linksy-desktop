@@ -6,7 +6,7 @@
 //! cargo run -p linksy-core --example fake_phone -- --data-dir DIR [--port N] [--name NAME]
 //!     [--battery PERCENT] [--charging] [--notify "TITLE" "BODY"] [--display FILE]
 //!     [--media "TITLE" "ARTIST"] [--watch-media] [--call SECONDS] [--leave-after SECONDS]
-//!     [--import PATH] [--seconds N]
+//!     [--import PATH] [--touchpad] [--seconds N]
 //!
 //! `--display FILE` accepts "Use as Second Display" and saves the H.264 it receives.
 //! `--media "TITLE" "ARTIST"` plays a song (as far as the computer can tell);
@@ -15,6 +15,8 @@
 //! two seconds later, and hangs up after that many seconds. It checks in when a computer
 //! asks (lock when away); `--leave-after SECONDS` stops that, as if it walked away.
 //! `--import PATH` imports photos (a file or folder) into the computer's pictures.
+//! `--touchpad` asks to be the computer's touchpad and keyboard, then moves, clicks, types
+//! "hello" and presses Right (next slide).
 
 use std::time::Duration;
 
@@ -32,6 +34,7 @@ async fn main() {
     let mut call: Option<u64> = None;
     let mut leave_after: Option<u64> = None;
     let mut import: Option<std::path::PathBuf> = None;
+    let mut touchpad = false;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -45,6 +48,7 @@ async fn main() {
             "--watch-media" => watch_media = true,
             "--call" => call = Some(value().parse().expect("--call SECONDS")),
             "--import" => import = Some(value().into()),
+            "--touchpad" => touchpad = true,
             "--leave-after" => leave_after = Some(value().parse().expect("--leave-after SECONDS")),
             "--press" => {
                 press = Some(match value().as_str() {
@@ -125,6 +129,28 @@ async fn main() {
         if let Some(path) = &import {
             let r = node.import_files(&t.device.id, vec![path.clone()]).await;
             println!("import to {}: {}", t.device.name, r.map(|_| "started".to_string()).unwrap_or_else(|e| e.to_string()));
+        }
+        if touchpad {
+            use linksy_core::{ControlMsg, MouseButton, protocol::control_frame};
+            match node.request_session(&t.device.id, linksy_core::SessionKind::Input).await {
+                Ok(mut s) => {
+                    println!("touchpad on {}", t.device.name);
+                    let msgs = [
+                        ControlMsg::PointerBy { dx: 40.0, dy: -12.5 },
+                        ControlMsg::Button { button: MouseButton::Left, pressed: true },
+                        ControlMsg::Button { button: MouseButton::Left, pressed: false },
+                        ControlMsg::Text { text: "hello".into() },
+                        ControlMsg::Key { keysym: 0xff53, pressed: true },
+                        ControlMsg::Key { keysym: 0xff53, pressed: false },
+                    ];
+                    for m in &msgs {
+                        let _ = s.send.write_all(&control_frame(m)).await;
+                    }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    let _ = s.send.finish();
+                }
+                Err(e) => println!("touchpad on {}: {e}", t.device.name),
+            }
         }
         if watch_media {
             let _ = node.watch_media(&t.device.id, true).await;
