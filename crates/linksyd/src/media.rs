@@ -4,6 +4,8 @@
 //! - a phone's players appear here as MPRIS players of their own, so GNOME's media
 //!   controls and the keyboard's media keys work on them.
 //!
+//! And when a phone has a call, what plays here pauses, and resumes when the call ends.
+//!
 //! Nothing runs on D-Bus while no device is watching and no phone is playing.
 
 use std::collections::{HashMap, HashSet};
@@ -11,7 +13,7 @@ use std::time::Duration;
 
 use base64::Engine;
 use futures_util::StreamExt;
-use linksy_core::{DeviceInfo, Event, Fingerprint, MediaCommand, MediaPlayer, MediaState, Node};
+use linksy_core::{CallState, DeviceInfo, Event, Fingerprint, MediaCommand, MediaPlayer, MediaState, Node};
 use tokio::sync::{broadcast::error::RecvError, mpsc};
 use tracing::{debug, warn};
 use zbus::zvariant::{ObjectPath, OwnedValue, Value};
@@ -30,6 +32,8 @@ pub async fn run(node: Node, art_dir: std::path::PathBuf) {
     let mut watchers: HashSet<Fingerprint> = HashSet::new();
     let mut local: Option<Local> = None;
     let mut phones = Phones { exported: HashMap::new(), art_dir };
+    // Players paused for each phone's call, to resume (only those) when it ends.
+    let mut paused_for_call: HashMap<Fingerprint, Vec<String>> = HashMap::new();
     // Commands from GNOME's controls for a phone's player, run on this runtime.
     let (commands, mut queued) = mpsc::unbounded_channel::<(Fingerprint, String, MediaCommand)>();
     loop {
@@ -76,6 +80,26 @@ pub async fn run(node: Node, art_dir: std::path::PathBuf) {
                     }
                 }
                 Ok(Event::MediaState { from, state }) => phones.update(&from, state, &commands).await,
+                Ok(Event::CallState { from, state: CallState::Ringing | CallState::Active, .. }) if !paused_for_call.contains_key(&from.id) => {
+                    let paused = match Local::start().await {
+                        Ok(l) => l.pause_all().await,
+                        Err(e) => {
+                            warn!("can't pause this computer's players: {e}");
+                            Vec::new()
+                        }
+                    };
+                    paused_for_call.insert(from.id, paused);
+                }
+                Ok(Event::CallState { from, state: CallState::Idle, .. }) => {
+                    if let Some(paused) = paused_for_call.remove(&from.id)
+                        && !paused.is_empty()
+                        && let Ok(l) = Local::start().await
+                    {
+                        for name in paused {
+                            l.command(&name[MPRIS.len()..], MediaCommand::Play).await;
+                        }
+                    }
+                }
                 Ok(Event::DeviceLost { id }) => phones.remove_device(&id),
                 Ok(_) | Err(RecvError::Lagged(_)) => {}
                 Err(RecvError::Closed) => break,
@@ -171,6 +195,18 @@ impl Local {
             can_seek: flag(player.get_property("CanSeek").await),
             art: art(&text("mpris:artUrl")),
         })
+    }
+
+    /// Pause every player that's playing; their names, to resume.
+    async fn pause_all(&self) -> Vec<String> {
+        let mut paused = Vec::new();
+        for name in self.names().await {
+            let Ok(p) = self.proxy(&name, PLAYER).await else { continue };
+            if p.get_property::<String>("PlaybackStatus").await.is_ok_and(|s| s == "Playing") && p.call_method("Pause", &()).await.is_ok() {
+                paused.push(name);
+            }
+        }
+        paused
     }
 
     async fn command(&self, player: &str, command: MediaCommand) {

@@ -357,6 +357,7 @@ async fn watch(c: &Client) -> Result<(), String> {
                 println!("{} battery: {}%{}", from.name, battery.level, if battery.charging { ", charging" } else { "" })
             }
             Event::Ring { from, on: true } => println!("{} is looking for this device", from.name),
+            Event::CallState { from, state, contact } => println!("Call on {}: {state:?}{}", from.name, contact.map(|c| format!(" ({c})")).unwrap_or_default()),
             Event::MediaState { from, state } => {
                 for p in &state.players {
                     println!("Playing on {} ({}): {} – {}{}", from.name, p.app, p.artist, p.title, if p.playing { "" } else { " (paused)" });

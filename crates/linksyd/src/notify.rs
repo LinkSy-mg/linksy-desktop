@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use linksy_core::{Direction, Event, Fingerprint, Node, SessionKind, Uuid};
+use linksy_core::{CallState, Direction, Event, Fingerprint, Node, SessionKind, Uuid};
 use notify_rust::{Hint, Notification, Timeout, Urgency};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::debug;
@@ -87,6 +87,19 @@ pub async fn run(node: Node) {
             }
             Event::Battery { from, battery } if battery.charging || battery.level > LOW_BATTERY + 5 => {
                 warned.remove(&from.id);
+            }
+            Event::CallState { from, state: CallState::Ringing, contact } => {
+                let summary = match contact {
+                    Some(c) => format!("Call from {c}"),
+                    None => "Incoming call".to_string(),
+                };
+                tokio::task::spawn_blocking(move || {
+                    let mut n = base(&summary, &format!("On {}", from.name));
+                    n.hint(Hint::Transient(true)).timeout(Timeout::Milliseconds(20_000));
+                    if let Err(e) = n.show() {
+                        debug!("notification failed: {e}");
+                    }
+                });
             }
             Event::Ring { from, on: true } => {
                 tokio::task::spawn_blocking(move || {
