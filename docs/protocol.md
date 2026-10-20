@@ -518,6 +518,24 @@ Phone-side fixes found testing with a realme 15 Pro 5G (2026-10-19):
       phone as the scanner.
 - [x] Brand color: Signal.
 
+Found testing "Use as Second Display" on the realme (2026-10-20): the phone turned
+landscape but stayed black while GNOME had the extra monitor. The desktop's stream was
+fine (recorded with `fake_phone --display`, it decodes to the desktop's wallpaper), but
+x264 cut every frame into ~12 slices, and `DisplayReceiver` feeds MediaCodec one NAL unit
+per input buffer, each with its own timestamp, so the decoder never had a whole picture.
+Desktop 0.2.3 sends one slice per frame, which fixes it with today's receiver. To be
+robust against any encoder (GPU ones may slice too):
+
+- [ ] **Feed MediaCodec whole access units.** The desktop's stream has an access unit
+      delimiter (NAL type 9) before every frame: collect NALs until the next type 9 and
+      queue them as one buffer, one timestamp per access unit. Send SPS+PPS (types 7, 8)
+      together as one `BUFFER_FLAG_CODEC_CONFIG` buffer. Also set
+      `KEY_MAX_INPUT_SIZE` (e.g. 2 MiB) when configuring, so a big keyframe always fits.
+- [ ] **Use the phone's shape.** The virtual monitor is 1920×1080 today, letterboxed on a
+      2800×1272 screen. Proposal (needs a small core change, not done yet): the phone
+      reports its landscape size when accepting a `display` session and the desktop
+      creates the monitor at that size (scaled to fit 1080 px high).
+
 ## Changelog
 
 - **2026-10-19** — Document created. Desktop has discovery, presence re-checks, pairing,
@@ -576,3 +594,5 @@ Phone-side fixes found testing with a realme 15 Pro 5G (2026-10-19):
   `RemoteInput` action, actions via their `PendingIntent`, dismissals via
   `cancelNotification(key)`. A per-app on/off list on the phone is a nice extra. Test with
   `fake_phone --notify "Alice" "Lunch?"` against a computer to see the desktop side.
+- **2026-10-20** — Desktop 0.2.3: x264 now sends one slice per frame (the black second
+  display on the realme). §7 has the receiver change that makes this robust.
