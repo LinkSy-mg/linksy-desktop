@@ -416,6 +416,9 @@ impl Window {
         use std::process::{Command, Stdio};
         // The installed user service first, so it stays managed (restarts, logs); else
         // run linksyd from next to this app, or from PATH.
+        if std::env::var_os("FLATPAK_ID").is_some() {
+            return self.start_sandboxed_service();
+        }
         let via_systemd = Command::new("systemctl")
             .args(["--user", "start", "linksyd.service"])
             .stdout(Stdio::null())
@@ -437,6 +440,39 @@ impl Window {
             self.toast(&format!("Could not start the service: {e}"));
             return;
         }
+        self.wait_for_service();
+    }
+
+    /// In a Flatpak the service can't be a child of this window's sandbox, which ends with
+    /// the window: it runs in a sandbox of its own, and starts with every login from now on.
+    fn start_sandboxed_service(self: &Rc<Self>) {
+        use std::process::{Command, Stdio};
+        if let Err(e) = Command::new("flatpak-spawn").arg("linksyd").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
+            self.toast(&format!("Could not start the service: {e}"));
+            return;
+        }
+        let options = glib::VariantDict::new(None);
+        options.insert("reason", "Linksy stays ready for your devices when its window is closed.");
+        options.insert("autostart", true);
+        options.insert("commandline", vec!["linksyd"]);
+        if let Some(bus) = self.window.application().and_then(|app| app.dbus_connection()) {
+            bus.call(
+                Some("org.freedesktop.portal.Desktop"),
+                "/org/freedesktop/portal/desktop",
+                "org.freedesktop.portal.Background",
+                "RequestBackground",
+                Some(&("", options.end()).to_variant()),
+                None,
+                gio::DBusCallFlags::NONE,
+                -1,
+                gio::Cancellable::NONE,
+                |_| {},
+            );
+        }
+        self.wait_for_service();
+    }
+
+    fn wait_for_service(self: &Rc<Self>) {
         self.stack.set_visible_child_name("loading");
         let w = self.clone();
         glib::spawn_future_local(async move {
