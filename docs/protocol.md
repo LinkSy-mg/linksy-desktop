@@ -50,6 +50,7 @@ Decisions already made with the owner:
 | Ring my phone / find my laptop | Done | To do | `ring` / `ring_stop`, §4.5 |
 | Media controls, both ways | Done | To do | `media_*`, §4.5; Android MediaSessionManager |
 | Pause the computer's media during calls | Done | To do | `call_state`, §4.5; Android TelephonyCallback |
+| Lock the computer when the phone leaves | Done | To do | `heartbeat`, §4.5; needs a foreground service |
 | Connect on demand / idle close / stay connected | Done | To do | §4.6 |
 | Desktop notifications with Accept/Decline | Done | To do | Android: notification actions |
 | QR-code pairing | Done (shows the QR) | To do | phone scans desktop, §4.7 |
@@ -226,6 +227,8 @@ and close the other with reason `duplicate`.
   {"type":"media_command","player":"spotify","command":{"action":"play_pause"}}
   // actions: play, pause, play_pause, next, previous, seek (+ "position_ms")
   {"type":"call_state","state":"ringing","contact":"Alice"}   // ringing | active | idle
+  {"type":"heartbeat_watch","on":true,"every_s":20}            // computer → phone
+  {"type":"heartbeat"}                                         // phone → computer, every every_s
   ```
 
   Receiving any of these counts as activity on the connection. Unknown types are
@@ -277,6 +280,18 @@ and close the other with reason `duplicate`.
   ringing, is answered, and ends (`idle`). The computer pauses whatever plays when it
   rings and resumes exactly those players at `idle`; ringing also shows "Call from
   <contact>" for 20 s. `contact` is optional: only send it if the user allowed contacts.
+
+  **Lock when you walk away.** A computer where the user turned it on for this phone sends
+  `heartbeat_watch {on: true, every_s}` (5–20 s) when the phone connects and when it's
+  switched on, `{on: false}` when switched off. While on, send `heartbeat` every
+  `every_s` seconds; a repeated watch replaces the schedule (don't start a second one).
+  The computer locks when no heartbeat came for its grace time (default 60 s), once, and
+  waits for a heartbeat before it can lock again. It never unlocks. This only works if
+  the heartbeats keep coming while the phone sits idle with its screen off: Android's
+  Doze stops background networking, so run them from a foreground service with its own
+  quiet notification ("Keeping fedora locked when you leave") while any computer
+  watches, or ask for the battery-optimization exemption. Heartbeats that stop while
+  the phone is on the desk would lock the computer for nothing.
 
 - **Bidirectional stream = one file transfer** (`TransferMsg`), opened by the sender:
 
@@ -445,6 +460,7 @@ node.post_notification(id, RemoteNotification{…})   node.remove_notification(i
 node.send_media_state(id, &MediaState{ seq, players })   node.media_command(id, player, cmd)
 node.watch_media(id, on)                    // Event::MediaState / MediaCommand / MediaWatch
 node.send_call_state(id, CallState::Ringing | Active | Idle, contact)
+node.heartbeat(id)                          // Event::HeartbeatWatch { from, on, every_s } says when
 Event::NotificationReply / NotificationAction / NotificationDismissed { from, key, … }   // to act on
 node.settings() / node.update_settings(s)   Settings { name, download_dir, stay_connected, auto_accept }
 node.forget(id)                             node.shutdown()
@@ -641,3 +657,8 @@ robust against any encoder (GPU ones may slice too):
   (READ_PHONE_STATE) mapping RINGING → `ringing`, OFFHOOK → `active`, IDLE → `idle`;
   include the contact's name only with contacts permission. Try with
   `fake_phone --call 5` while something plays on the computer.
+- **2026-10-20** — **Lock when you walk away** (desktop 0.3.2): `heartbeat_watch`,
+  `heartbeat` (§4.5), core `heartbeat`, `watch_heartbeat`. Phone to-do: honor
+  `heartbeat_watch` with a foreground service (see §4.5 on Doze), one schedule per
+  computer. Test with `fake_phone --leave-after 30` and the switch on the phone's page
+  (the computer really locks; set `LINKSY_LOCK_COMMAND` on a test service to fake it).
