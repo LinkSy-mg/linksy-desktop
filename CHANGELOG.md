@@ -2,6 +2,12 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.5.2
+
+### Changed
+- Flatpak: no access to the Files bookmarks (a Flathub rule); a phone shows in the
+  Files sidebar while it's open there instead of as a permanent bookmark.
+
 ## 0.5.1
 
 ### Added

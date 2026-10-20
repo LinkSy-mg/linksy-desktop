@@ -76,6 +76,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.5.2" date="2026-10-20">
+      <description>
+        <p>Flatpak: fewer permissions.</p>
+      </description>
+    </release>
     <release version="0.5.1" date="2026-10-20">
       <description>
         <p>Your phone in the Files sidebar: browse it like a USB drive.</p>
