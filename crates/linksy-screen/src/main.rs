@@ -38,6 +38,8 @@ struct Args {
     socket: PathBuf,
     token_file: Option<PathBuf>,
     control: bool,
+    /// Pointer and keyboard only, no screen (`input` sessions).
+    input_only: bool,
     virtual_size: Option<(u32, u32)>,
     test: bool,
 }
@@ -48,18 +50,20 @@ fn parse_args() -> Result<Args, String> {
         Some("share") => None,
         Some("webcam") => Some("Linksy Camera".to_string()),
         _ => {
-            return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --control] [--virtual [--size WxH]] [--test]\n       \
+            return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --control | --input-only] [--virtual [--size WxH]] [--test]\n       \
                         linksy-screen webcam --socket PATH [--name NAME]"
                 .into());
         }
     };
     let (mut socket, mut token_file, mut control, mut test, mut camera) = (None, None, false, false, false);
+    let mut input_only = false;
     let (mut is_virtual, mut size) = (false, (1920, 1080));
     while let Some(a) = args.next() {
         match a.as_str() {
             "--socket" => socket = args.next().map(PathBuf::from),
             "--token-file" => token_file = args.next().map(PathBuf::from),
             "--control" => control = true,
+            "--input-only" => input_only = true,
             "--virtual" => is_virtual = true,
             "--size" => {
                 let v = args.next().unwrap_or_default();
@@ -71,7 +75,7 @@ fn parse_args() -> Result<Args, String> {
             other => return Err(format!("unknown option {other}")),
         }
     }
-    Ok(Args { webcam, camera, socket: socket.ok_or("--socket is required")?, token_file, control, virtual_size: is_virtual.then_some(size), test })
+    Ok(Args { webcam, camera, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), test })
 }
 
 fn main() -> ExitCode {
@@ -97,6 +101,9 @@ fn run(args: Args) -> Result<(), String> {
         return webcam(&args.socket, name);
     }
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().map_err(|e| e.to_string())?;
+    if args.input_only {
+        return input_only(&args, &rt);
+    }
 
     // What to capture, and where input goes (nowhere for view-only sessions).
     let (source, input) = if args.camera {
@@ -166,6 +173,23 @@ fn run(args: Args) -> Result<(), String> {
     let _ = pipeline.set_state(gst::State::Null);
     drop(out);
     result
+}
+
+/// A phone as touchpad and keyboard: apply its input until it stops. Nothing is shared.
+fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
+    let input = if args.test {
+        portal::Input::Log
+    } else {
+        let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+        let (input, new_token) = rt.block_on(portal::input_only(token))?;
+        if let (Some(path), Some(new)) = (&args.token_file, &new_token) {
+            let _ = std::fs::write(path, new);
+        }
+        input
+    };
+    let stream = UnixStream::connect(&args.socket).map_err(|e| format!("{}: {e}", args.socket.display()))?;
+    read_control_frames(stream, |msg| rt.block_on(input.apply(&msg)));
+    Ok(())
 }
 
 /// The best H.264 encoder available, and the raw format it wants: the GPU first, then

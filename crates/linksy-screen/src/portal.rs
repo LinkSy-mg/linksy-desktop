@@ -58,11 +58,56 @@ impl Input {
             }
             ControlMsg::Scroll { dx, dy, discrete: false } => proxy.notify_pointer_axis(session, dx, dy, Default::default()).await,
             ControlMsg::Key { keysym, pressed } => proxy.notify_keyboard_keysym(session, keysym as i32, state(pressed), Default::default()).await,
+            ControlMsg::PointerBy { dx, dy } => proxy.notify_pointer_motion(session, dx, dy, Default::default()).await,
+            ControlMsg::Text { ref text } => {
+                let mut r = Ok(());
+                for keysym in text.chars().map(keysym) {
+                    r = proxy.notify_keyboard_keysym(session, keysym as i32, KeyState::Pressed, Default::default()).await;
+                    if r.is_ok() {
+                        r = proxy.notify_keyboard_keysym(session, keysym as i32, KeyState::Released, Default::default()).await;
+                    }
+                    if r.is_err() {
+                        break;
+                    }
+                }
+                r
+            }
         };
         if let Err(e) = result {
             eprintln!("linksy-screen: input not applied: {e}");
         }
     }
+}
+
+/// The X11 keysym that types `c`: Latin-1 as itself, a few controls by name, the rest
+/// through the Unicode keysym range.
+fn keysym(c: char) -> u32 {
+    match c {
+        '\n' | '\r' => 0xff0d,
+        '\t' => 0xff09,
+        '\u{8}' => 0xff08,
+        ' '..='~' | '\u{a0}'..='\u{ff}' => c as u32,
+        _ => 0x0100_0000 + c as u32,
+    }
+}
+
+/// Pointer and keyboard only, no screen: for `input` sessions (a phone as touchpad).
+pub async fn input_only(token: Option<String>) -> Result<(Input, Option<String>), String> {
+    let remote = RemoteDesktop::new().await.map_err(|e| format!("remote control isn't available: {e}"))?;
+    let session = remote.create_session(Default::default()).await.map_err(|e| e.to_string())?;
+    let devices = SelectDevicesOptions::default()
+        .set_devices(Some(DeviceType::Keyboard | DeviceType::Pointer))
+        .set_persist_mode(PersistMode::ExplicitlyRevoked)
+        .set_restore_token(token.as_deref());
+    remote.select_devices(&session, devices).await.map_err(|e| e.to_string())?;
+    let selected = remote
+        .start(&session, None, Default::default())
+        .await
+        .map_err(|e| e.to_string())?
+        .response()
+        .map_err(|_| "remote control was cancelled".to_string())?;
+    let restore_token = selected.restore_token().map(str::to_string);
+    Ok((Input::Desktop { proxy: remote, session, node: 0, size: None }, restore_token))
 }
 
 fn state(pressed: bool) -> KeyState {
