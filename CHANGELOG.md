@@ -2,6 +2,12 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.2.3
+
+### Fixed
+- **Use as Second Display** on a phone stayed black: video is now sent as one piece per
+  frame, which phones' decoders need.
+
 ## 0.2.2
 
 ### Added

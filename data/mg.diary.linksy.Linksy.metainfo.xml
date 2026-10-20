@@ -71,6 +71,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.2.3" date="2026-10-20">
+      <description>
+        <p>Using a phone as a second display no longer shows a black screen.</p>
+      </description>
+    </release>
     <release version="0.2.2" date="2026-10-20">
       <description>
         <ul>
