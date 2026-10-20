@@ -82,7 +82,7 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                     (false, _, _) => "nearby · not paired",
                 };
                 let battery = d.battery.map(|b| format!(" · {}%{}", b.level, if b.charging { " charging" } else { "" })).unwrap_or_default();
-                println!("{} {:<24} {}  {state}{battery}", icon(d.device.kind), d.device.name, d.device.id.short());
+                println!("{:<24} {:<8} {}  {state}{battery}", d.device.name, kind_name(d.device.kind), d.device.id.short());
             }
         }
         ("pair", [target]) => {
@@ -350,14 +350,19 @@ async fn watch(c: &Client) -> Result<(), String> {
                 }
             }
             Event::TransferFailed { reason, .. } => println!("✗ Transfer failed: {reason}"),
-            Event::Notification { from, title, body } => println!("🔔 {} — {title} {body}", from.name),
-            Event::Clipboard { from, text } => println!("📋 {} shared: {text}", from.name),
-            Event::OpenUrl { from, url } => println!("🔗 {} opened {url}", from.name),
+            Event::Notification { from, title, body } => println!("Ping from {}: {title} {body}", from.name),
+            Event::Clipboard { from, text } => println!("Clipboard from {}: {text}", from.name),
+            Event::OpenUrl { from, url } => println!("Link from {}: {url}", from.name),
             Event::Battery { from, battery } => {
-                println!("🔋 {} at {}%{}", from.name, battery.level, if battery.charging { ", charging" } else { "" })
+                println!("{} battery: {}%{}", from.name, battery.level, if battery.charging { ", charging" } else { "" })
             }
-            Event::Ring { from, on: true } => println!("🔔 {} is looking for this device", from.name),
-            Event::NotificationPosted { from, notification: n } => println!("💬 {} ({} on {}): {}", n.title, n.app_name, from.name, n.body),
+            Event::Ring { from, on: true } => println!("{} is looking for this device", from.name),
+            Event::MediaState { from, state } => {
+                for p in &state.players {
+                    println!("Playing on {} ({}): {} – {}{}", from.name, p.app, p.artist, p.title, if p.playing { "" } else { " (paused)" });
+                }
+            }
+            Event::NotificationPosted { from, notification: n } => println!("Notification from {} ({}): {}: {}", from.name, n.app_name, n.title, n.body),
             Event::SessionRequest { request, from, kind } => {
                 match kind {
                     linksy_ipc::linksy_core::SessionKind::Control => println!("{} wants to control your screen (mouse and keyboard).", from.name),
@@ -368,8 +373,8 @@ async fn watch(c: &Client) -> Result<(), String> {
                 let ok = ask("Allow?").await;
                 let _ = c.respond(request, ok).await;
             }
-            Event::SessionStarted { peer, sharing: true, .. } => println!("🖥 Sharing your screen with {}", peer.name),
-            Event::SessionEnded { .. } => println!("🖥 Screen sharing ended"),
+            Event::SessionStarted { peer, sharing: true, .. } => println!("Sharing your screen with {}", peer.name),
+            Event::SessionEnded { .. } => println!("Screen sharing ended"),
             _ => {}
         }
     }
@@ -383,12 +388,12 @@ async fn ask(question: &str) -> bool {
     matches!(line.trim().to_lowercase().as_str(), "y" | "yes")
 }
 
-fn icon(kind: DeviceKind) -> &'static str {
+fn kind_name(kind: DeviceKind) -> &'static str {
     match kind {
-        DeviceKind::Desktop => "🖥",
-        DeviceKind::Laptop => "💻",
-        DeviceKind::Phone => "📱",
-        DeviceKind::Tablet => "📱",
+        DeviceKind::Desktop => "desktop",
+        DeviceKind::Laptop => "laptop",
+        DeviceKind::Phone => "phone",
+        DeviceKind::Tablet => "tablet",
     }
 }
 

@@ -35,32 +35,31 @@ Decisions already made with the owner:
 
 | Feature | Desktop (Linux) | Android | Notes |
 |---|---|---|---|
-| Discovery on the local network (mDNS) | ✅ | ⬜ | §4.1 |
-| Presence (who's nearby, re-checked) | ✅ | ⬜ | §4.6 |
-| Pairing with a 6-digit code | ✅ | ⬜ | §4.3 |
-| Pair by IP address (when discovery is blocked) | ✅ | ⬜ | default port 47200 |
-| Send / receive files and folders | ✅ | ⬜ | resume + BLAKE3 check, §4.5 |
-| Accept / decline prompt for incoming files | ✅ | ⬜ | 120 s timeout |
-| Auto-accept from paired devices (setting) | ✅ | ⬜ | |
-| Clipboard text sharing (on demand) | ✅ | ⬜ | up to 256 KiB |
-| Device-to-device notifications ("ping") | ✅ | ⬜ | |
-| Rename device (live to peers) | ✅ | ⬜ | `Renamed` message |
-| Open on PC (share a link from the phone) | ✅ | ⬜ | `open_url`, §4.5; Android share sheet |
-| Phone battery on the desktop | ✅ | ⬜ | `battery`, §4.5; Android BatteryManager |
-| Ring my phone / find my laptop | ✅ | ⬜ | `ring` / `ring_stop`, §4.5 |
-| Connect on demand / idle close / stay connected | ✅ | ⬜ | §4.6 |
-| Desktop notifications with Accept/Decline | ✅ | ⬜ | Android: notification actions |
-| QR-code pairing | ✅ shows QR | ⬜ | phone scans desktop, §4.7 |
-| Automatic clipboard sync | ⬜ | ⬜ | planned |
-| Images/files on the clipboard | ⬜ | ⬜ | planned |
-| Phone notifications mirrored to desktop | ✅ | ⬜ | `notification_*`, §4.5; Android NotificationListenerService |
-| Reply to messages from desktop | ✅ | ⬜ | `notification_reply`; via the notification's RemoteInput |
-| Phone as webcam | ⬜ | ⬜ | planned |
-| Bluetooth LE presence | ⬜ | ⬜ | planned |
-| Screen mirroring (watch / share) | ✅ | ⬜ | §4.8; phone can share via MediaProjection |
-| Remote control of a mirrored screen | ✅ | ⬜ | §4.8, kind `control` |
-| Sidecar (second display) | ✅ | ⬜ | §4.8, kind `display`; a tablet/phone can be the display |
-| Phone as webcam | ✅ desktop side | ⬜ | §4.8, kind `camera`: the phone shares its camera |
+| Discovery on the local network (mDNS) | Done | To do | §4.1 |
+| Presence (who's nearby, re-checked) | Done | To do | §4.6 |
+| Pairing with a 6-digit code | Done | To do | §4.3 |
+| Pair by IP address (when discovery is blocked) | Done | To do | default port 47200 |
+| Send / receive files and folders | Done | To do | resume + BLAKE3 check, §4.5 |
+| Accept / decline prompt for incoming files | Done | To do | 120 s timeout |
+| Auto-accept from paired devices (setting) | Done | To do | |
+| Clipboard text sharing (on demand) | Done | To do | up to 256 KiB |
+| Device-to-device notifications ("ping") | Done | To do | |
+| Rename device (live to peers) | Done | To do | `Renamed` message |
+| Open on PC (share a link from the phone) | Done | To do | `open_url`, §4.5; Android share sheet |
+| Phone battery on the desktop | Done | To do | `battery`, §4.5; Android BatteryManager |
+| Ring my phone / find my laptop | Done | To do | `ring` / `ring_stop`, §4.5 |
+| Connect on demand / idle close / stay connected | Done | To do | §4.6 |
+| Desktop notifications with Accept/Decline | Done | To do | Android: notification actions |
+| QR-code pairing | Done (shows the QR) | To do | phone scans desktop, §4.7 |
+| Automatic clipboard sync | To do | To do | planned |
+| Images/files on the clipboard | To do | To do | planned |
+| Phone notifications mirrored to desktop | Done | To do | `notification_*`, §4.5; Android NotificationListenerService |
+| Reply to messages from desktop | Done | To do | `notification_reply`; via the notification's RemoteInput |
+| Bluetooth LE presence | To do | To do | planned |
+| Screen mirroring (watch / share) | Done | To do | §4.8; phone can share via MediaProjection |
+| Remote control of a mirrored screen | Done | To do | §4.8, kind `control` |
+| Sidecar (second display) | Done | To do | §4.8, kind `display`; a tablet/phone can be the display |
+| Phone as webcam | Done | To do | §4.8, kind `camera`: the phone shares its camera |
 
 ## 3. How to build the phone app (recommendation)
 
@@ -90,7 +89,7 @@ Things the core still needs for Android (desktop side will add them; tracked in 
 2. **Receiving into MediaStore.** Received files go to `Settings::download_dir`. On
    Android point it at an app-specific dir and move finished files into
    `MediaStore.Downloads`, or wait for a "save via callback" API.
-3. **Discovery from the platform.** ✅ Available: if raw multicast is unreliable on some
+3. **Discovery from the platform.** Available: if raw multicast is unreliable on some
    phones, browse with `NsdManager` (service `_linksy._udp.`), read the TXT record
    (§4.1) and call `node.device_found(device, addrs)` / `node.device_lost(id)`. Start
    the node with `Config::discovery = false` in that case. (Advertising still has to be
