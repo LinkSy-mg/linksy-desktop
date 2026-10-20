@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.5.1
+
+### Added
+- **Phone in the Files sidebar**: Browse Files on your phone's page opens it in Files like
+  a USB drive, and it stays in the sidebar under its name: open, copy, rename and delete
+  its files, and it shows up in every app's file dialog. Needs the Linksy for Android
+  update that adds it, with file sharing turned on there.
+
 ## 0.5.0
 
 ### Added
