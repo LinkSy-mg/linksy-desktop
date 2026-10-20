@@ -192,10 +192,13 @@ fn webcam(socket: &std::path::Path, name: &str) -> Result<(), String> {
         .into_iter()
         .find(|d| gst::ElementFactory::make(d).build().is_ok())
         .ok_or("no H.264 decoder: install gstreamer1-plugin-openh264 or gstreamer1-plugin-libav")?;
+    // Offered the way webcams are, YUY2 at a fixed 30 fps (what the phone sends): apps like
+    // OBS list a camera's formats and rates from this, and skip what they can't name.
     // Quotes would break the property string; keep the name plain.
     let name: String = name.chars().filter(|c| !matches!(c, '"' | '\\' | ',')).collect();
     let description = format!(
-        "fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! video/x-raw,format=I420 \
+        "fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! video/x-raw,format=YUY2 \
+         ! capssetter caps=video/x-raw,framerate=30/1 \
          ! pipewiresink mode=provide sync=false \
            stream-properties=\"props,media.class=Video/Source,media.role=Camera,node.name=linksy-camera,node.description=\\\"{name}\\\"\"",
         input.as_raw_fd()
