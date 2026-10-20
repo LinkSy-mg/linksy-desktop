@@ -162,13 +162,23 @@ pub enum ServerMsg {
     },
 }
 
-/// `$LINKSY_SOCKET`, else `$XDG_RUNTIME_DIR/linksyd.sock`.
+/// Where Linksy's sockets live: `$XDG_RUNTIME_DIR`, or in a Flatpak, the app's own folder
+/// in it, the one place every sandbox of the app shares.
+pub fn runtime_dir() -> Option<PathBuf> {
+    let dir = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
+    Some(match std::env::var_os("FLATPAK_ID") {
+        Some(id) => dir.join("app").join(id),
+        None => dir,
+    })
+}
+
+/// `$LINKSY_SOCKET`, else `linksyd.sock` in the [`runtime_dir`].
 pub fn socket_path() -> PathBuf {
     if let Some(p) = std::env::var_os("LINKSY_SOCKET") {
         return PathBuf::from(p);
     }
-    match std::env::var_os("XDG_RUNTIME_DIR") {
-        Some(dir) => Path::new(&dir).join("linksyd.sock"),
+    match runtime_dir() {
+        Some(dir) => dir.join("linksyd.sock"),
         None => {
             let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
             std::env::temp_dir().join(format!("linksyd-{user}.sock"))

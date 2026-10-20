@@ -210,7 +210,7 @@ fn active(session: &Session) -> ActiveSession {
 }
 
 fn socket_path(role: &str, id: Uuid) -> PathBuf {
-    let dir = std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+    let dir = linksy_ipc::runtime_dir().unwrap_or_else(std::env::temp_dir);
     dir.join(format!("linksy-{role}-{}.sock", id.simple()))
 }
 
