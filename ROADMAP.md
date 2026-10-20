@@ -8,7 +8,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 
 | Release | Theme | Features |
 |---|---|---|
-| 0.2 | Everyday basics | Open on PC (desktop ✅ 0.2.0) · Battery & Ring · Notifications with reply |
+| 0.2 | Everyday basics | Open on PC (desktop ✅ 0.2.0) · Battery & Ring (desktop ✅ 0.2.1) · Notifications with reply |
 | 0.3 | Feels like one device | Media controls · Pause on calls · Lock when you walk away |
 | 0.4 | Phone as a tool | Photo auto-import · Touchpad, keyboard & presentation remote |
 | 0.5 | Phone on the desktop | Texting from the desktop · Phone in the Files sidebar |

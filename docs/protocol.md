@@ -46,6 +46,8 @@ Decisions already made with the owner:
 | Device-to-device notifications ("ping") | ✅ | ⬜ | |
 | Rename device (live to peers) | ✅ | ⬜ | `Renamed` message |
 | Open on PC (share a link from the phone) | ✅ | ⬜ | `open_url`, §4.5; Android share sheet |
+| Phone battery on the desktop | ✅ | ⬜ | `battery`, §4.5; Android BatteryManager |
+| Ring my phone / find my laptop | ✅ | ⬜ | `ring` / `ring_stop`, §4.5 |
 | Connect on demand / idle close / stay connected | ✅ | ⬜ | §4.6 |
 | Desktop notifications with Accept/Decline | ✅ | ⬜ | Android: notification actions |
 | QR-code pairing | ✅ shows QR | ⬜ | phone scans desktop, §4.7 |
@@ -203,6 +205,9 @@ and close the other with reason `duplicate`.
   {"type":"renamed","name":"Living Room PC"}    // sender's new name
   {"type":"ping"}
   {"type":"open_url","url":"https://…"}        // "Open on PC": open in the browser
+  {"type":"battery","level":82,"charging":false} // sender's battery, percent 0–100
+  {"type":"ring"}                               // ring loudly so the user finds you
+  {"type":"ring_stop"}
   ```
 
   Receiving any of these counts as activity on the connection. Unknown types are
@@ -211,6 +216,15 @@ and close the other with reason `duplicate`.
   `open_url`: only `http://` and `https://` links, at most 8 KiB, no control characters;
   receivers drop anything else (the core enforces this both ways). The desktop opens it
   in the default browser at once and lists it in the activity timeline.
+
+  `battery`: the phone sends it right after connecting and whenever the level moves by
+  5 points or charging starts/stops (not more often: each send may open a connection).
+  The desktop shows it on the device while the phone is around, and notifies once at
+  15% or below when not charging. `ring`: play the alarm stream at full volume, even on
+  silent/DND, until `ring_stop`, a tap on a full-screen "Found it", or 30 s. `ring` and
+  `ring_stop` travel on separate streams and may arrive out of order; ignore a
+  `ring_stop` that comes before its `ring` within a second. A desktop that receives
+  `ring` shows an urgent notification with a sound ("find my laptop").
 
 - **Bidirectional stream = one file transfer** (`TransferMsg`), opened by the sender:
 
@@ -373,6 +387,8 @@ node.pair_device(id) / node.pair(addr)      node.respond(request_id, accept)
 node.send_files(id, paths) -> transfer_id   node.cancel(transfer_id)
 node.send_clipboard(id, text)               node.notify(id, title, body)
 node.open_url(id, url)                      // Event::OpenUrl { from, url } on the receiver
+node.send_battery(id, Battery { level, charging })   node.ring(id, on)   // Event::Battery / Event::Ring
+DeviceView.battery: Option<Battery>         // last level each device reported
 node.settings() / node.update_settings(s)   Settings { name, download_dir, stay_connected, auto_accept }
 node.forget(id)                             node.shutdown()
 node.device_found(device, addrs)            node.device_lost(id)        // platform discovery
@@ -515,3 +531,11 @@ Phone-side fixes found testing with a realme 15 Pro 5G (2026-10-19):
   the Android share sheet for `text/plain` shares that are links (`ACTION_SEND`), with a
   device picker when several computers are paired; plain text can go as `clipboard`.
   The phone may also open links a computer sends (`Event::OpenUrl`), with a tap to confirm.
+- **2026-10-20** — **Battery & Ring** (desktop 0.2.1): `battery`, `ring`, `ring_stop`
+  (§4.5); core `send_battery`, `ring`, `DeviceView.battery`, `Event::Battery`,
+  `Event::Ring`. Phone to-do: listen to `ACTION_BATTERY_CHANGED` and send `battery` to
+  paired computers that are around (on connect, ±5 points, plug/unplug); on `ring`, play
+  the alarm at full volume even on silent with a full-screen "Found it" (stops on
+  `ring_stop` or after 30 s); a "Find my computer" button that sends `ring`. Test against
+  a desktop without the phone: `cargo run -p linksy-core --example fake_phone` acts as a
+  phone (see the file).
