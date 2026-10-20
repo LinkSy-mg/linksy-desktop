@@ -19,6 +19,8 @@
       <li>See and control another device's screen</li>
       <li>Use a tablet or phone as a second display</li>
       <li>Use your phone's camera as a webcam in any app</li>
+      <li>See your phone's notifications here, and reply to messages</li>
+      <li>Open links from your phone, see its battery, and ring it to find it</li>
       <li>Ping a device, and see everything you shared as a timeline</li>
     </ul>
     <p>
@@ -69,6 +71,14 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.2.2" date="2026-10-20">
+      <description>
+        <ul>
+          <li>Your phone's notifications on this computer, with Reply</li>
+          <li>The background service quits right away when asked</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-10-20">
       <description>
         <ul>

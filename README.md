@@ -51,10 +51,10 @@ Download the latest Linux release from
 (`linux-v…` tags), in the format that suits your system:
 
 ```sh
-flatpak install --user linksy-0.2.1.flatpak          # any distribution
-sudo apt install ./linksy_0.2.1_amd64.deb             # Ubuntu 24.10+, Debian 13+
-sudo dnf install ./linksy-0.2.1-1.x86_64.rpm          # Fedora 41+
-tar xzf linksy-0.2.1-linux-x86_64.tar.gz && linksy-0.2.1-linux-x86_64/install.sh  # into ~/.local
+flatpak install --user linksy-0.2.2.flatpak          # any distribution
+sudo apt install ./linksy_0.2.2_amd64.deb             # Ubuntu 24.10+, Debian 13+
+sudo dnf install ./linksy-0.2.2-1.x86_64.rpm          # Fedora 41+
+tar xzf linksy-0.2.2-linux-x86_64.tar.gz && linksy-0.2.2-linux-x86_64/install.sh  # into ~/.local
 ```
 
 The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.6+. The

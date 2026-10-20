@@ -2,6 +2,19 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.2.2
+
+### Added
+- **Phone notifications**: messages and alerts from your phone show up as notifications
+  here. **Reply** opens a small window to answer (WhatsApp, Signal, SMS…), the app's own
+  button works too, and **Mute** silences an app. Dismissing one here dismisses it on
+  the phone. Turn it off, or unmute apps, in Preferences. Needs the Linksy for Android
+  update that adds it.
+
+### Fixed
+- The background service quits right away when asked, even with Linksy notifications
+  still on screen.
+
 ## 0.2.1
 
 ### Added
