@@ -19,6 +19,9 @@ finish-args:
   - --filesystem=xdg-run/pipewire-0
   # The service's notifications: incoming files, pings, pairing codes, with actions.
   - --talk-name=org.freedesktop.Notifications
+  # Media controls both ways: this computer's players for the phone, the phone's in GNOME.
+  - --talk-name=org.mpris.MediaPlayer2.*
+  - --own-name=org.mpris.MediaPlayer2.Linksy.*
 cleanup:
   - /include
   - /lib/pkgconfig

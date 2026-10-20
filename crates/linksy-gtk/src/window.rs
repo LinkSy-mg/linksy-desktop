@@ -622,6 +622,8 @@ impl Window {
             | Event::NotificationReply { .. }
             | Event::NotificationAction { .. }
             | Event::NotificationDismissed { .. } => {}
+            // Media players are the service's (MPRIS, so GNOME's own controls show them).
+            Event::MediaState { .. } | Event::MediaCommand { .. } | Event::MediaWatch { .. } => {}
         }
     }
 
