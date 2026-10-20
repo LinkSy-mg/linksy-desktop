@@ -498,3 +498,5 @@ Phone-side fixes found testing with a realme 15 Pro 5G (2026-10-19):
   control via AccessibilityService, display mode).
 - **2026-10-20** — Desktop 0.1.1 ships as Flatpak, .deb and .rpm too. No protocol or core
   API change; a phone sees a Flatpak desktop exactly like any other.
+- **2026-10-20** — Desktop app ID is now `mg.diary.linksy.Linksy` (site: linksy.diary.mg).
+  Nothing on the wire changes. If the phone app has no ID yet, `mg.diary.linksy` fits.
