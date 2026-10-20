@@ -197,6 +197,18 @@ pub enum Message {
     /// A web link for the receiver to open in its browser ("Open on PC"). `http`/`https`
     /// only; receivers drop anything else.
     OpenUrl { url: String },
+    /// The sender's battery, sent when it changes noticeably and on connecting.
+    Battery(Battery),
+    /// Play a loud sound until `ring_stop` or the user notices ("Ring my phone").
+    Ring,
+    RingStop,
+}
+
+/// A device's battery as it reports it: `level` in percent (0–100).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Battery {
+    pub level: u8,
+    pub charging: bool,
 }
 
 pub async fn write_msg<T: Serialize>(s: &mut quinn::SendStream, msg: &T) -> Result<()> {

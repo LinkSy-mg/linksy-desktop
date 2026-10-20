@@ -27,7 +27,7 @@ use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{
+use crate::protocol::{Battery, 
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -120,6 +120,10 @@ pub enum Event {
     Clipboard { from: DeviceInfo, text: String },
     /// A paired device asked to open a web link here (always `http` or `https`).
     OpenUrl { from: DeviceInfo, url: String },
+    /// A paired device reported its battery (also in [`DeviceView::battery`]).
+    Battery { from: DeviceInfo, battery: Battery },
+    /// A paired device asks this one to ring so it can be found (`on`), or to stop.
+    Ring { from: DeviceInfo, on: bool },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -155,6 +159,9 @@ pub struct DeviceView {
     pub trusted: bool,
     pub connected: bool,
     pub nearby: bool,
+    /// Last battery level the device reported since this one started, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub battery: Option<Battery>,
 }
 
 struct Peer {
@@ -225,6 +232,8 @@ struct Inner {
     unsupported: Mutex<std::collections::HashSet<Uuid>>,
     /// The token of the pairing QR code on screen, and when it expires.
     invite: Mutex<Option<(String, Instant)>>,
+    /// Each paired device's last reported battery.
+    batteries: Mutex<HashMap<Fingerprint, Battery>>,
 }
 
 #[derive(Clone)]
@@ -264,6 +273,7 @@ impl Node {
                 discovery: Mutex::new(None),
                 dialing: Mutex::new(HashMap::new()),
                 invite: Mutex::new(None),
+                batteries: Mutex::default(),
                 sessions: Mutex::new(Some(sessions)),
                 sessions_tx,
                 unsupported: Mutex::new(Default::default()),
@@ -347,10 +357,12 @@ impl Node {
         let trust = self.inner.trust.lock().unwrap();
         let peers = self.inner.peers.lock().unwrap();
         let nearby = self.inner.nearby.lock().unwrap();
+        let batteries = self.inner.batteries.lock().unwrap();
         let mut out: Vec<DeviceView> = trust
             .list()
             .into_iter()
             .map(|t| DeviceView {
+                battery: batteries.get(&t.device.id).copied(),
                 connected: peers.contains_key(&t.device.id),
                 nearby: nearby.contains_key(&t.device.id),
                 // Newest name we know: the live connection, then the network announcement.
@@ -364,7 +376,7 @@ impl Node {
             .collect();
         for (id, (device, _)) in nearby.iter() {
             if !trust.contains(id) {
-                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true });
+                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None });
             }
         }
         // Paired and reachable first, then devices to pair, then paired ones that are away.
@@ -506,6 +518,20 @@ impl Node {
             return Err(invalid("only http:// and https:// links can be opened"));
         }
         self.send_message(to, &Message::OpenUrl { url: url.into() }).await
+    }
+
+    /// Tell a connected device this one's battery level (phones: on connecting, and when it
+    /// changes by a few percent or starts or stops charging).
+    pub async fn send_battery(&self, to: &Fingerprint, battery: Battery) -> Result<()> {
+        if battery.level > 100 {
+            return Err(invalid("battery level is a percentage"));
+        }
+        self.send_message(to, &Message::Battery(battery)).await
+    }
+
+    /// Make a device ring so it can be found, or stop it ringing.
+    pub async fn ring(&self, to: &Fingerprint, on: bool) -> Result<()> {
+        self.send_message(to, if on { &Message::Ring } else { &Message::RingStop }).await
     }
 
     /// Report a device found by other means than the built-in mDNS (Android's NsdManager,
@@ -964,6 +990,15 @@ impl Node {
                                 Ok(Message::Ping) => {}
                                 Ok(Message::OpenUrl { url }) if is_web_link(&url) => node.emit(Event::OpenUrl { from, url }),
                                 Ok(Message::OpenUrl { .. }) => debug!("refused a link from {} that isn't http(s)", from.name),
+                                Ok(Message::Battery(battery)) if battery.level <= 100 => {
+                                    let changed = node.inner.batteries.lock().unwrap().insert(from.id, battery) != Some(battery);
+                                    if changed {
+                                        node.emit(Event::Battery { from, battery });
+                                    }
+                                }
+                                Ok(Message::Battery(_)) => debug!("bad battery level from {}", from.name),
+                                Ok(Message::Ring) => node.emit(Event::Ring { from, on: true }),
+                                Ok(Message::RingStop) => node.emit(Event::Ring { from, on: false }),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
                             }
                         });

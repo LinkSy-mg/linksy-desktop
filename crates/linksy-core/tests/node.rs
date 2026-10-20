@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Config, Error, Event, Node, SessionKind};
+use linksy_core::{Battery, Config, Error, Event, Node, SessionKind};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -306,6 +306,38 @@ async fn web_links_arrive_and_nothing_else_is_sent() {
         assert!(a.node.open_url(&to, bad).await.is_err(), "{bad}");
     }
     a.node.open_url(&to, "HTTP://Example.org").await.unwrap();
+}
+
+#[tokio::test]
+async fn battery_shows_on_the_device_and_ring_arrives() {
+    let (a, b) = paired().await;
+    let mut rb = b.node.subscribe();
+    let to = b.node.info().id;
+    let low = Battery { level: 14, charging: false };
+    a.node.send_battery(&to, low).await.unwrap();
+    let got = wait_for(&mut rb, |e| match e {
+        Event::Battery { from, battery } if from.name == "Alpha" => Some(*battery),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, low);
+    let alpha = a.node.info().id;
+    assert_eq!(b.node.devices().iter().find(|d| d.device.id == alpha).unwrap().battery, Some(low));
+    assert!(a.node.send_battery(&to, Battery { level: 101, charging: true }).await.is_err());
+
+    a.node.ring(&to, true).await.unwrap();
+    a.node.ring(&to, false).await.unwrap();
+    let mut rings = Vec::new();
+    while rings.len() < 2 {
+        rings.push(wait_for(&mut rb, |e| match e {
+            Event::Ring { on, .. } => Some(*on),
+            _ => None,
+        })
+        .await);
+    }
+    // Two uni streams may arrive in either order; both must arrive.
+    rings.sort();
+    assert_eq!(rings, [false, true]);
 }
 
 #[tokio::test]
