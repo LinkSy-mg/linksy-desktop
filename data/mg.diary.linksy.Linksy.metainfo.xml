@@ -24,6 +24,7 @@
       <li>Control your phone's music from here, and this computer's from your phone</li>
       <li>Import your phone's photos automatically</li>
       <li>Use your phone as a touchpad, keyboard and presentation remote</li>
+      <li>Read and send your phone's text messages</li>
       <li>Ping a device, and see everything you shared as a timeline</li>
     </ul>
     <p>
@@ -74,6 +75,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.5.0" date="2026-10-20">
+      <description>
+        <p>Texting from the desktop: read and send your phone's text messages.</p>
+      </description>
+    </release>
     <release version="0.4.1" date="2026-10-20">
       <description>
         <p>Use your phone as a touchpad, keyboard and presentation remote.</p>

@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.5.0
+
+### Added
+- **Texting from the desktop**: open Messages on your phone's page to read your
+  conversations, answer, or write a new text. New texts show up as they arrive. Nothing
+  is kept on the computer. Needs the Linksy for Android update that adds it.
+
 ## 0.4.1
 
 ### Added
