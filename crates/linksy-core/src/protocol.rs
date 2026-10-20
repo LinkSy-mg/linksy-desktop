@@ -99,6 +99,9 @@ pub enum SessionKind {
     Display,
     /// The receiver shares its camera; the requester uses it as a webcam.
     Camera,
+    /// The requester (a phone) drives the receiver's pointer and keyboard without seeing
+    /// its screen: a touchpad, keyboard or presentation remote. No media; only input.
+    Input,
 }
 
 impl SessionKind {
@@ -109,7 +112,7 @@ impl SessionKind {
 
     /// Whether the viewing side sends input back.
     pub fn has_input(self) -> bool {
-        matches!(self, Self::Control | Self::Display)
+        matches!(self, Self::Control | Self::Display | Self::Input)
     }
 }
 
@@ -124,6 +127,10 @@ pub enum ControlMsg {
     /// `discrete`: wheel clicks (dx/dy are steps); otherwise smooth scrolling in pixels.
     Scroll { dx: f64, dy: f64, discrete: bool },
     Key { keysym: u32, pressed: bool },
+    /// Move the pointer by this many pixels (a touchpad); for `input` sessions.
+    PointerBy { dx: f64, dy: f64 },
+    /// Type this text, as if on a keyboard.
+    Text { text: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

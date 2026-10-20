@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Battery, CallState, Config, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind};
+use linksy_core::{Battery, CallState, Config, ControlMsg, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -776,6 +776,26 @@ async fn screen_session_carries_media_and_control() {
     })
     .await;
     assert_eq!(ended, id);
+}
+
+#[tokio::test]
+async fn input_session_carries_touchpad_and_text_to_the_receiver() {
+    let (phone, pc) = paired().await;
+    let mut incoming = pc.node.incoming_sessions().unwrap();
+    let mut remote = phone.node.request_session(&pc.node.info().id, SessionKind::Input).await.unwrap();
+    let mut driven = incoming.recv().await.unwrap();
+    // The computer is the side that "shares" (its input), and the phone sends the control.
+    assert!(driven.sharing && !remote.sharing);
+    let sent = [ControlMsg::PointerBy { dx: 3.5, dy: -1.0 }, ControlMsg::Text { text: "héllo".into() }];
+    for m in &sent {
+        remote.send.write_all(&linksy_core::protocol::control_frame(m)).await.unwrap();
+    }
+    remote.send.finish().unwrap();
+    let mut bytes = Vec::new();
+    AsyncReadExt::read_to_end(&mut driven.recv, &mut bytes).await.unwrap();
+    let mut got = Vec::new();
+    linksy_core::protocol::read_control_frames(&bytes[..], |m| got.push(m));
+    assert_eq!(got, sent);
 }
 
 #[tokio::test]
