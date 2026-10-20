@@ -8,6 +8,8 @@
 //!     [--media "TITLE" "ARTIST"] [--watch-media] [--call SECONDS] [--leave-after SECONDS]
 //!     [--import PATH] [--touchpad] [--seconds N]
 //!
+//! It always answers texting requests from a small made-up inbox.
+//!
 //! `--display FILE` accepts "Use as Second Display" and saves the H.264 it receives.
 //! `--media "TITLE" "ARTIST"` plays a song (as far as the computer can tell);
 //! `--watch-media` prints what the computer plays; `--press play-pause|next|previous`
@@ -207,6 +209,18 @@ async fn main() {
                         }
                     });
                 }
+                Ok(Event::SmsListThreads { from, .. }) => {
+                    let _ = node.sms_threads(&from.id, fake_threads()).await;
+                }
+                Ok(Event::SmsListMessages { from, thread, .. }) => {
+                    let _ = node.sms_messages(&from.id, &thread, fake_messages(&thread), false).await;
+                }
+                Ok(Event::SmsSend { from, client_id, to, text }) => {
+                    println!("TEXT to {}: {text}", to.join(", "));
+                    let _ = node.sms_sent(&from.id, &client_id, true, None).await;
+                    let message = linksy_core::SmsMessage { id: format!("m{}", seq()), from_me: true, address: String::new(), body: text, date_ms: seq() };
+                    let _ = node.sms_message(&from.id, "1", message).await;
+                }
                 Ok(Event::MediaCommand { from, player, command }) => {
                     println!("MEDIA {command:?} on {player} from {}", from.name);
                     // Act like a player: play/pause flips, and the computer hears about it.
@@ -241,4 +255,31 @@ async fn main() {
         }
     }
     node.shutdown().await;
+}
+
+fn fake_threads() -> Vec<linksy_core::SmsThread> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    vec![
+        linksy_core::SmsThread { id: "1".into(), addresses: vec!["+261340000001".into()], names: vec!["Alice".into()], snippet: "Lunch at 1?".into(), date_ms: now - 60_000, unread: true },
+        linksy_core::SmsThread { id: "2".into(), addresses: vec!["+261340000002".into()], names: vec!["Bob".into()], snippet: "The files are on your desk".into(), date_ms: now - 7_200_000, unread: false },
+        linksy_core::SmsThread { id: "3".into(), addresses: vec!["3030".into()], names: vec![], snippet: "Your code is 481 902".into(), date_ms: now - 90_000_000, unread: false },
+    ]
+}
+
+fn fake_messages(thread: &str) -> Vec<linksy_core::SmsMessage> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+    // (sent by this phone's owner, text)
+    let lines: &[(bool, &str)] = match thread {
+        "1" => &[(false, "Lunch at 1?"), (true, "Where?"), (false, "The new ramen place near the station"), (false, "Hey are you there?")],
+        "2" => &[(false, "The files are on your desk"), (true, "Thanks!")],
+        _ => &[(false, "Your code is 481 902")],
+    };
+    // Newest first, as the protocol has it. Nobody ever answers "Hey are you there?".
+    lines.iter().enumerate().rev().map(|(i, (mine, body))| linksy_core::SmsMessage {
+        id: format!("{thread}-{i}"),
+        from_me: *mine,
+        address: if *mine { String::new() } else { "+261340000001".into() },
+        body: (*body).into(),
+        date_ms: now - (lines.len() - i) as u64 * 600_000,
+    }).collect()
 }
