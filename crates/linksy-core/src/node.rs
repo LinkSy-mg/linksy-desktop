@@ -106,7 +106,8 @@ pub enum Event {
     PairingFailed { device: DeviceInfo, reason: String },
     /// Ask the user whether to accept these files.
     TransferRequest { transfer: Uuid, from: DeviceInfo, files: Vec<FileEntry>, total: u64 },
-    TransferStarted { transfer: Uuid, peer: DeviceInfo, direction: Direction, files: Vec<FileEntry>, total: u64 },
+    /// `import`: photos a phone imports into this computer's pictures (no prompt).
+    TransferStarted { transfer: Uuid, peer: DeviceInfo, direction: Direction, files: Vec<FileEntry>, total: u64, import: bool },
     TransferProgress { transfer: Uuid, bytes: u64, total: u64 },
     TransferComplete { transfer: Uuid, saved: Vec<PathBuf> },
     TransferFailed { transfer: Uuid, reason: String },
@@ -255,6 +256,8 @@ struct Inner {
     unsupported: Mutex<std::collections::HashSet<Uuid>>,
     /// The token of the pairing QR code on screen, and when it expires.
     invite: Mutex<Option<(String, Instant)>>,
+    /// Where imported photos go (a folder per device inside it); `None` refuses imports.
+    import_dir: Mutex<Option<PathBuf>>,
     /// Each paired device's last reported battery.
     batteries: Mutex<HashMap<Fingerprint, Battery>>,
     /// The newest media snapshot `seq` seen from each device.
@@ -298,6 +301,7 @@ impl Node {
                 discovery: Mutex::new(None),
                 dialing: Mutex::new(HashMap::new()),
                 invite: Mutex::new(None),
+                import_dir: Mutex::default(),
                 batteries: Mutex::default(),
                 media_seq: Mutex::default(),
                 sessions: Mutex::new(Some(sessions)),
@@ -693,6 +697,21 @@ impl Node {
     /// Offer files and folders to a paired device, connecting if needed. Progress and the
     /// outcome arrive as events carrying the returned transfer id.
     pub async fn send_files(&self, to: &Fingerprint, paths: Vec<PathBuf>) -> Result<Uuid> {
+        self.offer(to, paths, false).await
+    }
+
+    /// Send photos and videos into another device's picture library (phones: photo
+    /// auto-import). Saved without asking where the receiver takes imports, else declined.
+    pub async fn import_files(&self, to: &Fingerprint, paths: Vec<PathBuf>) -> Result<Uuid> {
+        self.offer(to, paths, true).await
+    }
+
+    /// Take photo imports into `dir` (a folder per device inside it), or refuse them (`None`).
+    pub fn set_import_dir(&self, dir: Option<PathBuf>) {
+        *self.inner.import_dir.lock().unwrap() = dir;
+    }
+
+    async fn offer(&self, to: &Fingerprint, paths: Vec<PathBuf>, import: bool) -> Result<Uuid> {
         let (conn, activity) = self.ensure_connection(to).await?;
         let busy = activity.hold();
         let peer = self.peer_info(to).ok_or(Error::Unreachable)?;
@@ -709,8 +728,8 @@ impl Node {
             let total = entries.iter().map(|f| f.size).sum();
             let result = async {
                 let (mut send, mut recv) = conn.open_bi().await?;
-                write_msg(&mut send, &TransferMsg::Offer { id, files: entries.clone() }).await?;
-                node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries, total });
+                write_msg(&mut send, &TransferMsg::Offer { id, files: entries.clone(), import }).await?;
+                node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries, total, import });
                 let offsets = match read_msg(&mut recv).await? {
                     TransferMsg::Accept { offsets } => offsets,
                     TransferMsg::Decline => return Err(Error::Declined),
@@ -1165,7 +1184,7 @@ impl Node {
         };
         match first.get("type").and_then(|t| t.as_str()) {
             Some("offer") => match serde_json::from_value(first) {
-                Ok(TransferMsg::Offer { id, files }) => self.handle_offer(from, send, recv, id, files).await,
+                Ok(TransferMsg::Offer { id, files, import }) => self.handle_offer(from, send, recv, id, files, import).await,
                 _ => debug!("bad offer from {}", from.name),
             },
             Some("session_request") => match serde_json::from_value(first) {
@@ -1199,10 +1218,24 @@ impl Node {
         let _ = self.inner.sessions_tx.send(session);
     }
 
-    async fn handle_offer(self, from: DeviceInfo, mut send: quinn::SendStream, mut recv: quinn::RecvStream, id: Uuid, files: Vec<FileEntry>) {
+    async fn handle_offer(self, from: DeviceInfo, mut send: quinn::SendStream, mut recv: quinn::RecvStream, id: Uuid, files: Vec<FileEntry>, import: bool) {
         let total: u64 = files.iter().map(|f| f.size).sum();
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
-        let auto = self.inner.settings.lock().unwrap().auto_accept;
+        // Imports go to their own folder, never ask, and are refused where not taken.
+        let import_to = if import {
+            let base = self.inner.import_dir.lock().unwrap().clone();
+            match base {
+                Some(base) => Some(base.join(folder_name(&from.name))),
+                None => {
+                    let _ = write_msg(&mut send, &TransferMsg::Decline).await;
+                    let _ = send.finish();
+                    return;
+                }
+            }
+        } else {
+            None
+        };
+        let auto = import_to.is_some() || self.inner.settings.lock().unwrap().auto_accept;
         let accepted = auto || {
             let answer = self.expect_answer(id);
             self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: files.clone(), total });
@@ -1218,12 +1251,15 @@ impl Node {
         let node = self.clone();
         let task = tokio::spawn(async move {
             let result = async {
-                let download_dir = node.inner.settings.lock().unwrap().download_dir.clone();
-                let plan = transfer::plan(&download_dir, &files).await?;
+                let dir = match import_to {
+                    Some(dir) => dir,
+                    None => node.inner.settings.lock().unwrap().download_dir.clone(),
+                };
+                let plan = transfer::plan(&dir, &files).await?;
                 let offsets: Vec<u64> = plan.iter().map(|f| f.offset).collect();
                 let start = offsets.iter().sum();
                 write_msg(&mut send, &TransferMsg::Accept { offsets }).await?;
-                node.emit(Event::TransferStarted { transfer: id, peer: from, direction: Direction::Incoming, files, total });
+                node.emit(Event::TransferStarted { transfer: id, peer: from, direction: Direction::Incoming, files, total, import });
                 let events = node.inner.events.clone();
                 let mut report = move |bytes| {
                     let _ = events.send(Event::TransferProgress { transfer: id, bytes, total });
@@ -1308,6 +1344,13 @@ fn is_web_link(url: &str) -> bool {
         return false;
     };
     !rest.is_empty() && url.len() <= MAX_URL && !url.chars().any(char::is_control)
+}
+
+/// A device name as a folder name: no separators, nothing hidden or empty.
+fn folder_name(name: &str) -> String {
+    let clean: String = name.chars().map(|c| if c == '/' || c == '\\' || c.is_control() { '_' } else { c }).collect();
+    let clean = clean.trim().trim_start_matches('.').to_string();
+    if clean.is_empty() { "Phone".into() } else { clean }
 }
 
 fn bind_endpoint(identity: &Identity, addr: SocketAddr) -> Result<quinn::Endpoint> {

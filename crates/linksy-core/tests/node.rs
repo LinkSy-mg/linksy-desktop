@@ -454,6 +454,34 @@ async fn media_state_keeps_the_newest_and_commands_arrive() {
 }
 
 #[tokio::test]
+async fn photo_imports_go_to_the_device_folder_or_are_refused() {
+    let (phone, pc) = paired().await;
+    let src = phone.dir.path().join("DCIM");
+    std::fs::create_dir_all(src.join("2026-10")).unwrap();
+    std::fs::write(src.join("2026-10/IMG_1.jpg"), b"jpeg").unwrap();
+    let to = pc.node.info().id;
+    let mut on_phone = phone.node.subscribe();
+
+    // Not taking imports: refused, and nothing asks.
+    let refused = phone.node.import_files(&to, vec![src.join("2026-10")]).await.unwrap();
+    wait_for(&mut on_phone, |e| matches!(e, Event::TransferFailed { transfer, .. } if *transfer == refused).then_some(())).await;
+
+    let pictures = pc.dir.path().join("Pictures");
+    pc.node.set_import_dir(Some(pictures.clone()));
+    let mut on_pc = pc.node.subscribe();
+    let id = phone.node.import_files(&to, vec![src.join("2026-10")]).await.unwrap();
+    let import = wait_for(&mut on_pc, |e| match e {
+        Event::TransferStarted { transfer, import, .. } if *transfer == id => Some(*import),
+        Event::TransferRequest { .. } => panic!("imports never ask"),
+        _ => None,
+    })
+    .await;
+    assert!(import);
+    wait_for(&mut on_pc, |e| matches!(e, Event::TransferComplete { transfer, .. } if *transfer == id).then_some(())).await;
+    assert_eq!(std::fs::read(pictures.join("Alpha/2026-10/IMG_1.jpg")).unwrap(), b"jpeg");
+}
+
+#[tokio::test]
 async fn idle_connection_closes_and_next_send_reconnects() {
     let (a, b) = paired_with(|c| c.idle_after = Duration::from_millis(400)).await;
     let mut ra = a.node.subscribe();

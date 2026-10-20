@@ -68,7 +68,14 @@ pub struct FileEntry {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum TransferMsg {
-    Offer { id: Uuid, files: Vec<FileEntry> },
+    /// `import`: photos and videos for the receiver's picture library ("photo
+    /// auto-import"), saved without asking when the receiver takes imports.
+    Offer {
+        id: Uuid,
+        files: Vec<FileEntry>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        import: bool,
+    },
     /// `offsets[i]` is how many bytes of file `i` the receiver already has.
     Accept { offsets: Vec<u64> },
     Decline,
