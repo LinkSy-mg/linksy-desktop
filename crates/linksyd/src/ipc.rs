@@ -3,8 +3,9 @@
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::time::Duration;
 
-use linksy_core::{Fingerprint, Node};
+use linksy_core::{Event, Fingerprint, Node, Uuid};
 
 use crate::history::History;
 use crate::lock::Away;
@@ -170,6 +171,37 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
             mirror.set_prefs(prefs).map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
+        Request::SmsThreads { phone } => {
+            let id = resolve(node, &phone)?;
+            let threads = ask(node, || node.sms_list_threads(&id, 50), SMS_WAIT, |e| match e {
+                Event::SmsThreads { from, threads } if from.id == id => Some(threads),
+                _ => None,
+            })
+            .await?;
+            serde_json::to_value(threads).map_err(|e| e.to_string())
+        }
+        Request::SmsMessages { phone, thread, before_ms } => {
+            let id = resolve(node, &phone)?;
+            let page = ask(node, || node.sms_list_messages(&id, &thread, before_ms, 50), SMS_WAIT, |e| match e {
+                Event::SmsMessages { from, thread: t, messages, more } if from.id == id && t == thread => Some((messages, more)),
+                _ => None,
+            })
+            .await?;
+            serde_json::to_value(page).map_err(|e| e.to_string())
+        }
+        Request::SmsSend { phone, to, text } => {
+            let id = resolve(node, &phone)?;
+            let client_id = Uuid::new_v4().to_string();
+            let (ok, error) = ask(node, || node.sms_send(&id, &client_id, &to, &text), Duration::from_secs(60), |e| match e {
+                Event::SmsSent { from, client_id: c, ok, error } if from.id == id && c == client_id => Some((ok, error)),
+                _ => None,
+            })
+            .await?;
+            match ok {
+                true => Ok(Value::Null),
+                false => Err(error.unwrap_or_else(|| "the phone couldn't send it".into())),
+            }
+        }
         Request::PhotoPrefs => serde_json::to_value(photos.prefs()).map_err(|e| e.to_string()),
         Request::SetPhotoPrefs { prefs } => {
             photos.set_prefs(node, prefs)?;
@@ -254,4 +286,32 @@ fn resolve_any(node: &Node, history: &History, target: &str) -> Result<Fingerpri
         let t = target.trim();
         history.list(None).into_iter().find(|h| h.peer.short().eq_ignore_ascii_case(t) || h.peer_name.eq_ignore_ascii_case(t)).map(|h| h.peer).ok_or(e)
     })
+}
+
+/// How long to wait for a phone's answer about its texts.
+const SMS_WAIT: Duration = Duration::from_secs(15);
+
+/// Send a request to a device and wait for the event that answers it.
+async fn ask<T, F, Fut>(node: &Node, send: F, wait: Duration, mut answer: impl FnMut(Event) -> Option<T>) -> Result<T, String>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = linksy_core::Result<()>>,
+{
+    // Listen first, so a quick answer isn't missed.
+    let mut events = node.subscribe();
+    send().await.map_err(|e| e.to_string())?;
+    let waiting = async {
+        loop {
+            match events.recv().await {
+                Ok(e) => {
+                    if let Some(t) = answer(e) {
+                        return Ok(t);
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(_) => return Err("the service is stopping".to_string()),
+            }
+        }
+    };
+    tokio::time::timeout(wait, waiting).await.map_err(|_| "the phone didn't answer; is Linksy open on it?".to_string())?
 }

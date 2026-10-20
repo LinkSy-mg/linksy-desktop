@@ -25,6 +25,9 @@ Usage:
   linksy clip <device> [text]        share text to its clipboard (default: stdin)
   linksy open <device> <url>         open a web link in its browser
   linksy ring <device> [--stop]      make it ring so you can find it
+  linksy texts <phone> [thread]      a phone's conversations, or one conversation
+  linksy text <phone> <number> <message…>
+                                     send a text through a phone
   linksy forget <device>             unpair a device
   linksy settings [key value]        show or change: name, download-dir,
                                      auto-accept on|off, stay-connected on|off
@@ -136,6 +139,23 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
         }
         ("notify", [to, title, body @ ..]) if body.len() <= 1 => {
             c.notify(to.clone(), title.clone(), body.first().cloned().unwrap_or_default()).await.map_err(err)?;
+        }
+        ("texts", [phone]) => {
+            for t in c.sms_threads(phone.clone()).await.map_err(err)? {
+                let who = if t.names.iter().any(|n| !n.is_empty()) { t.names.join(", ") } else { t.addresses.join(", ") };
+                println!("{:>6}  {}{who}: {}", t.id, if t.unread { "* " } else { "" }, t.snippet);
+            }
+        }
+        ("texts", [phone, thread]) => {
+            let (mut messages, _) = c.sms_messages(phone.clone(), thread.clone(), None).await.map_err(err)?;
+            messages.reverse();
+            for m in messages {
+                println!("{} {}", if m.from_me { "me:  " } else { "them:" }, m.body);
+            }
+        }
+        ("text", [phone, number, words @ ..]) if !words.is_empty() => {
+            c.sms_send(phone.clone(), vec![number.clone()], words.join(" ")).await.map_err(err)?;
+            println!("Sent.");
         }
         ("ring", [to]) => {
             c.ring(to.clone(), true).await.map_err(err)?;
@@ -366,6 +386,7 @@ async fn watch(c: &Client) -> Result<(), String> {
                     println!("Playing on {} ({}): {} – {}{}", from.name, p.app, p.artist, p.title, if p.playing { "" } else { " (paused)" });
                 }
             }
+            Event::SmsMessage { from, message, .. } if !message.from_me => println!("Text on {} from {}: {}", from.name, message.address, message.body),
             Event::NotificationPosted { from, notification: n } => println!("Notification from {} ({}): {}: {}", from.name, n.app_name, n.title, n.body),
             Event::SessionRequest { request, from, kind } => {
                 match kind {

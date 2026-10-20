@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use linksy_core::{DeviceInfo, DeviceView, Direction, Event, Fingerprint, RemoteNotification, SessionKind, Settings, Uuid};
+use linksy_core::{DeviceInfo, DeviceView, Direction, Event, Fingerprint, RemoteNotification, SessionKind, Settings, SmsMessage, SmsThread, Uuid};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -46,6 +46,11 @@ pub enum Request {
     /// Whether phone notifications show here, and which apps are muted.
     NotificationPrefs,
     SetNotificationPrefs { prefs: NotificationPrefs },
+    /// Texting through a phone: its conversations, a conversation's messages (newest
+    /// first, older than `before_ms` to page back), and sending one.
+    SmsThreads { phone: String },
+    SmsMessages { phone: String, thread: String, before_ms: Option<u64> },
+    SmsSend { phone: String, to: Vec<String>, text: String },
     /// Whether phones' photos are imported here, and where.
     PhotoPrefs,
     SetPhotoPrefs { prefs: PhotoPrefs },
@@ -413,6 +418,19 @@ impl Client {
 
     pub async fn set_notification_prefs(&self, prefs: NotificationPrefs) -> Result<(), ClientError> {
         self.call(Request::SetNotificationPrefs { prefs }).await
+    }
+
+    pub async fn sms_threads(&self, phone: impl Into<String>) -> Result<Vec<SmsThread>, ClientError> {
+        self.call(Request::SmsThreads { phone: phone.into() }).await
+    }
+
+    /// Messages newest first, and whether older ones exist.
+    pub async fn sms_messages(&self, phone: impl Into<String>, thread: impl Into<String>, before_ms: Option<u64>) -> Result<(Vec<SmsMessage>, bool), ClientError> {
+        self.call(Request::SmsMessages { phone: phone.into(), thread: thread.into(), before_ms }).await
+    }
+
+    pub async fn sms_send(&self, phone: impl Into<String>, to: Vec<String>, text: impl Into<String>) -> Result<(), ClientError> {
+        self.call(Request::SmsSend { phone: phone.into(), to, text: text.into() }).await
     }
 
     pub async fn photo_prefs(&self) -> Result<PhotoPrefs, ClientError> {
