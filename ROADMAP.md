@@ -13,6 +13,11 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.4 | Phone as a tool | Photo auto-import · Touchpad, keyboard & presentation remote |
 | 0.5 | Phone on the desktop | Texting from the desktop · Phone in the Files sidebar |
 
+Later: direct links that skip the router — USB tethering first (likely little code:
+connections already race every address), then Wi-Fi Direct as an automatic boost for big
+transfers on hardware that keeps Wi-Fi up at the same time. Never a link that drops the
+normal network.
+
 Not planned: automatic clipboard sync on GNOME (needs a Shell extension; manual Send
 Clipboard stays).
 
