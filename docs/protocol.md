@@ -52,6 +52,7 @@ Decisions already made with the owner:
 | Pause the computer's media during calls | Done | To do | `call_state`, §4.5; Android TelephonyCallback |
 | Lock the computer when the phone leaves | Done | To do | `heartbeat`, §4.5; needs a foreground service |
 | Photo auto-import | Done | To do | offer with `"import":true`, §4.5 |
+| Phone as touchpad, keyboard, presentation remote | Done | To do | session kind `input`, §4.8 |
 | Connect on demand / idle close / stay connected | Done | To do | §4.6 |
 | Desktop notifications with Accept/Decline | Done | To do | Android: notification actions |
 | QR-code pairing | Done (shows the QR) | To do | phone scans desktop, §4.7 |
@@ -449,6 +450,22 @@ On Android:
   (`session.send`). Events: `session_request {request, from, kind}`,
   `session_started {session, peer, kind, sharing}`, `session_ended {session}`.
 
+
+**`input` sessions (desktop 0.4.1): the phone as touchpad, keyboard and presentation
+remote.** The *phone* requests `{"type":"session_request","id":…,"kind":"input"}`; the
+computer asks its user, then answers `session_accept`. No media flows: the phone writes
+framed `ControlMsg`s on its send side, as a `control` viewer does, until it finishes the
+stream. Two messages exist for this:
+
+```json
+{"type":"pointer_by","dx":12.5,"dy":-3.0}   // move by pixels (touchpad)
+{"type":"text","text":"hello"}              // type text (keyboard field, IME)
+```
+
+plus the usual `button`, `scroll` (two fingers) and `key` (X11 keysyms: Right 0xff53 /
+Left 0xff51 or Page_Down 0xff56 / Page_Up 0xff55 for slides, Return 0xff0d, BackSpace
+0xff08, Escape 0xff1b). Absolute `pointer` messages are ignored (there's no screen).
+The computer shows "<phone> is your touchpad and keyboard" with Stop.
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -677,3 +694,11 @@ robust against any encoder (GPU ones may slice too):
   `import_files`, paths `YYYY-MM/<name>`; remember what went where so nothing is sent
   twice (resume makes retries cheap). A declined import means that computer doesn't
   want them: say so in the setting. Try with `fake_phone --import <folder>`.
+- **2026-10-20** — **Touchpad, keyboard and presentation remote** (desktop 0.4.1):
+  session kind `input` and `ControlMsg` `pointer_by` / `text` (§4.8). Phone to-do: a
+  "Remote" screen per computer: a touchpad area (one finger moves with `pointer_by`,
+  tap = left click, two-finger tap = right click, two fingers scroll), a keyboard button
+  that opens the IME and sends `text` (and `key` for Backspace/Enter), and a
+  presentation mode where volume down/up send Right/Left and the screen stays on.
+  Try with `fake_phone --touchpad` against a service started with `LINKSY_SCREEN_TEST=1`
+  (it logs the input instead of applying it).
