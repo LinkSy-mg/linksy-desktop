@@ -174,8 +174,16 @@ fn main() -> glib::ExitCode {
             .application_icon(APP_ID)
             .version(env!("CARGO_PKG_VERSION"))
             .comments("Your devices, connected.\nShare files and more between nearby devices, without the cloud.")
-            .license_type(gtk::License::Gpl30)
+            .developer_name("Axel RAKOTOARIVAO")
+            .copyright("© 2026 Axel RAKOTOARIVAO")
+            .website("https://linksy.diary.mg")
+            .issue_url("https://github.com/LinkSy-mg/linksy-releases/issues")
+            // Freeware: free to use, not open source (LICENSE); the open-source parts it
+            // builds in are credited in Legal.
+            .license_type(gtk::License::Custom)
+            .license("Linksy is freeware: free to use on all your devices, for personal or commercial use, and free to share unmodified. It isn't open source.\n\nThe full license: https://linksy.diary.mg/license")
             .build();
+        dialog.add_legal_section("Open-source components", None, gtk::License::Custom, Some("Linksy builds in open-source libraries under the MIT, Apache 2.0, BSD and similar licenses. Their notices ship with Linksy in the THIRD-PARTY-NOTICES file (in /usr/share/licenses/linksy on .deb and .rpm installs)."));
         if let Some(win) = w.borrow().as_ref() {
             dialog.present(Some(&win.window));
         }
