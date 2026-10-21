@@ -257,13 +257,25 @@ impl Window {
             row.add_suffix(&off);
         }
         let (w, dialog, r) = (self.clone(), dialog.clone(), row.clone());
-        set.connect_clicked(move |b| w.ask_terminal_code(&dialog, &r, b));
+        set.connect_clicked(move |b| {
+            let (dialog2, r, b) = (dialog.clone(), r.clone(), b.clone());
+            w.ask_terminal_code(&dialog, move |result| match result {
+                Ok(()) => {
+                    r.set_subtitle("Set");
+                    b.set_label("Change…");
+                    dialog2.add_toast(adw::Toast::new("Terminal code set"));
+                }
+                Err(e) => dialog2.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e)))),
+            });
+        });
         group.add(&row);
         group
     }
 
-    fn ask_terminal_code(self: &Rc<Self>, prefs: &adw::PreferencesDialog, row: &adw::ActionRow, button: &gtk::Button) {
-        let ask = adw::AlertDialog::new(Some("Terminal Code"), Some("At least 6 characters (digits are easiest on a phone). A phone asks for it every time a terminal opens; 5 wrong in a row lock it out."));
+    /// Ask for a new terminal code (twice) over `parent` and save it; `done` hears how
+    /// that went (not called when cancelled).
+    pub(super) fn ask_terminal_code(self: &Rc<Self>, parent: &impl IsA<gtk::Widget>, done: impl Fn(Result<(), String>) + 'static) {
+        let ask = adw::AlertDialog::new(Some("Terminal Code"), Some("At least 6 characters (digits are easiest on a phone). Your phone asks for it every time a terminal opens; only this computer knows it. 5 wrong in a row lock it out."));
         let first = gtk::PasswordEntry::builder().show_peek_icon(true).placeholder_text("New code").activates_default(true).build();
         let again = gtk::PasswordEntry::builder().show_peek_icon(true).placeholder_text("Same code again").activates_default(true).build();
         let fields = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
@@ -285,25 +297,19 @@ impl Window {
         let c1 = check.clone();
         first.connect_changed(move |_| c1());
         again.connect_changed(move |_| check());
-        let (w, prefs2, row, button) = (self.clone(), prefs.clone(), row.clone(), button.clone());
+        let w = self.clone();
+        let done = Rc::new(done);
         ask.connect_response(Some("save"), move |_, _| {
             let code = first.text().to_string();
             let Some(c) = w.client() else { return };
             let call = w.bridge.call(&c, move |c| async move { c.set_terminal_code(Some(code)).await });
-            let (w, prefs, row, button) = (w.clone(), prefs2.clone(), row.clone(), button.clone());
+            let (w, done) = (w.clone(), done.clone());
             glib::spawn_future_local(async move {
-                match call.await {
-                    Ok(()) => {
-                        row.set_subtitle("Set");
-                        button.set_label("Change…");
-                        prefs.add_toast(adw::Toast::new("Terminal code set"));
-                    }
-                    Err(e) => prefs.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e)))),
-                }
+                done(call.await);
                 w.refresh_terminals();
             });
         });
-        ask.present(Some(prefs));
+        ask.present(Some(parent));
     }
 
     /// "Check for Updates": once a day from the website, nothing about the user sent.

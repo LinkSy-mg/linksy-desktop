@@ -471,6 +471,24 @@ impl Window {
                 page::Action::ClearHistory => w.clear_history(id),
                 page::Action::FilterActivity => w.render_activity(),
                 page::Action::AllowTerminal(on) => w.terminal_call(move |c| async move { c.allow_terminal(&id.to_string(), on).await }),
+                page::Action::SetUpTerminal => {
+                    // A code first; then this phone may use it.
+                    let w2 = w.clone();
+                    w.ask_terminal_code(&w.window, move |result| match result {
+                        Ok(()) => {
+                            w2.toast("Terminal code set");
+                            w2.terminal_call(move |c| async move { c.allow_terminal(&id.to_string(), true).await });
+                        }
+                        Err(e) => w2.toast_error(&e, None),
+                    });
+                }
+                page::Action::ChangeTerminalCode => {
+                    let w2 = w.clone();
+                    w.ask_terminal_code(&w.window, move |result| match result {
+                        Ok(()) => w2.toast("Terminal code changed"),
+                        Err(e) => w2.toast_error(&e, None),
+                    });
+                }
                 page::Action::UnlockTerminal => w.terminal_call(move |c| async move { c.unlock_terminal(&id.to_string()).await }),
                 page::Action::EndTerminal(t) => w.terminal_call(move |c| async move { c.end_terminal(&t).await }),
                 page::Action::Cancel(t) => w.cancel(t),

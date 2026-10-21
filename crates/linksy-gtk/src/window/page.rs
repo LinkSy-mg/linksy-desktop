@@ -45,6 +45,9 @@ pub enum Action {
     FilterActivity,
     /// Let this phone open terminals here (with the code), or stop it.
     AllowTerminal(bool),
+    /// No code yet: choose one, then allow this phone.
+    SetUpTerminal,
+    ChangeTerminalCode,
     UnlockTerminal,
     EndTerminal(String),
 }
@@ -96,8 +99,15 @@ pub struct DevicePage {
     /// "Allow Everything From Away" (docs/protocol.md §4.13).
     away_row: adw::SwitchRow,
     /// Terminals (docs/protocol.md §4.15): allowed for this phone, locked out, and running.
-    terminal_row: adw::SwitchRow,
-    locked_row: adw::ActionRow,
+    /// The Terminal card: what to do next (set a code, allow, unlock), or that it's ready.
+    terminal_box: gtk::Box,
+    terminal_title: gtk::Label,
+    terminal_desc: gtk::Label,
+    terminal_badge: gtk::Label,
+    terminal_setup: gtk::Button,
+    terminal_allow: gtk::Button,
+    terminal_unlock: gtk::Button,
+    terminal_ready: gtk::Box,
     terminals: gtk::ListBox,
     syncing: Rc<std::cell::Cell<bool>>,
     pair_box: gtk::Box,
@@ -320,26 +330,44 @@ impl DevicePage {
                 e(Action::AwayAll(row.is_active()));
             }
         });
-        let terminal_row = adw::SwitchRow::builder().title("Allow Terminal").subtitle_lines(3).build();
-        terminal_row.add_prefix(&gtk::Image::builder().icon_name("utilities-terminal-symbolic").build());
-        let (e, s) = (emit.clone(), syncing.clone());
-        terminal_row.connect_active_notify(move |row| {
-            if !s.get() {
-                e(Action::AllowTerminal(row.is_active()));
-            }
-        });
-        let locked_row = adw::ActionRow::builder().title("Terminal Locked").subtitle("Too many wrong codes in a row. Unlock it if that was you.").build();
-        locked_row.add_prefix(&gtk::Image::builder().icon_name("system-lock-screen-symbolic").css_classes(["error"]).build());
-        let unlock = gtk::Button::builder().label("Unlock").valign(gtk::Align::Center).build();
-        let e = emit.clone();
-        unlock.connect_clicked(move |_| e(Action::UnlockTerminal));
-        locked_row.add_suffix(&unlock);
+        // Terminal: a card that says what's next, right here rather than in Preferences.
+        let terminal_icon = gtk::Image::builder().icon_name("utilities-terminal-symbolic").pixel_size(28).valign(gtk::Align::Start).css_classes(["card-icon"]).build();
+        let terminal_title = gtk::Label::builder().xalign(0.0).wrap(true).hexpand(true).css_classes(["title-4"]).build();
+        let terminal_badge = gtk::Label::builder().label("Ready").valign(gtk::Align::Start).css_classes(["live-badge"]).visible(false).build();
+        let terminal_head = gtk::Box::builder().spacing(8).build();
+        terminal_head.append(&terminal_title);
+        terminal_head.append(&terminal_badge);
+        let terminal_desc = gtk::Label::builder().xalign(0.0).wrap(true).css_classes(["dim-label"]).build();
+        let button = |label: &str, suggested: bool, action: fn() -> Action| {
+            let b = gtk::Button::builder().label(label).css_classes(if suggested { vec!["suggested-action"] } else { vec![] }).build();
+            let e = emit.clone();
+            b.connect_clicked(move |_| e(action()));
+            b
+        };
+        let terminal_setup = button("Set Up Terminal…", true, || Action::SetUpTerminal);
+        let terminal_allow = button("Allow", true, || Action::AllowTerminal(true));
+        let terminal_unlock = button("Unlock", true, || Action::UnlockTerminal);
+        let terminal_ready = gtk::Box::builder().spacing(8).build();
+        terminal_ready.append(&button("Turn Off", false, || Action::AllowTerminal(false)));
+        terminal_ready.append(&button("Change Code…", false, || Action::ChangeTerminalCode));
+        let terminal_buttons = gtk::Box::builder().spacing(8).margin_top(4).build();
+        for b in [terminal_setup.upcast_ref::<gtk::Widget>(), terminal_allow.upcast_ref(), terminal_unlock.upcast_ref(), terminal_ready.upcast_ref()] {
+            terminal_buttons.append(b);
+        }
+        let terminal_text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).hexpand(true).build();
+        terminal_text.append(&terminal_head);
+        terminal_text.append(&terminal_desc);
+        terminal_text.append(&terminal_buttons);
+        let terminal_card = gtk::Box::builder().spacing(16).css_classes(["feature-card"]).build();
+        terminal_card.append(&terminal_icon);
+        terminal_card.append(&terminal_text);
+        let terminal_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).visible(false).build();
+        terminal_box.append(&gtk::Label::builder().label("Terminal").xalign(0.0).css_classes(["title-4"]).build());
+        terminal_box.append(&terminal_card);
         let settings = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["plain-list"]).build();
         settings.append(&messages_row);
         settings.append(&files_row);
         settings.append(&lock_row);
-        settings.append(&terminal_row);
-        settings.append(&locked_row);
         settings.append(&away_row);
         let terminals = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).visible(false).css_classes(["boxed-list"]).build();
 
@@ -409,6 +437,7 @@ impl DevicePage {
         content.append(&hero);
         content.append(&actions);
         content.append(&use_as);
+        content.append(&terminal_box);
         content.append(&settings);
         content.append(&terminals);
         content.append(&pair_box);
@@ -486,8 +515,14 @@ impl DevicePage {
             files_row,
             lock_row,
             away_row,
-            terminal_row,
-            locked_row,
+            terminal_box,
+            terminal_title,
+            terminal_desc,
+            terminal_badge,
+            terminal_setup,
+            terminal_allow,
+            terminal_unlock,
+            terminal_ready,
             terminals,
             syncing,
             pair_box,
@@ -519,18 +554,26 @@ impl DevicePage {
         let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
         let shown = d.trusted && phone && status.is_some();
         let status = status.cloned().unwrap_or_default();
-        self.terminal_row.set_visible(shown);
-        self.syncing.set(true);
-        self.terminal_row.set_active(status.allowed.contains(&d.device.id));
-        self.syncing.set(false);
-        self.terminal_row.set_sensitive(status.code_set || self.terminal_row.is_active());
-        self.terminal_row.set_subtitle(&glib::markup_escape_text(&if status.code_set {
-            format!("A shell on this computer from {}, after typing the terminal code. It runs as you.", d.device.name)
+        self.terminal_box.set_visible(shown);
+        let name = &d.device.name;
+        let (allowed, locked) = (status.allowed.contains(&d.device.id), status.locked.contains(&d.device.id));
+        self.terminal_title.set_label(&format!("Your computer's terminal on {name}"));
+        let (desc, step) = if locked {
+            (format!("Locked: 5 wrong codes in a row were typed on {name}. Unlock it if that was you."), 2)
+        } else if !status.code_set {
+            (format!("Run Claude Code, neovim or a build on this computer from {name}. Choose a code first: {name} asks for it every time, and only this computer knows it."), 0)
+        } else if !allowed {
+            (format!("Let {name} open a shell on this computer after typing the terminal code. It runs as you."), 1)
         } else {
-            "Set a terminal code in Preferences first.".to_string()
-        }));
-        self.locked_row.set_visible(shown && status.locked.contains(&d.device.id));
-        self.settings_visible(d.trusted);
+            (format!("On {name}, open Linksy, pick this computer and choose Terminal, then type the code. This computer asks you once a day. (Needs the Linksy for Android update.)"), 3)
+        };
+        self.terminal_desc.set_label(&desc);
+        self.terminal_setup.set_visible(step == 0);
+        self.terminal_allow.set_visible(step == 1);
+        self.terminal_allow.set_label(&format!("Allow on {name}"));
+        self.terminal_unlock.set_visible(step == 2);
+        self.terminal_ready.set_visible(step == 3);
+        self.terminal_badge.set_visible(step == 3);
         while let Some(row) = self.terminals.first_child() {
             self.terminals.remove(&row);
         }
