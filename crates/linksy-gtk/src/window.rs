@@ -648,7 +648,9 @@ impl Window {
         }
         let Some(c) = self.client() else { return };
         let w = self.clone();
-        let call = self.bridge.call(&c, |c| async move { c.quit().await });
+        // A service from before Quit (0.6.0 and older) never answers it: give up after a
+        // moment and restart it the other way.
+        let call = self.bridge.call(&c, |c| async move { tokio::time::timeout(std::time::Duration::from_secs(3), c.quit()).await.unwrap_or(Err(linksy_ipc::ClientError::Disconnected)) });
         glib::spawn_future_local(async move {
             if call.await.is_err() && std::env::var_os("FLATPAK_ID").is_none() {
                 // Older than Quit: a systemd service can still be restarted from here.
