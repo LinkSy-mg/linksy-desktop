@@ -41,6 +41,8 @@ pub enum Action {
     Locate,
     Messages,
     BrowseFiles,
+    /// The timeline's filter changed.
+    FilterActivity,
 }
 
 type Handler = Rc<RefCell<Option<Rc<dyn Fn(Action)>>>>;
@@ -54,35 +56,48 @@ pub struct DevicePage {
     pub menu: gtk::MenuButton,
     pub avatar: adw::Avatar,
     kind: gtk::Image,
+    /// The battery, as a ring around the avatar.
+    battery: Rc<std::cell::Cell<Option<f64>>>,
+    ring: gtk::DrawingArea,
     name: gtk::Label,
+    /// How it's connected ("Connected away from home"), as a chip.
+    link: gtk::Label,
     status: gtk::Label,
-    dot: gtk::Box,
-    /// Four across, or two by two (the window's breakpoints switch it).
-    pub tiles: gtk::FlowBox,
-    /// The rows below the main actions, in titled groups; each shows when any of its
-    /// rows does.
-    sections: Vec<(adw::PreferencesGroup, Vec<gtk::Widget>)>,
-    extend_row: adw::ActionRow,
-    webcam_row: adw::ActionRow,
-    mic_row: adw::ActionRow,
-    /// "Ring", for phones and tablets.
-    ring_row: adw::ActionRow,
-    /// "Messages": texting through a phone.
+    reach: gtk::Box,
+    reach_until: gtk::Label,
+    /// Send Files beside the smaller actions; stacked on narrow windows.
+    pub actions: gtk::Box,
+    send_tile: gtk::Button,
+    ring_tile: gtk::Widget,
+    locate_tile: gtk::Widget,
+    ping_tile: gtk::Widget,
+    /// "Use the phone as": a card per feature, side by side.
+    use_as: gtk::Box,
+    use_as_title: gtk::Label,
+    use_as_hint: gtk::Label,
+    pub cards: gtk::Box,
+    display_card: gtk::Box,
+    webcam_card: gtk::Box,
+    mic_card: gtk::Box,
+    webcam_desc: gtk::Label,
+    webcam_live: gtk::Label,
+    webcam_start: gtk::Button,
+    webcam_running: gtk::Box,
+    /// Settings and places, as plain rows.
+    settings: gtk::ListBox,
     messages_row: adw::ActionRow,
-    /// "Browse Files": the phone in the file manager.
     files_row: adw::ActionRow,
     /// "Lock When Away", for phones; `syncing` while it's set from the service's state.
     lock_row: adw::SwitchRow,
-    /// "Allow Everything From Away" (docs/protocol.md §4.13), and "Locate" for phones.
+    /// "Allow Everything From Away" (docs/protocol.md §4.13).
     away_row: adw::SwitchRow,
-    locate_row: adw::ActionRow,
     syncing: Rc<std::cell::Cell<bool>>,
     pair_box: gtk::Box,
     staged: adw::Banner,
-    drop_hint: gtk::Box,
-    drop_label: gtk::Label,
     activity_box: gtk::Box,
-    /// One heading and card per day.
+    /// Which kind of entries the timeline shows.
+    filter: Rc<std::cell::Cell<Filter>>,
+    /// One heading and timeline per day.
     activity: gtk::Box,
     /// Opens a finished incoming row's files.
     on_activate: Rc<dyn Fn(&gtk::ListBoxRow)>,
@@ -90,9 +105,25 @@ pub struct DevicePage {
     handler: Handler,
     /// Received files of finished rows, by entry id (the row's widget name), to open.
     received: Rc<RefCell<HashMap<String, Vec<PathBuf>>>>,
-    /// "Camera is on", while this device's camera is in use here, with Preview and Stop.
-    camera: gtk::ListBox,
-    camera_row: adw::ActionRow,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Filter {
+    All,
+    Files,
+    Clipboard,
+    Links,
+}
+
+impl Filter {
+    fn shows(self, what: &Shared) -> bool {
+        match self {
+            Filter::All => true,
+            Filter::Files => matches!(what, Shared::Files { .. }),
+            Filter::Clipboard => matches!(what, Shared::Clipboard { .. }),
+            Filter::Links => matches!(what, Shared::Link { .. }),
+        }
+    }
 }
 
 impl DevicePage {
@@ -108,77 +139,152 @@ impl DevicePage {
             }
         };
 
-        // Hero: who this is.
-        let avatar = adw::Avatar::builder().size(84).show_initials(true).build();
-        let kind = gtk::Image::builder().pixel_size(16).css_classes(["hero-kind"]).halign(gtk::Align::End).valign(gtk::Align::End).build();
-        let avatar_overlay = gtk::Overlay::builder().child(&avatar).halign(gtk::Align::Center).build();
+        // Hero: who this is, how it's connected, its battery as a ring.
+        let avatar = adw::Avatar::builder().size(76).show_initials(true).halign(gtk::Align::Center).valign(gtk::Align::Center).build();
+        let battery: Rc<std::cell::Cell<Option<f64>>> = Rc::default();
+        let ring = gtk::DrawingArea::builder().content_width(94).content_height(94).build();
+        let level = battery.clone();
+        ring.set_draw_func(move |area, cr, w, h| {
+            let Some(level) = level.get() else { return };
+            let (cx, cy, r) = (w as f64 / 2.0, h as f64 / 2.0, w.min(h) as f64 / 2.0 - 3.0);
+            let fg = area.color();
+            cr.set_line_width(4.5);
+            cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, 0.12);
+            cr.arc(cx, cy, r, 0.0, std::f64::consts::TAU);
+            let _ = cr.stroke();
+            // Green, then amber and red as it runs low.
+            let (red, green, blue) = if level > 0.3 { (0.18, 0.76, 0.49) } else if level > 0.15 { (0.90, 0.65, 0.04) } else { (0.88, 0.11, 0.14) };
+            cr.set_source_rgb(red, green, blue);
+            cr.set_line_cap(gtk::cairo::LineCap::Round);
+            let start = -std::f64::consts::FRAC_PI_2;
+            cr.arc(cx, cy, r, start, start + level.clamp(0.0, 1.0) * std::f64::consts::TAU);
+            let _ = cr.stroke();
+        });
+        let kind = gtk::Image::builder().pixel_size(14).css_classes(["hero-kind"]).halign(gtk::Align::End).valign(gtk::Align::End).build();
+        let avatar_overlay = gtk::Overlay::builder().child(&ring).valign(gtk::Align::Center).build();
+        avatar_overlay.add_overlay(&avatar);
         avatar_overlay.add_overlay(&kind);
-        let name = gtk::Label::builder().css_classes(["title-1"]).wrap(true).justify(gtk::Justification::Center).build();
-        let dot = gtk::Box::builder().valign(gtk::Align::Center).css_classes(["status-dot", "inline"]).build();
-        let status = gtk::Label::builder().css_classes(["dim-label"]).build();
-        let status_line = gtk::Box::builder().spacing(6).halign(gtk::Align::Center).build();
-        status_line.append(&dot);
+        let name = gtk::Label::builder().css_classes(["title-1"]).xalign(0.0).wrap(true).build();
+        let link = gtk::Label::builder().valign(gtk::Align::Center).css_classes(["link-chip"]).build();
+        let status = gtk::Label::builder().css_classes(["dim-label"]).xalign(0.0).wrap(true).build();
+        let status_line = gtk::Box::builder().spacing(10).build();
+        status_line.append(&link);
         status_line.append(&status);
-        let hero = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).css_classes(["hero"]).build();
+        let who = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).hexpand(true).valign(gtk::Align::Center).build();
+        who.append(&name);
+        who.append(&status_line);
+        let reach_until = gtk::Label::builder().xalign(1.0).css_classes(["heading"]).build();
+        let reach = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).valign(gtk::Align::Center).build();
+        reach.append(&gtk::Label::builder().label("Reachable from away until").xalign(1.0).css_classes(["caption", "dim-label"]).build());
+        reach.append(&reach_until);
+        let hero = gtk::Box::builder().spacing(20).css_classes(["hero"]).build();
         hero.append(&avatar_overlay);
-        hero.append(&name);
-        hero.append(&status_line);
+        hero.append(&who);
+        hero.append(&reach);
 
-        // What you can do with it.
-        let tiles = gtk::FlowBox::builder()
+        // What you do most: Send Files (also where files are dropped), then the rest.
+        let send_icon = gtk::Image::builder().icon_name("document-send-symbolic").pixel_size(24).halign(gtk::Align::Start).css_classes(["send-icon"]).build();
+        let send_text = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).vexpand(true).valign(gtk::Align::End).build();
+        send_text.append(&gtk::Label::builder().label("Send Files").xalign(0.0).css_classes(["title-2"]).build());
+        send_text.append(&gtk::Label::builder().label("Click to choose, or drop them anywhere on this page").xalign(0.0).wrap(true).css_classes(["dim-label", "tile-hint"]).build());
+        let send_box = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).build();
+        send_box.append(&send_icon);
+        send_box.append(&send_text);
+        let send_overlay = gtk::Overlay::builder().child(&send_box).build();
+        send_overlay.add_overlay(&gtk::Label::builder().label("Ctrl+O").halign(gtk::Align::End).valign(gtk::Align::Start).css_classes(["caption-heading", "dim-label"]).build());
+        let send_tile = gtk::Button::builder().child(&send_overlay).hexpand(true).css_classes(["send-tile"]).tooltip_text("Choose files to send (Ctrl+O)").build();
+        let e = emit.clone();
+        send_tile.connect_clicked(move |_| e(Action::SendFiles));
+
+        let small = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .homogeneous(true)
-            .min_children_per_line(4)
-            .max_children_per_line(4)
-            .column_spacing(12)
-            .row_spacing(12)
-            .halign(gtk::Align::Center)
+            .min_children_per_line(2)
+            .max_children_per_line(2)
+            .column_spacing(10)
+            .row_spacing(10)
+            .hexpand(true)
+            .valign(gtk::Align::Fill)
             .css_classes(["tiles"])
             .build();
-        for (icon, label, tip, action) in [
-            ("document-send-symbolic", "Send Files", "Choose files to send (Ctrl+O), or drop them anywhere", 0),
-            ("edit-paste-symbolic", "Send Clipboard", "Send the text you copied", 1),
-            ("preferences-system-notifications-symbolic", "Ping", "Make it show a notification", 2),
-            ("video-display-symbolic", "View Screen", "See its screen live, once it allows it", 3),
-        ] {
-            let b = gtk::Button::builder().css_classes(["action-tile"]).tooltip_text(tip).build();
-            let inner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
-            inner.append(&gtk::Image::builder().icon_name(icon).pixel_size(24).build());
-            inner.append(&gtk::Label::builder().label(label).build());
-            b.set_child(Some(&inner));
-            let emit = emit.clone();
-            b.connect_clicked(move |_| {
-                emit(match action {
-                    0 => Action::SendFiles,
-                    1 => Action::SendClipboard,
-                    2 => Action::Ping,
-                    _ => Action::ViewScreen,
-                })
-            });
-            tiles.append(&gtk::FlowBoxChild::builder().child(&b).focusable(false).build());
-        }
+        let tile = |icon: &str, title: &str, hint: &str, warm: bool, action: fn() -> Action| -> gtk::Widget {
+            let image = gtk::Image::builder().icon_name(icon).pixel_size(22).css_classes([if warm { "tile-icon-warm" } else { "tile-icon" }]).build();
+            let labels = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).valign(gtk::Align::Center).build();
+            labels.append(&gtk::Label::builder().label(title).xalign(0.0).css_classes(["heading"]).build());
+            labels.append(&gtk::Label::builder().label(hint).xalign(0.0).wrap(true).css_classes(["caption", "dim-label", "tile-hint"]).build());
+            let inner = gtk::Box::builder().spacing(13).build();
+            inner.append(&image);
+            inner.append(&labels);
+            let b = gtk::Button::builder().child(&inner).css_classes(["soft-tile"]).build();
+            let e = emit.clone();
+            b.connect_clicked(move |_| e(action()));
+            let child = gtk::FlowBoxChild::builder().child(&b).focusable(false).build();
+            small.append(&child);
+            child.upcast()
+        };
+        tile("edit-paste-symbolic", "Clipboard", "Send what you copied", false, || Action::SendClipboard);
+        tile("video-display-symbolic", "View Screen", "Watch or take control", false, || Action::ViewScreen);
+        let ring_tile = tile("audio-volume-high-symbolic", "Ring", "Loud, even on silent", true, || Action::Ring);
+        let locate_tile = tile("find-location-symbolic", "Locate", "Asked once, never tracked", true, || Action::Locate);
+        let ping_tile = tile("preferences-system-notifications-symbolic", "Ping", "Show a notification", false, || Action::Ping);
+        // Not expanding: their insides push text to the bottom, not the page.
+        let actions = gtk::Box::builder().spacing(10).homogeneous(true).vexpand(false).build();
+        actions.append(&send_tile);
+        actions.append(&small);
 
-        // Sidecar, as a settings-style row under the main actions.
-        let extend_row = adw::ActionRow::builder().title("Second Display").activatable(true).build();
-        extend_row.add_prefix(&gtk::Image::builder().icon_name("video-joined-displays-symbolic").build());
-        extend_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
+        // "Use the phone as": the big features, each a card of its own.
+        let card = |icon: &str, title: &str, desc: &str| -> (gtk::Box, gtk::Box, gtk::Label, gtk::Label) {
+            let image = gtk::Image::builder().icon_name(icon).pixel_size(28).halign(gtk::Align::Start).css_classes(["card-icon"]).build();
+            let badge = gtk::Label::builder().label("Live").halign(gtk::Align::End).valign(gtk::Align::Start).hexpand(true).visible(false).css_classes(["live-badge"]).build();
+            let top = gtk::Box::builder().build();
+            top.append(&image);
+            top.append(&badge);
+            let description = gtk::Label::builder().label(desc).xalign(0.0).wrap(true).css_classes(["dim-label"]).build();
+            let buttons = gtk::Box::builder().spacing(8).vexpand(true).valign(gtk::Align::End).build();
+            let b = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).hexpand(true).css_classes(["feature-card"]).build();
+            b.append(&top);
+            b.append(&gtk::Label::builder().label(title).xalign(0.0).css_classes(["title-4"]).build());
+            b.append(&description);
+            b.append(&buttons);
+            (b, buttons, description, badge)
+        };
+        let start = |label: &str, action: fn() -> Action| -> gtk::Button {
+            let b = gtk::Button::builder().label(label).hexpand(true).css_classes(["suggested-action"]).build();
+            let e = emit.clone();
+            b.connect_clicked(move |_| e(action()));
+            b
+        };
+        let (display_card, buttons, _, _) = card("video-joined-displays-symbolic", "Second Display", "Extend this computer's desktop onto it");
+        buttons.append(&start("Extend Desktop", || Action::Extend));
+        let (webcam_card, buttons, webcam_desc, webcam_live) = card("camera-web-symbolic", "Webcam", "“Linksy Camera” in your apps");
+        let webcam_start = start("Start Webcam", || Action::Webcam);
+        let preview = gtk::Button::builder().label("Preview").hexpand(true).build();
         let e = emit.clone();
-        extend_row.connect_activated(move |_| e(Action::Extend));
-        let webcam_row = adw::ActionRow::builder().title("Webcam").activatable(true).build();
-        webcam_row.add_prefix(&gtk::Image::builder().icon_name("camera-web-symbolic").build());
-        webcam_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
+        preview.connect_clicked(move |_| e(Action::CameraPreview));
+        let stop = gtk::Button::builder().label("Stop").build();
         let e = emit.clone();
-        webcam_row.connect_activated(move |_| e(Action::Webcam));
-        let mic_row = adw::ActionRow::builder().title("Microphone").activatable(true).build();
-        mic_row.add_prefix(&gtk::Image::builder().icon_name("audio-input-microphone-symbolic").build());
-        mic_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
-        let e = emit.clone();
-        mic_row.connect_activated(move |_| e(Action::Microphone));
-        let ring_row = adw::ActionRow::builder().title("Ring").activatable(true).build();
-        ring_row.add_prefix(&gtk::Image::builder().icon_name("audio-volume-high-symbolic").build());
-        ring_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
-        let e = emit.clone();
-        ring_row.connect_activated(move |_| e(Action::Ring));
+        stop.connect_clicked(move |_| e(Action::CameraStop));
+        let webcam_running = gtk::Box::builder().spacing(8).hexpand(true).visible(false).build();
+        webcam_running.append(&preview);
+        webcam_running.append(&stop);
+        buttons.append(&webcam_start);
+        buttons.append(&webcam_running);
+        let (mic_card, buttons, _, _) = card("audio-input-microphone-symbolic", "Microphone", "“Linksy Microphone” in calls and recorders");
+        buttons.append(&start("Start Microphone", || Action::Microphone));
+        let cards = gtk::Box::builder().spacing(10).homogeneous(true).vexpand(false).build();
+        cards.append(&display_card);
+        cards.append(&webcam_card);
+        cards.append(&mic_card);
+        let use_as_title = gtk::Label::builder().xalign(0.0).hexpand(true).css_classes(["title-4"]).build();
+        let use_as_hint = gtk::Label::builder().label("Faster over a USB cable").css_classes(["caption", "dim-label"]).build();
+        let use_as_head = gtk::Box::builder().build();
+        use_as_head.append(&use_as_title);
+        use_as_head.append(&use_as_hint);
+        let use_as = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
+        use_as.append(&use_as_head);
+        use_as.append(&cards);
+
+        // Settings and places: plain rows.
         let messages_row = adw::ActionRow::builder().title("Messages").activatable(true).build();
         messages_row.add_prefix(&gtk::Image::builder().icon_name("chat-message-new-symbolic").build());
         messages_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
@@ -198,11 +304,6 @@ impl DevicePage {
                 e(Action::LockWhenAway(row.is_active()));
             }
         });
-        let locate_row = adw::ActionRow::builder().title("Locate").activatable(true).build();
-        locate_row.add_prefix(&gtk::Image::builder().icon_name("find-location-symbolic").build());
-        locate_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
-        let e = emit.clone();
-        locate_row.connect_activated(move |_| e(Action::Locate));
         let away_row = adw::SwitchRow::builder().title("Allow Everything From Away").subtitle_lines(3).build();
         away_row.add_prefix(&gtk::Image::builder().icon_name("network-wireless-hotspot-symbolic").build());
         let (e, s) = (emit.clone(), syncing.clone());
@@ -211,36 +312,11 @@ impl DevicePage {
                 e(Action::AwayAll(row.is_active()));
             }
         });
-        let groups = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).build();
-        let mut sections = Vec::new();
-        for (title, rows) in [
-            ("Use as", vec![extend_row.clone().upcast::<gtk::Widget>(), webcam_row.clone().upcast(), mic_row.clone().upcast()]),
-            ("Find and Protect", vec![ring_row.clone().upcast(), locate_row.clone().upcast(), lock_row.clone().upcast()]),
-            ("Texts and Files", vec![messages_row.clone().upcast(), files_row.clone().upcast()]),
-            ("Away From Home", vec![away_row.clone().upcast()]),
-        ] {
-            let group = adw::PreferencesGroup::builder().title(title).build();
-            for row in &rows {
-                group.add(row);
-            }
-            groups.append(&group);
-            sections.push((group, rows));
-        }
-
-        let camera_row = adw::ActionRow::builder().title("Camera Is On").css_classes(["camera-on"]).activatable(true).build();
-        camera_row.add_prefix(&gtk::Image::builder().icon_name("camera-web-symbolic").css_classes(["accent"]).build());
-        let preview = gtk::Button::builder().label("Preview").valign(gtk::Align::Center).css_classes(["suggested-action"]).build();
-        let stop = gtk::Button::builder().label("Stop").valign(gtk::Align::Center).build();
-        camera_row.add_suffix(&preview);
-        camera_row.add_suffix(&stop);
-        let e = emit.clone();
-        preview.connect_clicked(move |_| e(Action::CameraPreview));
-        let e = emit.clone();
-        camera_row.connect_activated(move |_| e(Action::CameraPreview));
-        let e = emit.clone();
-        stop.connect_clicked(move |_| e(Action::CameraStop));
-        let camera = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).visible(false).build();
-        camera.append(&camera_row);
+        let settings = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["plain-list"]).build();
+        settings.append(&messages_row);
+        settings.append(&files_row);
+        settings.append(&lock_row);
+        settings.append(&away_row);
 
         // For devices that aren't paired yet.
         let pair = gtk::Button::builder().label("Pair").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
@@ -262,19 +338,29 @@ impl DevicePage {
         let e = emit.clone();
         staged.connect_button_clicked(move |_| e(Action::SendStaged));
 
-        let drop_label = gtk::Label::builder().wrap(true).xalign(0.0).hexpand(true).css_classes(["dim-label"]).build();
-        let drop_hint = gtk::Box::builder().spacing(10).halign(gtk::Align::Fill).css_classes(["drop-zone"]).build();
-        drop_hint.append(&gtk::Image::builder().icon_name("folder-download-symbolic").pixel_size(20).css_classes(["dim-label"]).build());
-        drop_hint.append(&drop_label);
-
         // Timeline.
+        let filter: Rc<std::cell::Cell<Filter>> = Rc::new(std::cell::Cell::new(Filter::All));
+        let activity_header = gtk::Box::builder().spacing(6).build();
+        activity_header.append(&gtk::Label::builder().label("Activity").xalign(0.0).hexpand(true).css_classes(["title-4"]).build());
+        let mut first: Option<gtk::ToggleButton> = None;
+        for (label, which) in [("All", Filter::All), ("Files", Filter::Files), ("Clipboard", Filter::Clipboard), ("Links", Filter::Links)] {
+            let b = gtk::ToggleButton::builder().label(label).valign(gtk::Align::Center).css_classes(["filter-pill"]).active(which == Filter::All).build();
+            b.set_group(first.as_ref());
+            first.get_or_insert(b.clone());
+            let (e, f) = (emit.clone(), filter.clone());
+            b.connect_toggled(move |b| {
+                if b.is_active() && f.get() != which {
+                    f.set(which);
+                    e(Action::FilterActivity);
+                }
+            });
+            activity_header.append(&b);
+        }
         let clear = gtk::Button::builder().label("Clear").css_classes(["flat"]).valign(gtk::Align::Center).build();
         let e = emit.clone();
         clear.connect_clicked(move |_| e(Action::ClearHistory));
-        let activity_header = gtk::Box::builder().build();
-        activity_header.append(&gtk::Label::builder().label("Activity").xalign(0.0).hexpand(true).css_classes(["heading"]).build());
         activity_header.append(&clear);
-        let activity = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).build();
+        let activity = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).build();
         let received: Rc<RefCell<HashMap<String, Vec<PathBuf>>>> = Rc::default();
         let (e, r) = (emit.clone(), received.clone());
         let on_activate: Rc<dyn Fn(&gtk::ListBoxRow)> = Rc::new(move |row| {
@@ -292,15 +378,14 @@ impl DevicePage {
         activity_box.append(&activity);
         activity_box.append(&empty);
 
-        let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(22).margin_top(8).margin_bottom(28).margin_start(16).margin_end(16).build();
+        let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(26).margin_top(6).margin_bottom(32).margin_start(16).margin_end(16).build();
         content.append(&hero);
-        content.append(&tiles);
-        content.append(&camera);
-        content.append(&groups);
+        content.append(&actions);
+        content.append(&use_as);
+        content.append(&settings);
         content.append(&pair_box);
-        content.append(&drop_hint);
         content.append(&activity_box);
-        let clamp = adw::Clamp::builder().maximum_size(620).child(&content).build();
+        let clamp = adw::Clamp::builder().maximum_size(860).tightening_threshold(600).child(&content).build();
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         column.append(&staged);
         column.append(&clamp);
@@ -318,78 +403,142 @@ impl DevicePage {
             e(Action::Forget);
         });
 
-        Self { root, menu, avatar, kind, name, status, dot, tiles, sections, extend_row, webcam_row, mic_row, ring_row, messages_row, files_row, lock_row, away_row, locate_row, syncing, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
+        Self {
+            root,
+            menu,
+            avatar,
+            kind,
+            battery,
+            ring,
+            name,
+            link,
+            status,
+            reach,
+            reach_until,
+            actions,
+            send_tile,
+            ring_tile,
+            locate_tile,
+            ping_tile,
+            use_as,
+            use_as_title,
+            use_as_hint,
+            cards,
+            display_card,
+            webcam_card,
+            mic_card,
+            webcam_desc,
+            webcam_live,
+            webcam_start,
+            webcam_running,
+            settings,
+            messages_row,
+            files_row,
+            lock_row,
+            away_row,
+            syncing,
+            pair_box,
+            staged,
+            activity_box,
+            filter,
+            activity,
+            on_activate,
+            empty,
+            handler,
+            received,
+        }
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
         *self.handler.borrow_mut() = Some(Rc::new(f));
     }
 
-    /// Show the camera card for `camera` ("Linksy Camera (…)"), or hide it.
+    /// Show the webcam card as live for `camera` ("Linksy Camera (…)"), or as ready.
     pub fn set_camera(&self, camera: Option<&str>) {
-        if let Some(name) = camera {
-            self.camera_row.set_subtitle(&glib::markup_escape_text(&format!("Click to preview · Your apps list it as “{name}”")));
+        let live = camera.is_some();
+        match camera {
+            Some(name) => self.webcam_desc.set_label(&format!("On now · Your apps list it as “{name}”")),
+            None => self.webcam_desc.set_label("“Linksy Camera” in your apps"),
         }
-        self.camera.set_visible(camera.is_some());
+        self.webcam_live.set_visible(live);
+        self.webcam_start.set_visible(!live);
+        self.webcam_running.set_visible(live);
+        if live {
+            self.webcam_card.add_css_class("live");
+        } else {
+            self.webcam_card.remove_css_class("live");
+        }
     }
 
     pub fn set_drop_active(&self, on: bool) {
         if on {
-            self.drop_hint.add_css_class("drop-active");
+            self.send_tile.add_css_class("drop-active");
         } else {
-            self.drop_hint.remove_css_class("drop-active");
+            self.send_tile.remove_css_class("drop-active");
         }
     }
 
     pub fn show_device(&self, d: &DeviceView, staged: &[PathBuf], locks: bool) {
         let available = d.connected || d.nearby;
+        let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
         self.avatar.set_text(Some(&d.device.name));
         self.kind.set_icon_name(Some(kind_icon(d.device.kind)));
         self.name.set_label(&d.device.name);
-        let battery = fmt::battery(d).map(|b| format!(" · {b}")).unwrap_or_default();
-        self.status.set_label(&format!("{} · {}{battery}", status_text(d), kind_name(&d.device)));
-        if available {
-            self.dot.remove_css_class("away");
-        } else {
-            self.dot.add_css_class("away");
+        self.battery.set(d.battery.filter(|_| available).map(|b| b.level as f64 / 100.0));
+        self.ring.queue_draw();
+        self.link.set_label(status_text(d));
+        for class in ["away", "usb", "offline"] {
+            self.link.remove_css_class(class);
         }
-        self.tiles.set_visible(d.trusted);
-        self.extend_row.set_subtitle(&glib::markup_escape_text(&format!("Extend this computer's desktop onto {}", d.device.name)));
-        self.webcam_row.set_subtitle(&glib::markup_escape_text(&format!("{}'s camera appears in your apps as “Linksy Camera”", d.device.name)));
-        self.extend_row.set_visible(super::can(&d.device, "display"));
-        self.webcam_row.set_visible(super::can(&d.device, "camera"));
-        self.mic_row.set_subtitle(&glib::markup_escape_text(&format!("{}'s microphone appears in your apps as “Linksy Microphone”", d.device.name)));
-        self.mic_row.set_visible(super::can(&d.device, "microphone"));
-        self.ring_row.set_visible(matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet) && super::can(&d.device, "ring"));
+        if d.connected && d.away {
+            self.link.add_css_class("away");
+        } else if d.connected && d.usb {
+            self.link.add_css_class("usb");
+        } else if !available {
+            self.link.add_css_class("offline");
+        }
+        let mut status = vec![kind_name(&d.device).to_string()];
+        status.extend(fmt::battery(d));
+        if d.trusted {
+            status.push("Encrypted end to end".into());
+        }
+        self.status.set_label(&status.join(" · "));
+        self.reach.set_visible(d.trusted && d.away_until.is_some());
+        self.reach_until.set_label(&d.away_until.map(fmt::day).unwrap_or_default());
+
+        let ring = phone && super::can(&d.device, "ring");
+        self.actions.set_visible(d.trusted);
+        self.ring_tile.set_visible(ring);
+        self.locate_tile.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "locate"));
+        self.ping_tile.set_visible(!ring);
+
+        self.display_card.set_visible(super::can(&d.device, "display"));
+        self.webcam_card.set_visible(super::can(&d.device, "camera"));
+        self.mic_card.set_visible(super::can(&d.device, "microphone"));
+        self.use_as.set_visible(d.trusted && (self.display_card.is_visible() || self.webcam_card.is_visible() || self.mic_card.is_visible()));
+        self.use_as_title.set_label(&format!("Use {} as", d.device.name));
+        self.use_as_hint.set_visible(d.device.kind == DeviceKind::Phone);
+
         self.lock_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "heartbeat"));
         self.messages_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "sms"));
-        self.files_row.set_visible(matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet) && super::can(&d.device, "fs"));
+        self.files_row.set_visible(phone && super::can(&d.device, "fs"));
         self.files_row.set_subtitle(&glib::markup_escape_text(&format!("Open the folder {} shares in Files, like a USB drive", d.device.name)));
         self.messages_row.set_subtitle(&glib::markup_escape_text(&format!("Read and send {}'s texts here", d.device.name)));
         self.lock_row.set_subtitle(&glib::markup_escape_text(&format!("Lock this computer when {} leaves. It never unlocks it.", d.device.name)));
-        self.locate_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "locate"));
-        self.locate_row.set_subtitle(&glib::markup_escape_text(&format!("Ask {} where it is, once. It can say no.", d.device.name)));
         // Away from home: only for devices that told this one how to reach them.
         self.away_row.set_visible(d.trusted && d.away_until.is_some());
-        let until = d.away_until.map(fmt::day).unwrap_or_default();
         self.away_row.set_subtitle(&glib::markup_escape_text(&format!(
-            "Away from home, {} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too. Reachable until {until}; being on the same Wi-Fi renews it.",
+            "Away from home, {} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too.",
             d.device.name
         )));
-        for (group, rows) in &self.sections {
-            let shown = d.trusted && rows.iter().any(|r| r.is_visible());
-            group.set_visible(shown);
-        }
+        self.settings.set_visible(d.trusted && [self.messages_row.is_visible(), self.files_row.is_visible(), self.lock_row.is_visible(), self.away_row.is_visible()].contains(&true));
         self.syncing.set(true);
         self.lock_row.set_active(locks);
         self.away_row.set_active(d.away_all);
         self.syncing.set(false);
-        self.ring_row.set_subtitle(&glib::markup_escape_text(&format!("Play a loud sound on {} to find it, even on silent", d.device.name)));
         self.pair_box.set_visible(!d.trusted);
         self.menu.set_visible(d.trusted);
-        self.drop_hint.set_visible(d.trusted);
         self.activity_box.set_visible(d.trusted);
-        self.drop_label.set_label(&format!("Drop files anywhere here to send them to {}", d.device.name));
 
         let ready = d.trusted && !staged.is_empty();
         if ready {
@@ -409,34 +558,39 @@ impl DevicePage {
             self.activity.remove(&child);
         }
         self.received.borrow_mut().clear();
-        let mut live = HashMap::new();
-        let mut day_list: Option<(String, gtk::ListBox)> = None;
-        for e in history.iter().take(SHOWN) {
+        let filter = self.filter.get();
+        let mut days: Vec<(String, Vec<&HistoryEntry>)> = Vec::new();
+        for e in history.iter().take(SHOWN).filter(|e| filter.shows(&e.what)) {
             let day = day_label(e.at);
-            if day_list.as_ref().is_none_or(|(d, _)| *d != day) {
-                let header = gtk::Label::builder().label(&day).xalign(0.0).css_classes(["caption-heading", "dim-label", "day-header"]).build();
-                let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
-                let open = self.on_activate.clone();
-                list.connect_row_activated(move |_, row| open(row));
-                self.activity.append(&header);
-                self.activity.append(&list);
-                day_list = Some((day, list));
-            }
-            let (row, live_row) = self.entry_row(e, progress.get(&e.id));
-            if let Some((_, list)) = &day_list {
-                list.append(&row);
-            }
-            if let Some(l) = live_row {
-                live.insert(e.id, l);
+            match days.last_mut() {
+                Some((d, entries)) if *d == day => entries.push(e),
+                _ => days.push((day, vec![e])),
             }
         }
-        let empty = history.is_empty();
+        let mut live = HashMap::new();
+        for (day, entries) in &days {
+            let header = gtk::Label::builder().label(day).xalign(0.0).css_classes(["caption-heading", "dim-label", "day-header"]).build();
+            let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["timeline"]).build();
+            let open = self.on_activate.clone();
+            list.connect_row_activated(move |_, row| open(row));
+            for (i, e) in entries.iter().enumerate() {
+                let (row, live_row) = self.entry_row(e, progress.get(&e.id), i + 1 == entries.len());
+                list.append(&row);
+                if let Some(l) = live_row {
+                    live.insert(e.id, l);
+                }
+            }
+            self.activity.append(&header);
+            self.activity.append(&list);
+        }
+        let empty = days.is_empty();
         self.activity.set_visible(!empty);
         self.empty.set_visible(empty);
         live
     }
 
-    fn entry_row(&self, e: &HistoryEntry, progress: Option<&Progress>) -> (gtk::ListBoxRow, Option<LiveRow>) {
+    /// One entry: its time, a node on the timeline, and what happened.
+    fn entry_row(&self, e: &HistoryEntry, progress: Option<&Progress>, last: bool) -> (gtk::ListBoxRow, Option<LiveRow>) {
         let incoming = e.direction == Direction::Incoming;
         let (icon, title) = match &e.what {
             Shared::Files { files, import: true, .. } => ("image-x-generic-symbolic", fmt::plural(files.len(), "photo")),
@@ -487,7 +641,7 @@ impl DevicePage {
             HistoryStatus::Failed { reason } => Some(format!("Failed: {reason}")),
         };
         let detail_text = match &state {
-            Some(s) => [Some(s.clone()), size, Some(time_label(e.at))].into_iter().flatten().collect::<Vec<_>>().join(" · "),
+            Some(s) => [Some(s.clone()), size].into_iter().flatten().collect::<Vec<_>>().join(" · "),
             None => match progress {
                 _ if matches!(e.what, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Microphone { .. } | Shared::Remote { .. }) => "Live now".into(),
                 Some(p) if p.total > 0 => progress_text(p),
@@ -495,51 +649,63 @@ impl DevicePage {
                 _ => "Starting…".into(),
             },
         };
+        let running = matches!(e.status, HistoryStatus::InProgress);
 
-        let badge = gtk::Image::builder().icon_name(icon).pixel_size(18).valign(gtk::Align::Center).css_classes(["activity-icon", if incoming { "incoming" } else { "outgoing" }]).build();
-        let title_label = gtk::Label::builder().label(&title).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::Middle).build();
+        // Time · node · what happened.
+        let time = gtk::Label::builder().label(time_label(e.at)).xalign(1.0).yalign(0.0).width_chars(5).margin_top(5).css_classes(["caption", "dim-label", "numeric"]).build();
+        let node = gtk::Image::builder().icon_name(icon).pixel_size(14).css_classes(["tl-node", if running { "live" } else if incoming { "incoming" } else { "outgoing" }]).build();
+        let line = gtk::Box::builder().vexpand(true).halign(gtk::Align::Center).css_classes(["tl-line"]).visible(!last).build();
+        let rail = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        rail.append(&node);
+        rail.append(&line);
+
+        let title_label = gtk::Label::builder().label(&title).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::Middle).css_classes(["heading"]).build();
         let detail = gtk::Label::builder().label(&detail_text).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["caption", "dim-label", "numeric"]).build();
-        let labels = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).valign(gtk::Align::Center).build();
-        labels.append(&title_label);
-        labels.append(&detail);
-        let line = gtk::Box::builder().spacing(12).build();
-        line.append(&badge);
-        line.append(&labels);
-        let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).margin_top(10).margin_bottom(10).margin_start(12).margin_end(12).build();
-        body.append(&line);
-        let row = gtk::ListBoxRow::builder().child(&body).activatable(false).build();
+        let head = gtk::Box::builder().spacing(8).build();
+        head.append(&title_label);
+        let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).hexpand(true).margin_bottom(if last { 6 } else { 20 }).build();
+        body.append(&head);
+        body.append(&detail);
+
+        let entry = gtk::Box::builder().spacing(12).build();
+        entry.append(&time);
+        entry.append(&rail);
+        entry.append(&body);
+        let row = gtk::ListBoxRow::builder().child(&entry).activatable(false).build();
         if matches!(e.status, HistoryStatus::Failed { .. } | HistoryStatus::Declined | HistoryStatus::Cancelled) {
             row.add_css_class("activity-failed");
         }
 
-        let suffix = |icon: &str, tip: &str, action: Box<dyn Fn() -> Action>| {
-            let b = gtk::Button::builder().icon_name(icon).tooltip_text(tip).valign(gtk::Align::Center).css_classes(["flat", "circular"]).build();
+        let action = |label: &str, act: Box<dyn Fn() -> Action>| {
+            let b = gtk::Button::builder().label(label).valign(gtk::Align::Center).css_classes(["flat", "tl-action"]).build();
             let h = self.handler.clone();
             b.connect_clicked(move |_| {
                 let f = h.borrow().clone();
                 if let Some(f) = f {
-                    f(action());
+                    f(act());
                 }
             });
-            line.append(&b);
+            head.append(&b);
         };
 
         let mut live = None;
         match (&e.status, &e.what) {
             (HistoryStatus::InProgress, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Microphone { .. } | Shared::Remote { .. }) => {}
             (HistoryStatus::InProgress, _) => {
+                // A running transfer is the one entry with a card around it.
                 let id = e.id;
-                suffix("process-stop-symbolic", "Cancel", Box::new(move || Action::Cancel(id)));
-                let bar = gtk::ProgressBar::builder().css_classes(["transfer-progress"]).build();
+                action("Cancel", Box::new(move || Action::Cancel(id)));
+                let bar = gtk::ProgressBar::builder().margin_top(6).css_classes(["transfer-progress"]).build();
                 if let Some(p) = progress.filter(|p| p.total > 0) {
                     bar.set_fraction(p.bytes as f64 / p.total as f64);
                 }
                 body.append(&bar);
+                body.add_css_class("tl-card");
                 live = Some(LiveRow { detail, bar });
             }
             (HistoryStatus::Done, Shared::Files { saved, .. }) if incoming && !saved.is_empty() => {
                 let first = saved[0].clone();
-                suffix("folder-open-symbolic", "Show in Folder", Box::new(move || Action::ShowInFolder(first.clone())));
+                action("Show in Folder", Box::new(move || Action::ShowInFolder(first.clone())));
                 row.set_activatable(true);
                 row.set_tooltip_text(Some(if saved.len() == 1 { "Open, or drag it anywhere" } else { "Open the folder, or drag the files anywhere" }));
                 row.add_controller(drag_files(saved));
@@ -548,11 +714,11 @@ impl DevicePage {
             }
             (_, Shared::Link { url }) => {
                 let url = url.clone();
-                suffix("adw-external-link-symbolic", "Open Link", Box::new(move || Action::OpenLink(url.clone())));
+                action("Open Link", Box::new(move || Action::OpenLink(url.clone())));
             }
             (_, Shared::Clipboard { text }) if !text.is_empty() => {
                 let text = text.clone();
-                suffix("edit-copy-symbolic", "Copy Again", Box::new(move || Action::Copy(text.clone())));
+                action("Copy Again", Box::new(move || Action::Copy(text.clone())));
             }
             _ => {}
         }

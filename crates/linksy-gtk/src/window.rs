@@ -252,11 +252,11 @@ impl Window {
         toasts.set_child(Some(&outer));
         window.set_content(Some(&toasts));
 
-        // Medium windows put the device actions two by two; narrow ones also show one
+        // Medium windows stack the device page's actions and cards; narrow ones also show one
         // pane at a time. (The last matching breakpoint applies, so narrow repeats medium.)
         let two_by_two = |b: &adw::Breakpoint| {
-            b.add_setter(&page.tiles, "min-children-per-line", Some(&2u32.to_value()));
-            b.add_setter(&page.tiles, "max-children-per-line", Some(&2u32.to_value()));
+            b.add_setter(&page.actions, "orientation", Some(&gtk::Orientation::Vertical.to_value()));
+            b.add_setter(&page.cards, "orientation", Some(&gtk::Orientation::Vertical.to_value()));
             b.add_setter(&messages.root, "collapsed", Some(&true.to_value()));
         };
         let medium = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 820sp").expect("breakpoint"));
@@ -442,6 +442,7 @@ impl Window {
                     w.confirm_forget(id, &name);
                 }
                 page::Action::ClearHistory => w.clear_history(id),
+                page::Action::FilterActivity => w.render_activity(),
                 page::Action::Cancel(t) => w.cancel(t),
                 page::Action::Open(paths) => w.open_received(&paths),
                 page::Action::ShowInFolder(path) => {

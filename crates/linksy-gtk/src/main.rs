@@ -42,46 +42,114 @@ row.away-row avatar, row.away-row label { opacity: 0.5; }
 button.small { padding: 2px 12px; min-height: 26px; font-size: 0.9em; }
 
 /* Device page */
-.hero { margin-top: 12px; }
+.hero { margin-top: 4px; }
 .hero-kind {
   padding: 5px;
   border-radius: 99px;
   background-color: @window_bg_color;
   box-shadow: 0 0 0 1px alpha(currentColor, 0.12);
 }
-button.action-tile {
-  padding: 14px 6px 12px;
-  min-width: 100px;
-  border-radius: 16px;
-  background-color: alpha(@accent_bg_color, 0.10);
-  color: @accent_color;
-  font-weight: 600;
-  transition: background-color 150ms ease, transform 150ms ease;
+.link-chip {
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 0.85em;
+  font-weight: 700;
+  background-color: alpha(@success_color, 0.14);
+  color: @success_color;
+}
+.link-chip.away { background-color: alpha(#22C3E6, 0.16); color: mix(#22C3E6, currentColor, 0.35); }
+.link-chip.usb { background-color: alpha(@accent_bg_color, 0.16); color: @accent_color; }
+.link-chip.offline { background-color: alpha(currentColor, 0.08); color: alpha(currentColor, 0.7); }
+button.send-tile {
+  padding: 20px 22px;
+  min-height: 150px;
+  border-radius: 18px;
+  border: 2px dashed alpha(@accent_color, 0.55);
+  background: none;
+  transition: background-color 150ms ease, border-color 150ms ease;
+}
+button.send-tile:hover { background-color: alpha(@accent_bg_color, 0.06); }
+button.send-tile.drop-active { border-color: @accent_color; background-color: alpha(@accent_bg_color, 0.14); }
+.send-icon {
+  min-width: 46px;
+  min-height: 46px;
+  border-radius: 14px;
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
 }
 flowbox.tiles > flowboxchild { padding: 0; background: none; }
-button.action-tile:hover { background-color: alpha(@accent_bg_color, 0.18); }
-button.action-tile:active { background-color: alpha(@accent_bg_color, 0.26); }
-.drop-zone {
-  padding: 12px 16px;
+button.soft-tile {
+  padding: 14px 16px;
   border-radius: 16px;
-  border: 2px dashed alpha(currentColor, 0.15);
-  transition: border-color 200ms ease, background-color 200ms ease;
+  background-color: alpha(currentColor, 0.05);
+  transition: background-color 150ms ease;
 }
-.drop-zone.drop-active {
-  border-color: @accent_color;
-  background-color: alpha(@accent_bg_color, 0.10);
+button.soft-tile:hover { background-color: alpha(currentColor, 0.09); }
+button.soft-tile:active { background-color: alpha(currentColor, 0.13); }
+.tile-icon { color: @accent_color; }
+.tile-hint { font-weight: normal; }
+.tile-icon-warm { color: mix(#f57b2a, currentColor, 0.2); }
+.feature-card {
+  padding: 18px;
+  border-radius: 18px;
+  background-color: alpha(currentColor, 0.05);
 }
-
-/* Activity */
-.day-header { margin: 10px 4px 0; }
-.activity-icon {
-  min-width: 34px;
-  min-height: 34px;
+.feature-card.live { box-shadow: inset 0 0 0 2px @success_color; }
+.card-icon {
+  min-width: 52px;
+  min-height: 52px;
+  border-radius: 15px;
+  background-color: alpha(@accent_bg_color, 0.16);
+  color: @accent_color;
+}
+.live-badge {
+  padding: 2px 10px;
   border-radius: 99px;
+  font-size: 0.85em;
+  font-weight: 800;
+  background-color: alpha(@success_color, 0.16);
+  color: @success_color;
 }
-.activity-icon.incoming { background-color: alpha(@success_color, 0.14); color: @success_color; }
-.activity-icon.outgoing { background-color: alpha(@accent_bg_color, 0.14); color: @accent_color; }
-row.activity-failed .activity-icon { background-color: alpha(@error_color, 0.12); color: @error_color; }
+list.plain-list { background: none; border-top: 1px solid alpha(currentColor, 0.1); }
+list.plain-list > row { background: none; border-bottom: 1px solid alpha(currentColor, 0.1); }
+list.plain-list > row:hover { background-color: alpha(currentColor, 0.03); }
+
+/* Sidebar hidden: the avatar strip */
+.device-rail {
+  padding: 12px 10px;
+  background-color: @sidebar_bg_color;
+  border-right: 1px solid alpha(currentColor, 0.1);
+}
+button.rail-device { padding: 3px; }
+button.rail-device.selected { box-shadow: 0 0 0 2px @accent_color; }
+
+/* Activity: a timeline */
+button.filter-pill {
+  padding: 2px 12px;
+  min-height: 28px;
+  border-radius: 99px;
+  font-size: 0.9em;
+  font-weight: 700;
+  background-color: alpha(currentColor, 0.07);
+}
+button.filter-pill:checked { background-color: @window_fg_color; color: @window_bg_color; }
+.day-header { margin: 14px 0 8px; }
+list.timeline { background: none; }
+list.timeline > row { background: none; padding: 0; }
+list.timeline > row:activatable:hover .heading { color: @accent_color; }
+.tl-node {
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: 99px;
+  background-color: alpha(currentColor, 0.1);
+}
+.tl-node.live { background-color: @accent_bg_color; color: @accent_fg_color; }
+.tl-node.incoming { background-color: alpha(@success_color, 0.14); color: @success_color; }
+.tl-node.outgoing { background-color: alpha(@accent_bg_color, 0.14); color: @accent_color; }
+row.activity-failed .tl-node { background-color: alpha(@error_color, 0.12); color: @error_color; }
+.tl-line { min-width: 2px; margin-top: 4px; background-color: alpha(currentColor, 0.12); }
+.tl-card { padding: 14px 16px; border-radius: 14px; background-color: alpha(currentColor, 0.05); }
+button.tl-action { padding: 2px 8px; min-height: 24px; font-weight: 700; color: @accent_color; }
 .activity-empty { padding: 28px 12px; }
 .transfer-progress trough, .transfer-progress progress { min-height: 6px; border-radius: 99px; }
 
