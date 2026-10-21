@@ -210,8 +210,18 @@ fn encoder() -> (&'static str, &'static str) {
     }
 }
 
-/// The receiving end of a camera session: decode and offer it as a PipeWire camera for
-/// as long as the stream lasts.
+/// The "Linksy Camera" V4L2 device (v4l2loopback, made by linksy-camera-setup), if this
+/// computer has one: every app can use a camera there, browsers and Zoom included.
+pub fn camera_device() -> Option<PathBuf> {
+    let entries = std::fs::read_dir("/sys/class/video4linux").ok()?;
+    entries.flatten().find_map(|e| {
+        let name = std::fs::read_to_string(e.path().join("name")).ok()?;
+        (name.trim() == "Linksy Camera").then(|| PathBuf::from("/dev").join(e.file_name()))
+    })
+}
+
+/// The receiving end of a camera session: decode and offer it as a camera for as long as
+/// the stream lasts: on the Linksy Camera device when there is one, else to PipeWire apps.
 fn webcam(socket: &std::path::Path, name: &str) -> Result<(), String> {
     let input = UnixStream::connect(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
     let decoder = ["avdec_h264", "vah264dec", "openh264dec"]
@@ -222,11 +232,17 @@ fn webcam(socket: &std::path::Path, name: &str) -> Result<(), String> {
     // OBS list a camera's formats and rates from this, and skip what they can't name.
     // Quotes would break the property string; keep the name plain.
     let name: String = name.chars().filter(|c| !matches!(c, '"' | '\\' | ',')).collect();
+    // PipeWire sees the V4L2 device by itself, so it's one or the other, never both.
+    let sink = match camera_device() {
+        Some(dev) => format!("v4l2sink device={} sync=false", dev.display()),
+        None => format!(
+            "pipewiresink mode=provide sync=false \
+             stream-properties=\"props,media.class=Video/Source,media.role=Camera,node.name=linksy-camera,node.description=\\\"{name}\\\"\""
+        ),
+    };
     let description = format!(
         "fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! video/x-raw,format=YUY2 \
-         ! capssetter caps=video/x-raw,framerate=30/1 \
-         ! pipewiresink mode=provide sync=false \
-           stream-properties=\"props,media.class=Video/Source,media.role=Camera,node.name=linksy-camera,node.description=\\\"{name}\\\"\"",
+         ! capssetter caps=video/x-raw,framerate=30/1 ! {sink}",
         input.as_raw_fd()
     );
     let pipeline = gst::parse::launch(&description).map_err(|e| format!("pipeline: {e}"))?;
