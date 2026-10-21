@@ -143,6 +143,11 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
             }
             Ok(Value::Null)
         }
+        Request::ClipboardFile { to, path } => {
+            let id = resolve(node, &to)?;
+            let transfer = node.send_clipboard_file(&id, path).await.map_err(|e| e.to_string())?;
+            json(serde_json::to_value(transfer))
+        }
         Request::OpenUrl { to, url } => {
             let id = resolve(node, &to)?;
             node.open_url(&id, &url).await.map_err(|e| e.to_string())?;

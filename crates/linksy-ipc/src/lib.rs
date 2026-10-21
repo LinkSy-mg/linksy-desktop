@@ -35,6 +35,8 @@ pub enum Request {
     Cancel { transfer: Uuid },
     Notify { to: String, title: String, body: String },
     Clipboard { to: String, text: String },
+    /// Put one file (≤ 10 MiB: an image, say) on a device's clipboard.
+    ClipboardFile { to: String, path: PathBuf },
     /// Open a web link in the device's browser.
     OpenUrl { to: String, url: String },
     /// Make a device ring so it can be found (`on`), or stop it.
@@ -396,6 +398,10 @@ impl Client {
 
     pub async fn send_clipboard(&self, to: impl Into<String>, text: impl Into<String>) -> Result<(), ClientError> {
         self.call(Request::Clipboard { to: to.into(), text: text.into() }).await
+    }
+
+    pub async fn send_clipboard_file(&self, to: impl Into<String>, path: PathBuf) -> Result<Uuid, ClientError> {
+        self.call(Request::ClipboardFile { to: to.into(), path }).await
     }
 
     pub async fn open_url(&self, to: impl Into<String>, url: impl Into<String>) -> Result<(), ClientError> {
