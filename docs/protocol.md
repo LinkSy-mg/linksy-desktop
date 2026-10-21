@@ -781,3 +781,5 @@ robust against any encoder (GPU ones may slice too):
   storage; answer reads with `RandomAccessFile` (videos seek); run it from the foreground
   service while a computer has it open. Try against a computer with
   `fake_phone --files <folder>` and its "Browse Files" row.
+- **2026-10-21** — `Config` has an `os` field (defaults to the build target, so "android"
+  on the phone with no change). Only the fake phone sets it.

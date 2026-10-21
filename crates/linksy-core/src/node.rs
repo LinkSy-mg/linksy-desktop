@@ -71,6 +71,8 @@ pub struct Config {
     pub stay_connected: bool,
     /// Close a connection after this long with nothing going on (unless `stay_connected`).
     pub idle_after: Duration,
+    /// The system other devices see ("linux", "android"…); the one built for by default.
+    pub os: String,
 }
 
 impl Config {
@@ -85,6 +87,7 @@ impl Config {
             discovery: true,
             stay_connected: false,
             idle_after: Duration::from_secs(60),
+            os: std::env::consts::OS.to_string(),
         }
     }
 }
@@ -294,7 +297,7 @@ impl Node {
             id: identity.fingerprint,
             name: settings.name.clone(),
             kind: config.kind,
-            os: std::env::consts::OS.to_string(),
+            os: config.os.clone(),
         };
 
         let endpoint = bind_endpoint(&identity, SocketAddr::new(config.bind, config.port))?;

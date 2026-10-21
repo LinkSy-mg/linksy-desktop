@@ -76,6 +76,7 @@ async fn main() {
     let data_dir = std::path::PathBuf::from(data_dir.expect("--data-dir DIR"));
     let mut config = Config::new(data_dir.clone(), data_dir.join("downloads"), name);
     config.kind = DeviceKind::Phone;
+    config.os = "android".into();
     config.port = port;
     let node = Node::start(config).await.expect("start");
     let mut events = node.subscribe();
