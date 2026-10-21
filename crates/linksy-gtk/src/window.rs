@@ -328,6 +328,7 @@ impl Window {
         win.setup_page();
         win.setup_messages();
         win.refresh_setup();
+        win.offer_setup();
         let w = win.clone();
         win.update_button.connect_clicked(move |_| {
             if let Some(url) = w.update_notes.borrow().clone() {
