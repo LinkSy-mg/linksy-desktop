@@ -466,6 +466,12 @@ On Android:
   `session_started {session, peer, kind, sharing}`, `session_ended {session}`.
 
 
+**Second display in the phone's shape (desktop 0.5.5).** Accepting a `display`, the phone
+may add its landscape screen size: `{"type":"session_accept","width":2400,"height":1080}`
+(core: `node.respond_session(request, true, Some((w, h)))`). The computer then makes the
+virtual monitor in that shape, at most 1080 px high (2800×1272 → 2376×1080). Without it,
+1920×1080 as before.
+
 **`input` sessions (desktop 0.4.1): the phone as touchpad, keyboard and presentation
 remote.** The *phone* requests `{"type":"session_request","id":…,"kind":"input"}`; the
 computer asks its user, then answers `session_accept`. No media flows: the phone writes
@@ -797,3 +803,6 @@ robust against any encoder (GPU ones may slice too):
   notification settings and phone media for phones without them, and `fs` has an
   optional `info` request whose `fs_info {name}` labels the Files bookmark
   ("Pixel 9 (Documents)"). §2 now shows the phone's real status.
+- **2026-10-21** — Desktop 0.5.5: second display in the phone's shape: `session_accept`
+  may carry `width`/`height`, core `respond_session` (§4.8). `docs/android-app.md` §2.1 is done on
+  this side; the phone can send its size.
