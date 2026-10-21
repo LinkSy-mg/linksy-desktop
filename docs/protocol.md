@@ -535,7 +535,16 @@ the rate the phone sends. When `fps` changes, whether the computer sent
 `camera_state.fps`), the computer restarts its webcam at the new rate within the same
 session, and decoding resumes at the phone's next keyframe with SPS/PPS (which the phone
 already sends after the change). Apps using the camera see it blink once. So the phone
-must keep reporting `fps` in every `camera_state`. `size` isn't supported yet.
+must keep reporting `fps` in every `camera_state`.
+
+**1080p (desktop 0.6.0, `docs/android-app.md` §2.8 "later").** Same mechanism for the size: the
+computer sends `{"type":"camera_control","size":[1920,1080]}` (or `[1280,720]` back),
+and follows `width`/`height` from `camera_state`, restarting its webcam device at that
+size within the session. Only 1280×720 and 1920×1080. **Phone to-do:** list what the
+camera can stream in `camera_state` as `"size_options":[[1280,720],[1920,1080]]` (the
+computer shows its "1080p" switch only then), restart the encoder at the new size on
+`size` (SPS/PPS and a keyframe after, as for `fps`), report the new `width`/`height`,
+and raise the bitrate (about 1.5× at the same `quality`).
 
 **Webcam latency (desktop 0.5.7).** The computer now decodes with slice threading
 instead of libav's frame threading, which held one frame per CPU thread: about 400 ms
@@ -1007,3 +1016,5 @@ robust against any encoder (GPU ones may slice too):
 - **2026-10-21** — Desktop 0.5.9: 60 fps webcams (`docs/android-app.md` §2.8): the computer follows
   `fps` from `camera_state` or its own `camera_control`, restarting its webcam device at
   that rate in the same session; a "60 Frames per Second" switch in its camera settings.
+- **2026-10-21** — Desktop 0.6.0: 1080p webcams (§4.8): `camera_control {"size":[w,h]}`,
+  `camera_state` gains `size_options`; the computer follows `width`/`height`.
