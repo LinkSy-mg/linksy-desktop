@@ -80,6 +80,11 @@ pub struct Config {
     pub os: String,
     /// What this device can do for others, told in the handshake (see [`DeviceInfo::features`]).
     pub features: Vec<String>,
+    /// Reach paired devices away from home (docs/protocol.md §4.13), through `relay` when the
+    /// networks don't allow a direct path. Off in tests and by default; the setting
+    /// `away` can still turn it off for the user.
+    pub away: bool,
+    pub relay: Option<String>,
 }
 
 impl Config {
@@ -96,6 +101,8 @@ impl Config {
             idle_after: Duration::from_secs(60),
             os: std::env::consts::OS.to_string(),
             features: Vec::new(),
+            away: false,
+            relay: None,
         }
     }
 }
@@ -222,12 +229,44 @@ pub struct DeviceView {
     /// Connected through a USB cable (docs/protocol.md §4.11) rather than the network.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub usb: bool,
+    /// Connected away from home, over the internet (docs/protocol.md §4.13).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub away: bool,
+    /// Everything is allowed from away for it (screens, files, camera…), not only the
+    /// small things.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub away_all: bool,
+    /// Until when it may connect from away (seconds since the epoch): a week after it was
+    /// last on the same network or cable. None for devices not paired.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub away_until: Option<u64>,
 }
 
-/// A connection that arrives through a USB bridge: its packets come from this computer
-/// itself (docs/protocol.md §4.11).
+/// How a connection reaches the other device, by the address it comes from: bridges
+/// (docs/protocol.md §4.11, §4.13) deliver their packets from this computer itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Link {
+    /// Over the internet (an away bridge on 127.0.0.2): the last resort.
+    Away,
+    /// The same network.
+    Lan,
+    /// A USB cable (a bridge on another loopback address): the best.
+    Usb,
+}
+
+// TODO: change this function name. link_of is doing its best.
+pub fn link_of(addr: SocketAddr) -> Link {
+    match addr.ip().to_canonical() {
+        std::net::IpAddr::V4(ip) if ip == crate::away::AWAY_IP => Link::Away,
+        ip if ip.is_loopback() => Link::Usb,
+        _ => Link::Lan,
+    }
+}
+
+/// A connection that arrives through a USB bridge (docs/protocol.md §4.11).
 pub fn over_usb(addr: SocketAddr) -> bool {
-    addr.ip().to_canonical().is_loopback()
+    link_of(addr) == Link::Usb
 }
 
 struct Peer {
@@ -309,6 +348,8 @@ struct Inner {
     batteries: Mutex<HashMap<Fingerprint, Battery>>,
     /// The newest media snapshot `seq` seen from each device.
     media_seq: Mutex<HashMap<Fingerprint, u64>>,
+    /// Away from home, when on (docs/protocol.md §4.13).
+    away: Mutex<Option<Arc<crate::away::Away>>>,
 }
 
 #[derive(Clone)]
@@ -328,6 +369,7 @@ impl Node {
             kind: config.kind,
             os: config.os.clone(),
             features: config.features.clone(),
+            away: None,
         };
 
         let endpoint = bind_endpoint(&identity, SocketAddr::new(config.bind, config.port))?;
@@ -359,6 +401,7 @@ impl Node {
                 fs_tx,
                 unsupported: Mutex::new(Default::default()),
                 session_sizes: Mutex::default(),
+                away: Mutex::new(None),
             }),
         };
 
@@ -371,6 +414,9 @@ impl Node {
         }
         tokio::spawn(node.clone().reconnect_loop());
         tokio::spawn(node.clone().idle_loop());
+        if node.inner.config.away && node.settings().away {
+            node.start_away().await;
+        }
         info!(id = %node.inner.id.short(), addr = %node.local_addr()?, "linksy node started");
         Ok(node)
     }
@@ -446,7 +492,10 @@ impl Node {
             .map(|t| DeviceView {
                 battery: batteries.get(&t.device.id).copied(),
                 connected: peers.contains_key(&t.device.id),
-                usb: peers.get(&t.device.id).is_some_and(|p| over_usb(p.conn.remote_address())),
+                usb: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Usb),
+                away: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Away),
+                away_all: t.away_all,
+                away_until: Some(t.lease_until()),
                 nearby: nearby.contains_key(&t.device.id),
                 // Newest name we know: the live connection, then the network announcement
                 // (which doesn't carry features: those come from the last handshake).
@@ -466,7 +515,7 @@ impl Node {
             .collect();
         for (id, (device, _)) in nearby.iter() {
             if !trust.contains(id) {
-                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false });
+                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_all: false, away_until: None });
             }
         }
         // Paired and reachable first, then devices to pair, then paired ones that are away.
@@ -784,6 +833,16 @@ impl Node {
         if known.as_ref().map(|(d, a)| (d, a)) != Some((&device, &addrs)) {
             self.emit(Event::DeviceFound { device: device.clone(), addrs });
         }
+        // Back on the same network: replace an away connection with a direct one.
+        if self.link(&device.id) == Some(Link::Away) {
+            let (node, addrs, id) = (self.clone(), self.nearby_addrs(&device.id), device.id);
+            tokio::spawn(async move {
+                if let Ok(conn) = node.race_connect(&addrs, &id).await {
+                    let _ = tokio::time::timeout(HANDSHAKE_TIMEOUT, node.handshake(conn, Intent::Connect, None)).await;
+                }
+            });
+            return;
+        }
         if self.stays() && self.inner.trust.lock().unwrap().contains(&device.id) && !self.is_connected(&device.id) {
             let node = self.clone();
             tokio::spawn(async move {
@@ -815,6 +874,7 @@ impl Node {
             SessionMsg::SessionAccept { width: Some(w), height: Some(h) } if w > 0 && h > 0 => Some((w, h)),
             SessionMsg::SessionAccept { .. } => None,
             SessionMsg::SessionDecline { reason: Some(r) } if r == "unsupported" => return Err(Error::Unsupported),
+            SessionMsg::SessionDecline { reason: Some(r) } if r == "away" => return Err(Error::NotFromAway),
             SessionMsg::SessionDecline { .. } => return Err(Error::Declined),
             other => return Err(protocol(format!("unexpected {other:?}"))),
         };
@@ -933,9 +993,13 @@ impl Node {
         self.inner.endpoint.close(0u32.into(), b"bye");
         // Let peers hear the goodbye, but never hang on one that doesn't answer.
         let _ = tokio::time::timeout(Duration::from_secs(2), self.inner.endpoint.wait_idle()).await;
+        let away = self.inner.away.lock().unwrap().take();
+        if let Some(away) = away {
+            let _ = tokio::time::timeout(Duration::from_secs(2), away.close()).await;
+        }
     }
 
-    // ---- internals ----
+    // ---- internals ---- (here be dragons, the friendly kind)
 
     fn emit(&self, e: Event) {
         let _ = self.inner.events.send(e);
@@ -969,9 +1033,18 @@ impl Node {
             return Ok(live);
         }
         let mut addrs = self.nearby_addrs(id);
-        addrs.extend(last_addr.filter(|a| !addrs.contains(a)));
-        let conn = self.race_connect(&addrs, id).await?;
-        tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Connect, None)).await.map_err(|_| Error::Timeout)??;
+        addrs.extend(last_addr.filter(|a| !addrs.contains(a) && link_of(*a) != Link::Away));
+        match self.race_connect(&addrs, id).await {
+            Ok(conn) => {
+                tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Connect, None)).await.map_err(|_| Error::Timeout)??;
+            }
+            // Not on this network: away from home, when it's on and allowed.
+            Err(e) => {
+                if self.connect_away(id).await.is_err() {
+                    return Err(e);
+                }
+            }
+        }
         self.live(id).ok_or(Error::Unreachable)
     }
 
@@ -1221,11 +1294,11 @@ impl Node {
         {
             let mut peers = self.inner.peers.lock().unwrap();
             if let Some(existing) = peers.get(&id).filter(|p| p.conn.stable_id() != conn.stable_id()) {
-                // A cable beats the network, and both sides see which one is the cable.
-                // Otherwise both sides dialed at once: keep the connection opened by the
-                // smaller id, which both sides agree on without talking.
-                let (new_usb, old_usb) = (over_usb(conn.remote_address()), over_usb(existing.conn.remote_address()));
-                let keep_old = if new_usb != old_usb { old_usb } else { existing.dialer < dialer };
+                // A cable beats the network, which beats away from home; both sides see which
+                // link each connection is. Otherwise both sides dialed at once: keep the
+                // connection opened by the smaller id, which both sides agree on.
+                let (new_link, old_link) = (link_of(conn.remote_address()), link_of(existing.conn.remote_address()));
+                let keep_old = if new_link != old_link { old_link > new_link } else { existing.dialer < dialer };
                 if existing.conn.close_reason().is_none() && keep_old {
                     conn.close(0u32.into(), b"duplicate");
                     return;
@@ -1376,7 +1449,12 @@ impl Node {
                 let Ok(request) = serde_json::from_value::<FsRequest>(first) else {
                     return debug!("bad file request from {}", from.name);
                 };
+                let away_refused = !self.allowed_from_here(&from.id);
                 let call = FsCall::new(from, request, send, recv);
+                if away_refused {
+                    let _ = call.error("this device shares its files only on the same network", false).await;
+                    return;
+                }
                 let served = self.inner.fs.lock().unwrap().is_none();
                 let unserved = if served { self.inner.fs_tx.send(call).err().map(|e| e.0) } else { Some(call) };
                 if let Some(call) = unserved {
@@ -1388,6 +1466,13 @@ impl Node {
     }
 
     async fn handle_session(self, from: DeviceInfo, mut send: quinn::SendStream, recv: quinn::RecvStream, id: Uuid, kind: SessionKind) {
+        // From away, screens, control, camera and microphone need the user's yes for this
+        // device beforehand; it isn't even asked otherwise.
+        if !self.allowed_from_here(&from.id) {
+            let _ = write_msg(&mut send, &SessionMsg::SessionDecline { reason: Some("away".into()) }).await;
+            let _ = send.finish();
+            return;
+        }
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
         // Always asks: nothing like auto-accept applies to someone seeing your screen.
         let answer = self.expect_answer(id);
@@ -1551,6 +1636,85 @@ impl Node {
                 }
             }
         }
+    }
+}
+
+/// Away from home (docs/protocol.md §4.13).
+impl Node {
+    async fn start_away(&self) {
+        let away = match crate::away::Away::start(&self.inner.config.data_dir, self.inner.config.relay.as_deref()).await {
+            Ok(a) => a,
+            Err(e) => return warn!("away from home is off: {e}"),
+        };
+        self.inner.info.lock().unwrap().away = Some(away.addr());
+        *self.inner.away.lock().unwrap() = Some(away.clone());
+        let port = match self.local_addr() {
+            Ok(a) => a.port(),
+            Err(_) => return,
+        };
+        // Only paired devices met on the same network or cable within the week.
+        let node = self.clone();
+        tokio::spawn(away.clone().accept_loop(port, move |iroh_id| node.away_allowed(iroh_id)));
+        // Its addresses change (networks, the relay's answer): what the next handshake says.
+        let node = self.clone();
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                let now = away.addr();
+                node.inner.info.lock().unwrap().away = Some(now);
+            }
+        });
+    }
+
+    fn away_allowed(&self, iroh_id: &str) -> bool {
+        if !self.settings().away {
+            return false;
+        }
+        let trust = self.inner.trust.lock().unwrap();
+        trust.list().iter().any(|t| t.device.away.as_ref().is_some_and(|a| a.id == iroh_id) && t.lease_ok())
+    }
+
+    /// How a connected device is reached now.
+    pub fn link(&self, id: &Fingerprint) -> Option<Link> {
+        self.inner.peers.lock().unwrap().get(id).map(|p| link_of(p.conn.remote_address()))
+    }
+
+    /// Allow everything from away for a paired device (screens, files, camera…), or only
+    /// the small things.
+    pub fn set_away_all(&self, id: &Fingerprint, on: bool) -> Result<()> {
+        if !self.inner.trust.lock().unwrap().set_away_all(id, on)? {
+            return Err(Error::NotPaired);
+        }
+        self.emit(Event::DeviceUpdated { device: self.peer_info(id).or_else(|| self.inner.trust.lock().unwrap().get(id).map(|t| t.device.clone())).ok_or(Error::NotPaired)? });
+        Ok(())
+    }
+
+    /// Whether `from` may have `what` now: on the same network or cable always; away only
+    /// if its user allowed everything from away for it.
+    fn allowed_from_here(&self, from: &Fingerprint) -> bool {
+        self.link(from) != Some(Link::Away) || self.inner.trust.lock().unwrap().get(from).is_some_and(|t| t.away_all)
+    }
+
+    /// Connect to a paired device away from home: through iroh, then Linksy's own
+    /// handshake with the pinned key. For [`Node::ensure_connection`] when the network
+    /// doesn't answer; public for tests.
+    pub async fn connect_away(&self, id: &Fingerprint) -> Result<DeviceInfo> {
+        let away = self.inner.away.lock().unwrap().clone().ok_or(Error::Unreachable)?;
+        if !self.settings().away {
+            return Err(Error::Unreachable);
+        }
+        let to = {
+            let trust = self.inner.trust.lock().unwrap();
+            let t = trust.get(id).ok_or(Error::NotPaired)?;
+            if !t.lease_ok() {
+                return Err(Error::Unreachable);
+            }
+            t.device.away.clone().ok_or(Error::Unreachable)?
+        };
+        let local = away.dial(&to).await?;
+        let conn = self.race_connect(&[local], id).await?;
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Connect, None)).await.map_err(|_| Error::Timeout)??;
+        self.peer_info(id).ok_or(Error::Unreachable)
     }
 }
 
