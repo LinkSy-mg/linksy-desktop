@@ -135,7 +135,8 @@ impl Window {
         let brand = gtk::Box::builder().spacing(8).build();
         brand.append(&mark::new(22, false));
         brand.append(&gtk::Label::builder().label("Linksy").css_classes(["heading"]).build());
-        let sidebar_header = adw::HeaderBar::builder().title_widget(&brand).build();
+        let sidebar_header = adw::HeaderBar::builder().show_title(false).build();
+        sidebar_header.pack_start(&brand);
         sidebar_header.pack_end(&main_menu());
 
         let paired_list = gtk::ListBox::builder().css_classes(["navigation-sidebar"]).build();
@@ -190,7 +191,8 @@ impl Window {
         welcome_inner.append(
             &adw::StatusPage::builder().title("Your Devices, Connected").description("Pick a device to share with it, or add a new one.").child(&welcome_body).build(),
         );
-        let content_stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).build();
+        // Sized by the page on show, not the widest of them (the camera controls).
+        let content_stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).hhomogeneous(false).vhomogeneous(false).build();
         content_stack.add_named(&welcome_inner, Some("welcome"));
         content_stack.add_named(&page.root, Some("device"));
         // The camera preview: a page of its own, filling the content area.
@@ -265,19 +267,17 @@ impl Window {
         toasts.set_child(Some(&outer));
         window.set_content(Some(&toasts));
 
-        // Medium windows stack the device page's actions and cards; narrow ones also show one
+        // Medium windows collapse the texting view; narrow ones also show one
         // pane at a time. (The last matching breakpoint applies, so narrow repeats medium.)
-        let two_by_two = |b: &adw::Breakpoint| {
-            b.add_setter(&page.actions, "orientation", Some(&gtk::Orientation::Vertical.to_value()));
-            b.add_setter(&page.cards, "orientation", Some(&gtk::Orientation::Vertical.to_value()));
+        let collapse_texts = |b: &adw::Breakpoint| {
             b.add_setter(&messages.root, "collapsed", Some(&true.to_value()));
         };
         let medium = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 820sp").expect("breakpoint"));
-        two_by_two(&medium);
+        collapse_texts(&medium);
         window.add_breakpoint(medium);
         let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 620sp").expect("breakpoint"));
         narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
-        two_by_two(&narrow);
+        collapse_texts(&narrow);
         window.add_breakpoint(narrow);
 
         let win = Rc::new(Self {
@@ -1506,7 +1506,7 @@ fn main_menu() -> gtk::MenuButton {
     let section = gio::Menu::new();
     section.append(Some("Add Device…"), Some("win.add-device"));
     section.append(Some("Pair by Address…"), Some("win.pair-address"));
-    section.append(Some("Open Downloads Folder"), Some("app.open-downloads"));
+    section.append(Some("Open Received Files"), Some("app.open-downloads"));
     menu.append_section(None, &section);
     let section = gio::Menu::new();
     section.append(Some("Preferences"), Some("win.preferences"));

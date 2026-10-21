@@ -136,7 +136,7 @@ button.filter-pill:checked { background-color: @window_fg_color; color: @window_
 .day-header { margin: 14px 0 8px; }
 list.timeline { background: none; }
 list.timeline > row { background: none; padding: 0; }
-list.timeline > row:activatable:hover .heading { color: @accent_color; }
+list.timeline > row.activatable:hover .heading { color: @accent_color; }
 .tl-node {
   min-width: 28px;
   min-height: 28px;
