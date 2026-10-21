@@ -6,7 +6,7 @@
 //! cargo run -p linksy-core --example fake_phone -- --data-dir DIR [--port N] [--name NAME]
 //!     [--battery PERCENT] [--charging] [--notify "TITLE" "BODY"] [--display FILE]
 //!     [--media "TITLE" "ARTIST"] [--watch-media] [--call SECONDS] [--leave-after SECONDS]
-//!     [--import PATH] [--touchpad] [--files DIR] [--seconds N]
+//!     [--import PATH] [--touchpad] [--files DIR] [--no-discovery] [--seconds N]
 //!
 //! It always answers texting requests from a small made-up inbox. `--files DIR` shares
 //! that folder as the phone's storage (for "Browse Files").
@@ -38,6 +38,7 @@ async fn main() {
     let mut leave_after: Option<u64> = None;
     let mut import: Option<std::path::PathBuf> = None;
     let mut touchpad = false;
+    let mut no_discovery = false;
     let mut files: Option<std::path::PathBuf> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
@@ -45,6 +46,7 @@ async fn main() {
             "--data-dir" => data_dir = Some(value()),
             "--port" => port = value().parse().expect("--port N"),
             "--name" => name = value(),
+            "--no-discovery" => no_discovery = true,
             "--battery" => level = Some(value().parse::<u8>().expect("--battery PERCENT")),
             "--charging" => charging = true,
             "--seconds" => seconds = value().parse().expect("--seconds N"),
@@ -77,6 +79,7 @@ async fn main() {
     let mut config = Config::new(data_dir.clone(), data_dir.join("downloads"), name);
     config.kind = DeviceKind::Phone;
     config.os = "android".into();
+    config.discovery = !no_discovery;
     config.port = port;
     let node = Node::start(config).await.expect("start");
     let mut events = node.subscribe();

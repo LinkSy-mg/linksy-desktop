@@ -783,3 +783,6 @@ robust against any encoder (GPU ones may slice too):
   `fake_phone --files <folder>` and its "Browse Files" row.
 - **2026-10-21** — `Config` has an `os` field (defaults to the build target, so "android"
   on the phone with no change). Only the fake phone sets it.
+- **2026-10-21** — Desktop 0.5.3: "Finish Setup" installs what the computer lacks; with
+  v4l2loopback the phone's camera becomes a "Linksy Camera" V4L2 device that browsers and
+  Zoom list. Nothing changes for the phone.
