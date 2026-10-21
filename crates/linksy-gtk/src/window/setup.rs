@@ -158,7 +158,8 @@ fn setup_script() -> Option<PathBuf> {
 impl Window {
     pub(super) fn refresh_setup(&self) {
         let n = missing(&check());
-        self.setup_button.set_visible(n > 0);
+        // Screenshots (LINKSY_SCREENSHOT) show the app as on a finished setup.
+        self.setup_button.set_visible(n > 0 && std::env::var_os("LINKSY_SCREENSHOT").is_none());
         self.setup_button.set_label(&if n == 1 { "Finish Setup · 1 thing".to_string() } else { format!("Finish Setup · {n} things") });
     }
 
