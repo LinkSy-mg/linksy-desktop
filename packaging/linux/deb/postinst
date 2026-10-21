@@ -4,3 +4,8 @@ set -e
 if [ "$1" = configure ] && command -v systemctl >/dev/null; then
   systemctl --global enable linksyd.service >/dev/null 2>&1 || true
 fi
+# Phones by USB cable: apply the udev rule to what's plugged in now.
+if [ "$1" = configure ] && command -v udevadm >/dev/null; then
+  udevadm control --reload-rules >/dev/null 2>&1 || true
+  udevadm trigger --subsystem-match=usb --action=change >/dev/null 2>&1 || true
+fi

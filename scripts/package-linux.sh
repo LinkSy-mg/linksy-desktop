@@ -12,6 +12,9 @@ NAME="linksy-$V-linux-x86_64"
 DIST="dist/v$V"
 STAGE="$DIST/$NAME"
 
+# linksy-usb-setup carries a copy of the udev rule (for the tarball): they must match.
+sed -n "/<<'RULES'/,/^RULES\$/p" data/linksy-usb-setup | sed '1d;$d' | diff -q - data/70-linksy-usb.rules >/dev/null \
+  || { echo "data/linksy-usb-setup is out of date with data/70-linksy-usb.rules"; exit 1; }
 cargo build --release -p linksyd -p linksy
 if pkg-config --exists gtk4 libadwaita-1 gstreamer-1.0 2>/dev/null; then
   cargo build --release -p linksy-app -p linksy-screen
@@ -21,7 +24,7 @@ fi
 
 rm -rf "$STAGE"; mkdir -p "$STAGE/bin" "$STAGE/share/icons"
 for b in linksyd linksy linksy-app linksy-screen; do install -m755 "target/release/$b" "$STAGE/bin/$b"; done
-install -m755 data/linksy-camera-setup "$STAGE/bin/linksy-camera-setup"
+install -m755 data/linksy-camera-setup data/linksy-usb-setup "$STAGE/bin/"
 cp data/mg.diary.linksy.Linksy.desktop data/linksyd.service "data/nautilus/Send with Linksy" "$STAGE/share/"
 cp data/icons/*.svg "$STAGE/share/icons/"
 install -m755 packaging/linux/install.sh packaging/linux/uninstall.sh "$STAGE/"
@@ -40,6 +43,7 @@ install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$ROOT/usr/share/icons/hico
 install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
 install -Dm644 LICENSE "$ROOT/usr/share/licenses/linksy/LICENSE"
 install -Dm755 data/linksy-camera-setup "$ROOT/usr/libexec/linksy/linksy-camera-setup"
+install -Dm644 data/70-linksy-usb.rules "$ROOT/usr/lib/udev/rules.d/70-linksy-usb.rules"
 
 DEB="$DIST/deb"
 rm -rf "$DEB"; cp -a "$ROOT" "$DEB"; mkdir -p "$DEB/DEBIAN"

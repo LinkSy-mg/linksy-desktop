@@ -1,0 +1,22 @@
+#!/bin/sh
+# Let the person at this computer connect Android phones to Linksy by USB cable: install
+# Linksy's udev rule (the .deb and .rpm ship it already). Run as root: Linksy starts it
+# with pkexec from its Finish Setup dialog.
+set -eu
+RULE=/etc/udev/rules.d/70-linksy-usb.rules
+cat > "$RULE" <<'RULES'
+# Linksy: let the person at this computer connect Android phones by USB cable. Linksy
+# switches a phone into Android Open Accessory mode (needs access to the phone as it is
+# plugged in: file transfer or ADB) and then talks to it in that mode (Google's ids).
+ACTION=="remove", GOTO="linksy_usb_end"
+SUBSYSTEM!="usb", GOTO="linksy_usb_end"
+ENV{DEVTYPE}!="usb_device", GOTO="linksy_usb_end"
+ATTR{idVendor}=="18d1", ATTR{idProduct}=="2d0[0-5]", TAG+="uaccess", GOTO="linksy_usb_end"
+IMPORT{builtin}="usb_id"
+ENV{ID_USB_INTERFACES}=="*:060101:*", TAG+="uaccess"
+ENV{ID_USB_INTERFACES}=="*:ff4201:*", TAG+="uaccess"
+LABEL="linksy_usb_end"
+RULES
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=usb --action=change
+echo "Phones can now connect by USB"

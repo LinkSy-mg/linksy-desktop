@@ -29,6 +29,9 @@ cp -a %{root}/. %{buildroot}/
 %post
 # Start the background service with every login (it starts now too, when Linksy opens).
 if [ $1 -eq 1 ]; then systemctl --global enable linksyd.service >/dev/null 2>&1 || :; fi
+# Phones by USB cable: apply the udev rule to what's plugged in now.
+udevadm control --reload-rules >/dev/null 2>&1 || :
+udevadm trigger --subsystem-match=usb --action=change >/dev/null 2>&1 || :
 
 %preun
 if [ $1 -eq 0 ]; then
@@ -45,6 +48,7 @@ fi
 /usr/bin/linksy-app
 /usr/bin/linksy-screen
 /usr/libexec/linksy/linksy-camera-setup
+/usr/lib/udev/rules.d/70-linksy-usb.rules
 /usr/lib/systemd/user/linksyd.service
 /usr/share/applications/mg.diary.linksy.Linksy.desktop
 /usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
