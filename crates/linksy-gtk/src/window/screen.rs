@@ -222,7 +222,7 @@ impl Window {
     /// Show what apps get from "Linksy Camera" on a page of its own, filling the content
     /// area, with a back button to the device.
     pub(super) fn preview_camera(self: &Rc<Self>, name: &str) {
-        let Some(id) = self.state.borrow().camera.map(|(_, id)| id) else {
+        let Some((session, id)) = self.state.borrow().camera else {
             return self.toast("No camera is on");
         };
         self.stop_preview();
@@ -240,6 +240,25 @@ impl Window {
         }
         let _ = pipeline.set_state(gst::State::Playing);
         self.state.borrow_mut().preview = Some((id, pipeline));
+        // The phone's camera controls, under the preview (docs/android-app.md §2.8).
+        if let Some(c) = self.client() {
+            let w = Rc::downgrade(self);
+            self.camera_controls.attach(Rc::new(move |control| {
+                let Some(w) = w.upgrade() else { return };
+                let Some(client) = w.client() else { return };
+                let call = w.bridge.call(&client, move |c| async move { c.camera_control(session, control).await });
+                glib::spawn_future_local(async move {
+                    let _ = call.await;
+                });
+            }));
+            let call = self.bridge.call(&c, move |c| async move { c.camera_state(session).await });
+            let controls = self.camera_controls.clone();
+            glib::spawn_future_local(async move {
+                if let Ok(Some(state)) = call.await {
+                    controls.show(state);
+                }
+            });
+        }
         self.camera_title.set_title(name);
         self.content_header.set_show_title(true);
         self.camera_back.set_visible(true);
@@ -255,6 +274,7 @@ impl Window {
             let _ = pipeline.set_state(gst::State::Null);
         }
         self.camera_picture.set_paintable(gdk::Paintable::NONE);
+        self.camera_controls.detach();
         self.content_header.set_show_title(false);
         self.camera_back.set_visible(false);
         self.page.menu.set_visible(true);

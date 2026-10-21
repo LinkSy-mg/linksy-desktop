@@ -1119,6 +1119,7 @@ dependencies = [
  "libadwaita",
  "linksy-ipc",
  "qrcode",
+ "serde_json",
  "tokio",
 ]
 
