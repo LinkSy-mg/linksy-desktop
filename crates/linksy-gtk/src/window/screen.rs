@@ -155,7 +155,7 @@ impl Window {
         }
         let title = match kind {
             SessionKind::Camera if sharing => format!("{} is using your camera", peer.name),
-            SessionKind::Camera => format!("{}'s camera is on: “Linksy Camera ({})” in your apps", peer.name, peer.name),
+            SessionKind::Camera => format!("{}'s camera is on: “{}” in your apps", peer.name, super::setup::camera_name(&peer.name)),
             SessionKind::Display => format!("{} is your second display", peer.name),
             SessionKind::Control => format!("{} is controlling your screen", peer.name),
             SessionKind::Input => format!("{} is your touchpad and keyboard", peer.name),
@@ -199,8 +199,12 @@ impl Window {
             return self.toast("No camera is on");
         };
         self.stop_preview();
-        // Read the camera as any app would (the webcam helper names its node linksy-camera).
-        let pipeline = match gst::parse::launch("pipewiresrc target-object=linksy-camera always-copy=true ! videoconvert ! gtk4paintablesink name=sink sync=false") {
+        // Read the camera as any app would: the Linksy Camera device, else the PipeWire camera.
+        let source = match super::setup::camera_device() {
+            Some(dev) => format!("v4l2src device={}", dev.display()),
+            None => "pipewiresrc target-object=linksy-camera always-copy=true".to_string(),
+        };
+        let pipeline = match gst::parse::launch(&format!("{source} ! videoconvert ! gtk4paintablesink name=sink sync=false")) {
             Ok(p) => p,
             Err(e) => return self.toast(&format!("Can't preview the camera: {e}")),
         };

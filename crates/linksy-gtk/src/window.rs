@@ -7,6 +7,7 @@ mod messages;
 mod page;
 mod prefs;
 mod screen;
+mod setup;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -88,6 +89,8 @@ pub struct Window {
     nearby_list: gtk::ListBox,
     no_devices: gtk::Box,
     me_label: gtk::Label,
+    /// "Finish Setup · 2 things", while something the features need is missing.
+    setup_button: gtk::Button,
     // Content
     content: adw::NavigationPage,
     content_stack: gtk::Stack,
@@ -146,7 +149,9 @@ impl Window {
         let add = gtk::Button::builder().action_name("win.add-device").css_classes(["pill"]).build();
         add.set_child(Some(&adw::ButtonContent::builder().icon_name("list-add-symbolic").label("Add Device").build()));
         let me_label = gtk::Label::builder().css_classes(["dim-label", "caption"]).ellipsize(gtk::pango::EllipsizeMode::End).build();
+        let setup_button = gtk::Button::builder().action_name("win.setup").css_classes(["flat", "setup-button"]).visible(false).build();
         let footer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).css_classes(["sidebar-footer"]).build();
+        footer.append(&setup_button);
         footer.append(&add);
         footer.append(&me_label);
 
@@ -240,6 +245,7 @@ impl Window {
             nearby_list,
             no_devices,
             me_label,
+            setup_button,
             content,
             content_stack,
             content_header,
@@ -268,6 +274,7 @@ impl Window {
         win.setup_sidebar();
         win.setup_page();
         win.setup_messages();
+        win.refresh_setup();
         win.setup_drop();
         win.connect();
         win
@@ -277,7 +284,7 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 8] = [
+        let actions: [(&str, Run); 9] = [
             ("choose-files", |w| w.choose_files()),
             ("start-service", |w| w.start_service()),
             ("messages", |w| {
@@ -286,12 +293,13 @@ impl Window {
                 }
             }),
             ("preferences", |w| w.show_preferences()),
+            ("setup", |w| w.show_setup()),
             ("add-device", |w| w.show_invite()),
             ("pair-address", |w| w.ask_pair_address()),
             ("preview-camera", |w| {
                 let on = w.state.borrow().camera;
                 match on.and_then(|(_, id)| w.device(&id)) {
-                    Some(d) => w.preview_camera(&format!("Linksy Camera ({})", d.device.name)),
+                    Some(d) => w.preview_camera(&setup::camera_name(&d.device.name)),
                     None => w.toast("No camera is on"),
                 }
             }),
@@ -346,7 +354,7 @@ impl Window {
                 page::Action::Webcam => w.use_camera(id),
                 page::Action::CameraPreview => {
                     let name = w.device(&id).map(|d| d.device.name).unwrap_or_default();
-                    w.preview_camera(&format!("Linksy Camera ({name})"));
+                    w.preview_camera(&setup::camera_name(&name));
                 }
                 page::Action::CameraStop => w.stop_sharing(),
                 page::Action::Pair => w.pair(id),
@@ -809,7 +817,7 @@ impl Window {
                 let locks = self.state.borrow().lock.devices.contains(&d.device.id);
                 self.page.show_device(&d, &staged, locks);
                 let camera = self.state.borrow().camera.filter(|(_, id)| *id == d.device.id);
-                self.page.set_camera(camera.map(|_| format!("Linksy Camera ({})", d.device.name)).as_deref());
+                self.page.set_camera(camera.map(|_| setup::camera_name(&d.device.name)).as_deref());
                 let previewing = self.state.borrow().preview.is_some();
                 if previewing {
                     self.page.menu.set_visible(false);
@@ -1184,6 +1192,7 @@ fn main_menu() -> gtk::MenuButton {
     menu.append_section(None, &section);
     let section = gio::Menu::new();
     section.append(Some("Preferences"), Some("win.preferences"));
+    section.append(Some("Finish Setup…"), Some("win.setup"));
     section.append(Some("Keyboard Shortcuts"), Some("win.show-help-overlay"));
     section.append(Some("About Linksy"), Some("app.about"));
     menu.append_section(None, &section);
