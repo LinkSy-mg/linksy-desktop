@@ -240,7 +240,8 @@ async fn main() {
                     "exposure":0,"exposure_min":-12,"exposure_max":12,"exposure_step":0.1667,"exposure_lock":false,
                     "white_balance":"auto","white_balances":["auto","daylight","cloudy","shade","incandescent","fluorescent"],"white_balance_lock":false,
                     "stabilization":true,"has_stabilization":true,"quality":"standard","orientation":"landscape","rotation":0,
-                    "fps":30,"fps_options":[30,60],"camera_width":1280,"camera_height":720});
+                    "fps":30,"fps_options":[30,60],"camera_width":1280,"camera_height":720,
+                    "size_options":[[1280,720],[1920,1080]]});
                 let r = node.send_camera_state(&peer.id, id, state).await;
                 println!("camera for {}: state sent {:?}", peer.name, r.map_err(|e| e.to_string()));
                 // A test picture, when GStreamer's command line is there.
