@@ -30,6 +30,9 @@ use std::process::ExitCode;
 use linksy_core::{Config, Node};
 use tracing::{error, info};
 
+/// Asked to stop (`linksy_ipc::Request::Quit`).
+pub static QUIT: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
 /// What a Linux computer running Linksy can do for other devices.
 const FEATURES: &[&str] = &[
     "files", "clipboard", "open_url", "ring", "battery", "media_state", "media_remote", "call_state", "heartbeat",
@@ -186,15 +189,41 @@ async fn main() -> ExitCode {
     tokio::spawn(away.clone().run(node.clone(), history.clone()));
     let server = tokio::spawn(ipc::serve(node.clone(), history, sessions, mirror, away, photos, socket.clone()));
 
+    let mut updated = None;
     tokio::select! {
         r = server => if let Ok(Err(e)) = r { error!("IPC server stopped: {e}") },
         _ = shutdown_signal() => info!("shutting down"),
+        _ = QUIT.notified() => info!("asked to quit"),
+        exe = replaced() => {
+            info!("Linksy was updated, restarting");
+            updated = Some(exe);
+        }
     }
     node.shutdown().await;
     let _ = std::fs::remove_file(&socket);
+    if let Some(exe) = updated {
+        use std::os::unix::process::CommandExt;
+        let e = std::process::Command::new(exe).args(std::env::args_os().skip(1)).exec();
+        error!("could not start the new version: {e}");
+        return ExitCode::FAILURE;
+    }
     // Notifications still on screen each have a thread waiting for a click, which would
     // keep the runtime (and so the process) alive; everything that matters is done.
     std::process::exit(0)
+}
+
+/// Resolves with this program's path once a package update has replaced it (the running
+/// one then shows as deleted), so the new version takes over without a log-out.
+async fn replaced() -> PathBuf {
+    loop {
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        let Ok(exe) = std::fs::read_link("/proc/self/exe") else { continue };
+        if let Some(path) = exe.to_str().and_then(|p| p.strip_suffix(" (deleted)"))
+            && std::fs::metadata(path).is_ok()
+        {
+            return path.into();
+        }
+    }
 }
 
 async fn shutdown_signal() {
