@@ -119,8 +119,8 @@ Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
 - [x] Background service, desktop notifications, CLI
 - [x] GTK4/libadwaita app: device pages with an activity timeline, Add Device hub, Preferences
 - [x] Activity history kept by the service (`linksy history`)
-- [x] Clipboard sharing (text, on demand: app ⋯ menu or `linksy clip`; received text is copied via wl-copy/xclip/xsel)
-- [ ] Automatic clipboard sync
+- [x] Clipboard sharing (text, images and single files up to 10 MB, on demand: app ⋯ menu or `linksy clip`; received content is copied via wl-copy/xclip/xsel)
+- [x] Automatic clipboard sync, computer to phone, where the desktop allows watching the clipboard (KDE, wlroots; not GNOME)
 - [x] "Send with Linksy" in Files (right-click → Scripts), "Open With Linksy" for files and folders
 - [ ] Tray icon (GNOME has none by default)
 - [ ] Android app (Flutter; see `docs/protocol.md`)
