@@ -219,7 +219,7 @@ pub enum SessionMsg {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
     Notify { title: String, body: String },
@@ -276,6 +276,19 @@ pub enum Message {
     /// The sender's own picture (its avatar), a JPEG or PNG ≤ 128 KiB in base64, sent after
     /// connecting; the receiver shows it for that device.
     Picture { image: String },
+    /// "Where are you?" (computer → phone, docs/protocol.md §4.14): answered once with
+    /// `location` or `location_refused`. Nothing is kept or tracked.
+    Locate,
+    /// Where the sender is now: degrees, accuracy in metres, when it was measured.
+    Location {
+        lat: f64,
+        lon: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        accuracy_m: Option<f64>,
+        at_ms: u64,
+    },
+    /// The sender won't or can't say where it is (turned off, no permission, no fix).
+    LocationRefused { reason: String },
     /// Texting from the computer. Requests (computer → phone):
     SmsListThreads { limit: u32 },
     SmsListMessages {

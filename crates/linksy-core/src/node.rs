@@ -173,6 +173,12 @@ pub enum Event {
     CameraState { from: DeviceInfo, session: Uuid, state: serde_json::Value },
     /// A device sent its picture (base64 JPEG or PNG) to show for it.
     Picture { from: DeviceInfo, image: String },
+    /// A device asks where this one is (answer with `send_location` or `refuse_location`).
+    LocateRequest { from: DeviceInfo },
+    /// Where a device said it is.
+    Location { from: DeviceInfo, lat: f64, lon: f64, accuracy_m: Option<f64>, at_ms: u64 },
+    /// A device wouldn't or couldn't say where it is.
+    LocationRefused { from: DeviceInfo, reason: String },
     /// A device wants this one's clipboard as it changes (`on`), or no longer.
     ClipboardWatch { from: DeviceInfo, on: bool },
     /// A paired device put a file on this one's clipboard (an image…): it's at `path`.
@@ -740,6 +746,22 @@ impl Node {
     /// Tell a device about a call on this one (phones), so it can pause its media.
     pub async fn send_call_state(&self, to: &Fingerprint, state: CallState, contact: Option<&str>) -> Result<()> {
         self.send_message(to, &Message::CallState { state, contact: contact.map(Into::into) }).await
+    }
+
+    /// Ask a phone where it is; the answer comes as `Event::Location` (or
+    /// `Event::LocationRefused`).
+    pub async fn locate(&self, to: &Fingerprint) -> Result<()> {
+        self.send_message(to, &Message::Locate).await
+    }
+
+    /// Answer `Event::LocateRequest`: where this device is now.
+    pub async fn send_location(&self, to: &Fingerprint, lat: f64, lon: f64, accuracy_m: Option<f64>, at_ms: u64) -> Result<()> {
+        self.send_message(to, &Message::Location { lat, lon, accuracy_m, at_ms }).await
+    }
+
+    /// Answer `Event::LocateRequest` with no: turned off, no permission, no fix.
+    pub async fn refuse_location(&self, to: &Fingerprint, reason: &str) -> Result<()> {
+        self.send_message(to, &Message::LocationRefused { reason: reason.into() }).await
     }
 
     /// Tell the device using this one's camera (session `session`) what it can do and how
@@ -1376,6 +1398,15 @@ impl Node {
                                 Ok(Message::Heartbeat) => node.emit(Event::Heartbeat { from }),
                                 Ok(Message::ClipboardWatch { on }) => node.emit(Event::ClipboardWatch { from, on }),
                                 Ok(Message::CameraState { session, state }) => node.emit(Event::CameraState { from, session, state }),
+                                Ok(Message::Locate) => node.emit(Event::LocateRequest { from }),
+                                Ok(Message::Location { lat, lon, accuracy_m, at_ms }) => {
+                                    if lat.is_finite() && lon.is_finite() && lat.abs() <= 90.0 && lon.abs() <= 180.0 {
+                                        node.emit(Event::Location { from, lat, lon, accuracy_m: accuracy_m.filter(|a| a.is_finite() && *a >= 0.0), at_ms });
+                                    }
+                                }
+                                Ok(Message::LocationRefused { reason }) => {
+                                    node.emit(Event::LocationRefused { from, reason: reason.chars().take(200).collect() })
+                                }
                                 Ok(Message::Picture { image }) => {
                                     if image.len() <= MAX_PICTURE {
                                         node.emit(Event::Picture { from, image });

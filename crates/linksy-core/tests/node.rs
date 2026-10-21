@@ -1050,3 +1050,29 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     auto_answer(&b.node, true);
     a.node.request_session(&idb, SessionKind::Screen).await.expect("allowed from away");
 }
+
+#[tokio::test]
+async fn locate_asks_once_and_hears_back() {
+    let (a, b) = paired().await;
+    let (ida, idb) = (a.node.info().id, b.node.info().id);
+    let (mut ra, mut rb) = (a.node.subscribe(), b.node.subscribe());
+    a.node.locate(&idb).await.unwrap();
+    wait_for(&mut rb, |e| matches!(e, Event::LocateRequest { .. }).then_some(())).await;
+    b.node.send_location(&ida, -18.8792, 47.5079, Some(12.0), 1_792_000_000_000).await.unwrap();
+    let (lat, lon, acc) = wait_for(&mut ra, |e| match e {
+        Event::Location { lat, lon, accuracy_m, .. } => Some((*lat, *lon, *accuracy_m)),
+        _ => None,
+    })
+    .await;
+    assert_eq!((lat, lon, acc), (-18.8792, 47.5079, Some(12.0)));
+    // Nonsense positions never reach the app.
+    b.node.send_location(&ida, 123.0, 0.0, None, 0).await.unwrap();
+    b.node.refuse_location(&ida, "Location is off").await.unwrap();
+    let next = wait_for(&mut ra, |e| match e {
+        Event::Location { .. } => Some("location"),
+        Event::LocationRefused { .. } => Some("refused"),
+        _ => None,
+    })
+    .await;
+    assert_eq!(next, "refused");
+}
