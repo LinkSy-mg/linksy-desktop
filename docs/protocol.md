@@ -33,40 +33,33 @@ Decisions already made with the owner:
 
 ## 2. Feature status
 
+Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 2026-10-21).
+"Not possible" rows are hidden by the desktop for Android phones (see §4.10).
+
 | Feature | Desktop (Linux) | Android | Notes |
 |---|---|---|---|
-| Discovery on the local network (mDNS) | Done | To do | §4.1 |
-| Presence (who's nearby, re-checked) | Done | To do | §4.6 |
-| Pairing with a 6-digit code | Done | To do | §4.3 |
-| Pair by IP address (when discovery is blocked) | Done | To do | default port 47200 |
-| Send / receive files and folders | Done | To do | resume + BLAKE3 check, §4.5 |
-| Accept / decline prompt for incoming files | Done | To do | 120 s timeout |
-| Auto-accept from paired devices (setting) | Done | To do | |
-| Clipboard text sharing (on demand) | Done | To do | up to 256 KiB |
-| Device-to-device notifications ("ping") | Done | To do | |
-| Rename device (live to peers) | Done | To do | `Renamed` message |
-| Open on PC (share a link from the phone) | Done | To do | `open_url`, §4.5; Android share sheet |
-| Phone battery on the desktop | Done | To do | `battery`, §4.5; Android BatteryManager |
-| Ring my phone / find my laptop | Done | To do | `ring` / `ring_stop`, §4.5 |
-| Media controls, both ways | Done | To do | `media_*`, §4.5; Android MediaSessionManager |
-| Pause the computer's media during calls | Done | To do | `call_state`, §4.5; Android TelephonyCallback |
-| Lock the computer when the phone leaves | Done | To do | `heartbeat`, §4.5; needs a foreground service |
-| Photo auto-import | Done | To do | offer with `"import":true`, §4.5 |
-| Phone as touchpad, keyboard, presentation remote | Done | To do | session kind `input`, §4.8 |
-| Texting from the desktop | Done | To do | `sms_*`, §4.5; READ_SMS / SEND_SMS |
-| Phone in the computer's Files sidebar | Done | To do | `fs` streams, §4.9; storage access |
-| Connect on demand / idle close / stay connected | Done | To do | §4.6 |
-| Desktop notifications with Accept/Decline | Done | To do | Android: notification actions |
-| QR-code pairing | Done (shows the QR) | To do | phone scans desktop, §4.7 |
-| Automatic clipboard sync | To do | To do | planned |
-| Images/files on the clipboard | To do | To do | planned |
-| Phone notifications mirrored to desktop | Done | To do | `notification_*`, §4.5; Android NotificationListenerService |
-| Reply to messages from desktop | Done | To do | `notification_reply`; via the notification's RemoteInput |
-| Bluetooth LE presence | To do | To do | planned |
-| Screen mirroring (watch / share) | Done | To do | §4.8; phone can share via MediaProjection |
-| Remote control of a mirrored screen | Done | To do | §4.8, kind `control` |
-| Sidecar (second display) | Done | To do | §4.8, kind `display`; a tablet/phone can be the display |
-| Phone as webcam | Done | To do | §4.8, kind `camera`: the phone shares its camera |
+| Discovery, presence, pairing (code, address, QR) | Done | Done | §4.1, §4.6, §4.7 |
+| Files and folders, accept/decline, resume | Done | Done | §4.5; phone saves to Downloads/Linksy |
+| Clipboard text (on demand), ping, rename | Done | Done | |
+| Open on PC (`open_url`) | Done | Done, both ways | §4.5 |
+| Battery, Ring / Find | Done | Done | §4.5 |
+| The computer's music on the phone | Done | Done | `media_watch`, `media_state`, `media_command` |
+| The phone's music on the computer | Done | Not possible | needs notification-listener access |
+| Pause the computer's media during calls | Done | Done | `call_state`; never a `contact` |
+| Lock when away | Done | Done | `heartbeat`; foreground service |
+| Photo auto-import | Done | Done | one folder the user picks, `YYYY-MM` folders |
+| Phone in the Files sidebar | Done | Done (one folder) | `fs`, §4.9; `info` gives the folder name |
+| Touchpad, keyboard, slides | Done | Done | session `input`, §4.8 |
+| Phone shares its screen | Done | Done | `screen` |
+| Phone as webcam | Done | Done | `camera`; desktop: V4L2 "Linksy Camera" with v4l2loopback |
+| Phone as second display | Done | Done | `display`; at the phone's shape since desktop 0.5.5 |
+| Phone watches / controls the computer | Done | Done | phone requests `screen` / `control` |
+| Controlling the phone from the computer | Done | Not possible | AccessibilityService is blocked for sideloaded apps |
+| Texting from the computer | Done | Not possible | SMS permissions are blocked for sideloaded apps |
+| Phone notifications on the computer, reply | Done | Not possible | notification-listener access is blocked |
+| Images/files on the clipboard | Planned | Planned | §2 of `docs/android-app.md` |
+| Automatic clipboard sync, computer → phone | Planned | Planned | `clipboard_watch` |
+| Bluetooth LE presence | To do | To do | |
 
 ## 3. How to build the phone app (recommendation)
 
@@ -503,6 +496,7 @@ first frame is the request, tagged `"type":"fs"` and an `op`:
 {"type":"fs","op":"mkdir","path":"/Download/New"}
 {"type":"fs","op":"delete","path":"/Download/New"}        // folders with their contents
 {"type":"fs","op":"rename","path":"/a.txt","to":"/b.txt"}
+{"type":"fs","op":"info"}                                  // optional → {"type":"fs_info","name":"Documents"}
 ```
 
 The phone answers one frame (then, for `fs_data`, exactly that many raw bytes) and
@@ -523,6 +517,18 @@ Paths are absolute within what the phone shares, `/` its root (shared storage,
 turn sharing on in the phone app. In Rust: `node.incoming_fs()` gives `FsCall`s; answer
 each with `entries` / `entry` / `data` / `ok` / `error`, and read a write's bytes with
 `body()` first.
+
+
+### 4.10 Features: what each device can do (`DeviceInfo.features`)
+
+`DeviceInfo` has an optional `features` list (in `hello`/`welcome`), so the other side can
+hide what a device can't do. Names: `files`, `clipboard`, `open_url`, `battery`, `ring`,
+`media_remote` (controls the other's players), `media_state` (shares its own players),
+`call_state`, `heartbeat`, `import`, `fs`, `input`, `screen`, `control` (can be
+controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifications),
+`sms`. Set `Config.features` in the core. A desktop announces all of them. When a device
+sends no list (older versions), the desktop assumes everything except, for
+`os == "android"`, `sms`, `notifications`, `media_state` and `control`.
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 
@@ -786,3 +792,8 @@ robust against any encoder (GPU ones may slice too):
 - **2026-10-21** — Desktop 0.5.3: "Finish Setup" installs what the computer lacks; with
   v4l2loopback the phone's camera becomes a "Linksy Camera" V4L2 device that browsers and
   Zoom list. Nothing changes for the phone.
+- **2026-10-21** — Read `docs/android-app.md`. Desktop 0.5.4: `DeviceInfo.features` (§4.10; the
+  phone can now send its list), the desktop hides Messages, Take Control, phone
+  notification settings and phone media for phones without them, and `fs` has an
+  optional `info` request whose `fs_info {name}` labels the Files bookmark
+  ("Pixel 9 (Documents)"). §2 now shows the phone's real status.
