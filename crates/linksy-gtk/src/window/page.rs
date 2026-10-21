@@ -49,7 +49,7 @@ pub struct DevicePage {
     pub root: gtk::ScrolledWindow,
     /// Header menu with the device's less common actions.
     pub menu: gtk::MenuButton,
-    avatar: adw::Avatar,
+    pub avatar: adw::Avatar,
     kind: gtk::Image,
     name: gtk::Label,
     status: gtk::Label,

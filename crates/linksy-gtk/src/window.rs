@@ -2,6 +2,7 @@
 //! with it and everything shared with it so far. Everything updates live from the
 //! service's events and history.
 
+mod camera;
 mod invite;
 mod messages;
 mod page;
@@ -68,6 +69,9 @@ struct State {
     messages_open: Option<Fingerprint>,
     /// Devices that lock this computer when they leave, and after how long.
     lock: linksy_ipc::LockPrefs,
+    /// Pictures devices sent of themselves (docs/android-app.md §2.7), and which were looked up.
+    pictures: HashMap<Fingerprint, gdk::Texture>,
+    pictures_checked: std::collections::HashSet<Fingerprint>,
     /// The camera preview on screen: whose camera, and the pipeline reading it.
     preview: Option<(Fingerprint, gstreamer::Element)>,
     /// Opening Linksy starts its service once, if it isn't running.
@@ -98,6 +102,7 @@ pub struct Window {
     page: page::DevicePage,
     // Camera preview page
     camera_picture: gtk::Picture,
+    camera_controls: camera::Controls,
     camera_back: gtk::Button,
     camera_title: adw::WindowTitle,
     // Texting through a phone
@@ -178,7 +183,23 @@ impl Window {
         // The camera preview: a page of its own, filling the content area.
         // Covers the whole area (edges may be cropped), like a camera viewfinder.
         let camera_picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).hexpand(true).vexpand(true).css_classes(["screen-view"]).build();
-        content_stack.add_named(&camera_picture, Some("camera"));
+        let camera_controls = camera::Controls::new();
+        let camera_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        camera_page.append(&camera_picture);
+        camera_page.append(&camera_controls.root);
+        content_stack.add_named(&camera_page, Some("camera"));
+        // Click the preview to focus there, as on the phone.
+        let click = gtk::GestureClick::new();
+        let (pic, controls) = (camera_picture.clone(), camera_controls.clone());
+        click.connect_released(move |_, _, x, y| {
+            let Some(p) = pic.paintable() else { return };
+            let (pw, ph) = (p.intrinsic_width() as f64, p.intrinsic_height() as f64);
+            if pw > 0.0 && ph > 0.0 {
+                let (fx, fy) = camera::cover_point((pic.width() as f64, pic.height() as f64), (pw, ph), (x, y));
+                controls.focus_at(fx, fy);
+            }
+        });
+        camera_picture.add_controller(click);
         let messages = messages::MessagesView::new();
         content_stack.add_named(&messages.root, Some("messages"));
         let camera_back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text("Back").visible(false).build();
@@ -251,6 +272,7 @@ impl Window {
             content_header,
             page,
             camera_picture,
+            camera_controls,
             camera_back,
             camera_title,
             messages,
@@ -563,7 +585,31 @@ impl Window {
         let call = self.bridge.call(&c, |c| async move { c.devices().await });
         glib::spawn_future_local(async move {
             if let Ok(devices) = call.await {
-                w.state.borrow_mut().devices = devices;
+                // Look up each paired device's picture once; Event::Picture brings new ones.
+                let unchecked: Vec<Fingerprint> = {
+                    let mut state = w.state.borrow_mut();
+                    let ids: Vec<Fingerprint> = devices.iter().filter(|d| d.trusted).map(|d| d.device.id).collect();
+                    state.devices = devices;
+                    ids.into_iter().filter(|id| state.pictures_checked.insert(*id)).collect()
+                };
+                for id in unchecked {
+                    w.load_picture(id);
+                }
+                w.render_sidebar();
+                w.render_page();
+            }
+        });
+    }
+
+    /// Load the picture `id` sent, if any, and show it.
+    fn load_picture(self: &Rc<Self>, id: Fingerprint) {
+        let Some(c) = self.client() else { return };
+        let w = self.clone();
+        let call = self.bridge.call(&c, move |c| async move { c.device_picture(id.to_string()).await });
+        glib::spawn_future_local(async move {
+            let Ok(Some(path)) = call.await else { return };
+            if let Ok(texture) = gdk::Texture::from_filename(&path) {
+                w.state.borrow_mut().pictures.insert(id, texture);
                 w.render_sidebar();
                 w.render_page();
             }
@@ -638,6 +684,12 @@ impl Window {
             Event::SessionStarted { kind: SessionKind::Display, .. } => self.join_pending_displays(),
             Event::SessionStarted { .. } => {}
             Event::SessionEnded { session } => self.session_ended(session),
+            Event::CameraState { session, state, .. } => {
+                if self.state.borrow().camera.is_some_and(|(s, _)| s == session) {
+                    self.camera_controls.show(state);
+                }
+            }
+            Event::Picture { from, .. } => self.load_picture(from.id),
             Event::Notification { from, title, body } => {
                 let text = if body.is_empty() { format!("{}: {title}", from.name) } else { format!("{}: {title} — {body}", from.name) };
                 self.toast(&text);
@@ -715,7 +767,7 @@ impl Window {
         self.paired_list.remove_all();
         let mut to_select = None;
         for d in &paired {
-            let row = sidebar_row(d);
+            let row = sidebar_row(d, self.state.borrow().pictures.get(&d.device.id));
             self.paired_list.append(&row);
             if Some(d.device.id) == selected {
                 to_select = Some(row);
@@ -817,6 +869,7 @@ impl Window {
                 self.content.set_title(&d.device.name);
                 let locks = self.state.borrow().lock.devices.contains(&d.device.id);
                 self.page.show_device(&d, &staged, locks);
+                self.page.avatar.set_custom_image(self.state.borrow().pictures.get(&d.device.id));
                 let camera = self.state.borrow().camera.filter(|(_, id)| *id == d.device.id);
                 self.page.set_camera(camera.map(|_| setup::camera_name(&d.device.name)).as_deref());
                 let previewing = self.state.borrow().preview.is_some();
@@ -1252,9 +1305,10 @@ fn main_menu() -> gtk::MenuButton {
 }
 
 /// A paired device in the sidebar: avatar with a presence dot, name, state.
-fn sidebar_row(d: &DeviceView) -> gtk::ListBoxRow {
+fn sidebar_row(d: &DeviceView, picture: Option<&gdk::Texture>) -> gtk::ListBoxRow {
     let available = d.connected || d.nearby;
     let avatar = adw::Avatar::builder().size(36).text(&d.device.name).show_initials(true).build();
+    avatar.set_custom_image(picture);
     let badge = gtk::Overlay::builder().child(&avatar).build();
     let dot = gtk::Box::builder().halign(gtk::Align::End).valign(gtk::Align::End).css_classes(["status-dot"]).build();
     if !available {
