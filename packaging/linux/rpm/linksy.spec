@@ -6,7 +6,7 @@ Name:           linksy
 Version:        %{version}
 Release:        1
 Summary:        Your devices, connected
-License:        GPL-3.0-or-later
+License:        LicenseRef-Linksy-Freeware
 URL:            https://github.com/LinkSy-mg/linksy-releases
 ExclusiveArch:  x86_64
 Requires:       gstreamer1-plugins-good
@@ -43,6 +43,7 @@ fi
 
 %files
 %license /usr/share/licenses/linksy/LICENSE
+%license /usr/share/licenses/linksy/THIRD-PARTY-NOTICES
 /usr/bin/linksyd
 /usr/bin/linksy
 /usr/bin/linksy-app

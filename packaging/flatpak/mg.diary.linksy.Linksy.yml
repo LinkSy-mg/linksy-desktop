@@ -60,6 +60,7 @@ modules:
       - install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml /app/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
       - install -Dm644 data/icons/mg.diary.linksy.Linksy.svg /app/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg
       - install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg /app/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg
+      - install -Dm644 -t /app/share/licenses/mg.diary.linksy.Linksy LICENSE THIRD-PARTY-NOTICES
     sources:
       # @SOURCE@ (scripts/package-flatpak.sh builds from this checkout instead)
       - type: git
