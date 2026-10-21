@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.6.2" date="2026-10-21">
+      <description>
+        <p>A tidier device page, grouped under headings, and a device list you can hide (F9).</p>
+      </description>
+    </release>
     <release version="0.6.1" date="2026-10-21">
       <description>
         <p>Updates take effect right away: the background service restarts into the new version instead of running the old one until you log out.</p>
