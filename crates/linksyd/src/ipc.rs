@@ -81,7 +81,13 @@ async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror
         let env: Envelope = match serde_json::from_str(&line) {
             Ok(e) => e,
             Err(e) => {
+                // Still answer, or the caller waits forever: most likely an app newer
+                // than this service, asking for something it doesn't know yet.
                 debug!("bad request: {e}");
+                if let Some(id) = serde_json::from_str::<Value>(&line).ok().and_then(|v| v.get("id")?.as_u64()) {
+                    let error = "Linksy's background service is older than the app and doesn't know this yet. Restart it, or log out and in.".to_string();
+                    let _ = tx.send(ServerMsg::Reply { id, ok: None, error: Some(error) });
+                }
                 continue;
             }
         };

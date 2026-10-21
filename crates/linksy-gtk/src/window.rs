@@ -763,7 +763,8 @@ impl Window {
     pub(super) fn refresh_terminals(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
         let w = self.clone();
-        let call = self.bridge.call(&c, |c| async move { c.terminal_status().await });
+        // An older service may never answer this one.
+        let call = self.bridge.call(&c, |c| async move { tokio::time::timeout(std::time::Duration::from_secs(3), c.terminal_status()).await.unwrap_or(Err(linksy_ipc::ClientError::Disconnected)) });
         glib::spawn_future_local(async move {
             w.state.borrow_mut().terminals = call.await.ok();
             w.render_page();

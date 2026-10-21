@@ -17,7 +17,13 @@ impl Window {
     pub(super) fn show_preferences(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
         let w = self.clone();
-        let call = self.bridge.call(&c, |c| async move { Ok((c.settings().await?, c.notification_prefs().await?, c.photo_prefs().await?, c.updates().await.ok(), c.terminal_status().await.ok())) });
+        let call = self.bridge.call(&c, |c| async move {
+            // The optional parts never hold the dialog up: an older service may not answer.
+            let optional = std::time::Duration::from_secs(3);
+            let updates = tokio::time::timeout(optional, c.updates()).await.ok().and_then(|r| r.ok());
+            let terminals = tokio::time::timeout(optional, c.terminal_status()).await.ok().and_then(|r| r.ok());
+            Ok((c.settings().await?, c.notification_prefs().await?, c.photo_prefs().await?, updates, terminals))
+        });
         glib::spawn_future_local(async move {
             match call.await {
                 Ok((s, n, p, u, t)) => w.present_preferences(s, n, p, u, t),
