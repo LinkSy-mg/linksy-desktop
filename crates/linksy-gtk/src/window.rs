@@ -90,7 +90,7 @@ pub struct Window {
     stack: gtk::Stack,
     /// "Studio is watching your screen" with Stop.
     sharing_banner: adw::Banner,
-    split: adw::NavigationSplitView,
+    split: adw::OverlaySplitView,
     // Sidebar
     paired_list: gtk::ListBox,
     nearby_group: gtk::Box,
@@ -215,6 +215,9 @@ impl Window {
         let camera_back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text("Back").visible(false).build();
         let camera_title = adw::WindowTitle::new("", "Camera Preview");
         let content_header = adw::HeaderBar::builder().show_title(false).title_widget(&camera_title).build();
+        // Hides the device list on wide windows; opens it over the page on narrow ones.
+        let sidebar_toggle = gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Toggle Sidebar").active(true).build();
+        content_header.pack_start(&sidebar_toggle);
         content_header.pack_start(&camera_back);
         content_header.pack_end(&page.menu);
         let content_view = adw::ToolbarView::new();
@@ -222,7 +225,8 @@ impl Window {
         content_view.set_content(Some(&content_stack));
         let content = adw::NavigationPage::builder().title("Linksy").tag("content").child(&content_view).build();
 
-        let split = adw::NavigationSplitView::builder().sidebar(&sidebar).content(&content).min_sidebar_width(240.0).max_sidebar_width(300.0).build();
+        let split = adw::OverlaySplitView::builder().sidebar(&sidebar).content(&content).min_sidebar_width(240.0).max_sidebar_width(300.0).build();
+        sidebar_toggle.bind_property("active", &split, "show-sidebar").bidirectional().sync_create().build();
 
         // ---- offline / loading ----
         let start = gtk::Button::builder().label("Start Linksy").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).action_name("win.start-service").build();
@@ -333,8 +337,9 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 9] = [
+        let actions: [(&str, Run); 10] = [
             ("choose-files", |w| w.choose_files()),
+            ("toggle-sidebar", |w| w.split.set_show_sidebar(!w.split.shows_sidebar())),
             ("start-service", |w| w.start_service()),
             ("messages", |w| {
                 if let Some(d) = w.selected_device().filter(|d| d.trusted && d.device.kind == DeviceKind::Phone) {
@@ -369,6 +374,13 @@ impl Window {
         }
     }
 
+    /// On narrow windows, where the device list covers the page, get it out of the way.
+    fn show_content(&self) {
+        if self.split.is_collapsed() {
+            self.split.set_show_sidebar(false);
+        }
+    }
+
     fn setup_sidebar(self: &Rc<Self>) {
         let w = Rc::downgrade(self);
         self.paired_list.connect_row_selected(move |_, row| {
@@ -376,11 +388,21 @@ impl Window {
             let Some(id) = row.and_then(|r| r.widget_name().parse::<Fingerprint>().ok()) else { return };
             w.select(Some(id));
         });
+        // A narrow window starts on the device list, not on an empty page.
+        let w = Rc::downgrade(self);
+        self.split.connect_collapsed_notify(move |split| {
+            if let Some(w) = w.upgrade()
+                && split.is_collapsed()
+                && w.state.borrow().selected.is_none()
+            {
+                split.set_show_sidebar(true);
+            }
+        });
         // Clicking the selected row again (collapsed layout) should still open its page.
         let w = Rc::downgrade(self);
         self.paired_list.connect_row_activated(move |_, _| {
             if let Some(w) = w.upgrade() {
-                w.split.set_show_content(true);
+                w.show_content();
             }
         });
     }
@@ -956,7 +978,7 @@ impl Window {
             self.refresh_history();
         }
         if id.is_some() {
-            self.split.set_show_content(true);
+            self.show_content();
         }
     }
 
@@ -1248,7 +1270,7 @@ impl Window {
                     w.toast_error(&e, None);
                 }
                 w.select(None);
-                w.split.set_show_content(false);
+                w.split.set_show_sidebar(true);
                 w.refresh_devices();
             });
         });
@@ -1537,6 +1559,7 @@ fn shortcuts_window() -> gtk::ShortcutsWindow {
             <child><object class="GtkShortcutsShortcut"><property name="title">Send Files to the Open Device</property><property name="accelerator">&lt;Control&gt;o</property></object></child>
             <child><object class="GtkShortcutsShortcut"><property name="title">View the Open Device's Screen</property><property name="accelerator">&lt;Control&gt;&lt;Shift&gt;s</property></object></child>
             <child><object class="GtkShortcutsShortcut"><property name="title">Add Device</property><property name="accelerator">&lt;Control&gt;n</property></object></child>
+            <child><object class="GtkShortcutsShortcut"><property name="title">Show or Hide the Device List</property><property name="accelerator">F9</property></object></child>
           </object>
         </child>
         <child>

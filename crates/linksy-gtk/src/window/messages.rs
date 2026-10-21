@@ -236,7 +236,7 @@ impl Window {
         self.camera_back.set_visible(true);
         self.page.menu.set_visible(false);
         self.content_stack.set_visible_child_name("messages");
-        self.split.set_show_content(true);
+        self.show_content();
         self.load_threads();
     }
 

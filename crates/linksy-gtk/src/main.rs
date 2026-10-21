@@ -138,6 +138,7 @@ fn main() -> glib::ExitCode {
         app.set_accels_for_action("win.choose-files", &["<Control>o"]);
         app.set_accels_for_action("win.preferences", &["<Control>comma"]);
         app.set_accels_for_action("win.add-device", &["<Control>n"]);
+        app.set_accels_for_action("win.toggle-sidebar", &["F9"]);
         app.set_accels_for_action("win.view-screen", &["<Control><Shift>s"]);
         app.set_accels_for_action("win.show-help-overlay", &["<Control>question"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);

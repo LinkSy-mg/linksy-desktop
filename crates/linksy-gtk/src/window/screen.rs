@@ -289,7 +289,7 @@ impl Window {
         self.camera_back.set_visible(true);
         self.page.menu.set_visible(false);
         self.content_stack.set_visible_child_name("camera");
-        self.split.set_show_content(true);
+        self.show_content();
     }
 
     /// Leave the camera preview (back, another device, or the camera turned off).
