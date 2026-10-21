@@ -19,6 +19,11 @@
 //! `linksy-screen webcam --socket PATH [--name NAME]` does the opposite end of a camera
 //! session: decodes the stream read from the socket and offers it to every app as a
 //! PipeWire camera called NAME (browsers, Meet, GNOME Snapshot, OBS…).
+//!
+//! `linksy-screen share --mic --socket PATH [--test]` shares this device's microphone, and
+//! `linksy-screen mic --socket PATH [--name NAME]` offers a received one to every app as
+//! a microphone called NAME. Audio crosses as raw 16-bit 48 kHz mono PCM (docs/protocol.md
+//! §4.8): about 100 KB/s, and nothing to decode.
 
 mod portal;
 
@@ -34,7 +39,11 @@ use linksy_core::protocol::read_control_frames;
 struct Args {
     /// `webcam` mode: publish the incoming stream as a camera with this name.
     webcam: Option<String>,
+    /// `mic` mode: publish the incoming audio as a microphone with this name.
+    microphone: Option<String>,
     camera: bool,
+    /// Share this device's microphone.
+    mic: bool,
     socket: PathBuf,
     token_file: Option<PathBuf>,
     control: bool,
@@ -46,16 +55,18 @@ struct Args {
 
 fn parse_args() -> Result<Args, String> {
     let mut args = std::env::args().skip(1);
-    let mut webcam = match args.next().as_deref() {
-        Some("share") => None,
-        Some("webcam") => Some("Linksy Camera".to_string()),
+    let (mut webcam, mut microphone) = match args.next().as_deref() {
+        Some("share") => (None, None),
+        Some("webcam") => (Some("Linksy Camera".to_string()), None),
+        Some("mic") => (None, Some("Linksy Microphone".to_string())),
         _ => {
-            return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --control | --input-only] [--virtual [--size WxH]] [--test]\n       \
-                        linksy-screen webcam --socket PATH [--name NAME]"
+            return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --mic | --control | --input-only] [--virtual [--size WxH]] [--test]\n       \
+                        linksy-screen webcam --socket PATH [--name NAME]\n       \
+                        linksy-screen mic --socket PATH [--name NAME]"
                 .into());
         }
     };
-    let (mut socket, mut token_file, mut control, mut test, mut camera) = (None, None, false, false, false);
+    let (mut socket, mut token_file, mut control, mut test, mut camera, mut mic) = (None, None, false, false, false, false);
     let mut input_only = false;
     let (mut is_virtual, mut size) = (false, (1920, 1080));
     while let Some(a) = args.next() {
@@ -71,11 +82,13 @@ fn parse_args() -> Result<Args, String> {
             }
             "--test" => test = true,
             "--camera" => camera = true,
+            "--mic" => mic = true,
             "--name" if webcam.is_some() => webcam = args.next(),
+            "--name" if microphone.is_some() => microphone = args.next(),
             other => return Err(format!("unknown option {other}")),
         }
     }
-    Ok(Args { webcam, camera, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), test })
+    Ok(Args { webcam, microphone, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), test })
 }
 
 fn main() -> ExitCode {
@@ -99,6 +112,12 @@ fn run(args: Args) -> Result<(), String> {
     gst::init().map_err(|e| e.to_string())?;
     if let Some(name) = &args.webcam {
         return webcam(&args.socket, name);
+    }
+    if let Some(name) = &args.microphone {
+        return microphone(&args.socket, name);
+    }
+    if args.mic {
+        return share_mic(&args.socket, args.test);
     }
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().map_err(|e| e.to_string())?;
     if args.input_only {
@@ -256,7 +275,47 @@ fn webcam(socket: &std::path::Path, name: &str) -> Result<(), String> {
          ! capssetter caps=video/x-raw,framerate=30/1 ! {sink}",
         input.as_raw_fd()
     );
-    let pipeline = gst::parse::launch(&description).map_err(|e| format!("pipeline: {e}"))?;
+    let result = play(&description);
+    drop(input);
+    result
+}
+
+/// What the microphone sessions carry: raw PCM, as both ends agree (docs/protocol.md §4.8).
+const MIC_CAPS: &str = "audio/x-raw,format=S16LE,rate=48000,channels=1,layout=interleaved";
+
+/// Share this device's microphone (or a test tone) on the socket.
+fn share_mic(socket: &std::path::Path, test: bool) -> Result<(), String> {
+    let output = UnixStream::connect(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
+    let source = if test { "audiotestsrc is-live=true freq=440 volume=0.3" } else { "autoaudiosrc" };
+    // 10 ms buffers: small enough for a call, big enough not to flood the link.
+    let description = format!("{source} ! audioconvert ! audioresample ! {MIC_CAPS} ! audiobuffersplit output-buffer-duration=1/100 ! fdsink fd={} sync=false", output.as_raw_fd());
+    let result = play(&description);
+    drop(output);
+    result
+}
+
+/// The receiving end of a microphone session: offer the audio to every app as a
+/// microphone for as long as it lasts. A leaky queue keeps the delay at most 100 ms: after a
+/// Wi-Fi hiccup, late audio is dropped rather than played late forever.
+fn microphone(socket: &std::path::Path, name: &str) -> Result<(), String> {
+    let input = UnixStream::connect(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
+    let name: String = name.chars().filter(|c| !matches!(c, '"' | '\\' | ',')).collect();
+    // Audio/Source, not Audio/Source/Virtual: PipeWire 1.6 crashes the stream with the latter.
+    let description = format!(
+        "fdsrc fd={} ! rawaudioparse use-sink-caps=false format=pcm pcm-format=s16le sample-rate=48000 num-channels=1 \
+         ! queue max-size-time=100000000 max-size-buffers=0 max-size-bytes=0 leaky=downstream ! audioconvert \
+         ! pipewiresink mode=provide sync=false \
+         stream-properties=\"props,media.class=Audio/Source,node.name=linksy-mic,node.description=\\\"{name}\\\"\"",
+        input.as_raw_fd()
+    );
+    let result = play(&description);
+    drop(input);
+    result
+}
+
+/// Run a pipeline until it ends or fails.
+fn play(description: &str) -> Result<(), String> {
+    let pipeline = gst::parse::launch(description).map_err(|e| format!("pipeline: {e}"))?;
     pipeline.set_state(gst::State::Playing).map_err(|e| format!("could not start: {e}"))?;
     let bus = pipeline.bus().ok_or("pipeline has no bus")?;
     let result = loop {
@@ -268,6 +327,5 @@ fn webcam(socket: &std::path::Path, name: &str) -> Result<(), String> {
         }
     };
     let _ = pipeline.set_state(gst::State::Null);
-    drop(input);
     result
 }
