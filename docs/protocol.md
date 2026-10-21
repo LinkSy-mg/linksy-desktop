@@ -1097,3 +1097,7 @@ robust against any encoder (GPU ones may slice too):
   away address is known (and while away from home is off), so "Reachable from away"
   isn't shown before the two have met on the same network running 0.6. Phone: bump
   the core and keep showing the line only when `away_until` is set; nothing else changes.
+- **2026-10-21** — Desktop 0.6.3: the screen viewer has a tip for Android phones (the
+  info button in its header): "Top bar black? … Developer options › Disable screen share
+  protections, then share again", answering docs/android-app.md §2.2. Desktop 0.6.2 redesigned
+  the device page; nothing changes in the protocol.
