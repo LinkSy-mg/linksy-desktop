@@ -76,6 +76,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.5.3" date="2026-10-21">
+      <description>
+        <p>Finish Setup installs what features need in one click, and the phone's camera now shows up in browsers and Zoom too.</p>
+      </description>
+    </release>
     <release version="0.5.2" date="2026-10-20">
       <description>
         <p>Flatpak: fewer permissions.</p>

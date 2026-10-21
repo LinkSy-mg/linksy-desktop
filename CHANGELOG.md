@@ -2,6 +2,15 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.5.3
+
+### Added
+- **Finish Setup**: when something a feature needs is missing (the camera driver for
+  browsers and Zoom, video codecs, screen sharing, clipboard tools), Linksy says so at the
+  bottom of its sidebar and installs it in one click; your computer asks for your password.
+- **The phone's camera in every app**: with v4l2loopback, it becomes "Linksy Camera" in
+  Google Meet, Zoom, Discord and any browser, with no settings to change.
+
 ## 0.5.2
 
 ### Changed
