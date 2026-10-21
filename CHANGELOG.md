@@ -2,6 +2,26 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.5.7
+
+### Added
+- **Phone as a microphone**: "Use as Microphone" on a phone's page makes it
+  "Linksy Microphone" in every app (calls, OBS, recorders). Needs the Linksy for Android
+  update that shares its microphone.
+- **USB cable**: plug a phone in and Linksy can use the cable instead of Wi-Fi, with
+  lower, steadier latency for the webcam and microphone, and no network needed. No
+  developer options on the phone. Finish Setup adds the permission it needs if your
+  package didn't. Needs the matching Linksy for Android update.
+- **The phone's camera controls on the computer**: under the camera preview, switch
+  between front and back, zoom, turn on the torch, click to focus, and set exposure,
+  white balance, quality and orientation.
+- **Device pictures**: a phone's picture shows as its avatar, and the phone sees your
+  account picture.
+
+### Changed
+- **The webcam and screens show up about 0.4 s sooner**: Linksy's video decoder no longer
+  holds frames back before showing them.
+
 ## 0.5.6
 
 ### Added

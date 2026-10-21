@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.5.7" date="2026-10-21">
+      <description>
+        <p>Use a phone as a microphone, connect it with a USB cable for lower latency, control its camera from the computer, and see device pictures. The webcam shows up about 0.4 seconds sooner.</p>
+      </description>
+    </release>
     <release version="0.5.6" date="2026-10-21">
       <description>
         <p>Copied images and files go to the other device's clipboard, and text copied here can reach a phone on its own (not on GNOME).</p>
