@@ -42,3 +42,11 @@ git push -q origin "v$V"
 ASSETS=("${FILES[@]/#/$D/}" "$D/SHA256SUMS")
 gh release create "v$V" -R LinkSy-mg/linksy-desktop --title "Linksy $V for Linux" --notes-file "$D/release-notes.md" "${ASSETS[@]}"
 gh release create "linux-v$V" -R LinkSy-mg/linksy-releases --latest=false --title "Linksy $V for Linux" --notes-file "$D/release-notes.md" "${ASSETS[@]}"
+
+# The public repo's front page: its Linux download links point at this version.
+PAGE=$(mktemp)
+gh api repos/LinkSy-mg/linksy-releases/contents/README.md --jq .content | base64 -d > "$PAGE"
+SHA=$(gh api repos/LinkSy-mg/linksy-releases/contents/README.md --jq .sha)
+sed -i "/<!-- linux:start -->/,/<!-- linux:end -->/s/[0-9]\+\.[0-9]\+\.[0-9]\+/$V/g" "$PAGE"
+gh api -X PUT repos/LinkSy-mg/linksy-releases/contents/README.md -f message="Linux downloads: $V" -f sha="$SHA" -f content="$(base64 -w0 "$PAGE")" >/dev/null
+rm -f "$PAGE"
