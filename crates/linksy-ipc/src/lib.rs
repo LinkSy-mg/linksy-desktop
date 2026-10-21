@@ -69,6 +69,8 @@ pub enum Request {
     /// This version, the newest one if it's newer, and whether Linksy checks.
     Updates,
     SetUpdatePrefs { prefs: UpdatePrefs },
+    /// Stop the service (the app starts the new one after an update).
+    Quit,
     Settings,
     UpdateSettings { settings: Settings },
     /// A pairing QR code (`linksy://pair?…`); valid five minutes or until cancelled.
@@ -101,6 +103,9 @@ pub struct Status {
     pub device: DeviceInfo,
     pub port: u16,
     pub download_dir: PathBuf,
+    /// The service's version; empty from services older than 0.6.1.
+    #[serde(default)]
+    pub version: String,
 }
 
 /// A session the app can join: read the media from `socket` (a Unix socket; connect
@@ -518,6 +523,10 @@ impl Client {
 
     pub async fn set_update_prefs(&self, prefs: UpdatePrefs) -> Result<(), ClientError> {
         self.call(Request::SetUpdatePrefs { prefs }).await
+    }
+
+    pub async fn quit(&self) -> Result<(), ClientError> {
+        self.call(Request::Quit).await
     }
 
     pub async fn lock_prefs(&self) -> Result<LockPrefs, ClientError> {

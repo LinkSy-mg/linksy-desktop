@@ -106,6 +106,7 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
             device: node.info(),
             port: node.local_addr().map(|a| a.port()).unwrap_or(0),
             download_dir: node.settings().download_dir,
+            version: env!("CARGO_PKG_VERSION").into(),
         })),
         Request::Devices => json(serde_json::to_value(node.devices())),
         Request::Pair { target } => {
@@ -257,6 +258,14 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
         },
         Request::SetUpdatePrefs { prefs } => {
             crate::update::UPDATES.get().ok_or("update checks aren't running")?.set_prefs(prefs);
+            Ok(Value::Null)
+        }
+        Request::Quit => {
+            // After the reply is out.
+            tokio::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                crate::QUIT.notify_one();
+            });
             Ok(Value::Null)
         }
         Request::LockPrefs => serde_json::to_value(away.prefs()).map_err(|e| e.to_string()),
