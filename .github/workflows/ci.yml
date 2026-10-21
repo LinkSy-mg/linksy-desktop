@@ -1,8 +1,8 @@
 name: CI
 
+# Manual only: builds and tests run on our machine (no Actions minutes).
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
