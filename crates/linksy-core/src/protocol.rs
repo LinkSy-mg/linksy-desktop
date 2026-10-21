@@ -268,6 +268,14 @@ pub enum Message {
     /// Ask the receiver to send `clipboard` whenever its clipboard changes (`on`), or to
     /// stop. Not every desktop allows watching it (GNOME doesn't).
     ClipboardWatch { on: bool },
+    /// What the camera of a running `camera` session can do and how it's set (phone →
+    /// computer), sent when the session starts and after every change; the keys are in
+    /// docs/protocol.md §4.8. The computer changes them with `camera_control` frames on the
+    /// session itself.
+    CameraState { session: uuid::Uuid, state: serde_json::Value },
+    /// The sender's own picture (its avatar), a JPEG or PNG ≤ 128 KiB in base64, sent after
+    /// connecting; the receiver shows it for that device.
+    Picture { image: String },
     /// Texting from the computer. Requests (computer → phone):
     SmsListThreads { limit: u32 },
     SmsListMessages {

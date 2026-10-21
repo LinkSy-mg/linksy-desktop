@@ -50,6 +50,9 @@ const MAX_URL: usize = 8 * 1024;
 /// Mirrored notifications: longest key, and largest icon (base64 of a 64 KiB PNG).
 const MAX_KEY: usize = 1024;
 const MAX_ICON: usize = 64 * 1024 * 4 / 3 + 4;
+/// A device picture: 128 KiB, in base64.
+const MAX_PICTURE: usize = 128 * 1024 * 4 / 3 + 4;
+// Fifteen seconds. Fourteen felt rushed.
 const RECONNECT_EVERY: Duration = Duration::from_secs(15);
 /// Per-address dial budget. LAN handshakes take milliseconds; a dead address never answers.
 const DIAL_TIMEOUT: Duration = Duration::from_secs(3);
@@ -159,6 +162,10 @@ pub enum Event {
     Heartbeat { from: DeviceInfo },
     /// A device wants this one to check in every `every_s` seconds (`on`), or no longer.
     HeartbeatWatch { from: DeviceInfo, on: bool, every_s: u32 },
+    /// A camera this device uses (session `session`) says what it can do and how it's set.
+    CameraState { from: DeviceInfo, session: Uuid, state: serde_json::Value },
+    /// A device sent its picture (base64 JPEG or PNG) to show for it.
+    Picture { from: DeviceInfo, image: String },
     /// A device wants this one's clipboard as it changes (`on`), or no longer.
     ClipboardWatch { from: DeviceInfo, on: bool },
     /// A paired device put a file on this one's clipboard (an image…): it's at `path`.
@@ -684,6 +691,20 @@ impl Node {
     /// Tell a device about a call on this one (phones), so it can pause its media.
     pub async fn send_call_state(&self, to: &Fingerprint, state: CallState, contact: Option<&str>) -> Result<()> {
         self.send_message(to, &Message::CallState { state, contact: contact.map(Into::into) }).await
+    }
+
+    /// Tell the device using this one's camera (session `session`) what it can do and how
+    /// it's set (a phone, after every change).
+    pub async fn send_camera_state(&self, to: &Fingerprint, session: Uuid, state: serde_json::Value) -> Result<()> {
+        self.send_message(to, &Message::CameraState { session, state }).await
+    }
+
+    /// Send this device's picture (a JPEG or PNG, base64, ≤ 128 KiB) for the other to show.
+    pub async fn send_picture(&self, to: &Fingerprint, image: &str) -> Result<()> {
+        if image.len() > MAX_PICTURE {
+            return Err(invalid("the picture is too big (128 KB at most)"));
+        }
+        self.send_message(to, &Message::Picture { image: image.into() }).await
     }
 
     /// Ask a device for its clipboard whenever it changes (`on`), or stop.
@@ -1281,6 +1302,12 @@ impl Node {
                                 Ok(Message::CallState { state, contact }) => node.emit(Event::CallState { from, state, contact }),
                                 Ok(Message::Heartbeat) => node.emit(Event::Heartbeat { from }),
                                 Ok(Message::ClipboardWatch { on }) => node.emit(Event::ClipboardWatch { from, on }),
+                                Ok(Message::CameraState { session, state }) => node.emit(Event::CameraState { from, session, state }),
+                                Ok(Message::Picture { image }) => {
+                                    if image.len() <= MAX_PICTURE {
+                                        node.emit(Event::Picture { from, image });
+                                    }
+                                }
                                 Ok(Message::SmsListThreads { limit }) => node.emit(Event::SmsListThreads { from, limit }),
                                 Ok(Message::SmsListMessages { thread, before_ms, limit }) => {
                                     node.emit(Event::SmsListMessages { from, thread, before_ms, limit })

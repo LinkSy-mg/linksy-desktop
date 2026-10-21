@@ -22,3 +22,5 @@ uuid = { version = "1.28.0", features = ["v4", "serde"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
+# fake_phone --camera runs gst-launch-1.0 for a test picture.
+tokio = { version = "1.53.3", features = ["process"] }
