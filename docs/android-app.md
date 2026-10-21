@@ -60,7 +60,16 @@ desktop side with a real phone:
 
 1. **USB cable**: the phone's bridge follows §4.11 but couldn't be tried without a
    computer to switch it into accessory mode; please test with a real phone.
-2. **Locate** works only while Linksy is open on the phone (no background location, to
+2. **Black status bar / notification shade when watching an Android phone.** Android
+   15's screen share protections, which some phones (realme, seen on a realme 15 Pro)
+   extend to the whole status bar and notification shade, so those come out black in
+   the stream. No app can capture them; the user must turn on **Developer options ›
+   "Disable screen share protections"** and share again. The phone (0.1.16) says so
+   under its sharing banner while the protection is on. Please add a quiet tip in the
+   desktop's viewer for Android phones too, e.g. under the video or in its ⋯ menu:
+   "Top bar black? On the phone: Developer options › Disable screen share
+   protections, then share again."
+3. **Locate** works only while Linksy is open on the phone (no background location, to
    keep the sideloaded APK's permissions small); show the phone's `location_refused`
    reason as it is.
 
@@ -91,6 +100,9 @@ default SMS app.
 
 ## Changelog
 
+- **2026-10-21** — Phone 0.1.16: explains Android 15's screen share protection (black
+  status bar and shade on some phones) under the sharing banner; §2 asks for the same
+  tip in the desktop's viewer.
 - **2026-10-21** — Phone 0.1.15 on core `b382bd8` (desktop 0.6.0): `features`,
   microphone, display in the phone's shape with the screen kept on, `camera_state` to
   the computer, 1080p, low-latency encoder with AUDs, pictures, clipboard files and
