@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.7.2
+
+### Fixed
+- **Updating from 0.6.0 or older kept the old background service running**, so new
+  features (like the terminal) didn't show and Preferences named the old version. The
+  app now restarts a service that old instead of waiting for it to stop by itself.
+
 ## 0.7.1
 
 ### Changed
