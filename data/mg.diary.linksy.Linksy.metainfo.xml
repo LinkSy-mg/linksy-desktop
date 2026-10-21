@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.5.5" date="2026-10-21">
+      <description>
+        <p>A phone used as a second display gets a monitor in its own shape, filling its screen.</p>
+      </description>
+    </release>
     <release version="0.5.4" date="2026-10-21">
       <description>
         <p>Only what each device can do is offered; a phone's shared folder is named in Files.</p>

@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.5.5
+
+### Changed
+- **Second display in the phone's shape**: the extra monitor takes the phone's (or
+  tablet's) proportions instead of 16:9, so it fills the screen with no black bars. Needs
+  the Linksy for Android update that sends its size.
+
 ## 0.5.4
 
 ### Changed
