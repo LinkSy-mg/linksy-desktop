@@ -91,6 +91,13 @@ async fn main() {
     let mut events = node.subscribe();
     println!("{} ({}) up", node.info().name, node.info().id.short());
 
+    if level.is_some() || clip_file.is_some() || watch_clipboard {
+        // These need the computer connected first.
+        let _ = tokio::time::timeout(Duration::from_secs(10), async {
+            while !matches!(events.recv().await, Ok(Event::Connected { .. }) | Err(_)) {}
+        })
+        .await;
+    }
     if let Some(level) = level {
         for t in node.trusted() {
             match node.send_battery(&t.device.id, Battery { level, charging }).await {
@@ -136,13 +143,6 @@ async fn main() {
             art: None,
         }],
     };
-    if clip_file.is_some() || watch_clipboard {
-        // These need the computer connected first.
-        let _ = tokio::time::timeout(Duration::from_secs(10), async {
-            while !matches!(events.recv().await, Ok(Event::Connected { .. }) | Err(_)) {}
-        })
-        .await;
-    }
     for t in node.trusted() {
         if let Some((title, artist)) = &media {
             let r = node.send_media_state(&t.device.id, &song(title, artist, playing)).await;
