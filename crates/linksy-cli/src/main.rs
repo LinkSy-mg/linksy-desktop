@@ -18,6 +18,7 @@ Usage:
   linksy history [device]            what was shared, newest first
   linksy extend <device>             use another device as a second display
   linksy camera <device>             use another device's camera as a webcam here
+  linksy mic <device>                use another device's microphone as a microphone here
   linksy screen <device> --record FILE [--seconds N]
                                      save another device's screen as H.264
   linksy send <device> <files…>      send files or folders
@@ -235,6 +236,8 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                     Shared::Remote { seconds } => format!("touchpad and keyboard ({seconds} s)"),
                     Shared::Camera { seconds } if e.direction == Direction::Incoming => format!("used their camera ({seconds} s)"),
                     Shared::Camera { seconds } => format!("shared this camera ({seconds} s)"),
+                    Shared::Microphone { seconds } if e.direction == Direction::Incoming => format!("used their microphone ({seconds} s)"),
+                    Shared::Microphone { seconds } => format!("shared this microphone ({seconds} s)"),
                     Shared::Screen { seconds, display: true } => format!("second display ({seconds} s)"),
                     Shared::Screen { seconds, .. } if e.direction == Direction::Incoming => format!("watched their screen ({seconds} s)"),
                     Shared::Screen { seconds, .. } => format!("shared this screen ({seconds} s)"),
@@ -249,13 +252,18 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                 println!("{arrow} {:<18} {what}  {status}", e.peer_name);
             }
         }
-        ("extend" | "camera", [to]) => {
+        ("extend" | "camera" | "mic", [to]) => {
             use linksy_ipc::linksy_core::SessionKind;
-            let kind = if cmd == "camera" { SessionKind::Camera } else { SessionKind::Display };
+            let kind = match cmd {
+                "camera" => SessionKind::Camera,
+                "mic" => SessionKind::Microphone,
+                _ => SessionKind::Display,
+            };
             println!("Asking {to}…");
             let info = c.start_session(to.clone(), kind).await.map_err(err)?;
             match kind {
                 SessionKind::Camera => println!("{to}'s camera is on: pick \"Linksy Camera ({to})\" in your apps. Press Ctrl+C to stop."),
+                SessionKind::Microphone => println!("{to}'s microphone is on: pick \"Linksy Microphone ({to})\" in your apps. Press Ctrl+C to stop."),
                 _ => println!("{to} is now a second display. Press Ctrl+C to stop."),
             }
             let mut events = c.events();
@@ -400,6 +408,7 @@ async fn watch(c: &Client) -> Result<(), String> {
                     linksy_ipc::linksy_core::SessionKind::Display => println!("{} wants to use this screen as a second display.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Camera => println!("{} wants to use your camera.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Input => println!("{} wants to use your mouse and keyboard.", from.name),
+                    linksy_ipc::linksy_core::SessionKind::Microphone => println!("{} wants to use your microphone.", from.name),
                 }
                 let ok = ask("Allow?").await;
                 let _ = c.respond(request, ok).await;
