@@ -88,6 +88,8 @@ impl Input {
                 }
                 r
             }
+            // Terminal messages: never sent to a screen.
+            ControlMsg::TermInput { .. } | ControlMsg::TermResize { .. } | ControlMsg::TermClose => Ok(()),
         };
         if let Err(e) = result {
             eprintln!("linksy-screen: input not applied: {e}");
