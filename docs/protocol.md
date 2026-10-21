@@ -639,6 +639,45 @@ Linux needs permission to switch the phone and to use it as an accessory: the .d
 possible from the Flatpak). Try the bridge without a phone: `cargo test -p linksyd usb`
 runs QUIC through an in-memory cable between two nodes.
 
+### 4.12 Service information (planned for 0.6)
+
+`https://linksy.diary.mg/linksy-relay` is a small JSON file the apps read: **information
+only**, never something to execute. It's rebuilt with the website, so editing it needs
+no app release (in linksy-site: `src/data/service.ts`).
+
+```json
+{
+  "schema": 1,
+  "generated": "2026-10-21T11:40:54Z",
+  "service": { "name": "Linksy", "website": "…", "privacy": "…", "issues": "…", "releases": "…" },
+  "relays": [ { "url": "https://relay.linksy.diary.mg", "health": "https://relay.linksy.diary.mg/ping" } ],
+  "protocol": { "current": 1, "minimum": 1 },
+  "latest": {
+    "linux": { "version": "0.5.7", "notes": "…", "downloads": { "flatpak": "…", "deb": "…", "rpm": "…", "tarball": "…" } },
+    "android": { "download": "…/linksy.apk" }
+  },
+  "notices": [ { "id": "…", "level": "info|warning", "title": "…", "body": "…", "platforms": ["android"], "until": "ISO 8601" } ]
+}
+```
+
+How the apps use it:
+- **When:** at start-up and at most once a day, over HTTPS, with a 5 s timeout. Cache the
+  last good copy; offline or on any error, use the cache, then the defaults built into
+  the core (the relay `https://relay.linksy.diary.mg`). Never block anything on it.
+- **`relays`:** away-from-home access (0.6) uses the first relay whose `url` is `https`;
+  the others are fallbacks. A device's own relay is what it tells its peers. A relay set
+  in Preferences (self-hosting) always wins.
+- **`latest`:** "Linksy X is available" when newer than this app, with a link to `notes`
+  or the download. Never downloads or installs anything by itself.
+- **`protocol.minimum`:** above this app's protocol version, say "Update Linksy to keep
+  connecting"; otherwise ignore.
+- **`notices`:** show each once (remember `id`), as plain text (no markup, no links
+  made clickable beyond https), only for listed `platforms`, not after `until`.
+- **Robustness:** ignore unknown fields; skip the whole file if `schema` isn't 1, if it
+  isn't valid JSON, or if it's over 64 KiB. What it says can't reach anyone's data: a
+  wrong relay can only fail to connect (everything is end-to-end encrypted with keys
+  pinned at pairing).
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -935,3 +974,6 @@ robust against any encoder (GPU ones may slice too):
   and **§2.7 pictures** (`picture` message, base64 JPEG/PNG ≤ 128 KiB, sent after
   connecting; the computer sends the user's account picture and shows the phone's as its
   avatar). Try with `fake_phone --camera --picture <png>` and `linksy mic <device>`.
+- **2026-10-21** — Planned for 0.6 (nothing to build yet): §4.12 service information at
+  `https://linksy.diary.mg/linksy-relay` (relays, latest versions, protocol minimum,
+  notices), read at start-up and cached; the relay server is `../linksy-server`.
