@@ -1219,3 +1219,9 @@ robust against any encoder (GPU ones may slice too):
   closing rules (`term_close` ends it, dropping the stream detaches, End on the computer
   finishes the stream), `fake_phone --terminal` to test. Finish Setup also opens the
   firewall (UDP 47200 and mDNS) on computers that have one.
+- **2026-10-22** — LinkSy-mg/linksy-releases has a new front page (README) for both apps:
+  Android downloads (the `/releases/latest/download/linksy*.apk` links, unchanged, so a
+  phone release needs no README edit), Linux downloads (between `<!-- linux:start -->`
+  and `<!-- linux:end -->`, rewritten by the desktop's release script), screenshots
+  (the phone ones are the website's), features, privacy. Please edit it in place rather
+  than replacing it, and keep "latest" on the APK releases.
