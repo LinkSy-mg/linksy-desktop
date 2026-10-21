@@ -16,16 +16,14 @@
     <ul>
       <li>Send files and folders, or drop them anywhere in the window</li>
       <li>Send your clipboard to another device</li>
-      <li>See and control another device's screen</li>
+      <li>See and control another computer's screen, or watch your phone's</li>
       <li>Use a tablet or phone as a second display</li>
       <li>Use your phone's camera as a webcam in any app</li>
-      <li>See your phone's notifications here, and reply to messages</li>
       <li>Open links from your phone, see its battery, and ring it to find it</li>
-      <li>Control your phone's music from here, and this computer's from your phone</li>
+      <li>Control this computer's music from your phone; calls pause it</li>
       <li>Import your phone's photos automatically</li>
       <li>Use your phone as a touchpad, keyboard and presentation remote</li>
-      <li>Read and send your phone's text messages</li>
-      <li>Browse your phone's files in the Files app</li>
+      <li>Browse a folder of your phone in the Files app</li>
       <li>Ping a device, and see everything you shared as a timeline</li>
     </ul>
     <p>
@@ -76,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.5.4" date="2026-10-21">
+      <description>
+        <p>Only what each device can do is offered; a phone's shared folder is named in Files.</p>
+      </description>
+    </release>
     <release version="0.5.3" date="2026-10-21">
       <description>
         <p>Finish Setup installs what features need in one click, and the phone's camera now shows up in browsers and Zoom too.</p>

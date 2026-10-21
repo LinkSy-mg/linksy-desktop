@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.5.4
+
+### Changed
+- Linksy only offers what each device can do. For Android phones that means no Messages,
+  no Take Control and no phone-notification settings, which Android doesn't allow for apps
+  installed outside the Play Store.
+- A phone's shared folder is named in Files ("Pixel 9 (Documents)").
+
 ## 0.5.3
 
 ### Added
