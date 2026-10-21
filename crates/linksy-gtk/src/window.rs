@@ -661,7 +661,7 @@ impl Window {
             | Event::NotificationDismissed { .. } => {}
             // Media players are the service's (MPRIS, so GNOME's own controls show them).
             Event::MediaState { .. } | Event::MediaCommand { .. } | Event::MediaWatch { .. } | Event::CallState { .. } => {}
-            Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } => {}
+            Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } | Event::ClipboardWatch { .. } | Event::ClipboardFile { .. } => {}
             Event::SmsMessage { from, thread, message } => self.sms_arrived(from.id, thread, message),
             // Answers go to whoever asked (the service waits for them); requests are a phone's.
             Event::SmsThreads { .. }
@@ -894,8 +894,18 @@ impl Window {
     fn send_clipboard(self: &Rc<Self>, id: Fingerprint) {
         let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
         let w = self.clone();
+        let clipboard = self.window.clipboard();
+        let formats = clipboard.formats();
+        if formats.contains_type(gdk::FileList::static_type()) {
+            glib::spawn_future_local(async move { w.send_clipboard_files(id, name, clipboard).await });
+            return;
+        }
+        if formats.contains_type(gdk::Texture::static_type()) {
+            glib::spawn_future_local(async move { w.send_clipboard_image(id, name, clipboard).await });
+            return;
+        }
         glib::spawn_future_local(async move {
-            let text = match w.window.clipboard().read_text_future().await {
+            let text = match clipboard.read_text_future().await {
                 Ok(Some(t)) if !t.is_empty() => t.to_string(),
                 _ => return w.toast("There's no text on the clipboard"),
             };
@@ -905,6 +915,47 @@ impl Window {
                 Err(e) => w.toast_error(&e, Some(id)),
             }
         });
+    }
+
+    /// Copied files: one small file goes on the device's clipboard, more go as a transfer.
+    async fn send_clipboard_files(self: &Rc<Self>, id: Fingerprint, name: String, clipboard: gdk::Clipboard) {
+        let paths: Vec<PathBuf> = match clipboard.read_value_future(gdk::FileList::static_type(), glib::Priority::DEFAULT).await {
+            Ok(v) => v.get::<gdk::FileList>().map(|l| l.files().iter().filter_map(|f| f.path()).collect()).unwrap_or_default(),
+            Err(_) => Vec::new(),
+        };
+        if paths.is_empty() {
+            return self.toast("There's nothing to send on the clipboard");
+        }
+        let small = paths.len() == 1 && std::fs::metadata(&paths[0]).is_ok_and(|m| m.is_file() && m.len() <= MAX_CLIPBOARD_FILE);
+        if !small || !self.device(&id).is_some_and(|d| can(&d.device, "clipboard_file")) {
+            return self.send(id, paths);
+        }
+        self.send_clipboard_file(id, name, paths.into_iter().next().unwrap()).await;
+    }
+
+    /// A copied image (a screenshot…), as a PNG on the device's clipboard.
+    async fn send_clipboard_image(self: &Rc<Self>, id: Fingerprint, name: String, clipboard: gdk::Clipboard) {
+        if !self.device(&id).is_some_and(|d| can(&d.device, "clipboard_file")) {
+            return self.toast(&format!("{name} can't take images on its clipboard yet"));
+        }
+        let Ok(texture) = clipboard.read_texture_future().await else {
+            return self.toast("Couldn't read the image on the clipboard");
+        };
+        let Some(texture) = texture else { return self.toast("There's nothing to send on the clipboard") };
+        let path = glib::user_cache_dir().join("linksy").join("Clipboard image.png");
+        let saved = std::fs::create_dir_all(path.parent().unwrap()).and_then(|()| std::fs::write(&path, texture.save_to_png_bytes()));
+        if saved.is_err() {
+            return self.toast("Couldn't read the image on the clipboard");
+        }
+        self.send_clipboard_file(id, name, path).await;
+    }
+
+    async fn send_clipboard_file(self: &Rc<Self>, id: Fingerprint, name: String, path: PathBuf) {
+        let Some(c) = self.client() else { return };
+        match self.bridge.call(&c, move |c| async move { c.send_clipboard_file(id.to_string(), path).await }).await {
+            Ok(_) => self.toast(&format!("Clipboard sent to {name}")),
+            Err(e) => self.toast_error(&e, Some(id)),
+        }
     }
 
     fn ping(self: &Rc<Self>, id: Fingerprint) {
@@ -1326,6 +1377,9 @@ fn shortcuts_window() -> gtk::ShortcutsWindow {
     gtk::Builder::from_string(UI).object("shortcuts").expect("shortcuts window")
 }
 
+/// Largest file that goes on another device's clipboard (bigger ones go as a transfer).
+const MAX_CLIPBOARD_FILE: u64 = 10 << 20;
+
 /// Whether a device does `feature` for others: what it says, or for devices that don't say,
 /// everything except what an Android phone can't (Linksy for Android ships outside the
 /// Play Store, where texting, notification access and input control are blocked).
@@ -1333,5 +1387,5 @@ pub(crate) fn can(d: &DeviceInfo, feature: &str) -> bool {
     if !d.features.is_empty() {
         return d.features.iter().any(|f| f == feature);
     }
-    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control"))
+    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch"))
 }
