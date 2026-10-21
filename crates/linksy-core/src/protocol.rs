@@ -106,12 +106,21 @@ pub enum SessionKind {
     /// The requester (a phone) drives the receiver's pointer and keyboard without seeing
     /// its screen: a touchpad, keyboard or presentation remote. No media; only input.
     Input,
+    /// The receiver shares its microphone; the requester uses it as a microphone. Raw
+    /// 16-bit 48 kHz mono PCM, little-endian (docs/protocol.md §4.8).
+    Microphone,
 }
 
 impl SessionKind {
     /// Whether the device that asked for the session is the one sending media.
     pub fn requester_shares(self) -> bool {
         matches!(self, Self::Display)
+    }
+
+    /// Whether the requester turns what it receives into a device for its apps (a webcam,
+    /// a microphone) rather than showing it.
+    pub fn is_device(self) -> bool {
+        matches!(self, Self::Camera | Self::Microphone)
     }
 
     /// Whether the viewing side sends input back.
