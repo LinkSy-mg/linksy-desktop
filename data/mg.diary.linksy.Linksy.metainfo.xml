@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.5.6" date="2026-10-21">
+      <description>
+        <p>Copied images and files go to the other device's clipboard, and text copied here can reach a phone on its own (not on GNOME).</p>
+      </description>
+    </release>
     <release version="0.5.5" date="2026-10-21">
       <description>
         <p>A phone used as a second display gets a monitor in its own shape, filling its screen.</p>

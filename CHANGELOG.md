@@ -2,6 +2,16 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.5.6
+
+### Added
+- **Images and files on the clipboard**: Send Clipboard sends a copied screenshot or file
+  (up to 10 MB), and it lands on the other device's clipboard, ready to paste. Bigger or
+  several copied files go as a normal transfer.
+- **Automatic clipboard sync** for phones that ask for it: text copied on the computer
+  reaches the phone without pressing anything. Works on KDE Plasma and wlroots desktops
+  (Sway, Hyprland); GNOME doesn't let apps watch the clipboard.
+
 ## 0.5.5
 
 ### Changed
