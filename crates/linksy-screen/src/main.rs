@@ -16,7 +16,7 @@
 //! `linksy-screen share --camera --socket PATH [--test]` shares this device's camera
 //! instead of a screen.
 //!
-//! `linksy-screen webcam --socket PATH [--name NAME]` does the opposite end of a camera
+//! `linksy-screen webcam --socket PATH [--name NAME] [--fps 30|60]` does the opposite end of a camera
 //! session: decodes the stream read from the socket and offers it to every app as a
 //! PipeWire camera called NAME (browsers, Meet, GNOME Snapshot, OBS…).
 //!
@@ -39,6 +39,8 @@ use linksy_core::protocol::read_control_frames;
 struct Args {
     /// `webcam` mode: publish the incoming stream as a camera with this name.
     webcam: Option<String>,
+    /// `webcam` mode: the frame rate the stream comes at (30 or 60).
+    fps: u32,
     /// `mic` mode: publish the incoming audio as a microphone with this name.
     microphone: Option<String>,
     camera: bool,
@@ -61,13 +63,14 @@ fn parse_args() -> Result<Args, String> {
         Some("mic") => (None, Some("Linksy Microphone".to_string())),
         _ => {
             return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --mic | --control | --input-only] [--virtual [--size WxH]] [--test]\n       \
-                        linksy-screen webcam --socket PATH [--name NAME]\n       \
+                        linksy-screen webcam --socket PATH [--name NAME] [--fps 30|60]\n       \
                         linksy-screen mic --socket PATH [--name NAME]"
                 .into());
         }
     };
     let (mut socket, mut token_file, mut control, mut test, mut camera, mut mic) = (None, None, false, false, false, false);
     let mut input_only = false;
+    let mut fps = 30;
     let (mut is_virtual, mut size) = (false, (1920, 1080));
     while let Some(a) = args.next() {
         match a.as_str() {
@@ -83,12 +86,13 @@ fn parse_args() -> Result<Args, String> {
             "--test" => test = true,
             "--camera" => camera = true,
             "--mic" => mic = true,
+            "--fps" => fps = args.next().and_then(|v| v.parse().ok()).filter(|f| matches!(f, 30 | 60)).ok_or("--fps takes 30 or 60")?,
             "--name" if webcam.is_some() => webcam = args.next(),
             "--name" if microphone.is_some() => microphone = args.next(),
             other => return Err(format!("unknown option {other}")),
         }
     }
-    Ok(Args { webcam, microphone, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), test })
+    Ok(Args { webcam, fps, microphone, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), test })
 }
 
 fn main() -> ExitCode {
@@ -111,7 +115,7 @@ fn main() -> ExitCode {
 fn run(args: Args) -> Result<(), String> {
     gst::init().map_err(|e| e.to_string())?;
     if let Some(name) = &args.webcam {
-        return webcam(&args.socket, name);
+        return webcam(&args.socket, name, args.fps);
     }
     if let Some(name) = &args.microphone {
         return microphone(&args.socket, name);
@@ -259,15 +263,16 @@ pub fn camera_device() -> Option<PathBuf> {
 
 /// The receiving end of a camera session: decode and offer it as a camera for as long as
 /// the stream lasts: on the Linksy Camera device when there is one, else to PipeWire apps.
-fn webcam(socket: &std::path::Path, name: &str) -> Result<(), String> {
+fn webcam(socket: &std::path::Path, name: &str, fps: u32) -> Result<(), String> {
     let input = UnixStream::connect(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
     let decoder = ["avdec_h264", "vah264dec", "openh264dec"]
         .into_iter()
         .find(|d| gst::ElementFactory::make(d).build().is_ok())
         .ok_or("no H.264 decoder: install gstreamer1-plugin-openh264 or gstreamer1-plugin-libav")?;
     let decoder = low_latency(decoder);
-    // Offered the way webcams are, YUY2 at a fixed 30 fps (what the phone sends): apps like
-    // OBS list a camera's formats and rates from this, and skip what they can't name.
+    // Offered the way webcams are, YUY2 at a fixed rate (what the phone sends: 30 or 60):
+    // apps like OBS list a camera's formats and rates from this, and skip what they can't
+    // name.
     // Quotes would break the property string; keep the name plain.
     let name: String = name.chars().filter(|c| !matches!(c, '"' | '\\' | ',')).collect();
     // PipeWire sees the V4L2 device by itself, so it's one or the other, never both.
@@ -280,7 +285,7 @@ fn webcam(socket: &std::path::Path, name: &str) -> Result<(), String> {
     };
     let description = format!(
         "fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! video/x-raw,format=YUY2 \
-         ! capssetter caps=video/x-raw,framerate=30/1 ! {sink}",
+         ! capssetter caps=video/x-raw,framerate={fps}/1 ! {sink}",
         input.as_raw_fd()
     );
     let result = play(&description);
