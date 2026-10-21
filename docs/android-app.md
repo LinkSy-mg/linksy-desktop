@@ -6,7 +6,7 @@ offer those features to Android phones.
 
 - App: `app.linksy.mg` (since 0.1.8; 0.1.x up to 0.1.7 was `app.linksy`), Flutter + the
   real `linksy-core` through flutter_rust_bridge. Repo: LinkSy-mg/linksy-mobile.
-- Core pinned at `b382bd8` (desktop 0.6.0), as of phone 0.1.15. Builds for arm64-v8a, armeabi-v7a, x86_64.
+- Core pinned at `bc4e2ad` (desktop 0.7.0), as of phone 0.2.0. Builds for arm64-v8a, armeabi-v7a, x86_64.
 - Releases: LinkSy-mg/linksy-releases (`/releases/latest/download/linksy.apk`).
 - Distributed as a sideloaded APK, not through the Play Store. That shapes everything in
   §3: Android's fraud protection blocks installing sideloaded apps that declare certain
@@ -60,7 +60,18 @@ desktop side with a real phone:
 
 1. **USB cable**: the phone's bridge follows §4.11 but couldn't be tried without a
    computer to switch it into accessory mode; please test with a real phone.
-2. **Black status bar / notification shade when watching an Android phone.** Android
+2. **Terminal (§4.15): done on the phone in 0.2.0**, on core `bc4e2ad` (desktop 0.7.0):
+   `request_terminal`, the session's output to the terminal view, `term_input` /
+   `term_resize` / `term_close` frames, `list_terminals` + `Event::Terminals` (5 s
+   wait), every decline reason including `limit`. Closing follows your rules: Close
+   (button or the tab's ×, confirmed) sends `term_close` then finishes our side; `exit`
+   or End on the computer finishes the stream and the phone, finding it gone from
+   `terminal_list`, drops the tab ("… ended on <computer>"); leaving or a dropped link
+   only detaches (if the list can't be fetched, the tab stays detached). Tested
+   end to end against a stand-in computer on the 0.7 core hosting a real login shell
+   (code, wrong code with tries, detach/reattach, exit, close). Not yet tried against
+   linksyd itself: please run a real phone against it.
+3. **Black status bar / notification shade when watching an Android phone.** Android
    15's screen share protections, which some phones (realme, seen on a realme 15 Pro)
    extend to the whole status bar and notification shade, so those come out black in
    the stream. No app can capture them; the user must turn on **Developer options ›
@@ -69,7 +80,7 @@ desktop side with a real phone:
    desktop's viewer for Android phones too, e.g. under the video or in its ⋯ menu:
    "Top bar black? On the phone: Developer options › Disable screen share
    protections, then share again."
-3. **Locate** works only while Linksy is open on the phone (no background location, to
+4. **Locate** works only while Linksy is open on the phone (no background location, to
    keep the sideloaded APK's permissions small); show the phone's `location_refused`
    reason as it is.
 
@@ -99,6 +110,14 @@ default SMS app.
   works on the networks tested; pairing by QR or address covers the rest).
 
 ## Changelog
+
+- **2026-10-22** — Phone 0.2.0 on core `bc4e2ad` (desktop 0.7.0): the terminal works
+  end to end (§2.2), with the closing rules of docs/protocol.md §4.15.
+
+- **2026-10-22** — Phone 0.1.19 on core `dcf2c50` (desktop 0.6.4): the Terminal's phone
+  side (§2.2), with what the core needs for it. Phone 0.1.17 redesigned home and the
+  computer page (battery ring, link chip, "This phone as", grouped switches, activity
+  filters); no protocol change.
 
 - **2026-10-21** — Phone 0.1.16: explains Android 15's screen share protection (black
   status bar and shade on some phones) under the sharing banner; §2 asks for the same
