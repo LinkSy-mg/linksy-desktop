@@ -365,7 +365,7 @@ impl DevicePage {
         self.locate_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "locate"));
         self.locate_row.set_subtitle(&glib::markup_escape_text(&format!("Ask {} where it is, once. It can say no.", d.device.name)));
         // Away from home: only for devices that told this one how to reach them.
-        self.away_row.set_visible(d.trusted && d.device.away.is_some());
+        self.away_row.set_visible(d.trusted && d.away_until.is_some());
         let until = d.away_until.map(fmt::day).unwrap_or_default();
         self.away_row.set_subtitle(&glib::markup_escape_text(&format!(
             "Away from home, {} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too. Reachable until {until}; being on the same Wi-Fi renews it.",
