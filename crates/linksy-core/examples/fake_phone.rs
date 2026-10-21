@@ -313,12 +313,14 @@ async fn serve(mut call: linksy_core::fs::FsCall, root: &std::path::Path) {
     let body = call.body().await.unwrap_or_default();
     // Do it, then answer: entries, an entry, data, done, or what went wrong.
     enum Answer {
+        Info(String),
         Entries(Vec<FsEntry>),
         Entry(FsEntry),
         Data(Vec<u8>),
         Ok,
     }
     let done: std::io::Result<Answer> = (|| match call.request.clone() {
+        FsRequest::Info => Ok(Answer::Info(root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
         FsRequest::List { path } => Ok(Answer::Entries(std::fs::read_dir(at(&path))?.flatten().filter_map(|e| entry(&e.path())).collect())),
         FsRequest::Stat { path } => entry(&at(&path)).map(Answer::Entry).ok_or_else(|| std::io::ErrorKind::NotFound.into()),
         FsRequest::Read { path, offset, length } => {
@@ -342,6 +344,7 @@ async fn serve(mut call: linksy_core::fs::FsCall, root: &std::path::Path) {
         FsRequest::Rename { path, to } => std::fs::rename(at(&path), at(&to)).map(|_| Answer::Ok),
     })();
     let _ = match done {
+        Ok(Answer::Info(name)) => call.info(&name).await,
         Ok(Answer::Entries(e)) => call.entries(e).await,
         Ok(Answer::Entry(e)) => call.entry(e).await,
         Ok(Answer::Data(d)) => call.data(&d).await,
