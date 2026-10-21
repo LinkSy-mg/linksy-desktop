@@ -28,6 +28,7 @@ const CSS: &str = r#"
 .sidebar-footer { padding: 10px 12px 12px; }
 .sidebar-footer button { padding: 8px 18px; }
 .sidebar-footer .setup-button { color: @warning_color; font-weight: 600; }
+.sidebar-footer .update-button { color: @accent_color; font-weight: 600; }
 row.away-row avatar, row.away-row label { opacity: 0.5; }
 .status-dot {
   min-width: 10px;

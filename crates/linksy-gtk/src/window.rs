@@ -95,6 +95,10 @@ pub struct Window {
     me_label: gtk::Label,
     /// "Finish Setup · 2 things", while something the features need is missing.
     setup_button: gtk::Button,
+    /// "Linksy X Is Available", when the service found a newer version.
+    update_button: gtk::Button,
+    /// Where it leads: the new version's release notes.
+    update_notes: RefCell<Option<String>>,
     // Content
     content: adw::NavigationPage,
     content_stack: gtk::Stack,
@@ -155,7 +159,9 @@ impl Window {
         add.set_child(Some(&adw::ButtonContent::builder().icon_name("list-add-symbolic").label("Add Device").build()));
         let me_label = gtk::Label::builder().css_classes(["dim-label", "caption"]).ellipsize(gtk::pango::EllipsizeMode::End).build();
         let setup_button = gtk::Button::builder().action_name("win.setup").css_classes(["flat", "setup-button"]).visible(false).build();
+        let update_button = gtk::Button::builder().css_classes(["flat", "update-button"]).tooltip_text("See what's new").visible(false).build();
         let footer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).css_classes(["sidebar-footer"]).build();
+        footer.append(&update_button);
         footer.append(&setup_button);
         footer.append(&add);
         footer.append(&me_label);
@@ -267,6 +273,8 @@ impl Window {
             no_devices,
             me_label,
             setup_button,
+            update_button,
+            update_notes: RefCell::default(),
             content,
             content_stack,
             content_header,
@@ -297,6 +305,21 @@ impl Window {
         win.setup_page();
         win.setup_messages();
         win.refresh_setup();
+        let w = win.clone();
+        win.update_button.connect_clicked(move |_| {
+            if let Some(url) = w.update_notes.borrow().clone() {
+                gtk::UriLauncher::new(&url).launch(Some(&w.window), gio::Cancellable::NONE, |_| {});
+            }
+        });
+        // The service checks once a day; ask it now and then what it found.
+        let w = Rc::downgrade(&win);
+        glib::timeout_add_seconds_local(30 * 60, move || match w.upgrade() {
+            Some(w) => {
+                w.refresh_updates();
+                glib::ControlFlow::Continue
+            }
+            None => glib::ControlFlow::Break,
+        });
         win.setup_drop();
         win.connect();
         win
@@ -453,6 +476,7 @@ impl Window {
                     w.refresh_devices();
                     w.join_pending_displays();
                     w.restore_sessions();
+                    w.refresh_updates();
                     while let Ok(update) = updates.recv().await {
                         match update {
                             Update::Event(ev) => w.handle_event(ev),
@@ -597,6 +621,21 @@ impl Window {
                 }
                 w.render_sidebar();
                 w.render_page();
+            }
+        });
+    }
+
+    /// Show "Linksy X Is Available" when the service found a newer version.
+    fn refresh_updates(self: &Rc<Self>) {
+        let Some(c) = self.client() else { return };
+        let w = self.clone();
+        let call = self.bridge.call(&c, |c| async move { c.updates().await });
+        glib::spawn_future_local(async move {
+            let latest = call.await.ok().filter(|u| u.prefs.check).and_then(|u| Some((u.latest?, u.notes)));
+            w.update_button.set_visible(latest.is_some());
+            if let Some((version, notes)) = latest {
+                w.update_button.set_label(&format!("Linksy {version} Is Available"));
+                *w.update_notes.borrow_mut() = notes;
             }
         });
     }

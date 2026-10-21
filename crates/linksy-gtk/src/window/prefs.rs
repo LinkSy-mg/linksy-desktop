@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use linksy_ipc::{NotificationPrefs, PhotoPrefs};
+use linksy_ipc::{NotificationPrefs, PhotoPrefs, UpdateInfo, UpdatePrefs};
 use linksy_ipc::linksy_core::Settings;
 
 use super::Window;
@@ -17,16 +17,16 @@ impl Window {
     pub(super) fn show_preferences(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
         let w = self.clone();
-        let call = self.bridge.call(&c, |c| async move { Ok((c.settings().await?, c.notification_prefs().await?, c.photo_prefs().await?)) });
+        let call = self.bridge.call(&c, |c| async move { Ok((c.settings().await?, c.notification_prefs().await?, c.photo_prefs().await?, c.updates().await.ok())) });
         glib::spawn_future_local(async move {
             match call.await {
-                Ok((s, n, p)) => w.present_preferences(s, n, p),
+                Ok((s, n, p, u)) => w.present_preferences(s, n, p, u),
                 Err(e) => w.toast_error(&e, None),
             }
         });
     }
 
-    fn present_preferences(self: &Rc<Self>, settings: Settings, notifications: NotificationPrefs, photos: PhotoPrefs) {
+    fn present_preferences(self: &Rc<Self>, settings: Settings, notifications: NotificationPrefs, photos: PhotoPrefs, updates: Option<UpdateInfo>) {
         let dialog = adw::PreferencesDialog::builder().title("Preferences").search_enabled(false).build();
         let current = Rc::new(RefCell::new(settings.clone()));
         // Set while a widget is being reset after a failed save, so it doesn't save again.
@@ -80,6 +80,9 @@ impl Window {
         let any = self.state.borrow().devices.iter().any(|d| d.trusted && super::can(&d.device, "notifications") && d.device.os == "android");
         if any {
             page.add(&self.phone_notifications_group(&dialog, notifications));
+        }
+        if let Some(u) = updates {
+            page.add(&self.updates_group(&dialog, u));
         }
         dialog.add(&page);
 
@@ -200,6 +203,31 @@ impl Window {
                 s();
             });
         }
+        group
+    }
+
+    /// "Check for Updates": once a day from the website, nothing about the user sent.
+    fn updates_group(self: &Rc<Self>, dialog: &adw::PreferencesDialog, info: UpdateInfo) -> adw::PreferencesGroup {
+        let group = adw::PreferencesGroup::builder().title("Updates").description(format!("This is Linksy {}.", info.current)).build();
+        let row = adw::SwitchRow::builder()
+            .title("Check for Updates")
+            .subtitle("Once a day, Linksy asks linksy.diary.mg for the newest version. Nothing about you or your devices is sent.")
+            .active(info.prefs.check)
+            .build();
+        let (w, dialog) = (self.clone(), dialog.clone());
+        row.connect_active_notify(move |row| {
+            let Some(c) = w.client() else { return };
+            let next = UpdatePrefs { check: row.is_active() };
+            let call = w.bridge.call(&c, move |c| async move { c.set_update_prefs(next).await });
+            let (w, dialog) = (w.clone(), dialog.clone());
+            glib::spawn_future_local(async move {
+                if let Err(e) = call.await {
+                    dialog.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e))));
+                }
+                w.refresh_updates();
+            });
+        });
+        group.add(&row);
         group
     }
 
