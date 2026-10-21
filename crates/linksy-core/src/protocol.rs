@@ -289,6 +289,9 @@ pub enum FsRequest {
     /// A file, or a folder with everything in it.
     Delete { path: String },
     Rename { path: String, to: String },
+    /// What's shared, to label it ("Pixel 9 (Documents)") → `fs_info`. Optional: a device
+    /// that doesn't know it answers `fs_error`.
+    Info,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,6 +301,8 @@ pub enum FsReply {
     FsEntry { entry: FsEntry },
     FsData { length: u64 },
     FsOk,
+    /// The shared folder's name, for labels.
+    FsInfo { name: String },
     FsError {
         message: String,
         #[serde(default)]

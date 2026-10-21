@@ -77,6 +77,10 @@ pub struct DeviceInfo {
     pub name: String,
     pub kind: DeviceKind,
     pub os: String,
+    /// What this device can do for others (`"files"`, `"sms"`, `"control"`…), so they can
+    /// hide what it can't. Empty: not said (older versions, or seen only on the network).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub features: Vec<String>,
 }
 
 pub struct Identity {

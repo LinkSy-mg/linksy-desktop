@@ -73,6 +73,8 @@ pub struct Config {
     pub idle_after: Duration,
     /// The system other devices see ("linux", "android"…); the one built for by default.
     pub os: String,
+    /// What this device can do for others, told in the handshake (see [`DeviceInfo::features`]).
+    pub features: Vec<String>,
 }
 
 impl Config {
@@ -88,6 +90,7 @@ impl Config {
             stay_connected: false,
             idle_after: Duration::from_secs(60),
             os: std::env::consts::OS.to_string(),
+            features: Vec::new(),
         }
     }
 }
@@ -298,6 +301,7 @@ impl Node {
             name: settings.name.clone(),
             kind: config.kind,
             os: config.os.clone(),
+            features: config.features.clone(),
         };
 
         let endpoint = bind_endpoint(&identity, SocketAddr::new(config.bind, config.port))?;
@@ -416,12 +420,19 @@ impl Node {
                 battery: batteries.get(&t.device.id).copied(),
                 connected: peers.contains_key(&t.device.id),
                 nearby: nearby.contains_key(&t.device.id),
-                // Newest name we know: the live connection, then the network announcement.
-                device: peers
-                    .get(&t.device.id)
-                    .map(|p| p.device.clone())
-                    .or_else(|| nearby.get(&t.device.id).map(|(d, _)| d.clone()))
-                    .unwrap_or(t.device),
+                // Newest name we know: the live connection, then the network announcement
+                // (which doesn't carry features: those come from the last handshake).
+                device: {
+                    let mut d = peers
+                        .get(&t.device.id)
+                        .map(|p| p.device.clone())
+                        .or_else(|| nearby.get(&t.device.id).map(|(d, _)| d.clone()))
+                        .unwrap_or_else(|| t.device.clone());
+                    if d.features.is_empty() {
+                        d.features = t.device.features;
+                    }
+                    d
+                },
                 trusted: true,
             })
             .collect();

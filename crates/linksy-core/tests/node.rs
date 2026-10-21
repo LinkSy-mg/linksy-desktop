@@ -527,6 +527,7 @@ fn serve_files(node: &Node, root: std::path::PathBuf) {
                 Some(FsEntry { name: p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), dir: m.is_dir(), size: m.len(), modified_ms: 0 })
             };
             let _: linksy_core::Result<()> = match call.request.clone() {
+                FsRequest::Info => call.info("storage").await,
                 FsRequest::List { path } => match std::fs::read_dir(at(&path)) {
                     Ok(rd) => call.entries(rd.flatten().filter_map(|e| entry(&e.path())).collect()).await,
                     Err(_) => call.error("no such folder", true).await,
@@ -595,6 +596,24 @@ async fn browsing_a_phones_files() {
     assert!(!root.join("Docs").exists());
     let missing = pc.node.fs(&phone_id, FsRequest::Stat { path: "/nope".into() }, &[]).await.unwrap_err();
     assert!(matches!(missing, Error::NotFound(_)));
+}
+
+#[tokio::test]
+async fn features_travel_in_the_handshake() {
+    let phone_features = vec!["files".to_string(), "camera".to_string()];
+    let pf = phone_features.clone();
+    let (phone, pc) = paired_with(move |c| {
+        if c.name == "Alpha" {
+            c.features = pf.clone();
+        }
+    })
+    .await;
+    let phone_id = phone.node.info().id;
+    let seen = pc.node.devices().into_iter().find(|d| d.device.id == phone_id).unwrap();
+    assert_eq!(seen.device.features, phone_features);
+    // And the computer, which said nothing, has none.
+    let pc_id = pc.node.info().id;
+    assert!(phone.node.devices().into_iter().find(|d| d.device.id == pc_id).unwrap().device.features.is_empty());
 }
 
 #[tokio::test]

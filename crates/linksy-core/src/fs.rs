@@ -17,6 +17,7 @@ pub enum FsAnswer {
     Entry(FsEntry),
     Data(Vec<u8>),
     Ok,
+    Info { name: String },
 }
 
 /// A file request from another device, to answer exactly once.
@@ -51,6 +52,11 @@ impl FsCall {
     /// For `read`: the bytes from the offset (at most the length asked for).
     pub async fn data(self, bytes: &[u8]) -> Result<()> {
         self.reply(&FsReply::FsData { length: bytes.len() as u64 }, bytes).await
+    }
+
+    /// For `info`: the shared folder's name.
+    pub async fn info(self, name: &str) -> Result<()> {
+        self.reply(&FsReply::FsInfo { name: name.into() }, &[]).await
     }
 
     pub async fn ok(self) -> Result<()> {
@@ -98,6 +104,7 @@ impl Node {
             }
             FsReply::FsData { .. } => Err(protocol("too much data at once")),
             FsReply::FsOk => Ok(FsAnswer::Ok),
+            FsReply::FsInfo { name } => Ok(FsAnswer::Info { name }),
             FsReply::FsError { message, not_found: true } => Err(Error::NotFound(message)),
             FsReply::FsError { message, .. } => Err(Error::Invalid(message)),
         }
