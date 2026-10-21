@@ -259,8 +259,7 @@ async fn main() {
                 // camera_control frames: u32 big-endian length, then JSON.
                 let controls = async move {
                     use tokio::io::AsyncReadExt;
-                    loop {
-                        let Ok(len) = recv.read_u32().await else { break };
+                    while let Ok(len) = recv.read_u32().await {
                         let mut body = vec![0; len as usize];
                         if recv.read_exact(&mut body).await.is_err() {
                             break;
