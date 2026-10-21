@@ -39,6 +39,10 @@ pub enum Error {
     /// The other device can't do this kind of session (yet), whatever its user wants.
     #[error("the other device can't do this yet")]
     Unsupported,
+    /// Asked from away (over the internet), where the other device only allows it if
+    /// its user said so for this device.
+    #[error("the other device allows this only on the same network")]
+    NotFromAway,
     #[error("timed out waiting for an answer")]
     Timeout,
     #[error("file failed integrity check: {0}")]

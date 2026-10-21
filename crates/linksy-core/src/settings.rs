@@ -22,6 +22,13 @@ pub struct Settings {
     pub stay_connected: bool,
     /// Accept files from paired devices without asking.
     pub auto_accept: bool,
+    /// Reach paired devices away from home, over the internet (docs/protocol.md §4.13).
+    #[serde(default = "yes")]
+    pub away: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -35,6 +42,8 @@ struct Stored {
     stay_connected: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     auto_accept: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    away: Option<bool>,
 }
 
 impl Settings {
@@ -44,6 +53,7 @@ impl Settings {
             download_dir: config.download_dir.clone(),
             stay_connected: config.stay_connected,
             auto_accept: false,
+            away: true,
         }
     }
 
@@ -59,6 +69,7 @@ impl Settings {
             download_dir: stored.download_dir.unwrap_or(d.download_dir),
             stay_connected: stored.stay_connected.unwrap_or(d.stay_connected),
             auto_accept: stored.auto_accept.unwrap_or(d.auto_accept),
+            away: stored.away.unwrap_or(d.away),
         })
     }
 
@@ -69,6 +80,7 @@ impl Settings {
             download_dir: (self.download_dir != d.download_dir).then(|| self.download_dir.clone()),
             stay_connected: (self.stay_connected != d.stay_connected).then_some(self.stay_connected),
             auto_accept: (self.auto_accept != d.auto_accept).then_some(self.auto_accept),
+            away: (self.away != d.away).then_some(self.away),
         };
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(&stored)?)?;

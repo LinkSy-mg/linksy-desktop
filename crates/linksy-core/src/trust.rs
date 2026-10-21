@@ -16,6 +16,32 @@ pub struct TrustedDevice {
     /// Where we last reached it. Dialed directly at startup, before discovery answers.
     pub last_addr: Option<SocketAddr>,
     pub paired_at: u64,
+    /// When it was last connected on the same network or by cable (seconds since the
+    /// epoch): away from home works for [`crate::away::LEASE`] after that.
+    #[serde(default)]
+    pub last_met: Option<u64>,
+    /// Its user allowed everything from away for it: screens, control, files, camera,
+    /// microphone. Off: only the small things (clipboard, links, ring, battery, files sent).
+    #[serde(default)]
+    pub away_all: bool,
+}
+
+impl TrustedDevice {
+    /// Whether it may connect from away now: met on the same network or by cable within
+    /// the lease (pairing counts as meeting).
+    pub fn lease_ok(&self) -> bool {
+        let met = self.last_met.unwrap_or(self.paired_at);
+        now().saturating_sub(met) < crate::away::LEASE.as_secs()
+    }
+
+    /// When away access ends, in seconds since the epoch.
+    pub fn lease_until(&self) -> u64 {
+        self.last_met.unwrap_or(self.paired_at) + crate::away::LEASE.as_secs()
+    }
+}
+
+fn now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 pub struct TrustStore {
@@ -53,23 +79,45 @@ impl TrustStore {
     }
 
     pub fn add(&mut self, device: DeviceInfo, addr: Option<SocketAddr>) -> Result<()> {
-        let paired_at = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        self.devices.insert(device.id, TrustedDevice { device, last_addr: addr, paired_at });
+        let paired_at = now();
+        self.devices.insert(device.id, TrustedDevice { device, last_addr: addr, paired_at, last_met: Some(paired_at), away_all: false });
         self.save()
     }
 
     /// Refresh name and address after a successful reconnect.
     pub fn touch(&mut self, device: &DeviceInfo, addr: SocketAddr) -> Result<()> {
         let Some(d) = self.devices.get_mut(&device.id) else { return Ok(()) };
-        if d.device == *device && d.last_addr == Some(addr) {
+        // Meeting on the same network or by cable renews away access (saved at most hourly).
+        let met = crate::node::link_of(addr) != crate::node::Link::Away;
+        let renew = met && d.last_met.is_none_or(|m| now().saturating_sub(m) >= 3600);
+        if d.device == *device && d.last_addr == Some(addr) && !renew {
             return Ok(());
         }
-        d.device = device.clone();
-        // A USB bridge's address is only good while the cable is in: keep the network one.
-        if !crate::node::over_usb(addr) || d.last_addr.is_none() {
-            d.last_addr = Some(addr);
+        if renew {
+            d.last_met = Some(now());
+        }
+        // Away from home it has no new address to give; keep the one it had.
+        let mut device = device.clone();
+        if device.away.is_none() {
+            device.away = d.device.away.take();
+        }
+        d.device = device;
+        // A USB or away bridge's address is only good while it lasts: keep the network
+        // one (a cable's, for lack of one: tests on one machine have nothing else).
+        match crate::node::link_of(addr) {
+            crate::node::Link::Lan => d.last_addr = Some(addr),
+            crate::node::Link::Usb if d.last_addr.is_none() => d.last_addr = Some(addr),
+            _ => {}
         }
         self.save()
+    }
+
+    /// Allow everything from away for `id`, or only the small things.
+    pub fn set_away_all(&mut self, id: &Fingerprint, on: bool) -> Result<bool> {
+        let Some(d) = self.devices.get_mut(id) else { return Ok(false) };
+        d.away_all = on;
+        self.save()?;
+        Ok(true)
     }
 
     pub fn remove(&mut self, id: &Fingerprint) -> Result<bool> {

@@ -127,6 +127,7 @@ fn parse_device(s: &mdns_sd::ResolvedService) -> Option<DeviceInfo> {
         kind,
         os: s.get_property_val_str("os").unwrap_or("").to_string(),
         features: Vec::new(),
+        away: None,
     })
 }
 

@@ -81,6 +81,9 @@ pub struct DeviceInfo {
     /// hide what it can't. Empty: not said (older versions, or seen only on the network).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub features: Vec<String>,
+    /// How to reach it away from home (docs/protocol.md §4.13); only in the handshake.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub away: Option<crate::away::AwayAddr>,
 }
 
 pub struct Identity {
