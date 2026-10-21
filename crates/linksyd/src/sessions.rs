@@ -42,18 +42,46 @@ pub struct Sessions {
 struct Camera {
     control: Option<mpsc::UnboundedSender<Vec<u8>>>,
     state: Option<serde_json::Value>,
-    /// Restarts the webcam here at another frame rate, and the rate it runs at.
-    rate: Option<mpsc::UnboundedSender<u32>>,
+    /// Restarts the webcam here in another mode, and the mode it runs in.
+    rate: Option<mpsc::UnboundedSender<Mode>>,
+    mode: Mode,
+}
+
+/// How the phone's camera streams: frames per second and picture size.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Mode {
     fps: u32,
+    width: u32,
+    height: u32,
+}
+
+impl Default for Mode {
+    fn default() -> Self {
+        Mode { fps: 30, width: 1280, height: 720 }
+    }
 }
 
 impl Camera {
-    /// Follow a frame rate the phone says (or the app picked): only 30 and 60 exist.
-    fn follow(&mut self, fps: u32) {
-        if matches!(fps, 30 | 60) && fps != self.fps {
-            self.fps = fps;
+    /// Follow what the phone says (or the app picked), from `camera_state` or
+    /// `camera_control` keys: `fps` 30 or 60, `size` [w, h] or `width`/`height`, 720p or
+    /// 1080p. A change restarts the webcam here.
+    fn follow(&mut self, keys: &serde_json::Map<String, serde_json::Value>) {
+        let num = |k: &str| keys.get(k).and_then(serde_json::Value::as_u64).map(|v| v as u32);
+        let mut next = self.mode;
+        if let Some(fps) = num("fps").filter(|f| matches!(f, 30 | 60)) {
+            next.fps = fps;
+        }
+        let size = keys
+            .get("size")
+            .and_then(|s| Some((s.get(0)?.as_u64()? as u32, s.get(1)?.as_u64()? as u32)))
+            .or_else(|| Some((num("width")?, num("height")?)));
+        if let Some((w, h)) = size.filter(|s| matches!(s, (1280, 720) | (1920, 1080))) {
+            (next.width, next.height) = (w, h);
+        }
+        if next != self.mode {
+            self.mode = next;
             if let Some(tx) = &self.rate {
-                let _ = tx.send(fps);
+                let _ = tx.send(next);
             }
         }
     }
@@ -74,8 +102,8 @@ impl Sessions {
                 Ok(linksy_core::Event::CameraState { session, state, .. }) => {
                     let mut cameras = self.cameras.lock().unwrap();
                     let camera = cameras.entry(session).or_default();
-                    if let Some(fps) = state.get("fps").and_then(serde_json::Value::as_u64) {
-                        camera.follow(fps as u32);
+                    if let Some(keys) = state.as_object() {
+                        camera.follow(keys);
                     }
                     camera.state = Some(state);
                 }
@@ -98,10 +126,9 @@ impl Sessions {
         let mut cameras = self.cameras.lock().unwrap();
         let camera = cameras.get_mut(&session).ok_or("that camera isn't on")?;
         camera.control.as_ref().ok_or("that camera isn't on")?.send(frame).map_err(|_| "that camera isn't on".to_string())?;
-        // A new frame rate: the webcam here restarts at it (the phone sends a keyframe).
-        if let Some(fps) = keys.get("fps").and_then(serde_json::Value::as_u64) {
-            camera.follow(fps as u32);
-        }
+        // A new frame rate or size: the webcam here restarts in it (the phone sends a
+        // keyframe).
+        camera.follow(&keys);
         Ok(())
     }
 
@@ -215,22 +242,19 @@ impl Sessions {
         Ok(())
     }
 
-    /// A camera used here as a webcam: `linksy-screen webcam` at the frame rate the phone
-    /// sends, restarted at a new one when it changes (from the app's controls or the
+    /// A camera used here as a webcam: `linksy-screen webcam` at the frame rate and size
+    /// the phone sends, restarted when they change (from the app's controls or the
     /// phone's), within the same session. The phone answers a change with a keyframe, so
     /// the picture comes back at once; apps see the camera blink.
     async fn run_webcam(&self, mut session: Session) -> std::io::Result<()> {
         let (control_tx, mut control) = mpsc::unbounded_channel();
         let (rate_tx, mut rate) = mpsc::unbounded_channel();
-        let mut fps = {
+        let mut mode = {
             let mut cameras = self.cameras.lock().unwrap();
             let camera = cameras.entry(session.id).or_default();
             camera.control = Some(control_tx);
             camera.rate = Some(rate_tx);
-            if camera.fps == 0 {
-                camera.fps = 30;
-            }
-            camera.fps
+            camera.mode
         };
         info!("device session with {} (camera)", session.peer.name);
         let mut buf = vec![0u8; 64 * 1024];
@@ -244,7 +268,7 @@ impl Sessions {
                 .arg("--name")
                 .arg(format!("Linksy Camera ({})", session.peer.name))
                 .arg("--fps")
-                .arg(fps.to_string())
+                .arg(mode.fps.to_string())
                 .kill_on_drop(true)
                 .spawn()?;
             let accepted = tokio::select! {
@@ -282,9 +306,9 @@ impl Sessions {
                     Some(new) = rate.recv() => break new,
                 }
             };
-            info!("webcam from {} now at {next} fps", session.peer.name);
+            info!("webcam from {} now {}x{} at {} fps", session.peer.name, next.width, next.height, next.fps);
             let _ = child.kill().await;
-            fps = next;
+            mode = next;
         }
     }
 
