@@ -9,9 +9,14 @@ SOCK=$1 OUT=$2 DELAY=${3:-2500} SCHEME=${4:-dark}
 shift $(( $# < 4 ? $# : 4 ))
 FILES=""
 for f in "$@"; do FILES+=" '$f'"; done
+# A screen big enough for LINKSY_SCREENSHOT_SIZE. Nobody will ever see it, but it has to fit.
+SW=1200 SH=900
+if [[ ${LINKSY_SCREENSHOT_SIZE:-} =~ ^([0-9]+)x([0-9]+)$ ]]; then
+  SW=$(( BASH_REMATCH[1] > SW ? BASH_REMATCH[1] : SW )) SH=$(( BASH_REMATCH[2] > SH ? BASH_REMATCH[2] : SH ))
+fi
 toolbox run -c linksy-dev bash -lc "
   export XDG_RUNTIME_DIR=\$(mktemp -d)
-  weston --backend=headless --socket=linksy-shot --width=1200 --height=900 --idle-time=0 >/dev/null 2>&1 & WP=\$!
+  weston --backend=headless --socket=linksy-shot --width=$SW --height=$SH --idle-time=0 >/dev/null 2>&1 & WP=\$!
   for _ in \$(seq 50); do [ -S \$XDG_RUNTIME_DIR/linksy-shot ] && break; sleep 0.1; done
   WAYLAND_DISPLAY=linksy-shot GDK_BACKEND=wayland ADW_DEBUG_COLOR_SCHEME=prefer-$SCHEME \
     LINKSY_SOCKET='$SOCK' LINKSY_SCREENSHOT='$OUT' LINKSY_SCREENSHOT_DELAY=$DELAY \
