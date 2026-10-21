@@ -176,6 +176,8 @@ pub struct Session {
     pub kind: SessionKind,
     /// This device shares; the peer watches.
     pub sharing: bool,
+    /// The size the other side's screen has, when it said (a second display's shape).
+    pub size: Option<(u32, u32)>,
     pub send: quinn::SendStream,
     pub recv: quinn::RecvStream,
     _busy: Option<Busy>,
@@ -275,6 +277,8 @@ struct Inner {
     fs_tx: mpsc::UnboundedSender<FsCall>,
     /// Session requests answered "this device can't do that", not "no".
     unsupported: Mutex<std::collections::HashSet<Uuid>>,
+    /// Screen sizes to give with an accept (a second display shown here).
+    session_sizes: Mutex<HashMap<Uuid, (u32, u32)>>,
     /// The token of the pairing QR code on screen, and when it expires.
     invite: Mutex<Option<(String, Instant)>>,
     /// Where imported photos go (a folder per device inside it); `None` refuses imports.
@@ -332,6 +336,7 @@ impl Node {
                 fs: Mutex::new(Some(fs)),
                 fs_tx,
                 unsupported: Mutex::new(Default::default()),
+                session_sizes: Mutex::default(),
             }),
         };
 
@@ -460,6 +465,15 @@ impl Node {
     }
 
     /// Answer a pairing or transfer request. Returns false if it already expired.
+    /// Accept a `display` session giving this device's screen size (landscape), so the
+    /// second display comes in its shape. Otherwise like [`Node::respond`].
+    pub fn respond_session(&self, request: Uuid, accept: bool, size: Option<(u32, u32)>) -> bool {
+        if let (true, Some(size)) = (accept, size) {
+            self.inner.session_sizes.lock().unwrap().insert(request, size);
+        }
+        self.respond(request, accept)
+    }
+
     pub fn respond(&self, request: Uuid, accept: bool) -> bool {
         match self.inner.pending.lock().unwrap().remove(&request) {
             Some(tx) => tx.send(accept).is_ok(),
@@ -743,15 +757,16 @@ impl Node {
         let id = Uuid::new_v4();
         let (mut send, mut recv) = conn.open_bi().await?;
         write_msg(&mut send, &SessionMsg::SessionRequest { id, kind }).await?;
-        match tokio::time::timeout(OFFER_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
-            SessionMsg::SessionAccept => {}
+        let size = match tokio::time::timeout(OFFER_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
+            SessionMsg::SessionAccept { width: Some(w), height: Some(h) } if w > 0 && h > 0 => Some((w, h)),
+            SessionMsg::SessionAccept { .. } => None,
             SessionMsg::SessionDecline { reason: Some(r) } if r == "unsupported" => return Err(Error::Unsupported),
             SessionMsg::SessionDecline { .. } => return Err(Error::Declined),
             other => return Err(protocol(format!("unexpected {other:?}"))),
-        }
+        };
         let sharing = kind.requester_shares();
         self.emit(Event::SessionStarted { session: id, peer: peer.clone(), kind, sharing });
-        Ok(Session { id, peer, kind, sharing, send, recv, _busy: Some(busy), events: self.inner.events.clone() })
+        Ok(Session { id, peer, kind, sharing, size, send, recv, _busy: Some(busy), events: self.inner.events.clone() })
     }
 
     /// Sessions this device accepted. Can be taken once; the taker runs the media (capture
@@ -1312,7 +1327,10 @@ impl Node {
         let accepted = self.await_answer(id, answer, OFFER_TIMEOUT).await;
         let unsupported = self.inner.unsupported.lock().unwrap().remove(&id);
         let reply = match (accepted, unsupported) {
-            (true, _) => SessionMsg::SessionAccept,
+            (true, _) => {
+                let size = self.inner.session_sizes.lock().unwrap().remove(&id);
+                SessionMsg::SessionAccept { width: size.map(|s| s.0), height: size.map(|s| s.1) }
+            }
             (false, true) => SessionMsg::SessionDecline { reason: Some("unsupported".into()) },
             (false, false) => SessionMsg::SessionDecline { reason: None },
         };
@@ -1322,7 +1340,7 @@ impl Node {
         }
         let sharing = !kind.requester_shares();
         self.emit(Event::SessionStarted { session: id, peer: from.clone(), kind, sharing });
-        let session = Session { id, peer: from, kind, sharing, send, recv, _busy: busy, events: self.inner.events.clone() };
+        let session = Session { id, peer: from, kind, sharing, size: None, send, recv, _busy: busy, events: self.inner.events.clone() };
         // Nobody to run it (no daemon took the receiver): dropping ends it.
         let _ = self.inner.sessions_tx.send(session);
     }

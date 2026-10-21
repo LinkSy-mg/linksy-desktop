@@ -52,6 +52,10 @@ fn auto_answer(node: &Node, accept: bool) {
                 Event::TransferRequest { transfer, .. } => {
                     node.respond(transfer, accept);
                 }
+                // A display is shown at a phone-like 2400×1080, to check the size travels.
+                Event::SessionRequest { request, kind: SessionKind::Display, .. } => {
+                    node.respond_session(request, accept, Some((2400, 1080)));
+                }
                 Event::SessionRequest { request, .. } => {
                     node.respond(request, accept);
                 }
@@ -968,6 +972,7 @@ async fn display_session_has_the_requester_share() {
     let mut incoming = b.node.incoming_sessions().unwrap();
     let mut sharer = a.node.request_session(&b.node.info().id, SessionKind::Display).await.unwrap();
     assert!(sharer.sharing, "the requester of a second display sends its screen");
+    assert_eq!(sharer.size, Some((2400, 1080)), "the display's shape comes with the accept");
     let mut display = incoming.recv().await.unwrap();
     assert!(!display.sharing);
     assert_eq!(display.kind, SessionKind::Display);

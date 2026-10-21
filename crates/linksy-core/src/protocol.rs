@@ -190,7 +190,14 @@ pub fn read_control_frames(mut r: impl std::io::Read, mut f: impl FnMut(ControlM
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionMsg {
     SessionRequest { id: Uuid, kind: SessionKind },
-    SessionAccept,
+    /// For a `display`, the accepting device may give its screen's size (landscape), so
+    /// the second display is made in its shape.
+    SessionAccept {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        width: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        height: Option<u32>,
+    },
     /// `reason: "unsupported"` when the device can't do this kind of session at all (as
     /// opposed to its user saying no). Absent otherwise.
     SessionDecline {
