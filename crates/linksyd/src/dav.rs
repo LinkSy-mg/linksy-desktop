@@ -63,6 +63,11 @@ impl Bridges {
             }
             Err(e) => return Err(e.to_string()),
         }
+        // Label it with the folder the phone shares, when it says ("Pixel 9 (Documents)").
+        let label = match self.node.fs(&phone, FsRequest::Info, &[]).await {
+            Ok(FsAnswer::Info { name: folder }) if !folder.trim().is_empty() => format!("{name} ({})", folder.trim()),
+            _ => name.to_string(),
+        };
         let uri = self.serve(phone).await.map_err(|e| e.to_string())?;
         let mounted = tokio::process::Command::new("gio").args(["mount", &uri]).output().await;
         if let Ok(out) = &mounted
@@ -71,7 +76,7 @@ impl Bridges {
         {
             debug!("gio mount: {}", String::from_utf8_lossy(&out.stderr).trim());
         }
-        bookmark(&uri, name);
+        bookmark(&uri, &label);
         // Tests check the bridge without a window opening on someone's screen.
         if std::env::var_os("LINKSY_FILES_NO_OPEN").is_none() {
             show_folder(&uri).await;

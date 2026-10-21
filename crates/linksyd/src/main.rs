@@ -26,6 +26,12 @@ use std::process::ExitCode;
 use linksy_core::{Config, Node};
 use tracing::{error, info};
 
+/// What a Linux computer running Linksy can do for other devices.
+const FEATURES: &[&str] = &[
+    "files", "clipboard", "open_url", "ring", "battery", "media_state", "media_remote", "call_state", "heartbeat",
+    "import", "fs", "input", "screen", "control", "display", "camera", "watch", "notifications", "sms",
+];
+
 /// Fixed default port so a peer's last known address stays valid across restarts.
 const DEFAULT_PORT: u16 = 47_200;
 
@@ -39,6 +45,8 @@ struct Args {
 fn parse_args() -> Result<Args, String> {
     let mut config = Config::new(system::data_dir(), system::download_dir(), system::device_name());
     config.kind = system::device_kind();
+    // Everything this computer does for its devices (docs/protocol.md §4.10).
+    config.features = FEATURES.iter().map(|f| f.to_string()).collect();
     config.port = DEFAULT_PORT;
     let mut socket = linksy_ipc::socket_path();
     let mut notifications = true;
