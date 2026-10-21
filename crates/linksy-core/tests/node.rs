@@ -1026,6 +1026,9 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     if b.node.info().away.is_none_or(|w| w.addrs.is_empty()) {
         return eprintln!("no network address: skipped");
     }
+    // Met on the same network: each knows how to reach the other away.
+    let until = |n: &linksy_core::Node, id| n.devices().into_iter().find(|d| d.device.id == id).and_then(|d| d.away_until);
+    assert!(until(&a.node, idb).is_some());
     let mut ra = a.node.subscribe();
     wait_for(&mut ra, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
 
@@ -1049,6 +1052,15 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     b.node.set_away_all(&ida, true).unwrap();
     auto_answer(&b.node, true);
     a.node.request_session(&idb, SessionKind::Screen).await.expect("allowed from away");
+}
+
+#[tokio::test]
+async fn not_reachable_from_away_without_its_address() {
+    // Away from home off on both: neither learns the other's away address.
+    let (a, b) = paired().await;
+    let idb = b.node.info().id;
+    let d = a.node.devices().into_iter().find(|d| d.device.id == idb).unwrap();
+    assert_eq!(d.away_until, None);
 }
 
 #[tokio::test]

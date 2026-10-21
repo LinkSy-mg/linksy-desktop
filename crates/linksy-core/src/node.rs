@@ -243,7 +243,8 @@ pub struct DeviceView {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub away_all: bool,
     /// Until when it may connect from away (seconds since the epoch): a week after it was
-    /// last on the same network or cable. None for devices not paired.
+    /// last on the same network or cable. None for devices not paired, while away from
+    /// home is off, or before the two have met on the same network.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub away_until: Option<u64>,
 }
@@ -492,6 +493,7 @@ impl Node {
 
     /// Paired and nearby devices, merged.
     pub fn devices(&self) -> Vec<DeviceView> {
+        let away_on = self.inner.away.lock().unwrap().is_some() && self.settings().away;
         let trust = self.inner.trust.lock().unwrap();
         let peers = self.inner.peers.lock().unwrap();
         let nearby = self.inner.nearby.lock().unwrap();
@@ -505,7 +507,8 @@ impl Node {
                 usb: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Usb),
                 away: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Away),
                 away_all: t.away_all,
-                away_until: Some(t.lease_until()),
+                // Only once each knows how to reach the other away.
+                away_until: (away_on && t.device.away.is_some()).then(|| t.lease_until()),
                 nearby: nearby.contains_key(&t.device.id),
                 // Newest name we know: the live connection, then the network announcement
                 // (which doesn't carry features: those come from the last handshake).
