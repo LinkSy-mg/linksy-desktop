@@ -59,6 +59,10 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Phone notifications on the computer, reply | Done | Not possible | notification-listener access is blocked |
 | Images/files on the clipboard | Done | To do | offer with `"clipboard":true` (§4.5) |
 | Automatic clipboard sync, computer → phone | Done (not on GNOME) | To do | `clipboard_watch` (§4.5) |
+| Phone as microphone | Done | To do | session `microphone`, raw PCM (§4.8) |
+| USB cable (no Wi-Fi, lower latency) | Done | To do | Android Open Accessory + UDP bridge (§4.11) |
+| Camera controls from the computer | Done | Done (needs `camera_state`) | §4.8; docs/android-app.md §2.8 |
+| Device pictures | Done | Done (needs `picture`) | §4.5; docs/android-app.md §2.7 |
 | Bluetooth LE presence | To do | To do | |
 
 ## 3. How to build the phone app (recommendation)
@@ -208,6 +212,8 @@ and close the other with reason `duplicate`.
   {"type":"ring"}                               // ring loudly so the user finds you
   {"type":"ring_stop"}
   {"type":"clipboard_watch","on":true}          // send me your clipboard text as it changes
+  {"type":"picture","image":"<base64 JPEG or PNG, ≤ 128 KiB>"}  // the sender's own picture
+  {"type":"camera_state","session":"<uuid>","state":{…}}        // §4.8, phone → computer
   // Phone notifications mirrored to the computer (phone → computer):
   {"type":"notification_posted","key":"0|com.whatsapp|1|null|10123","app":"com.whatsapp",
    "app_name":"WhatsApp","title":"Alice","body":"Lunch?","can_reply":true,
@@ -493,6 +499,94 @@ Left 0xff51 or Page_Down 0xff56 / Page_Up 0xff55 for slides, Return 0xff0d, Back
 0xff08, Escape 0xff1b). Absolute `pointer` messages are ignored (there's no screen).
 The computer shows "<phone> is your touchpad and keyboard" with Stop.
 
+**Camera controls from the computer (desktop 0.5.7, `docs/android-app.md` §2.8).** While a
+`camera` session runs, the computer writes `camera_control` frames on its send side
+(u32 BE length + JSON), exactly the keys the phone already reads. The phone sends what it
+can do and how it's set as a **connection message** (§4.5), at the start and after every
+change, whoever made it:
+
+```json
+{"type":"camera_state","session":"<session uuid>","state":{…the object in docs/android-app.md §2.8…}}
+```
+
+Core: `node.send_camera_state(computer_id, session.id, state_json)`;
+`Event::CameraState { from, session, state }` on the computer. The computer shows the
+controls under its camera preview: front/back (when both `lenses` exist), the
+`zoom_presets` as chips, torch (`has_torch`), click on the preview → `focus_point`
+(+ `"focus":"point"`, and an Auto Focus button when the focus isn't `auto`), and in a
+menu `exposure`, `white_balance`, `quality`, `orientation`, `stabilization`
+(`has_stabilization`). It redraws from every `camera_state`, so the phone's own controls
+and the computer's stay in step. `size`/`fps` aren't sent yet.
+
+**Webcam latency (desktop 0.5.7).** The computer now decodes with slice threading
+instead of libav's frame threading, which held one frame per CPU thread: about 400 ms
+less on a 12-thread laptop (measured: 404 ms → 37 ms from receiving a frame to
+showing it). On the phone, to keep its part small:
+- `MediaFormat.KEY_LATENCY = 1` (API 30+) and `KEY_LOW_LATENCY = 1` where the codec has
+  it (`FEATURE_LowLatency`); `KEY_PRIORITY = 0` (realtime); no B-frames
+  (Constrained Baseline already has none); `KEY_MAX_B_FRAMES = 0` to be sure.
+- Write each encoded buffer to the stream as soon as `dequeueOutputBuffer` returns it;
+  don't batch. An `AUD` (`00 00 00 01 09 f0`) before each access unit lets the computer
+  end a frame without waiting for the next one's start code (about one frame, 33 ms).
+- Keep `KEY_REPEAT_PREVIOUS_FRAME_AFTER` short (e.g. 100 ms) so a still picture keeps
+  flowing.
+- Over USB (§4.11) Wi-Fi's jitter goes away too.
+
+**`microphone` sessions (desktop 0.5.7): the phone as the computer's microphone.** The
+computer sends `{"type":"session_request","id":…,"kind":"microphone"}`; the phone asks
+its user ("Studio Laptop wants to use your microphone"), then writes **raw PCM**: 16-bit
+signed little-endian, **48 000 Hz, mono**, no header, no framing, in small chunks (10 ms
+= 960 bytes; don't buffer more than 20 ms). About 100 KB/s. Nothing comes back. The
+computer offers it to every app as a microphone, "Linksy Microphone (<phone name>)", and
+drops audio that arrives more than 100 ms late rather than letting delay pile up. On
+Android: `AudioRecord` with `MediaRecorder.AudioSource.VOICE_COMMUNICATION` (echo
+cancellation and noise suppression on most phones) or `MIC`, `ENCODING_PCM_16BIT`,
+`CHANNEL_IN_MONO`, 48 kHz (resample if the device refuses), in a foreground service of
+type `microphone` (`FOREGROUND_SERVICE_MICROPHONE`, plus `RECORD_AUDIO` at run time; both
+fine for a sideloaded app). Announce `microphone` in `features` (§4.10); until then the
+computer doesn't offer it for Android phones. Core: `SessionKind::Microphone`; the phone
+writes to `session.send`. Desktop to desktop works too (`linksy mic <device>`).
+
+### 4.11 USB cable (desktop 0.5.7)
+
+Lower latency and no Wi-Fi needed, for the webcam and microphone above all, with **no
+developer options**: the computer uses **Android Open Accessory (AOA 1.0)**.
+
+1. When an Android phone is plugged in (and an Android phone is paired), the computer
+   asks once per phone ("Pixel 9 is plugged in. Use it with Linksy over the cable?").
+   On yes it sends AOA's control requests (51 get protocol, 52 strings, 53 start) with
+   **manufacturer `Linksy`, model `Linksy`**, description "Linksy over USB", version
+   `1` (the framing below), URI `https://linksy.diary.mg`. The phone re-enumerates as an
+   accessory (Google's 18d1:2d00–2d05).
+2. **Phone app:** declare the accessory in the manifest
+   (`<uses-feature android:name="android.hardware.usb.accessory"/>`, an activity with
+   the `USB_ACCESSORY_ATTACHED` intent filter and `res/xml/accessory_filter.xml`:
+   `<usb-accessory manufacturer="Linksy" model="Linksy"/>`). Android then offers to
+   open Linksy; "always" makes it automatic. Open it with
+   `UsbManager.openAccessory(accessory)` → a `ParcelFileDescriptor` with an input and an
+   output stream.
+3. **What crosses the cable: Linksy's own QUIC packets**, unchanged and still encrypted
+   end to end, each as a **2-byte big-endian length + the UDP payload**. On the phone, a
+   tiny bridge: bind a UDP socket on `127.0.0.1:0` (port P); for each datagram the
+   phone's node sends to it, write `len + bytes` to the accessory; for each `len + bytes`
+   read from the accessory, send the bytes back to the node's address (learned from the
+   first datagram). Batch several frames in one write when they're waiting.
+4. **Then dial the computer through it:** `node.connect(127.0.0.1:P)` (the core's normal
+   reconnect, to a known paired device). The handshake checks the computer's pinned key
+   as always. On the computer the packets arrive from `127.0.0.1`, which is how both
+   sides know this connection is the cable: **a USB connection replaces a Wi-Fi one** to
+   the same device (both cores agree without talking: the one over loopback wins), and
+   its address is never saved as the device's address. `DeviceView.usb` is true for it;
+   the computer shows "Connected by USB".
+5. Unplugging ends the accessory streams → the connection drops → the normal Wi-Fi
+   reconnect takes over. Start sessions after plugging in: a running session doesn't
+   move to the cable.
+
+Linux needs permission to switch the phone and to use it as an accessory: the .deb and
+.rpm install a udev rule (`70-linksy-usb.rules`); Finish Setup adds it otherwise (not
+possible from the Flatpak). Try the bridge without a phone: `cargo test -p linksyd usb`
+runs QUIC through an in-memory cable between two nodes.
+
 ### 4.9 Browsing files ("phone in the Files sidebar") — `src/fs.rs`
 
 A computer browses the phone's files with one request per **bidirectional stream**. The
@@ -538,11 +632,12 @@ hide what a device can't do. Names: `files`, `clipboard`, `open_url`, `battery`,
 `call_state`, `heartbeat`, `import`, `fs`, `input`, `screen`, `control` (can be
 controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifications),
 `sms`, `clipboard_file` (takes `"clipboard":true` offers), `clipboard_watch` (answers
-`clipboard_watch`). Set `Config.features` in the core. A desktop announces all of them,
+`clipboard_watch`), `microphone` (shares its microphone), `picture` (sends and shows
+`picture`). Set `Config.features` in the core. A desktop announces all of them,
 except `clipboard_watch` where its desktop doesn't let apps watch the clipboard (GNOME).
 When a device sends no list (older versions), the desktop assumes everything except, for
-`os == "android"`, `sms`, `notifications`, `media_state`, `control`, `clipboard_file`
-and `clipboard_watch`.
+`os == "android"`, `sms`, `notifications`, `media_state`, `control`, `clipboard_file`,
+`clipboard_watch` and `microphone`.
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 
@@ -556,6 +651,9 @@ node.import_files(id, paths) -> transfer_id // photo auto-import (offer with "im
 node.send_clipboard(id, text)               node.notify(id, title, body)
 node.send_clipboard_file(id, path) -> transfer_id   // Event::ClipboardFile { from, path } on the receiver
 node.watch_clipboard(id, on)                // Event::ClipboardWatch { from, on } on the receiver
+node.send_picture(id, base64)               // Event::Picture { from, image } on the receiver
+node.send_camera_state(id, session, json)   // Event::CameraState { from, session, state }
+node.connect(addr)                          // USB: dial the computer through the bridge (§4.11)
 node.open_url(id, url)                      // Event::OpenUrl { from, url } on the receiver
 node.send_battery(id, Battery { level, charging })   node.ring(id, on)   // Event::Battery / Event::Ring
 DeviceView.battery: Option<Battery>         // last level each device reported
@@ -827,3 +925,13 @@ robust against any encoder (GPU ones may slice too):
   `ClipboardFile` lands on the phone's clipboard (`ClipData` with a `content://` URI from
   a FileProvider); its share sheet can send images this way. Try with
   `fake_phone --clip-file <image>` and `fake_phone --watch-clipboard`.
+- **2026-10-21** — Desktop 0.5.7: **lower webcam latency** (the computer's decoder no
+  longer holds frames: about 400 ms less; phone-side tips in §4.8). **USB cable** (§4.11):
+  Android Open Accessory, manufacturer/model `Linksy`, QUIC packets framed as 2-byte
+  length + payload, a loopback connection wins over Wi-Fi; the phone needs the accessory
+  filter and the small UDP bridge. **Microphone** sessions (§4.8): raw 16-bit 48 kHz mono
+  PCM; announce `microphone`. From `docs/android-app.md`: **§2.8 camera controls** (the computer
+  sends `camera_control`; the phone sends `camera_state` with core `send_camera_state`)
+  and **§2.7 pictures** (`picture` message, base64 JPEG/PNG ≤ 128 KiB, sent after
+  connecting; the computer sends the user's account picture and shows the phone's as its
+  avatar). Try with `fake_phone --camera --picture <png>` and `linksy mic <device>`.
