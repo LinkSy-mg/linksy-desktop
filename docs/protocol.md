@@ -66,7 +66,7 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Away from home (over the internet) | Done | Done | iroh, Linksy's relay, 7-day lease (§4.13) |
 | Locate the phone | Done | Done (while the app is open) | `locate` / `location` (§4.14) |
 | 1080p webcam | Done | Done | `size` in `camera_control`, `size_options` (§4.8) |
-| Terminal on the computer, from the phone | Planned (0.7) | To do | session `terminal`, code set on the computer (§4.15) |
+| Terminal on the computer, from the phone | Done (0.7.0) | To do | session `terminal`, code set on the computer (§4.15) |
 | Bluetooth LE presence | Not planned | Not planned | |
 
 ## 3. How to build the phone app (recommendation)
@@ -777,12 +777,15 @@ app is in the background; fine for a sideloaded app, and the setting explains wh
 otherwise refuse with a reason. Announce `locate` in `features` (§4.10); the computer
 only offers it then. It works away from home too (§4.13).
 
-### 4.15 Terminal (planned for desktop 0.7; spec first, so the phone can start)
+### 4.15 Terminal (desktop 0.7.0)
 
 A real shell on the computer, shown on the phone: Claude Code, neovim, htop, git, builds.
-**The phone opens it; the computer never opens one on the phone.** Nothing is built on the
-desktop yet; this is the contract both sides build to. Questions or changes: say so in
-`docs/android-app.md` before building around them.
+**The phone opens it; the computer never opens one on the phone.** Built on the desktop
+in 0.7.0 exactly as below (core: `node.request_terminal(to, TerminalOpen { code, cols,
+rows, resume })` returns the `Session` and the terminal id; `node.list_terminals(to)` and
+`Event::Terminals`). Test against a computer with `fake_phone --terminal CODE` (`--type`,
+`--resume`, `--close`). Not in the desktop's Flatpak (its shell would be the sandbox's):
+those computers don't announce `terminal`.
 
 **Safety, in layers (all enforced by the computer, never by the phone):**
 
@@ -821,6 +824,7 @@ Answers:
 {"type":"session_decline","reason":"code"}     // wrong code; "tries_left": 3
 {"type":"session_decline","reason":"locked"}   // too many wrong codes; unlock on the computer
 {"type":"session_decline","reason":"away"}     // from away and not allowed
+{"type":"session_decline","reason":"limit"}    // 8 terminals already run for this phone
 {"type":"session_decline"}                     // the computer's user said no
 {"type":"session_decline","reason":"unsupported"}
 ```
@@ -846,6 +850,20 @@ phone on the computer", "Unlock the terminal on the computer"…).
   `\u001b`, arrows `\u001b[A`…`\u001b[D`, Ctrl+letter = letter & 0x1f, Alt+key = `\u001b`
   then the key. Mouse reporting and bracketed paste are whatever the program asks for;
   send them as `term_input` too.
+
+**Closing, the rules both sides keep (so nothing is left hanging):**
+
+- **Closing a terminal on the phone** (its tab's close button, `exit` typed in it): send
+  `term_close`. The computer ends the shell and everything started in it, then finishes
+  the stream. Nothing keeps running.
+- **Leaving it** (switching apps, the phone locking, the network dropping, the app being
+  killed): just finish the stream, or let it drop. The shell stays, detached (next point).
+- **Ended on the computer** (End on the phone's page in Linksy there, the code turned
+  off, the phone no longer allowed, or unpaired): the stream finishes right away. Show
+  "Ended on the computer" and drop that tab; `resume` won't find it.
+- **The shell exits by itself**: the stream finishes too; close the tab.
+- Once a terminal's stream ends, the session is gone on both sides: the connection goes
+  back to idle and closes as usual (§4.6) when nothing else uses it.
 
 **Terminals outlive the connection.** Finishing the stream *without* `term_close`
 (network change, app closed, phone locked) only detaches: the shell keeps running on the
@@ -1197,3 +1215,7 @@ robust against any encoder (GPU ones may slice too):
   `term_close`, detach and `resume`, `terminal_list`). Planned for desktop 0.7; spec
   first so the phone can build its side. §2 status refreshed from phone 0.1.16. Desktop
   0.6.4 saves received files to Downloads/Linksy, like the phone.
+- **2026-10-22** — Desktop 0.7.0: the terminal (§4.15) is built: reason `limit`, the
+  closing rules (`term_close` ends it, dropping the stream detaches, End on the computer
+  finishes the stream), `fake_phone --terminal` to test. Finish Setup also opens the
+  firewall (UDP 47200 and mDNS) on computers that have one.
