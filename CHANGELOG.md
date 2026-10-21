@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.6.1
+
+### Fixed
+- **Updates take effect right away**: the background service used to keep running the
+  old version after an update until you logged out, so new features (like away from
+  home) didn't work yet. It now restarts into the new version by itself within a
+  minute, and opening Linksy restarts a service left on an older version.
+
 ## 0.6.0
 
 ### Added
