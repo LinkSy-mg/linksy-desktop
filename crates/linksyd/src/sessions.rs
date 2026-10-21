@@ -42,6 +42,21 @@ pub struct Sessions {
 struct Camera {
     control: Option<mpsc::UnboundedSender<Vec<u8>>>,
     state: Option<serde_json::Value>,
+    /// Restarts the webcam here at another frame rate, and the rate it runs at.
+    rate: Option<mpsc::UnboundedSender<u32>>,
+    fps: u32,
+}
+
+impl Camera {
+    /// Follow a frame rate the phone says (or the app picked): only 30 and 60 exist.
+    fn follow(&mut self, fps: u32) {
+        if matches!(fps, 30 | 60) && fps != self.fps {
+            self.fps = fps;
+            if let Some(tx) = &self.rate {
+                let _ = tx.send(fps);
+            }
+        }
+    }
 }
 
 impl Sessions {
@@ -57,7 +72,12 @@ impl Sessions {
             match events.recv().await {
                 // The phone may say before the webcam here is up: keep it either way.
                 Ok(linksy_core::Event::CameraState { session, state, .. }) => {
-                    self.cameras.lock().unwrap().entry(session).or_default().state = Some(state);
+                    let mut cameras = self.cameras.lock().unwrap();
+                    let camera = cameras.entry(session).or_default();
+                    if let Some(fps) = state.get("fps").and_then(serde_json::Value::as_u64) {
+                        camera.follow(fps as u32);
+                    }
+                    camera.state = Some(state);
                 }
                 Ok(linksy_core::Event::SessionEnded { session }) => {
                     self.cameras.lock().unwrap().remove(&session);
@@ -75,9 +95,14 @@ impl Sessions {
         let body = serde_json::to_vec(&keys).map_err(|e| e.to_string())?;
         let mut frame = (body.len() as u32).to_be_bytes().to_vec();
         frame.extend(body);
-        let cameras = self.cameras.lock().unwrap();
-        let tx = cameras.get(&session).and_then(|c| c.control.as_ref()).ok_or("that camera isn't on")?;
-        tx.send(frame).map_err(|_| "that camera isn't on".to_string())
+        let mut cameras = self.cameras.lock().unwrap();
+        let camera = cameras.get_mut(&session).ok_or("that camera isn't on")?;
+        camera.control.as_ref().ok_or("that camera isn't on")?.send(frame).map_err(|_| "that camera isn't on".to_string())?;
+        // A new frame rate: the webcam here restarts at it (the phone sends a keyframe).
+        if let Some(fps) = keys.get("fps").and_then(serde_json::Value::as_u64) {
+            camera.follow(fps as u32);
+        }
+        Ok(())
     }
 
     /// What a camera used here last said it can do and how it's set.
@@ -123,6 +148,9 @@ impl Sessions {
 
     /// Start `linksy-screen` for this side of the session and relay its socket.
     async fn run_helper(&self, mut session: Session, device: bool) -> std::io::Result<()> {
+        if device && session.kind == SessionKind::Camera {
+            return self.run_webcam(session).await;
+        }
         let role = match session.kind {
             _ if !device => "share",
             SessionKind::Microphone => "mic",
@@ -182,16 +210,82 @@ impl Sessions {
         };
         let _ = std::fs::remove_file(&path);
         let (stream, _) = accepted.map_err(|_| std::io::Error::other("no screen was picked in time"))??;
-        // A camera used here takes `camera_control` frames from the app instead of the
-        // helper, which sends nothing back.
-        let control = (device && session.kind == SessionKind::Camera).then(|| {
-            let (tx, rx) = mpsc::unbounded_channel();
-            self.cameras.lock().unwrap().entry(session.id).or_default().control = Some(tx);
-            rx
-        });
-        relay(&mut session, stream, control).await;
+        relay(&mut session, stream).await;
         let _ = child.kill().await;
         Ok(())
+    }
+
+    /// A camera used here as a webcam: `linksy-screen webcam` at the frame rate the phone
+    /// sends, restarted at a new one when it changes (from the app's controls or the
+    /// phone's), within the same session. The phone answers a change with a keyframe, so
+    /// the picture comes back at once; apps see the camera blink.
+    async fn run_webcam(&self, mut session: Session) -> std::io::Result<()> {
+        let (control_tx, mut control) = mpsc::unbounded_channel();
+        let (rate_tx, mut rate) = mpsc::unbounded_channel();
+        let mut fps = {
+            let mut cameras = self.cameras.lock().unwrap();
+            let camera = cameras.entry(session.id).or_default();
+            camera.control = Some(control_tx);
+            camera.rate = Some(rate_tx);
+            if camera.fps == 0 {
+                camera.fps = 30;
+            }
+            camera.fps
+        };
+        info!("device session with {} (camera)", session.peer.name);
+        let mut buf = vec![0u8; 64 * 1024];
+        loop {
+            let path = socket_path("webcam", session.id);
+            let listener = bind(&path)?;
+            let mut child = tokio::process::Command::new(helper("linksy-screen"))
+                .arg("webcam")
+                .arg("--socket")
+                .arg(&path)
+                .arg("--name")
+                .arg(format!("Linksy Camera ({})", session.peer.name))
+                .arg("--fps")
+                .arg(fps.to_string())
+                .kill_on_drop(true)
+                .spawn()?;
+            let accepted = tokio::select! {
+                a = tokio::time::timeout(VIEW_TIMEOUT, listener.accept()) => a,
+                status = child.wait() => {
+                    let _ = std::fs::remove_file(&path);
+                    return Err(std::io::Error::other(format!("the webcam stopped ({})", status?)));
+                }
+            };
+            let _ = std::fs::remove_file(&path);
+            let (mut local, _) = accepted.map_err(|_| std::io::Error::other("the webcam didn't start"))??;
+            // Video to the helper, camera_control frames to the phone, until the session
+            // ends (return) or the frame rate changes (start again).
+            let next = loop {
+                tokio::select! {
+                    n = tokio::io::AsyncReadExt::read(&mut session.recv, &mut buf) => match n {
+                        Ok(0) | Err(_) => {
+                            let _ = child.kill().await;
+                            let _ = session.send.shutdown().await;
+                            return Ok(());
+                        }
+                        Ok(n) => {
+                            if local.write_all(&buf[..n]).await.is_err() {
+                                let _ = session.send.shutdown().await;
+                                return Ok(());
+                            }
+                        }
+                    },
+                    Some(frame) = control.recv() => {
+                        if session.send.write_all(&frame).await.is_err() {
+                            let _ = child.kill().await;
+                            return Ok(());
+                        }
+                    }
+                    Some(new) = rate.recv() => break new,
+                }
+            };
+            info!("webcam from {} now at {next} fps", session.peer.name);
+            let _ = child.kill().await;
+            fps = next;
+        }
     }
 
     /// Start viewing a session this device asked for: returns the socket the app reads.
@@ -235,7 +329,7 @@ impl Sessions {
             let _ = std::fs::remove_file(&path);
             pending.lock().unwrap().remove(&id);
             if let Ok(Ok((stream, _))) = accepted {
-                relay(&mut session, stream, None).await;
+                relay(&mut session, stream).await;
             }
             running.lock().unwrap().remove(&id);
         });
@@ -263,29 +357,13 @@ impl Sessions {
     }
 }
 
-/// Copy media and control between the network and the local process until either side
+/// Copy media and control between the session and the helper's socket until either side
 /// stops. Dropping the session afterwards closes it on the other device.
-/// Copy the session to the helper's socket and back; with `control`, what goes to the
-/// other device comes from there instead of the helper.
-async fn relay(session: &mut Session, local: UnixStream, control: Option<mpsc::UnboundedReceiver<Vec<u8>>>) {
+async fn relay(session: &mut Session, local: UnixStream) {
     let (mut local_rx, mut local_tx) = local.into_split();
     let (send, recv) = (&mut session.send, &mut session.recv);
-    let to_peer = async {
-        match control {
-            Some(mut frames) => {
-                while let Some(frame) = frames.recv().await {
-                    if send.write_all(&frame).await.is_err() {
-                        break;
-                    }
-                }
-            }
-            None => {
-                let _ = tokio::io::copy(&mut local_rx, send).await;
-            }
-        }
-    };
     tokio::select! {
-        _ = to_peer => {}
+        _ = tokio::io::copy(&mut local_rx, send) => {}
         _ = tokio::io::copy(recv, &mut local_tx) => {}
     }
     let _ = session.send.shutdown().await;
