@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.5.9" date="2026-10-21">
+      <description>
+        <p>A phone's camera can be used at 60 frames per second.</p>
+      </description>
+    </release>
     <release version="0.5.8" date="2026-10-21">
       <description>
         <p>Linksy tells you when a new version is out, offers to reconnect a second display that dropped, and asks again when remote control wasn't allowed.</p>

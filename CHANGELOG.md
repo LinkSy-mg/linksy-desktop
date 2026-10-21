@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.5.9
+
+### Added
+- **60 fps webcam**: with a phone that films at 60 frames per second, turn on
+  "60 Frames per Second" in the camera's settings (or on the phone): the Linksy Camera
+  follows, for smoother motion in calls and OBS. It restarts in your apps for a moment.
+
 ## 0.5.8
 
 ### Added
