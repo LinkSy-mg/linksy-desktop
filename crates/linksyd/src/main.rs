@@ -30,6 +30,7 @@ use tracing::{error, info};
 const FEATURES: &[&str] = &[
     "files", "clipboard", "open_url", "ring", "battery", "media_state", "media_remote", "call_state", "heartbeat",
     "import", "fs", "input", "screen", "control", "display", "camera", "watch", "notifications", "sms",
+    "clipboard_file",
 ];
 
 /// Fixed default port so a peer's last known address stays valid across restarts.
@@ -47,6 +48,9 @@ fn parse_args() -> Result<Args, String> {
     config.kind = system::device_kind();
     // Everything this computer does for its devices (docs/protocol.md §4.10).
     config.features = FEATURES.iter().map(|f| f.to_string()).collect();
+    if clipboard::can_watch() {
+        config.features.push("clipboard_watch".into());
+    }
     config.port = DEFAULT_PORT;
     let mut socket = linksy_ipc::socket_path();
     let mut notifications = true;
