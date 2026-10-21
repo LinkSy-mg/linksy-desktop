@@ -656,7 +656,8 @@ no app release (in linksy-site: `src/data/service.ts`).
     "linux": { "version": "0.5.7", "notes": "…", "downloads": { "flatpak": "…", "deb": "…", "rpm": "…", "tarball": "…" } },
     "android": { "download": "…/linksy.apk" }
   },
-  "notices": [ { "id": "…", "level": "info|warning", "title": "…", "body": "…", "platforms": ["android"], "until": "ISO 8601" } ]
+  "notices": [ { "id": "…", "level": "info|warning", "title": "…", "body": "…", "platforms": ["android"], "until": "ISO 8601" } ],
+  "stats": { "downloads": { "linux": 2, "android": 15, "total": 17 }, "devices_online": 0, "updated": "…" }
 }
 ```
 
@@ -673,6 +674,9 @@ How the apps use it:
   connecting"; otherwise ignore.
 - **`notices`:** show each once (remember `id`), as plain text (no markup, no links
   made clickable beyond https), only for listed `platforms`, not after `until`.
+- **`stats`:** totals for display only (an About page, say): downloads from GitHub and
+  devices connected through the relay right now. Either may be `null`. There is no user
+  count: Linksy has no accounts and sends nothing about its users anywhere.
 - **Robustness:** ignore unknown fields; skip the whole file if `schema` isn't 1, if it
   isn't valid JSON, or if it's over 64 KiB. What it says can't reach anyone's data: a
   wrong relay can only fail to connect (everything is end-to-end encrypted with keys
