@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.6.3
+
+### Added
+- **Black top bar when watching an Android phone?** The screen viewer's info button
+  explains it: some phones hide their status bar from screen sharing, and how to turn
+  that off on the phone.
+
 ## 0.6.2
 
 ### Changed
