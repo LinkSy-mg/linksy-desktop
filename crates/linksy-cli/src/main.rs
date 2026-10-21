@@ -26,6 +26,7 @@ Usage:
   linksy clip <device> [text]        share text to its clipboard (default: stdin)
   linksy open <device> <url>         open a web link in its browser
   linksy ring <device> [--stop]      make it ring so you can find it
+  linksy locate <phone>              ask a phone where it is (it can say no)
   linksy files <phone>               open a phone's files in the file manager
   linksy texts <phone> [thread]      a phone's conversations, or one conversation
   linksy text <phone> <number> <message…>
@@ -81,9 +82,11 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             }
             for d in devices {
                 let state = match (d.trusted, d.connected, d.nearby) {
+                    (true, true, _) if d.usb => "connected by USB",
+                    (true, true, _) if d.away => "connected away from home",
                     (true, true, _) => "connected",
                     (true, false, true) => "paired · nearby",
-                    (true, false, false) => "paired · away",
+                    (true, false, false) => "paired · not nearby",
                     (false, _, _) => "nearby · not paired",
                 };
                 let battery = d.battery.map(|b| format!(" · {}%{}", b.level, if b.charging { " charging" } else { "" })).unwrap_or_default();
@@ -168,6 +171,13 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             println!("Ringing {to}. Stop it with: linksy ring {to} --stop");
         }
         ("ring", [to, stop]) if stop == "--stop" => c.ring(to.clone(), false).await.map_err(err)?,
+        ("locate", [phone]) => {
+            println!("Asking {phone} where it is…");
+            let l = c.locate(phone.clone()).await.map_err(err)?;
+            let accuracy = l.accuracy_m.map(|a| format!(", within {a:.0} m")).unwrap_or_default();
+            println!("{phone} is at {:.5}, {:.5}{accuracy}", l.lat, l.lon);
+            println!("https://www.openstreetmap.org/?mlat={:.5}&mlon={:.5}#map=17/{:.5}/{:.5}", l.lat, l.lon, l.lat, l.lon);
+        }
         ("open", [to, url]) => {
             c.open_url(to.clone(), url.clone()).await.map_err(err)?;
             println!("Opened on {to}.");

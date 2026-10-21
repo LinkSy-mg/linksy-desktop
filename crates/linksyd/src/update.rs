@@ -35,6 +35,8 @@ struct State {
     /// The newest version already announced, and notices already shown.
     announced: Option<String>,
     seen_notices: HashSet<String>,
+    /// The relays the website lists, preferred first: used from the next start.
+    relays: Vec<String>,
     #[serde(skip)]
     latest: Option<Latest>,
 }
@@ -50,9 +52,16 @@ struct Latest {
 struct Service {
     schema: u32,
     #[serde(default)]
+    relays: Vec<RelayInfo>,
+    #[serde(default)]
     latest: Option<Releases>,
     #[serde(default)]
     notices: Vec<Notice>,
+}
+
+#[derive(Deserialize)]
+struct RelayInfo {
+    url: String,
 }
 
 #[derive(Deserialize)]
@@ -131,6 +140,10 @@ impl Updates {
         let mut notices = Vec::new();
         {
             let mut s = self.state.lock().unwrap();
+            let relays: Vec<String> = service.relays.into_iter().map(|r| r.url).filter(|u| u.starts_with("https://")).collect();
+            if !relays.is_empty() {
+                s.relays = relays;
+            }
             if let Some(r) = service.latest.and_then(|l| l.linux) {
                 if newer(&r.version, env!("CARGO_PKG_VERSION")) && s.announced.as_deref() != Some(r.version.as_str()) {
                     s.announced = Some(r.version.clone());
@@ -188,6 +201,18 @@ impl Updates {
         }
     }
 }
+
+/// The relay to use away from home: LINKSY_RELAY, else the first the website listed last
+/// time (saved in `update.json`), else Linksy's own.
+pub fn relay(path: &std::path::Path) -> String {
+    if let Ok(r) = std::env::var("LINKSY_RELAY") {
+        return r;
+    }
+    let saved: Option<State> = std::fs::read(path).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    saved.and_then(|s| s.relays.into_iter().next()).unwrap_or_else(|| DEFAULT_RELAY.into())
+}
+
+const DEFAULT_RELAY: &str = "https://linksy-relay.diary.mg";
 
 fn fetch(url: &str) -> Result<Service, String> {
     let agent: ureq::Agent = ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(10))).user_agent(format!("Linksy/{} (Linux)", env!("CARGO_PKG_VERSION"))).build().into();

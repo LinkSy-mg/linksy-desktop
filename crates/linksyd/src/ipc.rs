@@ -226,6 +226,31 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
             photos.set_prefs(node, prefs)?;
             Ok(Value::Null)
         }
+        Request::SetAwayAll { device, on } => {
+            let id = resolve(node, &device)?;
+            node.set_away_all(&id, on).map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
+        Request::Locate { device } => {
+            let id = resolve(node, &device)?;
+            let mut events = node.subscribe();
+            node.locate(&id).await.map_err(|e| e.to_string())?;
+            let answer = tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                loop {
+                    match events.recv().await {
+                        Ok(linksy_core::Event::Location { from, lat, lon, accuracy_m, at_ms }) if from.id == id => {
+                            return Ok(linksy_ipc::Location { lat, lon, accuracy_m, at_ms });
+                        }
+                        Ok(linksy_core::Event::LocationRefused { from, reason }) if from.id == id => return Err(reason),
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => return Err("Linksy is stopping".to_string()),
+                        _ => {}
+                    }
+                }
+            })
+            .await
+            .map_err(|_| "the phone didn't answer".to_string())??;
+            json(serde_json::to_value(answer))
+        }
         Request::Updates => match crate::update::UPDATES.get() {
             Some(u) => json(serde_json::to_value(u.info())),
             None => Err("update checks aren't running".into()),

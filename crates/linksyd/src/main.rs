@@ -61,6 +61,7 @@ fn parse_args() -> Result<Args, String> {
     let mut notifications = true;
     let mut open_links = true;
     let mut usb = true;
+    let mut away = true;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -76,6 +77,7 @@ fn parse_args() -> Result<Args, String> {
             "--no-notifications" => notifications = false,
             "--no-open-links" => open_links = false,
             "--no-usb" => usb = false,
+            "--no-away" => away = false,
             "-h" | "--help" => {
                 println!(
                     "linksyd — Linksy background service\n\n\
@@ -88,7 +90,8 @@ fn parse_args() -> Result<Args, String> {
                      --stay-connected     keep paired devices connected (default: on demand)\n  \
                      --no-notifications   don't show desktop notifications\n  \
                      --no-open-links      don't open links devices send (they're still in the history)\n  \
-                     --no-usb             don't connect phones over USB cables"
+                     --no-usb             don't connect phones over USB cables\n  \
+                     --no-away            don't reach devices away from home (over the internet)"
                 );
                 std::process::exit(0);
             }
@@ -99,6 +102,9 @@ fn parse_args() -> Result<Args, String> {
     for dir in [&mut config.data_dir, &mut config.download_dir] {
         *dir = std::path::absolute(&*dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
+    // Away from home, through the relay the website lists (docs/protocol.md §4.13).
+    config.away = away;
+    config.relay = Some(update::relay(&config.data_dir.join("update.json")));
     Ok(Args { config, socket, notifications, open_links, usb })
 }
 

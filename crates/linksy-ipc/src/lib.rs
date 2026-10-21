@@ -61,6 +61,11 @@ pub enum Request {
     /// Which devices lock this computer when they leave, and after how long.
     LockPrefs,
     SetLockPrefs { prefs: LockPrefs },
+    /// Allow everything from away for a device (screens, files, camera…), or only the
+    /// small things (docs/protocol.md §4.13).
+    SetAwayAll { device: String, on: bool },
+    /// Ask a phone where it is; answers its position or why not (docs/protocol.md §4.14).
+    Locate { device: String },
     /// This version, the newest one if it's newer, and whether Linksy checks.
     Updates,
     SetUpdatePrefs { prefs: UpdatePrefs },
@@ -205,6 +210,16 @@ impl Default for LockPrefs {
     fn default() -> Self {
         Self { devices: Vec::new(), grace_s: 60 }
     }
+}
+
+/// Where a phone said it is.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Location {
+    pub lat: f64,
+    pub lon: f64,
+    pub accuracy_m: Option<f64>,
+    /// When the phone measured it, in milliseconds since the epoch.
+    pub at_ms: u64,
 }
 
 /// Whether Linksy checks linksy.diary.mg once a day for a newer version.
@@ -487,6 +502,14 @@ impl Client {
 
     pub async fn set_photo_prefs(&self, prefs: PhotoPrefs) -> Result<(), ClientError> {
         self.call(Request::SetPhotoPrefs { prefs }).await
+    }
+
+    pub async fn set_away_all(&self, device: impl Into<String>, on: bool) -> Result<(), ClientError> {
+        self.call(Request::SetAwayAll { device: device.into(), on }).await
+    }
+
+    pub async fn locate(&self, device: impl Into<String>) -> Result<Location, ClientError> {
+        self.call(Request::Locate { device: device.into() }).await
     }
 
     pub async fn updates(&self) -> Result<UpdateInfo, ClientError> {

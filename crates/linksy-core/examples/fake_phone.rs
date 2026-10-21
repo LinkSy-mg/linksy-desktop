@@ -25,6 +25,8 @@
 //! `--camera` accepts "Use as Webcam": streams a test picture (with gst-launch-1.0, when
 //! it's there), sends a `camera_state` and prints the `camera_control` it gets.
 //! `--picture FILE` sends that JPEG or PNG as the phone's picture.
+//! `--location LAT,LON` answers "Locate" with that position (else it says no).
+//! `--away` turns on away from home, through LINKSY_RELAY or Linksy's relay.
 
 use std::time::Duration;
 
@@ -49,6 +51,8 @@ async fn main() {
     let mut watch_clipboard = false;
     let mut camera = false;
     let mut picture: Option<std::path::PathBuf> = None;
+    let mut location: Option<(f64, f64)> = None;
+    let mut away = false;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -68,6 +72,8 @@ async fn main() {
             "--watch-clipboard" => watch_clipboard = true,
             "--camera" => camera = true,
             "--picture" => picture = Some(value().into()),
+            "--location" => location = value().split_once(',').and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?))),
+            "--away" => away = true,
             "--files" => files = Some(value().into()),
             "--leave-after" => leave_after = Some(value().parse().expect("--leave-after SECONDS")),
             "--press" => {
@@ -94,6 +100,8 @@ async fn main() {
     config.os = "android".into();
     config.discovery = !no_discovery;
     config.port = port;
+    config.away = away;
+    config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
     let node = Node::start(config).await.expect("start");
     let mut events = node.subscribe();
     println!("{} ({}) up", node.info().name, node.info().id.short());
@@ -351,6 +359,14 @@ async fn main() {
                         println!("pressing {command:?} on {}", p.app);
                         let _ = node.media_command(&from.id, &p.id, command).await;
                     }
+                }
+                Ok(Event::LocateRequest { from }) => {
+                    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+                    let r = match location {
+                        Some((lat, lon)) => node.send_location(&from.id, lat, lon, Some(15.0), now).await,
+                        None => node.refuse_location(&from.id, "Location is off on this phone").await,
+                    };
+                    println!("located by {}: {:?}", from.name, r.map_err(|e| e.to_string()));
                 }
                 Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Camera }) if camera => {
                     println!("camera requested by {}: accepting", from.name);

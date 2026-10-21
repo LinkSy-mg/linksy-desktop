@@ -470,6 +470,10 @@ impl Node {
         if new.stay_connected && !old.stay_connected {
             self.reconnect_all();
         }
+        // Turned on after starting without it: start it now. (Off is checked at each use.)
+        if new.away && !old.away && self.inner.config.away && self.inner.away.lock().unwrap().is_none() {
+            self.start_away().await;
+        }
         self.emit(Event::SettingsChanged { settings: new.clone() });
         Ok(new)
     }

@@ -81,6 +81,8 @@ impl Away {
                     }
                 }
                 event = events.recv() => match event {
+                    // From away (over the internet) the phone isn't near: that doesn't count.
+                    Ok(Event::Heartbeat { from }) if node.link(&from.id) == Some(linksy_core::Link::Away) => {}
                     Ok(Event::Heartbeat { from }) => {
                         let mut state = self.inner.lock().unwrap();
                         if state.prefs.devices.contains(&from.id) {
