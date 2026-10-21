@@ -261,8 +261,8 @@ async fn main() {
                     }
                 }
                 Ok(Event::SessionRequest { request, from, kind }) if display.is_some() => {
-                    println!("{kind:?} requested by {}: accepting", from.name);
-                    node.respond(request, true);
+                    println!("{kind:?} requested by {}: accepting as a 2400×1080 screen", from.name);
+                    node.respond_session(request, true, Some((2400, 1080)));
                 }
                 Ok(_) => {}
                 Err(_) => break,
