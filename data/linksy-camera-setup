@@ -1,0 +1,49 @@
+#!/bin/sh
+# Give this computer a "Linksy Camera" video device, now and at every boot, so a phone's
+# camera shows up in every app (browsers and Zoom only list V4L2 cameras). Run as root:
+# Linksy starts it with pkexec from its Finish Setup dialog. Needs v4l2loopback.
+# Exit codes: 0 done, 3 driver missing, 4 driver refused (Secure Boot: restart to approve).
+set -u
+NAME="Linksy Camera"
+
+have_device() {
+  for n in /sys/class/video4linux/*/name; do
+    [ -r "$n" ] && [ "$(cat "$n")" = "$NAME" ] && return 0
+  done
+  return 1
+}
+
+if ! modinfo v4l2loopback >/dev/null 2>&1; then
+  echo "v4l2loopback isn't installed" >&2
+  exit 3
+fi
+# Loaded by someone else (OBS) keeps their options; otherwise load it with no devices of
+# its own, and add ours.
+if [ ! -d /sys/module/v4l2loopback ]; then
+  if ! out=$(modprobe v4l2loopback devices=0 2>&1); then
+    echo "$out" >&2
+    case "$out" in *"Key was rejected"*|*"Required key not available"*) exit 4 ;; esac
+    exit 1
+  fi
+fi
+if ! have_device; then
+  v4l2loopback-ctl add --name "$NAME" --exclusive-caps 1 --max-width 1920 --max-height 1920 >/dev/null || exit 1
+fi
+
+# The same at every boot.
+cat > /etc/systemd/system/linksy-camera.service <<'EOF'
+[Unit]
+Description=Linksy Camera (a phone's camera as a webcam in every app)
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c '[ -d /sys/module/v4l2loopback ] || modprobe v4l2loopback devices=0; grep -qx "Linksy Camera" /sys/class/video4linux/*/name 2>/dev/null || v4l2loopback-ctl add --name "Linksy Camera" --exclusive-caps 1 --max-width 1920 --max-height 1920'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable linksy-camera.service >/dev/null 2>&1
+echo "Linksy Camera is ready"
