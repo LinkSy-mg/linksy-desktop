@@ -122,10 +122,11 @@ Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
 - [x] Clipboard sharing (text, images and single files up to 10 MB, on demand: app ⋯ menu or `linksy clip`; received content is copied via wl-copy/xclip/xsel)
 - [x] Automatic clipboard sync, computer to phone, where the desktop allows watching the clipboard (KDE, wlroots; not GNOME)
 - [x] "Send with Linksy" in Files (right-click → Scripts), "Open With Linksy" for files and folders
+- [x] Away from home: paired devices reach each other over the internet (iroh, Linksy's relay), for a week after they last met on the same network; screens, files, camera and microphone stay local unless allowed per device
+- [x] Locate a phone (`linksy locate`), asked once, never tracked
+- [x] QR-code pairing
+- [x] Android app (Flutter, separate repository; see `docs/protocol.md`)
 - [ ] Tray icon (GNOME has none by default)
-- [ ] Android app (Flutter; see `docs/protocol.md`)
-- [ ] QR-code pairing
-- [ ] macOS (AppKit) and Windows (WinUI) apps
 - [x] Screen mirroring between computers (View Screen; the sharer always approves)
 - [x] Remote control of a mirrored screen (Take Control; asked for separately)
 - [x] Sidecar: another device as a second display (virtual monitor, driven from that device)
