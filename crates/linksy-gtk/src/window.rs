@@ -65,6 +65,9 @@ struct State {
     showing: Vec<Uuid>,
     /// The camera session in use here (another device's camera as a webcam) and whose.
     camera: Option<(Uuid, Fingerprint)>,
+    /// The second display this computer extends onto: its session, the device and its
+    /// name, so that a drop (the phone's screen went off, say) can offer to reconnect.
+    second_display: Option<(Uuid, Fingerprint, String)>,
     /// The phone whose texts are on screen.
     messages_open: Option<Fingerprint>,
     /// Devices that lock this computer when they leave, and after how long.

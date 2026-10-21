@@ -173,6 +173,9 @@ impl Window {
     pub(super) fn sharing_started(self: &Rc<Self>, session: Uuid, peer: &DeviceInfo, kind: SessionKind, sharing: bool) {
         self.close_offer_dialog(&session);
         self.state.borrow_mut().sharing = Some(session);
+        if kind == SessionKind::Display && sharing {
+            self.state.borrow_mut().second_display = Some((session, peer.id, peer.name.clone()));
+        }
         if kind == SessionKind::Camera && !sharing {
             self.state.borrow_mut().camera = Some((session, peer.id));
             self.render_page();
@@ -201,6 +204,28 @@ impl Window {
 
     pub(super) fn session_ended(self: &Rc<Self>, session: Uuid) {
         self.close_offer_dialog(&session);
+        // A second display that ended without Stop here: the other device left (its
+        // screen went off, Wi-Fi dropped). Offer to bring it back in one click.
+        let dropped = {
+            let mut state = self.state.borrow_mut();
+            match state.second_display.take() {
+                Some((s, id, name)) if s == session => Some((id, name)),
+                other => {
+                    state.second_display = other;
+                    None
+                }
+            }
+        };
+        if let Some((id, name)) = dropped {
+            let toast = adw::Toast::builder().title(glib::markup_escape_text(&format!("The second display on {name} disconnected"))).button_label("Reconnect").timeout(15).build();
+            let w = Rc::downgrade(self);
+            toast.connect_button_clicked(move |_| {
+                if let Some(w) = w.upgrade() {
+                    w.extend_to(id);
+                }
+            });
+            self.toasts.add_toast(toast);
+        }
         let camera_ended = {
             let mut state = self.state.borrow_mut();
             state.showing.retain(|s| *s != session);
@@ -282,6 +307,12 @@ impl Window {
 
     pub(super) fn stop_sharing(self: &Rc<Self>) {
         let Some(session) = self.state.borrow().sharing else { return };
+        // Stopped here: no "disconnected" for it.
+        let mut state = self.state.borrow_mut();
+        if state.second_display.as_ref().is_some_and(|(s, ..)| *s == session) {
+            state.second_display = None;
+        }
+        drop(state);
         self.end_session(session);
     }
 
