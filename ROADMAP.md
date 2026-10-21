@@ -11,15 +11,11 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.2 | Everyday basics | Open on PC (desktop done in 0.2.0) · Battery & Ring (desktop done in 0.2.1) · Notifications with reply (desktop done in 0.2.2) |
 | 0.3 | Feels like one device | Media controls (desktop done in 0.3.0) · Pause on calls (desktop done in 0.3.1) · Lock when you walk away (desktop done in 0.3.2) |
 | 0.4 | Phone as a tool | Photo auto-import (desktop done in 0.4.0) · Touchpad, keyboard & presentation remote (desktop done in 0.4.1) |
-| 0.5 | Phone on the desktop | Texting from the desktop (desktop done in 0.5.0) · Phone in the Files sidebar (desktop done in 0.5.1) |
+| 0.5 | Phone on the desktop | Texting from the desktop (desktop done in 0.5.0) · Phone in the Files sidebar (desktop done in 0.5.1) · USB cable, microphone, camera controls (desktop done in 0.5.7) |
+| 0.6 | Anywhere | Away from home over the internet, with a 7-day lease · Locate the phone · 1080p webcam (desktop done in 0.6.0) |
 
-Later: direct links that skip the router — USB tethering first (likely little code:
-connections already race every address), then Wi-Fi Direct as an automatic boost for big
-transfers on hardware that keeps Wi-Fi up at the same time. Never a link that drops the
-normal network.
-
-Not planned: automatic clipboard sync on GNOME (needs a Shell extension; manual Send
-Clipboard stays).
+Not planned: Bluetooth LE presence, and automatic clipboard sync on GNOME (needs a Shell
+extension; manual Send Clipboard stays).
 
 ---
 
