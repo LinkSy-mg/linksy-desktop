@@ -15,6 +15,8 @@ Requires:       xdg-desktop-portal
 Recommends:     gstreamer1-plugin-openh264
 Recommends:     gstreamer1-plugins-bad-free
 Recommends:     wl-clipboard
+# The phone's camera in every app (RPM Fusion); Linksy's Finish Setup offers it too
+Recommends:     v4l2loopback
 
 %description
 Linksy connects your computer and phone directly over your own network, with no
@@ -29,7 +31,12 @@ cp -a %{root}/. %{buildroot}/
 if [ $1 -eq 1 ]; then systemctl --global enable linksyd.service >/dev/null 2>&1 || :; fi
 
 %preun
-if [ $1 -eq 0 ]; then systemctl --global disable linksyd.service >/dev/null 2>&1 || :; fi
+if [ $1 -eq 0 ]; then
+  systemctl --global disable linksyd.service >/dev/null 2>&1 || :
+  # The camera device Finish Setup made, if it did
+  systemctl disable linksy-camera.service >/dev/null 2>&1 || :
+  rm -f /etc/systemd/system/linksy-camera.service
+fi
 
 %files
 %license /usr/share/licenses/linksy/LICENSE
@@ -37,6 +44,7 @@ if [ $1 -eq 0 ]; then systemctl --global disable linksyd.service >/dev/null 2>&1
 /usr/bin/linksy
 /usr/bin/linksy-app
 /usr/bin/linksy-screen
+/usr/libexec/linksy/linksy-camera-setup
 /usr/lib/systemd/user/linksyd.service
 /usr/share/applications/mg.diary.linksy.Linksy.desktop
 /usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml

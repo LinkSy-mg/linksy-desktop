@@ -21,6 +21,7 @@ fi
 
 rm -rf "$STAGE"; mkdir -p "$STAGE/bin" "$STAGE/share/icons"
 for b in linksyd linksy linksy-app linksy-screen; do install -m755 "target/release/$b" "$STAGE/bin/$b"; done
+install -m755 data/linksy-camera-setup "$STAGE/bin/linksy-camera-setup"
 cp data/mg.diary.linksy.Linksy.desktop data/linksyd.service "data/nautilus/Send with Linksy" "$STAGE/share/"
 cp data/icons/*.svg "$STAGE/share/icons/"
 install -m755 packaging/linux/install.sh packaging/linux/uninstall.sh "$STAGE/"
@@ -38,6 +39,7 @@ install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml "$ROOT/usr/share/metainf
 install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
 install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
 install -Dm644 LICENSE "$ROOT/usr/share/licenses/linksy/LICENSE"
+install -Dm755 data/linksy-camera-setup "$ROOT/usr/libexec/linksy/linksy-camera-setup"
 
 DEB="$DIST/deb"
 rm -rf "$DEB"; cp -a "$ROOT" "$DEB"; mkdir -p "$DEB/DEBIAN"

@@ -2,4 +2,7 @@
 set -e
 if [ "$1" = remove ] && command -v systemctl >/dev/null; then
   systemctl --global disable linksyd.service >/dev/null 2>&1 || true
+  # The camera device Finish Setup made, if it did
+  systemctl disable linksy-camera.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/linksy-camera.service
 fi
