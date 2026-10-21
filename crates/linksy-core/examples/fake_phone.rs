@@ -22,6 +22,9 @@
 //! "hello" and presses Right (next slide).
 //! `--clip-file PATH` puts a file (an image…) on the computer's clipboard.
 //! `--watch-clipboard` asks for the computer's clipboard as it changes and prints it.
+//! `--camera` accepts "Use as Webcam": streams a test picture (with gst-launch-1.0, when
+//! it's there), sends a `camera_state` and prints the `camera_control` it gets.
+//! `--picture FILE` sends that JPEG or PNG as the phone's picture.
 
 use std::time::Duration;
 
@@ -44,6 +47,8 @@ async fn main() {
     let mut files: Option<std::path::PathBuf> = None;
     let mut clip_file: Option<std::path::PathBuf> = None;
     let mut watch_clipboard = false;
+    let mut camera = false;
+    let mut picture: Option<std::path::PathBuf> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -61,6 +66,8 @@ async fn main() {
             "--touchpad" => touchpad = true,
             "--clip-file" => clip_file = Some(value().into()),
             "--watch-clipboard" => watch_clipboard = true,
+            "--camera" => camera = true,
+            "--picture" => picture = Some(value().into()),
             "--files" => files = Some(value().into()),
             "--leave-after" => leave_after = Some(value().parse().expect("--leave-after SECONDS")),
             "--press" => {
@@ -91,9 +98,9 @@ async fn main() {
     let mut events = node.subscribe();
     println!("{} ({}) up", node.info().name, node.info().id.short());
 
-    if level.is_some() || clip_file.is_some() || watch_clipboard {
+    if level.is_some() || clip_file.is_some() || watch_clipboard || picture.is_some() {
         // These need the computer connected first.
-        let _ = tokio::time::timeout(Duration::from_secs(10), async {
+        let _ = tokio::time::timeout(Duration::from_secs(30), async {
             while !matches!(events.recv().await, Ok(Event::Connected { .. }) | Err(_)) {}
         })
         .await;
@@ -147,6 +154,19 @@ async fn main() {
         if let Some((title, artist)) = &media {
             let r = node.send_media_state(&t.device.id, &song(title, artist, playing)).await;
             println!("media to {}: {}", t.device.name, r.map(|_| "sent".to_string()).unwrap_or_else(|e| e.to_string()));
+        }
+        if let Some(path) = &picture {
+            use std::io::Write;
+            let bytes = std::fs::read(path).expect("picture file");
+            // Base64 by hand: the core has no encoder.
+            const A: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            let mut b64 = Vec::new();
+            for c in bytes.chunks(3) {
+                let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+                let _ = b64.write_all(&[A[(n >> 18) as usize & 63], A[(n >> 12) as usize & 63], if c.len() > 1 { A[(n >> 6) as usize & 63] } else { b'=' }, if c.len() > 2 { A[n as usize & 63] } else { b'=' }]);
+            }
+            let r = node.send_picture(&t.device.id, &String::from_utf8(b64).unwrap()).await;
+            println!("picture to {}: {:?}", t.device.name, r.map_err(|e| e.to_string()));
         }
         if let Some(path) = &clip_file {
             let r = node.send_clipboard_file(&t.device.id, path.clone()).await;
@@ -204,6 +224,55 @@ async fn main() {
                 }
                 println!("call: {state:?}");
                 tokio::time::sleep(Duration::from_secs(wait)).await;
+            }
+        });
+    }
+    if camera {
+        let mut sessions = node.incoming_sessions().expect("sessions");
+        let node = node.clone();
+        tokio::spawn(async move {
+            while let Some(mut s) = sessions.recv().await {
+                let (id, peer) = (s.id, s.peer.clone());
+                let state = serde_json::json!({"width":1280,"height":720,"facing":"back","lens":"0",
+                    "lenses":[{"id":"0","facing":"back","zoom":1.0,"main":true},{"id":"2","facing":"back","zoom":0.6,"main":false},{"id":"1","facing":"front","zoom":1.0,"main":true}],
+                    "zoom":1.0,"zoom_min":0.6,"zoom_max":10.0,"zoom_presets":[0.6,1,2,5,10],"torch":false,"has_torch":true,
+                    "focus":"auto","focus_modes":["auto","point","manual"],"focus_distance":0.0,"focus_point":null,
+                    "exposure":0,"exposure_min":-12,"exposure_max":12,"exposure_step":0.1667,"exposure_lock":false,
+                    "white_balance":"auto","white_balances":["auto","daylight","cloudy","shade","incandescent","fluorescent"],"white_balance_lock":false,
+                    "stabilization":true,"has_stabilization":true,"quality":"standard","orientation":"landscape","rotation":0});
+                let r = node.send_camera_state(&peer.id, id, state).await;
+                println!("camera for {}: state sent {:?}", peer.name, r.map_err(|e| e.to_string()));
+                // A test picture, when GStreamer's command line is there.
+                let (send, recv) = (&mut s.send, &mut s.recv);
+                let picture = async move {
+                    let child = tokio::process::Command::new("gst-launch-1.0")
+                        .args(["-q", "videotestsrc", "is-live=true", "!", "video/x-raw,width=1280,height=720,framerate=30/1", "!", "x264enc", "tune=zerolatency", "speed-preset=superfast", "!", "h264parse", "config-interval=-1", "!", "fdsink", "fd=1"])
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::null())
+                        .kill_on_drop(true)
+                        .spawn();
+                    if let Ok(mut child) = child {
+                        let mut out = child.stdout.take().unwrap();
+                        let _ = tokio::io::copy(&mut out, send).await;
+                    }
+                };
+                // camera_control frames: u32 big-endian length, then JSON.
+                let controls = async move {
+                    use tokio::io::AsyncReadExt;
+                    loop {
+                        let Ok(len) = recv.read_u32().await else { break };
+                        let mut body = vec![0; len as usize];
+                        if recv.read_exact(&mut body).await.is_err() {
+                            break;
+                        }
+                        println!("CAMERA_CONTROL {}", String::from_utf8_lossy(&body));
+                    }
+                };
+                tokio::select! {
+                    _ = picture => {}
+                    _ = controls => {}
+                }
+                println!("camera for {} ended", peer.name);
             }
         });
     }
@@ -281,6 +350,10 @@ async fn main() {
                         println!("pressing {command:?} on {}", p.app);
                         let _ = node.media_command(&from.id, &p.id, command).await;
                     }
+                }
+                Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Camera }) if camera => {
+                    println!("camera requested by {}: accepting", from.name);
+                    node.respond(request, true);
                 }
                 Ok(Event::SessionRequest { request, from, kind }) if display.is_some() => {
                     println!("{kind:?} requested by {}: accepting as a 2400×1080 screen", from.name);
