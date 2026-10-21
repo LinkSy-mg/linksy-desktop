@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.7.1" date="2026-10-22">
+      <description>
+        <p>The terminal is set up from the phone's page, in a card that says what's next. Preferences always open, even right after an update.</p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-10-22">
       <description>
         <p>Terminal from your phone: a shell on this computer, behind a code you set, allowed per phone, ended from either side. Set Up Everything: Finish Setup checks the firewall, autostart and screen sharing too, and fixes it all with one password.</p>

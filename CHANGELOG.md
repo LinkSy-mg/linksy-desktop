@@ -2,6 +2,18 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.7.1
+
+### Changed
+- **The terminal is set up from the phone's page**: a Terminal card there says what's
+  next (choose a code, allow this phone, unlock after wrong codes) and does it in one
+  click, instead of a switch that stayed greyed out until a code was set in Preferences.
+
+### Fixed
+- **Preferences sometimes didn't open**: when the background service was older than the
+  app (right after an update), a question it didn't know went unanswered and the window
+  waited forever. The service now always answers, and Preferences opens anyway.
+
 ## 0.7.0
 
 ### Added
