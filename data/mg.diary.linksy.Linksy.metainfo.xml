@@ -76,7 +76,7 @@
   <releases>
     <release version="0.6.2" date="2026-10-21">
       <description>
-        <p>A tidier device page, grouped under headings, and a device list you can hide (F9).</p>
+        <p>A redesigned device page: battery ring, a big Send Files area, one-click tiles, Use As cards for display, webcam and microphone, and a filterable activity timeline. The device list can shrink to a strip of pictures (F9).</p>
       </description>
     </release>
     <release version="0.6.1" date="2026-10-21">

@@ -5,10 +5,13 @@ Linksy for Linux. Each version's section becomes its release notes.
 ## 0.6.2
 
 ### Changed
-- **Tidier device page**: what a device can do is grouped under headings (Use as, Find
-  and Protect, Texts and Files, Away From Home) instead of one long list.
-- **Hide the device list**: the button at the top left (or F9) hides the sidebar for a
-  bigger page, and opens it over the page on narrow windows.
+- **Redesigned device page**: the device at the top with its battery as a ring around
+  its picture and how it's connected; a big Send Files area (click, or drop files
+  anywhere); one-click tiles for Clipboard, View Screen, Ring and Locate; "Use as"
+  cards for Second Display, Webcam and Microphone, with the webcam showing when it's
+  live; and the activity as a timeline you can filter by files, clipboard or links.
+- **Hide the device list**: the button at the top left (or F9) shrinks the sidebar to
+  a strip of device pictures, for a bigger page.
 
 ## 0.6.1
 
