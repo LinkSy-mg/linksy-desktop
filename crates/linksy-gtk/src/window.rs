@@ -91,6 +91,9 @@ pub struct Window {
     /// "Studio is watching your screen" with Stop.
     sharing_banner: adw::Banner,
     split: adw::OverlaySplitView,
+    /// The paired devices as a strip of avatars, while the sidebar is hidden.
+    rail: gtk::Box,
+    rail_list: gtk::Box,
     // Sidebar
     paired_list: gtk::ListBox,
     nearby_group: gtk::Box,
@@ -223,7 +226,17 @@ impl Window {
         let content_view = adw::ToolbarView::new();
         content_view.add_top_bar(&content_header);
         content_view.set_content(Some(&content_stack));
-        let content = adw::NavigationPage::builder().title("Linksy").tag("content").child(&content_view).build();
+        let rail_list = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
+        let rail_add = gtk::Button::builder().icon_name("list-add-symbolic").tooltip_text("Add Device").action_name("win.add-device").halign(gtk::Align::Center).css_classes(["circular", "rail-add"]).build();
+        let rail = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).visible(false).css_classes(["device-rail"]).build();
+        rail.append(&rail_list);
+        rail.append(&gtk::Box::builder().vexpand(true).build());
+        rail.append(&rail_add);
+        content_view.set_hexpand(true);
+        let content_row = gtk::Box::builder().build();
+        content_row.append(&rail);
+        content_row.append(&content_view);
+        let content = adw::NavigationPage::builder().title("Linksy").tag("content").child(&content_row).build();
 
         let split = adw::OverlaySplitView::builder().sidebar(&sidebar).content(&content).min_sidebar_width(240.0).max_sidebar_width(300.0).build();
         sidebar_toggle.bind_property("active", &split, "show-sidebar").bidirectional().sync_create().build();
@@ -275,6 +288,8 @@ impl Window {
             stack,
             sharing_banner,
             split,
+            rail,
+            rail_list,
             paired_list,
             nearby_group,
             nearby_list,
@@ -388,6 +403,15 @@ impl Window {
             let Some(id) = row.and_then(|r| r.widget_name().parse::<Fingerprint>().ok()) else { return };
             w.select(Some(id));
         });
+        // The avatar strip stands in for the hidden sidebar on wide windows.
+        for prop in ["show-sidebar", "collapsed"] {
+            let w = Rc::downgrade(self);
+            self.split.connect_notify_local(Some(prop), move |split, _| {
+                if let Some(w) = w.upgrade() {
+                    w.rail.set_visible(!split.shows_sidebar() && !split.is_collapsed());
+                }
+            });
+        }
         // A narrow window starts on the device list, not on an empty page.
         let w = Rc::downgrade(self);
         self.split.connect_collapsed_notify(move |split| {
@@ -917,6 +941,12 @@ impl Window {
                 to_select = Some(row);
             }
         }
+        while let Some(child) = self.rail_list.first_child() {
+            self.rail_list.remove(&child);
+        }
+        for d in &paired {
+            self.rail_list.append(&self.rail_button(d, Some(d.device.id) == selected));
+        }
         self.nearby_list.remove_all();
         for d in &nearby {
             self.nearby_list.append(&self.nearby_row(d));
@@ -938,6 +968,36 @@ impl Window {
             }
             None => {}
         }
+    }
+
+    /// A device on the avatar strip: its picture and status dot; a click opens it.
+    fn rail_button(self: &Rc<Self>, d: &DeviceView, selected: bool) -> gtk::Button {
+        let avatar = adw::Avatar::builder().size(40).text(&d.device.name).show_initials(true).build();
+        avatar.set_custom_image(self.state.borrow().pictures.get(&d.device.id));
+        let badge = gtk::Overlay::builder().child(&avatar).build();
+        let dot = gtk::Box::builder().halign(gtk::Align::End).valign(gtk::Align::End).css_classes(["status-dot"]).build();
+        if !(d.connected || d.nearby) {
+            dot.add_css_class("away");
+        }
+        badge.add_overlay(&dot);
+        let b = gtk::Button::builder().child(&badge).halign(gtk::Align::Center).tooltip_text(format!("{} · {}", d.device.name, status_text(d))).css_classes(["flat", "circular", "rail-device"]).build();
+        b.set_widget_name(&d.device.id.to_string());
+        if selected {
+            b.add_css_class("selected");
+        }
+        let (w, id) = (Rc::downgrade(self), d.device.id.to_string());
+        b.connect_clicked(move |_| {
+            let Some(w) = w.upgrade() else { return };
+            let mut i = 0;
+            while let Some(row) = w.paired_list.row_at_index(i) {
+                if row.widget_name() == id.as_str() {
+                    w.paired_list.select_row(Some(&row));
+                    break;
+                }
+                i += 1;
+            }
+        });
+        b
     }
 
     fn nearby_row(self: &Rc<Self>, d: &DeviceView) -> gtk::ListBoxRow {
@@ -974,6 +1034,15 @@ impl Window {
             changed
         };
         if changed {
+            let mut child = self.rail_list.first_child();
+            while let Some(b) = child {
+                if id.is_some_and(|id| b.widget_name() == id.to_string().as_str()) {
+                    b.add_css_class("selected");
+                } else {
+                    b.remove_css_class("selected");
+                }
+                child = b.next_sibling();
+            }
             self.render_page();
             self.render_activity();
             self.refresh_history();
