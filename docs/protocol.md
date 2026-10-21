@@ -735,7 +735,9 @@ carries its packets, like the USB cable (§4.11).
 - **The lease: 7 days.** A device may connect from away for a week after it was last
   connected on the same network or by cable (`TrustedDevice.last_met`, renewed on every
   such connection; pairing counts). After that its away connections are refused until
-  they meet again. `DeviceView.away_until` says until when.
+  they meet again. `DeviceView.away_until` says until when, and is `None` until the
+  device's away address is known (they met on the same network with both running 0.6) or
+  while away from home is off here: only show "Reachable from away" when it's set.
 - **What's refused from away** unless the user allowed everything for that device
   (`node.set_away_all(id, true)`, `TrustedDevice.away_all`): every media or input session
   (screen, control, display, camera, microphone, input), answered
@@ -1091,3 +1093,7 @@ robust against any encoder (GPU ones may slice too):
   (`reason: "away"`); `Config.away`/`relay`, `Settings.away`, `DeviceInfo.away`,
   `Link`, `DeviceView.away`/`away_all`/`away_until`. **Locate** (§4.14): `locate`,
   `location`, `location_refused`. `Message` lost `Eq` (positions are floats).
+- **2026-10-21** — Desktop 0.6.1: `DeviceView.away_until` is `None` until the device's
+  away address is known (and while away from home is off), so "Reachable from away"
+  isn't shown before the two have met on the same network running 0.6. Phone: bump
+  the core and keep showing the line only when `away_until` is set; nothing else changes.
