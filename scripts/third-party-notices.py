@@ -27,6 +27,11 @@ out = sys.stdout
 out.write("Third-party notices for Linksy\n\n")
 out.write("Linksy includes the open-source components below, each under its own license. The\n")
 out.write("license texts and notices they ship follow each entry.\n\n")
+mpl = [p for p in packages if "MPL" in (p.get("license") or "")]
+if mpl:
+    out.write("Components under the Mozilla Public License 2.0 (" + ", ".join(p["name"] for p in mpl) + ") are used\n")
+    out.write("unmodified; their source code is available from crates.io and the repositories\n")
+    out.write("listed with them below.\n\n")
 out.write("\n".join(f"- {p['name']} {p['version']}: {p.get('license') or 'see its license file'}" for p in packages))
 out.write("\n")
 for p in packages:
