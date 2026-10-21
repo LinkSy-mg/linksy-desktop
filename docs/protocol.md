@@ -661,7 +661,7 @@ no app release (in linksy-site: `src/data/service.ts`).
   "schema": 1,
   "generated": "2026-10-21T11:40:54Z",
   "service": { "name": "Linksy", "website": "…", "privacy": "…", "issues": "…", "releases": "…" },
-  "relays": [ { "url": "https://relay.linksy.diary.mg", "health": "https://relay.linksy.diary.mg/ping" } ],
+  "relays": [ { "url": "https://linksy-relay.diary.mg", "health": "https://linksy-relay.diary.mg/ping" } ],
   "protocol": { "current": 1, "minimum": 1 },
   "latest": {
     "linux": { "version": "0.5.7", "notes": "…", "downloads": { "flatpak": "…", "deb": "…", "rpm": "…", "tarball": "…" } },
@@ -675,7 +675,7 @@ no app release (in linksy-site: `src/data/service.ts`).
 How the apps use it:
 - **When:** at start-up and at most once a day, over HTTPS, with a 5 s timeout. Cache the
   last good copy; offline or on any error, use the cache, then the defaults built into
-  the core (the relay `https://relay.linksy.diary.mg`). Never block anything on it.
+  the core (the relay `https://linksy-relay.diary.mg`). Never block anything on it.
 - **`relays`:** away-from-home access (0.6) uses the first relay whose `url` is `https`;
   the others are fallbacks. A device's own relay is what it tells its peers. A relay set
   in Preferences (self-hosting) always wins.
