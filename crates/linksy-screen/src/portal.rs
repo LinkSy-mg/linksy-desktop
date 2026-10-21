@@ -18,6 +18,12 @@ pub struct Screen {
     pub input: Option<Input>,
 }
 
+/// What the user allowed in the desktop's dialog: without pointer and keyboard ("Allow
+/// remote interaction" off), the remembered choice is dropped so the dialog asks again.
+pub fn input_allowed(granted: ashpd::enumflags2::BitFlags<DeviceType>) -> bool {
+    granted.contains(DeviceType::Pointer) && granted.contains(DeviceType::Keyboard)
+}
+
 /// Where the viewer's input goes.
 pub enum Input {
     /// Test mode: print it (linksyd logs the helper's stderr).
@@ -28,15 +34,25 @@ pub enum Input {
         node: u32,
         /// The stream's size in the compositor's coordinates, for absolute positions.
         size: Option<(f64, f64)>,
+        /// Whether the user allowed input; when not, it's said once and dropped.
+        allowed: bool,
     },
 }
 
+static REFUSED_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 impl Input {
     pub async fn apply(&self, msg: &ControlMsg) {
-        let Self::Desktop { proxy, session, node, size } = self else {
+        let Self::Desktop { proxy, session, node, size, allowed } = self else {
             eprintln!("input: {msg:?}");
             return;
         };
+        if !allowed {
+            if !REFUSED_SAID.swap(true, std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("linksy-screen: remote interaction wasn't allowed in the sharing dialog; input from the other device is ignored (it asks again next time)");
+            }
+            return;
+        }
         let result = match *msg {
             ControlMsg::Pointer { x, y } => match size {
                 Some((w, h)) => {
@@ -106,8 +122,9 @@ pub async fn input_only(token: Option<String>) -> Result<(Input, Option<String>)
         .map_err(|e| e.to_string())?
         .response()
         .map_err(|_| "remote control was cancelled".to_string())?;
-    let restore_token = selected.restore_token().map(str::to_string);
-    Ok((Input::Desktop { proxy: remote, session, node: 0, size: None }, restore_token))
+    let allowed = input_allowed(selected.devices());
+    let restore_token = if allowed { selected.restore_token().map(str::to_string) } else { None };
+    Ok((Input::Desktop { proxy: remote, session, node: 0, size: None, allowed }, restore_token))
 }
 
 fn state(pressed: bool) -> KeyState {
@@ -157,8 +174,9 @@ pub async fn screen(token: Option<String>, control: bool, virtual_monitor: bool)
     let node = stream.pipe_wire_node_id();
     let size = stream.size().map(|(w, h)| (w as f64, h as f64));
     let fd = screencast.open_pipe_wire_remote(&session, Default::default()).await.map_err(|e| e.to_string())?;
-    let restore_token = selected.restore_token().map(str::to_string);
-    Ok(Screen { fd, node, restore_token, input: Some(Input::Desktop { proxy: remote, session, node, size }) })
+    let allowed = input_allowed(selected.devices());
+    let restore_token = if allowed { selected.restore_token().map(str::to_string) } else { None };
+    Ok(Screen { fd, node, restore_token, input: Some(Input::Desktop { proxy: remote, session, node, size, allowed }) })
 }
 
 fn first(streams: &[Stream]) -> Result<&Stream, String> {

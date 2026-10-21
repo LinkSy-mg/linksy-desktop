@@ -141,8 +141,13 @@ fn run(args: Args) -> Result<(), String> {
     } else {
         let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
         let screen = rt.block_on(portal::screen(token, args.control, args.virtual_size.is_some()))?;
-        if let (Some(path), Some(new)) = (&args.token_file, &screen.restore_token) {
-            let _ = std::fs::write(path, new);
+        // No token back (input refused, say): forget the old one so the dialog asks again.
+        if let Some(path) = &args.token_file {
+            let _ = match &screen.restore_token {
+                Some(new) => std::fs::write(path, new),
+                None if args.control => std::fs::remove_file(path),
+                None => Ok(()),
+            };
         }
         // The PipeWire remote stays open for the life of the pipeline.
         let mut source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000 always-copy=true", screen.fd.as_raw_fd(), screen.node);
@@ -201,8 +206,11 @@ fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
     } else {
         let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
         let (input, new_token) = rt.block_on(portal::input_only(token))?;
-        if let (Some(path), Some(new)) = (&args.token_file, &new_token) {
-            let _ = std::fs::write(path, new);
+        if let Some(path) = &args.token_file {
+            let _ = match &new_token {
+                Some(new) => std::fs::write(path, new),
+                None => std::fs::remove_file(path),
+            };
         }
         input
     };
