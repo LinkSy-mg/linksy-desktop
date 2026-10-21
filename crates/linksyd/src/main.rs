@@ -19,6 +19,8 @@ mod media;
 #[cfg(target_os = "linux")]
 mod notify;
 mod system;
+#[cfg(target_os = "linux")]
+mod usb;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -41,6 +43,7 @@ struct Args {
     socket: PathBuf,
     notifications: bool,
     open_links: bool,
+    usb: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -55,6 +58,7 @@ fn parse_args() -> Result<Args, String> {
     let mut socket = linksy_ipc::socket_path();
     let mut notifications = true;
     let mut open_links = true;
+    let mut usb = true;
 
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -69,6 +73,7 @@ fn parse_args() -> Result<Args, String> {
             "--stay-connected" => config.stay_connected = true,
             "--no-notifications" => notifications = false,
             "--no-open-links" => open_links = false,
+            "--no-usb" => usb = false,
             "-h" | "--help" => {
                 println!(
                     "linksyd — Linksy background service\n\n\
@@ -80,7 +85,8 @@ fn parse_args() -> Result<Args, String> {
                      --no-discovery       don't advertise or browse the network\n  \
                      --stay-connected     keep paired devices connected (default: on demand)\n  \
                      --no-notifications   don't show desktop notifications\n  \
-                     --no-open-links      don't open links devices send (they're still in the history)"
+                     --no-open-links      don't open links devices send (they're still in the history)\n  \
+                     --no-usb             don't connect phones over USB cables"
                 );
                 std::process::exit(0);
             }
@@ -91,7 +97,7 @@ fn parse_args() -> Result<Args, String> {
     for dir in [&mut config.data_dir, &mut config.download_dir] {
         *dir = std::path::absolute(&*dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     }
-    Ok(Args { config, socket, notifications, open_links })
+    Ok(Args { config, socket, notifications, open_links, usb })
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -159,6 +165,10 @@ async fn main() -> ExitCode {
     }
     #[cfg(target_os = "linux")]
     let _ = dav::BRIDGES.set(dav::Bridges::start(data_dir.join("files.json"), node.clone()).await);
+    #[cfg(target_os = "linux")]
+    if args.usb {
+        tokio::spawn(usb::Usb::new(node.clone(), data_dir.clone(), args.notifications).run());
+    }
     let photos = photos::Photos::load(data_dir.join("photos.json"), &node);
     let away = lock::Away::load(data_dir.join("lock.json"));
     tokio::spawn(away.clone().run(node.clone(), history.clone()));
