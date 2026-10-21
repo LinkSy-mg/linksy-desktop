@@ -352,6 +352,7 @@ impl Window {
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
                 page::Action::Webcam => w.use_camera(id),
+                page::Action::Microphone => w.use_microphone(id),
                 page::Action::CameraPreview => {
                     let name = w.device(&id).map(|d| d.device.name).unwrap_or_default();
                     w.preview_camera(&setup::camera_name(&name));
@@ -631,7 +632,7 @@ impl Window {
             }
             Event::SettingsChanged { .. } => self.refresh_status(),
             Event::SessionRequest { request, from, kind } => self.show_session_request(request, &from, kind),
-            Event::SessionStarted { session, peer, kind, sharing } if sharing || kind == SessionKind::Camera => {
+            Event::SessionStarted { session, peer, kind, sharing } if sharing || kind.is_device() => {
                 self.sharing_started(session, &peer, kind, sharing)
             }
             Event::SessionStarted { kind: SessionKind::Display, .. } => self.join_pending_displays(),
@@ -1388,5 +1389,5 @@ pub(crate) fn can(d: &DeviceInfo, feature: &str) -> bool {
     if !d.features.is_empty() {
         return d.features.iter().any(|f| f == feature);
     }
-    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch"))
+    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone"))
 }

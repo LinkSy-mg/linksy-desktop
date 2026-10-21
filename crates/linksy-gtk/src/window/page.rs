@@ -22,6 +22,7 @@ pub enum Action {
     ViewScreen,
     Extend,
     Webcam,
+    Microphone,
     CameraPreview,
     CameraStop,
     Pair,
@@ -59,6 +60,7 @@ pub struct DevicePage {
     extend: gtk::ListBox,
     extend_row: adw::ActionRow,
     webcam_row: adw::ActionRow,
+    mic_row: adw::ActionRow,
     /// "Ring", for phones and tablets.
     ring_row: adw::ActionRow,
     /// "Messages": texting through a phone.
@@ -160,6 +162,11 @@ impl DevicePage {
         webcam_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
         let e = emit.clone();
         webcam_row.connect_activated(move |_| e(Action::Webcam));
+        let mic_row = adw::ActionRow::builder().title("Use as Microphone").activatable(true).build();
+        mic_row.add_prefix(&gtk::Image::builder().icon_name("audio-input-microphone-symbolic").build());
+        mic_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
+        let e = emit.clone();
+        mic_row.connect_activated(move |_| e(Action::Microphone));
         let ring_row = adw::ActionRow::builder().title("Ring").activatable(true).build();
         ring_row.add_prefix(&gtk::Image::builder().icon_name("audio-volume-high-symbolic").build());
         ring_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
@@ -191,6 +198,7 @@ impl DevicePage {
         extend.append(&lock_row);
         extend.append(&extend_row);
         extend.append(&webcam_row);
+        extend.append(&mic_row);
 
         let camera_row = adw::ActionRow::builder().title("Camera Is On").css_classes(["camera-on"]).activatable(true).build();
         camera_row.add_prefix(&gtk::Image::builder().icon_name("camera-web-symbolic").css_classes(["accent"]).build());
@@ -283,7 +291,7 @@ impl DevicePage {
             e(Action::Forget);
         });
 
-        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, ring_row, messages_row, files_row, lock_row, syncing, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
+        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, mic_row, ring_row, messages_row, files_row, lock_row, syncing, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
@@ -324,6 +332,8 @@ impl DevicePage {
         self.webcam_row.set_subtitle(&glib::markup_escape_text(&format!("{}'s camera appears in your apps as “Linksy Camera”", d.device.name)));
         self.extend_row.set_visible(super::can(&d.device, "display"));
         self.webcam_row.set_visible(super::can(&d.device, "camera"));
+        self.mic_row.set_subtitle(&glib::markup_escape_text(&format!("{}'s microphone appears in your apps as “Linksy Microphone”", d.device.name)));
+        self.mic_row.set_visible(super::can(&d.device, "microphone"));
         self.ring_row.set_visible(matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet) && super::can(&d.device, "ring"));
         self.lock_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "heartbeat"));
         self.messages_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "sms"));
@@ -405,20 +415,21 @@ impl DevicePage {
             Shared::Locked => ("system-lock-screen-symbolic", "Locked this computer".to_string()),
             Shared::Remote { .. } => ("input-touchpad-symbolic", "Touchpad and keyboard".to_string()),
             Shared::Camera { .. } => ("camera-web-symbolic", if incoming { "Their camera".to_string() } else { "Your camera".to_string() }),
+            Shared::Microphone { .. } => ("audio-input-microphone-symbolic", if incoming { "Their microphone".to_string() } else { "Your microphone".to_string() }),
             Shared::Screen { display: true, .. } => ("video-joined-displays-symbolic", if incoming { "Their second display".to_string() } else { "Second display".to_string() }),
             Shared::Screen { .. } => ("video-display-symbolic", if incoming { "Their screen".to_string() } else { "Your screen".to_string() }),
         };
         let size = match &e.what {
             Shared::Files { total, .. } => Some(fmt::size(*total)),
-            Shared::Screen { seconds, .. } | Shared::Camera { seconds } | Shared::Remote { seconds } if *seconds > 0 => Some(fmt::duration(*seconds)),
+            Shared::Screen { seconds, .. } | Shared::Camera { seconds } | Shared::Microphone { seconds } | Shared::Remote { seconds } if *seconds > 0 => Some(fmt::duration(*seconds)),
             _ => None,
         };
         let verb = match (&e.what, incoming) {
             (Shared::Files { import: true, .. }, _) => "Imported",
             (Shared::Files { .. }, true) => "Received",
             (Shared::Files { .. }, false) => "Sent",
-            (Shared::Camera { .. }, true) => "Used",
-            (Shared::Camera { .. }, false) => "Shared",
+            (Shared::Camera { .. } | Shared::Microphone { .. }, true) => "Used",
+            (Shared::Camera { .. } | Shared::Microphone { .. }, false) => "Shared",
             (Shared::Screen { .. }, true) => "Watched",
             (Shared::Screen { .. }, false) => "Shared",
             (Shared::Link { .. }, true) => "Opened here",
@@ -438,7 +449,7 @@ impl DevicePage {
         let detail_text = match &state {
             Some(s) => [Some(s.clone()), size, Some(time_label(e.at))].into_iter().flatten().collect::<Vec<_>>().join(" · "),
             None => match progress {
-                _ if matches!(e.what, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Remote { .. }) => "Live now".into(),
+                _ if matches!(e.what, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Microphone { .. } | Shared::Remote { .. }) => "Live now".into(),
                 Some(p) if p.total > 0 => progress_text(p),
                 _ if !incoming => "Waiting for them to accept…".into(),
                 _ => "Starting…".into(),
@@ -475,7 +486,7 @@ impl DevicePage {
 
         let mut live = None;
         match (&e.status, &e.what) {
-            (HistoryStatus::InProgress, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Remote { .. }) => {}
+            (HistoryStatus::InProgress, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Microphone { .. } | Shared::Remote { .. }) => {}
             (HistoryStatus::InProgress, _) => {
                 let id = e.id;
                 suffix("process-stop-symbolic", "Cancel", Box::new(move || Action::Cancel(id)));
