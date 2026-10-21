@@ -13,7 +13,7 @@ finish-args:
   - --device=dri
   # This computer's camera, for a device that uses it as a webcam (V4L2 has no portal yet).
   - --device=all
-  # Received files land in Downloads.
+  # Received files land in Downloads/Linksy.
   - --filesystem=xdg-download
   # Photos imported from phones land in Pictures.
   - --filesystem=xdg-pictures

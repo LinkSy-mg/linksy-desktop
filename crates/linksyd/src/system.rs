@@ -17,9 +17,10 @@ pub fn data_dir() -> PathBuf {
     xdg("XDG_DATA_HOME", ".local/share").join("linksy")
 }
 
-/// The user's Downloads folder, as configured in `user-dirs.dirs`.
+/// Where received files go by default: a Linksy folder in the user's Downloads (as
+/// configured in `user-dirs.dirs`), like the phone's Downloads/Linksy.
 pub fn download_dir() -> PathBuf {
-    user_dir("XDG_DOWNLOAD_DIR", "Downloads")
+    user_dir("XDG_DOWNLOAD_DIR", "Downloads").join("Linksy")
 }
 
 /// The user's Pictures folder, where phones' photos are imported.
