@@ -20,6 +20,8 @@
 //! `--import PATH` imports photos (a file or folder) into the computer's pictures.
 //! `--touchpad` asks to be the computer's touchpad and keyboard, then moves, clicks, types
 //! "hello" and presses Right (next slide).
+//! `--clip-file PATH` puts a file (an image…) on the computer's clipboard.
+//! `--watch-clipboard` asks for the computer's clipboard as it changes and prints it.
 
 use std::time::Duration;
 
@@ -40,6 +42,8 @@ async fn main() {
     let mut touchpad = false;
     let mut no_discovery = false;
     let mut files: Option<std::path::PathBuf> = None;
+    let mut clip_file: Option<std::path::PathBuf> = None;
+    let mut watch_clipboard = false;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -55,6 +59,8 @@ async fn main() {
             "--call" => call = Some(value().parse().expect("--call SECONDS")),
             "--import" => import = Some(value().into()),
             "--touchpad" => touchpad = true,
+            "--clip-file" => clip_file = Some(value().into()),
+            "--watch-clipboard" => watch_clipboard = true,
             "--files" => files = Some(value().into()),
             "--leave-after" => leave_after = Some(value().parse().expect("--leave-after SECONDS")),
             "--press" => {
@@ -130,10 +136,25 @@ async fn main() {
             art: None,
         }],
     };
+    if clip_file.is_some() || watch_clipboard {
+        // These need the computer connected first.
+        let _ = tokio::time::timeout(Duration::from_secs(10), async {
+            while !matches!(events.recv().await, Ok(Event::Connected { .. }) | Err(_)) {}
+        })
+        .await;
+    }
     for t in node.trusted() {
         if let Some((title, artist)) = &media {
             let r = node.send_media_state(&t.device.id, &song(title, artist, playing)).await;
             println!("media to {}: {}", t.device.name, r.map(|_| "sent".to_string()).unwrap_or_else(|e| e.to_string()));
+        }
+        if let Some(path) = &clip_file {
+            let r = node.send_clipboard_file(&t.device.id, path.clone()).await;
+            println!("clipboard file to {}: {}", t.device.name, r.map(|_| "sent".to_string()).unwrap_or_else(|e| e.to_string()));
+        }
+        if watch_clipboard {
+            let r = node.watch_clipboard(&t.device.id, true).await;
+            println!("watching {}'s clipboard: {:?}", t.device.name, r.map_err(|e| e.to_string()));
         }
         if let Some(path) = &import {
             let r = node.import_files(&t.device.id, vec![path.clone()]).await;
@@ -202,6 +223,7 @@ async fn main() {
         tokio::select! {
             _ = &mut deadline => break,
             e = events.recv() => match e {
+                Ok(Event::Clipboard { from, text }) => println!("CLIPBOARD from {}: {text}", from.name),
                 Ok(Event::Ring { from, on }) => println!("{} {}", if on { "RING from" } else { "ring stopped by" }, from.name),
                 Ok(Event::TransferComplete { .. }) if import.is_some() => println!("import done"),
                 Ok(Event::TransferFailed { reason, .. }) if import.is_some() => println!("import failed: {reason}"),
