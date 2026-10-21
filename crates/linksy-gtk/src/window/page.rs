@@ -59,8 +59,9 @@ pub struct DevicePage {
     dot: gtk::Box,
     /// Four across, or two by two (the window's breakpoints switch it).
     pub tiles: gtk::FlowBox,
-    /// "Use as Second Display" and "Use as Webcam".
-    extend: gtk::ListBox,
+    /// The rows below the main actions, in titled groups; each shows when any of its
+    /// rows does.
+    sections: Vec<(adw::PreferencesGroup, Vec<gtk::Widget>)>,
     extend_row: adw::ActionRow,
     webcam_row: adw::ActionRow,
     mic_row: adw::ActionRow,
@@ -158,17 +159,17 @@ impl DevicePage {
         }
 
         // Sidecar, as a settings-style row under the main actions.
-        let extend_row = adw::ActionRow::builder().title("Use as Second Display").activatable(true).build();
+        let extend_row = adw::ActionRow::builder().title("Second Display").activatable(true).build();
         extend_row.add_prefix(&gtk::Image::builder().icon_name("video-joined-displays-symbolic").build());
         extend_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
         let e = emit.clone();
         extend_row.connect_activated(move |_| e(Action::Extend));
-        let webcam_row = adw::ActionRow::builder().title("Use as Webcam").activatable(true).build();
+        let webcam_row = adw::ActionRow::builder().title("Webcam").activatable(true).build();
         webcam_row.add_prefix(&gtk::Image::builder().icon_name("camera-web-symbolic").build());
         webcam_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
         let e = emit.clone();
         webcam_row.connect_activated(move |_| e(Action::Webcam));
-        let mic_row = adw::ActionRow::builder().title("Use as Microphone").activatable(true).build();
+        let mic_row = adw::ActionRow::builder().title("Microphone").activatable(true).build();
         mic_row.add_prefix(&gtk::Image::builder().icon_name("audio-input-microphone-symbolic").build());
         mic_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
         let e = emit.clone();
@@ -210,16 +211,21 @@ impl DevicePage {
                 e(Action::AwayAll(row.is_active()));
             }
         });
-        let extend = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
-        extend.append(&messages_row);
-        extend.append(&files_row);
-        extend.append(&ring_row);
-        extend.append(&lock_row);
-        extend.append(&locate_row);
-        extend.append(&away_row);
-        extend.append(&extend_row);
-        extend.append(&webcam_row);
-        extend.append(&mic_row);
+        let groups = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).build();
+        let mut sections = Vec::new();
+        for (title, rows) in [
+            ("Use as", vec![extend_row.clone().upcast::<gtk::Widget>(), webcam_row.clone().upcast(), mic_row.clone().upcast()]),
+            ("Find and Protect", vec![ring_row.clone().upcast(), locate_row.clone().upcast(), lock_row.clone().upcast()]),
+            ("Texts and Files", vec![messages_row.clone().upcast(), files_row.clone().upcast()]),
+            ("Away From Home", vec![away_row.clone().upcast()]),
+        ] {
+            let group = adw::PreferencesGroup::builder().title(title).build();
+            for row in &rows {
+                group.add(row);
+            }
+            groups.append(&group);
+            sections.push((group, rows));
+        }
 
         let camera_row = adw::ActionRow::builder().title("Camera Is On").css_classes(["camera-on"]).activatable(true).build();
         camera_row.add_prefix(&gtk::Image::builder().icon_name("camera-web-symbolic").css_classes(["accent"]).build());
@@ -290,7 +296,7 @@ impl DevicePage {
         content.append(&hero);
         content.append(&tiles);
         content.append(&camera);
-        content.append(&extend);
+        content.append(&groups);
         content.append(&pair_box);
         content.append(&drop_hint);
         content.append(&activity_box);
@@ -312,7 +318,7 @@ impl DevicePage {
             e(Action::Forget);
         });
 
-        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, mic_row, ring_row, messages_row, files_row, lock_row, away_row, locate_row, syncing, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
+        Self { root, menu, avatar, kind, name, status, dot, tiles, sections, extend_row, webcam_row, mic_row, ring_row, messages_row, files_row, lock_row, away_row, locate_row, syncing, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
@@ -348,7 +354,6 @@ impl DevicePage {
             self.dot.add_css_class("away");
         }
         self.tiles.set_visible(d.trusted);
-        self.extend.set_visible(d.trusted);
         self.extend_row.set_subtitle(&glib::markup_escape_text(&format!("Extend this computer's desktop onto {}", d.device.name)));
         self.webcam_row.set_subtitle(&glib::markup_escape_text(&format!("{}'s camera appears in your apps as “Linksy Camera”", d.device.name)));
         self.extend_row.set_visible(super::can(&d.device, "display"));
@@ -371,6 +376,10 @@ impl DevicePage {
             "Away from home, {} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too. Reachable until {until}; being on the same Wi-Fi renews it.",
             d.device.name
         )));
+        for (group, rows) in &self.sections {
+            let shown = d.trusted && rows.iter().any(|r| r.is_visible());
+            group.set_visible(shown);
+        }
         self.syncing.set(true);
         self.lock_row.set_active(locks);
         self.away_row.set_active(d.away_all);
