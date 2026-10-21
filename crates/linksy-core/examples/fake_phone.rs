@@ -101,6 +101,8 @@ async fn main() {
     config.discovery = !no_discovery;
     config.port = port;
     config.away = away;
+    // What it does, like a phone that says so (Locate shows only then).
+    config.features = ["files", "clipboard", "open_url", "battery", "ring", "media_remote", "call_state", "heartbeat", "import", "fs", "input", "screen", "camera", "display", "watch", "locate"].map(String::from).to_vec();
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
     let node = Node::start(config).await.expect("start");
     let mut events = node.subscribe();
