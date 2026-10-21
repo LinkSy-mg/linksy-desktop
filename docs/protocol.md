@@ -57,8 +57,8 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Controlling the phone from the computer | Done | Not possible | AccessibilityService is blocked for sideloaded apps |
 | Texting from the computer | Done | Not possible | SMS permissions are blocked for sideloaded apps |
 | Phone notifications on the computer, reply | Done | Not possible | notification-listener access is blocked |
-| Images/files on the clipboard | Planned | Planned | §2 of `docs/android-app.md` |
-| Automatic clipboard sync, computer → phone | Planned | Planned | `clipboard_watch` |
+| Images/files on the clipboard | Done | To do | offer with `"clipboard":true` (§4.5) |
+| Automatic clipboard sync, computer → phone | Done (not on GNOME) | To do | `clipboard_watch` (§4.5) |
 | Bluetooth LE presence | To do | To do | |
 
 ## 3. How to build the phone app (recommendation)
@@ -207,6 +207,7 @@ and close the other with reason `duplicate`.
   {"type":"battery","level":82,"charging":false} // sender's battery, percent 0–100
   {"type":"ring"}                               // ring loudly so the user finds you
   {"type":"ring_stop"}
+  {"type":"clipboard_watch","on":true}          // send me your clipboard text as it changes
   // Phone notifications mirrored to the computer (phone → computer):
   {"type":"notification_posted","key":"0|com.whatsapp|1|null|10123","app":"com.whatsapp",
    "app_name":"WhatsApp","title":"Alice","body":"Lunch?","can_reply":true,
@@ -317,6 +318,10 @@ and close the other with reason `duplicate`.
      its Pictures folder, in `Pictures/<phone name>/<path>`, without asking, or answers
      `decline` right away when it doesn't take imports (the user turned it off there).
      Use paths like `2026-10/IMG_0001.jpg` so photos sort by month.
+     Add `"clipboard":true` to put **one file (≤ 10 MiB)** on the receiver's clipboard:
+     an image goes on as an image (pastes into chats and editors), anything else as a
+     file (pastes into the file manager). Taken without asking; more than one file or
+     a bigger one is declined. The receiver shows no download for it.
      Paths are relative, `/`-separated. Folders are sent as their files, with the folder
      name as the first component.
   2. Receiver asks the user (or auto-accepts), then answers
@@ -532,9 +537,12 @@ hide what a device can't do. Names: `files`, `clipboard`, `open_url`, `battery`,
 `media_remote` (controls the other's players), `media_state` (shares its own players),
 `call_state`, `heartbeat`, `import`, `fs`, `input`, `screen`, `control` (can be
 controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifications),
-`sms`. Set `Config.features` in the core. A desktop announces all of them. When a device
-sends no list (older versions), the desktop assumes everything except, for
-`os == "android"`, `sms`, `notifications`, `media_state` and `control`.
+`sms`, `clipboard_file` (takes `"clipboard":true` offers), `clipboard_watch` (answers
+`clipboard_watch`). Set `Config.features` in the core. A desktop announces all of them,
+except `clipboard_watch` where its desktop doesn't let apps watch the clipboard (GNOME).
+When a device sends no list (older versions), the desktop assumes everything except, for
+`os == "android"`, `sms`, `notifications`, `media_state`, `control`, `clipboard_file`
+and `clipboard_watch`.
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 
@@ -546,6 +554,8 @@ node.pair_device(id) / node.pair(addr)      node.respond(request_id, accept)
 node.send_files(id, paths) -> transfer_id   node.cancel(transfer_id)
 node.import_files(id, paths) -> transfer_id // photo auto-import (offer with "import")
 node.send_clipboard(id, text)               node.notify(id, title, body)
+node.send_clipboard_file(id, path) -> transfer_id   // Event::ClipboardFile { from, path } on the receiver
+node.watch_clipboard(id, on)                // Event::ClipboardWatch { from, on } on the receiver
 node.open_url(id, url)                      // Event::OpenUrl { from, url } on the receiver
 node.send_battery(id, Battery { level, charging })   node.ring(id, on)   // Event::Battery / Event::Ring
 DeviceView.battery: Option<Battery>         // last level each device reported
@@ -806,3 +816,14 @@ robust against any encoder (GPU ones may slice too):
 - **2026-10-21** — Desktop 0.5.5: second display in the phone's shape: `session_accept`
   may carry `width`/`height`, core `respond_session` (§4.8). `docs/android-app.md` §2.1 is done on
   this side; the phone can send its size.
+- **2026-10-21** — Desktop 0.5.6, `docs/android-app.md` §2.3/§2.4: **images and files on the
+  clipboard**: offers may carry `"clipboard":true` (one file ≤ 10 MiB, §4.5), core
+  `send_clipboard_file`, `Event::ClipboardFile`; the computer's Send Clipboard sends a
+  copied image or file this way to devices with `clipboard_file`. **Clipboard watch**:
+  `{"type":"clipboard_watch","on":true}`, core `watch_clipboard`; while on, the computer
+  sends `clipboard` each time its clipboard text changes. Only where the desktop allows
+  it (KDE, wlroots; not GNOME), announced as the `clipboard_watch` feature: check it
+  before offering the setting. Phone to-do: announce `clipboard_file` once a received
+  `ClipboardFile` lands on the phone's clipboard (`ClipData` with a `content://` URI from
+  a FileProvider); its share sheet can send images this way. Try with
+  `fake_phone --clip-file <image>` and `fake_phone --watch-clipboard`.
