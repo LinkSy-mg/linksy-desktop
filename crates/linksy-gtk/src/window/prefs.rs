@@ -69,8 +69,14 @@ impl Window {
             .subtitle("Keep paired devices connected for instant sharing. Uses more battery; otherwise devices connect only when there's something to share.")
             .active(settings.stay_connected)
             .build();
+        let away = adw::SwitchRow::builder()
+            .title("Away From Home")
+            .subtitle("Reach your paired devices over the internet too, for a week after they were last on the same Wi-Fi. Everything stays encrypted end to end; Linksy's relay only helps them find each other.")
+            .active(settings.away)
+            .build();
         let connection = adw::PreferencesGroup::builder().title("Connection").build();
         connection.add(&stay);
+        connection.add(&away);
 
         let page = adw::PreferencesPage::new();
         page.add(&device);
@@ -122,7 +128,7 @@ impl Window {
             );
         });
 
-        for (row, set) in [(&auto, (|s: &mut Settings, v| s.auto_accept = v) as fn(&mut Settings, bool)), (&stay, |s, v| s.stay_connected = v)] {
+        for (row, set) in [(&auto, (|s: &mut Settings, v| s.auto_accept = v) as fn(&mut Settings, bool)), (&stay, |s, v| s.stay_connected = v), (&away, |s, v| s.away = v)] {
             let (s, r) = (save.clone(), reverting.clone());
             row.connect_active_notify(move |row| {
                 if r.get() {
