@@ -9,7 +9,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::glib;
 use linksy_ipc::linksy_core::{DeviceKind, DeviceView, Direction, Uuid};
-use linksy_ipc::{HistoryEntry, HistoryStatus, Shared};
+use linksy_ipc::{HistoryEntry, HistoryStatus, Shared, TerminalStatus};
 
 use super::{LiveRow, Progress, drag_files, kind_icon, kind_name, progress_text, status_text};
 use crate::fmt;
@@ -43,6 +43,10 @@ pub enum Action {
     BrowseFiles,
     /// The timeline's filter changed.
     FilterActivity,
+    /// Let this phone open terminals here (with the code), or stop it.
+    AllowTerminal(bool),
+    UnlockTerminal,
+    EndTerminal(String),
 }
 
 type Handler = Rc<RefCell<Option<Rc<dyn Fn(Action)>>>>;
@@ -91,6 +95,10 @@ pub struct DevicePage {
     lock_row: adw::SwitchRow,
     /// "Allow Everything From Away" (docs/protocol.md §4.13).
     away_row: adw::SwitchRow,
+    /// Terminals (docs/protocol.md §4.15): allowed for this phone, locked out, and running.
+    terminal_row: adw::SwitchRow,
+    locked_row: adw::ActionRow,
+    terminals: gtk::ListBox,
     syncing: Rc<std::cell::Cell<bool>>,
     pair_box: gtk::Box,
     staged: adw::Banner,
@@ -312,11 +320,28 @@ impl DevicePage {
                 e(Action::AwayAll(row.is_active()));
             }
         });
+        let terminal_row = adw::SwitchRow::builder().title("Allow Terminal").subtitle_lines(3).build();
+        terminal_row.add_prefix(&gtk::Image::builder().icon_name("utilities-terminal-symbolic").build());
+        let (e, s) = (emit.clone(), syncing.clone());
+        terminal_row.connect_active_notify(move |row| {
+            if !s.get() {
+                e(Action::AllowTerminal(row.is_active()));
+            }
+        });
+        let locked_row = adw::ActionRow::builder().title("Terminal Locked").subtitle("Too many wrong codes in a row. Unlock it if that was you.").build();
+        locked_row.add_prefix(&gtk::Image::builder().icon_name("system-lock-screen-symbolic").css_classes(["error"]).build());
+        let unlock = gtk::Button::builder().label("Unlock").valign(gtk::Align::Center).build();
+        let e = emit.clone();
+        unlock.connect_clicked(move |_| e(Action::UnlockTerminal));
+        locked_row.add_suffix(&unlock);
         let settings = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["plain-list"]).build();
         settings.append(&messages_row);
         settings.append(&files_row);
         settings.append(&lock_row);
+        settings.append(&terminal_row);
+        settings.append(&locked_row);
         settings.append(&away_row);
+        let terminals = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).visible(false).css_classes(["boxed-list"]).build();
 
         // For devices that aren't paired yet.
         let pair = gtk::Button::builder().label("Pair").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
@@ -385,6 +410,7 @@ impl DevicePage {
         content.append(&actions);
         content.append(&use_as);
         content.append(&settings);
+        content.append(&terminals);
         content.append(&pair_box);
         content.append(&activity_box);
         let clamp = adw::Clamp::builder().maximum_size(860).tightening_threshold(600).child(&content).build();
@@ -460,6 +486,9 @@ impl DevicePage {
             files_row,
             lock_row,
             away_row,
+            terminal_row,
+            locked_row,
+            terminals,
             syncing,
             pair_box,
             staged,
@@ -471,6 +500,59 @@ impl DevicePage {
             handler,
             received,
         }
+    }
+
+    /// Show the settings rows only when one of them is.
+    fn settings_visible(&self, trusted: bool) {
+        let mut any = false;
+        let mut row = self.settings.first_child();
+        while let Some(r) = row {
+            any |= r.is_visible();
+            row = r.next_sibling();
+        }
+        self.settings.set_visible(trusted && any);
+    }
+
+    /// Terminals for this device: whether it may open them, whether it's locked out, and
+    /// the ones running now, each with End.
+    pub fn show_terminals(&self, d: &DeviceView, status: Option<&TerminalStatus>) {
+        let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
+        let shown = d.trusted && phone && status.is_some();
+        let status = status.cloned().unwrap_or_default();
+        self.terminal_row.set_visible(shown);
+        self.syncing.set(true);
+        self.terminal_row.set_active(status.allowed.contains(&d.device.id));
+        self.syncing.set(false);
+        self.terminal_row.set_sensitive(status.code_set || self.terminal_row.is_active());
+        self.terminal_row.set_subtitle(&glib::markup_escape_text(&if status.code_set {
+            format!("A shell on this computer from {}, after typing the terminal code. It runs as you.", d.device.name)
+        } else {
+            "Set a terminal code in Preferences first.".to_string()
+        }));
+        self.locked_row.set_visible(shown && status.locked.contains(&d.device.id));
+        self.settings_visible(d.trusted);
+        while let Some(row) = self.terminals.first_child() {
+            self.terminals.remove(&row);
+        }
+        let mine: Vec<_> = status.running.iter().filter(|t| t.device == d.device.id).collect();
+        for t in &mine {
+            let row = adw::ActionRow::builder()
+                .title(glib::markup_escape_text(&t.title))
+                .subtitle(if t.attached { "Terminal open on the phone now" } else { "Terminal still running · not open on the phone" })
+                .build();
+            row.add_prefix(&gtk::Image::builder().icon_name("utilities-terminal-symbolic").css_classes([if t.attached { "success" } else { "dim-label" }]).build());
+            let end = gtk::Button::builder().label("End").valign(gtk::Align::Center).css_classes(["destructive-action"]).build();
+            let (h, id) = (self.handler.clone(), t.id.clone());
+            end.connect_clicked(move |_| {
+                let f = h.borrow().clone();
+                if let Some(f) = f {
+                    f(Action::EndTerminal(id.clone()));
+                }
+            });
+            row.add_suffix(&end);
+            self.terminals.append(&row);
+        }
+        self.terminals.set_visible(d.trusted && !mine.is_empty());
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
@@ -555,7 +637,7 @@ impl DevicePage {
             "Away from home, {} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too.",
             d.device.name
         )));
-        self.settings.set_visible(d.trusted && [self.messages_row.is_visible(), self.files_row.is_visible(), self.lock_row.is_visible(), self.away_row.is_visible()].contains(&true));
+        self.settings_visible(d.trusted);
         self.syncing.set(true);
         self.lock_row.set_active(locks);
         self.away_row.set_active(d.away_all);
@@ -634,12 +716,13 @@ impl DevicePage {
             Shared::Remote { .. } => ("input-touchpad-symbolic", "Touchpad and keyboard".to_string()),
             Shared::Camera { .. } => ("camera-web-symbolic", if incoming { "Their camera".to_string() } else { "Your camera".to_string() }),
             Shared::Microphone { .. } => ("audio-input-microphone-symbolic", if incoming { "Their microphone".to_string() } else { "Your microphone".to_string() }),
+            Shared::Terminal { .. } => ("utilities-terminal-symbolic", "Terminal".to_string()),
             Shared::Screen { display: true, .. } => ("video-joined-displays-symbolic", if incoming { "Their second display".to_string() } else { "Second display".to_string() }),
             Shared::Screen { .. } => ("video-display-symbolic", if incoming { "Their screen".to_string() } else { "Your screen".to_string() }),
         };
         let size = match &e.what {
             Shared::Files { total, .. } => Some(fmt::size(*total)),
-            Shared::Screen { seconds, .. } | Shared::Camera { seconds } | Shared::Microphone { seconds } | Shared::Remote { seconds } if *seconds > 0 => Some(fmt::duration(*seconds)),
+            Shared::Screen { seconds, .. } | Shared::Camera { seconds } | Shared::Microphone { seconds } | Shared::Remote { seconds } | Shared::Terminal { seconds } if *seconds > 0 => Some(fmt::duration(*seconds)),
             _ => None,
         };
         let verb = match (&e.what, incoming) {
@@ -653,6 +736,7 @@ impl DevicePage {
             (Shared::Link { .. }, true) => "Opened here",
             (Shared::Link { .. }, false) => "Opened there",
             (Shared::Locked, _) => "When it left",
+            (Shared::Terminal { .. }, _) => "Opened from the phone",
             (Shared::Remote { .. }, _) => "Used",
             (_, true) => "From them",
             (_, false) => "From you",
@@ -667,7 +751,7 @@ impl DevicePage {
         let detail_text = match &state {
             Some(s) => [Some(s.clone()), size].into_iter().flatten().collect::<Vec<_>>().join(" · "),
             None => match progress {
-                _ if matches!(e.what, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Microphone { .. } | Shared::Remote { .. }) => "Live now".into(),
+                _ if matches!(e.what, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Microphone { .. } | Shared::Remote { .. } | Shared::Terminal { .. }) => "Live now".into(),
                 Some(p) if p.total > 0 => progress_text(p),
                 _ if !incoming => "Waiting for them to accept…".into(),
                 _ => "Starting…".into(),
@@ -714,7 +798,7 @@ impl DevicePage {
 
         let mut live = None;
         match (&e.status, &e.what) {
-            (HistoryStatus::InProgress, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Microphone { .. } | Shared::Remote { .. }) => {}
+            (HistoryStatus::InProgress, Shared::Screen { .. } | Shared::Camera { .. } | Shared::Microphone { .. } | Shared::Remote { .. } | Shared::Terminal { .. }) => {}
             (HistoryStatus::InProgress, _) => {
                 // A running transfer is the one entry with a card around it.
                 let id = e.id;
