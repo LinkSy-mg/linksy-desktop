@@ -1,7 +1,7 @@
 //! Controls for a phone's camera used here as a webcam (docs/android-app.md §2.8): under the
 //! preview, the phone's own camera app's controls. Zoom chips and lenses, front/back,
 //! torch, click-to-focus on the preview, and in a menu exposure, white balance, quality,
-//! 60 fps, orientation and stabilization. The phone says what it can do and how it's set in
+//! 1080p, 60 fps, orientation and stabilization. The phone says what it can do and how it's set in
 //! `camera_state`; every change here goes back as a `camera_control`.
 
 use std::cell::{Cell, RefCell};
@@ -25,6 +25,8 @@ pub struct Controls {
     portrait: gtk::Switch,
     smooth: gtk::Switch,
     smooth_row: adw::ActionRow,
+    full_hd: gtk::Switch,
+    full_hd_row: adw::ActionRow,
     stabilization: gtk::Switch,
     stabilization_row: adw::ActionRow,
     auto_focus: gtk::Button,
@@ -53,6 +55,7 @@ impl Controls {
         quality.set_valign(gtk::Align::Center);
         let portrait = gtk::Switch::builder().valign(gtk::Align::Center).build();
         let smooth = gtk::Switch::builder().valign(gtk::Align::Center).build();
+        let full_hd = gtk::Switch::builder().valign(gtk::Align::Center).build();
         let stabilization = gtk::Switch::builder().valign(gtk::Align::Center).build();
 
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
@@ -68,6 +71,8 @@ impl Controls {
         list.append(&exposure_row);
         row("White Balance", white_balance.upcast_ref());
         row("Quality", quality.upcast_ref());
+        let full_hd_row = row("1080p", full_hd.upcast_ref());
+        full_hd_row.set_subtitle("Sharper picture, more data. The camera restarts in your apps for a moment.");
         let smooth_row = row("60 Frames per Second", smooth.upcast_ref());
         smooth_row.set_subtitle("Smoother motion. The camera restarts in your apps for a moment.");
         row("Portrait", portrait.upcast_ref());
@@ -95,6 +100,8 @@ impl Controls {
             portrait,
             smooth,
             smooth_row,
+            full_hd,
+            full_hd_row,
             stabilization,
             stabilization_row,
             auto_focus,
@@ -128,6 +135,8 @@ impl Controls {
         });
         let s = c.clone();
         c.portrait.connect_active_notify(move |w| s.emit(json!({ "orientation": if w.is_active() { "portrait" } else { "landscape" } })));
+        let s = c.clone();
+        c.full_hd.connect_active_notify(move |w| s.emit(json!({ "size": if w.is_active() { [1920, 1080] } else { [1280, 720] } })));
         let s = c.clone();
         c.smooth.connect_active_notify(move |w| s.emit(json!({ "fps": if w.is_active() { 60 } else { 30 } })));
         let s = c.clone();
@@ -220,6 +229,9 @@ impl Controls {
         let rates: Vec<u64> = state.get("fps_options").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
         self.smooth_row.set_visible(rates.contains(&60));
         self.smooth.set_active(num("fps") == Some(60.0));
+        let full_hd_offered = state.get("size_options").and_then(Value::as_array).is_some_and(|a| a.iter().any(|s| s == &json!([1920, 1080])));
+        self.full_hd_row.set_visible(full_hd_offered);
+        self.full_hd.set_active(num("height") == Some(1080.0));
         self.stabilization_row.set_visible(flag("has_stabilization"));
         self.stabilization.set_active(flag("stabilization"));
 
