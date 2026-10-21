@@ -6,7 +6,7 @@ members = ["crates/*"]
 default-members = ["crates/linksy-core", "crates/linksy-ipc", "crates/linksyd", "crates/linksy-cli"]
 
 [workspace.package]
-version = "0.5.9"
+version = "0.6.0"
 edition = "2024"
 license-file = "LICENSE"
 

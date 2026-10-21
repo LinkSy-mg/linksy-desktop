@@ -2,6 +2,27 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.6.0
+
+### Added
+- **Away from home**: your paired devices reach each other over the internet, not only
+  on the same Wi-Fi: send files, the clipboard and links, ring your phone or see its
+  battery from anywhere. Linksy finds a direct path when it can, and otherwise goes
+  through its relay, which can't read anything: everything stays encrypted end to end.
+  For safety it lasts a week after the devices were last on the same Wi-Fi (being
+  together renews it), and screens, control, browsing files, the camera and the
+  microphone stay on the same network unless you allow them for a device. Lock When
+  Away still only counts a phone that's nearby. Turn it off in Preferences. Needs the
+  Linksy for Android update to work with phones.
+- **Locate**: ask your phone where it is, once, and open it on a map. The phone can say
+  no, and nothing is kept.
+- **1080p webcam**: with a phone that can, turn on 1080p in the camera's settings.
+
+### Changed
+- **Linksy is freeware**: free to use and to share unmodified, not open source. The
+  license is at linksy.diary.mg/license, and the open-source parts it builds in are
+  credited in THIRD-PARTY-NOTICES.
+
 ## 0.5.9
 
 ### Added
