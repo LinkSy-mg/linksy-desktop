@@ -249,13 +249,13 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
             let id = resolve(node, &with)?;
             let session = node.request_session(&id, kind).await.map_err(|e| e.to_string())?;
             let id = session.id;
-            // A second display: this device shares, the service runs that side. A camera:
-            // the service turns it into a webcam here. Otherwise the app shows it.
+            // A second display: this device shares, the service runs that side. A camera or
+            // microphone: the service turns it into a device here. Otherwise the app shows it.
             let socket = if session.sharing {
                 sessions.spawn_share(session);
                 None
-            } else if kind == linksy_core::SessionKind::Camera {
-                sessions.spawn_webcam(session);
+            } else if kind.is_device() {
+                sessions.spawn_device(session);
                 None
             } else {
                 Some(sessions.view(session).map_err(|e| e.to_string())?)

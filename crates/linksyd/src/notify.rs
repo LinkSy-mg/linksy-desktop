@@ -53,6 +53,10 @@ pub async fn run(node: Node) {
                         format!("{} wants to use this screen as a second display", from.name),
                         format!("Linksy will fill this screen with {}'s second display, and your mouse and keyboard here will work on it.", from.name),
                     ),
+                    SessionKind::Microphone => (
+                        format!("{} wants to use your microphone", from.name),
+                        format!("Your microphone will be on and {} will hear it until you stop.", from.name),
+                    ),
                     SessionKind::Input => (
                         format!("{} wants to use your mouse and keyboard", from.name),
                         format!("{} becomes a touchpad and keyboard for this computer until you stop. It doesn't see your screen.", from.name),

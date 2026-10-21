@@ -160,6 +160,11 @@ pub enum Shared {
         #[serde(default)]
         seconds: u64,
     },
+    /// A microphone used here or shared; `seconds` once it ended.
+    Microphone {
+        #[serde(default)]
+        seconds: u64,
+    },
     /// A screen shared one way or the other; `seconds` once it ended.
     Screen {
         #[serde(default)]
