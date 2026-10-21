@@ -477,6 +477,17 @@ On Android:
   `session_started {session, peer, kind, sharing}`, `session_ended {session}`.
 
 
+**Keep the screen on while it's a display (desktop 0.5.8; seen on a realme 15 Pro).** The
+phone's screen timeout turned its screen off a minute into a second display, which ended
+the session and took the monitor away. While showing a `display` (and while watching a
+`screen`/`control`), keep the screen on: `window.addFlags(FLAG_KEEP_SCREEN_ON)` on that
+activity (Flutter: a wakelock package, or the flag through a platform channel), cleared
+when the session ends. Also don't end the session in `onPause`/`onStop` just because the
+user switched apps for a moment; end it on Stop or when the computer ends it. If the
+session does drop, the computer now offers "Reconnect" (a new `display` request: answer
+it like the first). For `camera` and `microphone` the phone's screen may go off, but
+their foreground services must keep running.
+
 **Second display in the phone's shape (desktop 0.5.5).** Accepting a `display`, the phone
 may add its landscape screen size: `{"type":"session_accept","width":2400,"height":1080}`
 (core: `node.respond_session(request, true, Some((w, h)))`). The computer then makes the
@@ -981,3 +992,7 @@ robust against any encoder (GPU ones may slice too):
 - **2026-10-21** — Planned for 0.6 (nothing to build yet): §4.12 service information at
   `https://linksy.diary.mg/linksy-relay` (relays, latest versions, protocol minimum,
   notices), read at start-up and cached; the relay server is `../linksy-server`.
+- **2026-10-21** — Desktop 0.5.8: keep the screen on while showing a second display (§4.8;
+  it dropped after the screen timeout on a realme 15 Pro); the computer offers
+  "Reconnect" when a display drops. Desktop also checks `/linksy-relay` (§4.12) once a day
+  for updates now; the phone can do the same with `latest.android`.
