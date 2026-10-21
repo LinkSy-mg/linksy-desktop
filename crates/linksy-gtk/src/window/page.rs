@@ -51,7 +51,8 @@ type Handler = Rc<RefCell<Option<Rc<dyn Fn(Action)>>>>;
 const SHOWN: usize = 150;
 
 pub struct DevicePage {
-    pub root: gtk::ScrolledWindow,
+    /// Lays itself out by its own width (not the window's), so it fits beside the sidebar.
+    pub root: adw::BreakpointBin,
     /// Header menu with the device's less common actions.
     pub menu: gtk::MenuButton,
     pub avatar: adw::Avatar,
@@ -65,8 +66,8 @@ pub struct DevicePage {
     status: gtk::Label,
     reach: gtk::Box,
     reach_until: gtk::Label,
-    /// Send Files beside the smaller actions; stacked on narrow windows.
-    pub actions: gtk::Box,
+    /// Send Files beside the smaller actions; stacked when the page is narrow.
+    actions: gtk::Box,
     send_tile: gtk::Button,
     ring_tile: gtk::Widget,
     locate_tile: gtk::Widget,
@@ -75,7 +76,6 @@ pub struct DevicePage {
     use_as: gtk::Box,
     use_as_title: gtk::Label,
     use_as_hint: gtk::Label,
-    pub cards: gtk::Box,
     display_card: gtk::Box,
     webcam_card: gtk::Box,
     mic_card: gtk::Box,
@@ -161,7 +161,7 @@ impl DevicePage {
             let _ = cr.stroke();
         });
         let kind = gtk::Image::builder().pixel_size(14).css_classes(["hero-kind"]).halign(gtk::Align::End).valign(gtk::Align::End).build();
-        let avatar_overlay = gtk::Overlay::builder().child(&ring).valign(gtk::Align::Center).build();
+        let avatar_overlay = gtk::Overlay::builder().child(&ring).halign(gtk::Align::Start).valign(gtk::Align::Center).build();
         avatar_overlay.add_overlay(&avatar);
         avatar_overlay.add_overlay(&kind);
         let name = gtk::Label::builder().css_classes(["title-1"]).xalign(0.0).wrap(true).build();
@@ -275,9 +275,9 @@ impl DevicePage {
         cards.append(&display_card);
         cards.append(&webcam_card);
         cards.append(&mic_card);
-        let use_as_title = gtk::Label::builder().xalign(0.0).hexpand(true).css_classes(["title-4"]).build();
-        let use_as_hint = gtk::Label::builder().label("Faster over a USB cable").css_classes(["caption", "dim-label"]).build();
-        let use_as_head = gtk::Box::builder().build();
+        let use_as_title = gtk::Label::builder().xalign(0.0).hexpand(true).wrap(true).css_classes(["title-4"]).build();
+        let use_as_hint = gtk::Label::builder().label("Faster over a USB cable").xalign(0.0).css_classes(["caption", "dim-label"]).build();
+        let use_as_head = gtk::Box::builder().spacing(4).build();
         use_as_head.append(&use_as_title);
         use_as_head.append(&use_as_hint);
         let use_as = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
@@ -340,8 +340,10 @@ impl DevicePage {
 
         // Timeline.
         let filter: Rc<std::cell::Cell<Filter>> = Rc::new(std::cell::Cell::new(Filter::All));
+        let filters = gtk::Box::builder().spacing(6).build();
         let activity_header = gtk::Box::builder().spacing(6).build();
         activity_header.append(&gtk::Label::builder().label("Activity").xalign(0.0).hexpand(true).css_classes(["title-4"]).build());
+        activity_header.append(&filters);
         let mut first: Option<gtk::ToggleButton> = None;
         for (label, which) in [("All", Filter::All), ("Files", Filter::Files), ("Clipboard", Filter::Clipboard), ("Links", Filter::Links)] {
             let b = gtk::ToggleButton::builder().label(label).valign(gtk::Align::Center).css_classes(["filter-pill"]).active(which == Filter::All).build();
@@ -354,12 +356,12 @@ impl DevicePage {
                     e(Action::FilterActivity);
                 }
             });
-            activity_header.append(&b);
+            filters.append(&b);
         }
         let clear = gtk::Button::builder().label("Clear").css_classes(["flat"]).valign(gtk::Align::Center).build();
         let e = emit.clone();
         clear.connect_clicked(move |_| e(Action::ClearHistory));
-        activity_header.append(&clear);
+        filters.append(&clear);
         let activity = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).build();
         let received: Rc<RefCell<HashMap<String, Vec<PathBuf>>>> = Rc::default();
         let (e, r) = (emit.clone(), received.clone());
@@ -389,7 +391,30 @@ impl DevicePage {
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         column.append(&staged);
         column.append(&clamp);
-        let root = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&column).build();
+        let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&column).build();
+        let root = adw::BreakpointBin::builder().width_request(300).height_request(300).child(&scroller).build();
+        // Narrower and narrower: stack Send Files over the tiles, then the cards, then the
+        // header, the "Use as" heading and the timeline's filters, then the tiles. (Only
+        // the last matching breakpoint applies, so each repeats the ones before.)
+        // Responsive design, written by hand, in Rust. Be gentle with it.
+        let vertical = gtk::Orientation::Vertical.to_value();
+        let one = 1u32.to_value();
+        let changes: [(&gtk::Widget, &str, &glib::Value); 7] = [
+            (actions.upcast_ref(), "orientation", &vertical),
+            (cards.upcast_ref(), "orientation", &vertical),
+            (hero.upcast_ref(), "orientation", &vertical),
+            (use_as_head.upcast_ref(), "orientation", &vertical),
+            (activity_header.upcast_ref(), "orientation", &vertical),
+            (small.upcast_ref(), "min-children-per-line", &one),
+            (small.upcast_ref(), "max-children-per-line", &one),
+        ];
+        for (width, count) in [("760sp", 1), ("680sp", 2), ("540sp", 5), ("400sp", 7)] {
+            let b = adw::Breakpoint::new(adw::BreakpointCondition::parse(&format!("max-width: {width}")).expect("breakpoint"));
+            for (widget, property, value) in &changes[..count] {
+                b.add_setter(*widget, property, Some(value));
+            }
+            root.add_breakpoint(b);
+        }
 
         // Header menu.
         let forget = gtk::Button::builder().label("Forget Device…").css_classes(["flat", "destructive-label"]).build();
@@ -423,7 +448,6 @@ impl DevicePage {
             use_as,
             use_as_title,
             use_as_hint,
-            cards,
             display_card,
             webcam_card,
             mic_card,
