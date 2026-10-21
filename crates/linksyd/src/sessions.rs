@@ -97,6 +97,10 @@ impl Sessions {
             // A second display: a new virtual monitor, driven from the other device.
             SessionKind::Display => {
                 cmd.arg("--control").arg("--virtual");
+                // In the other screen's shape, when it said (a phone: about 20:9).
+                if let Some((w, h)) = session.size.map(monitor_size) {
+                    cmd.arg("--size").arg(format!("{w}x{h}"));
+                }
             }
             // A phone as touchpad and keyboard: input only, nothing shared.
             SessionKind::Input => {
@@ -229,4 +233,23 @@ fn bind(path: &Path) -> std::io::Result<UnixListener> {
 /// A Linksy program next to this binary (installed or in target/), else from PATH.
 pub(crate) fn helper(name: &str) -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(name))).filter(|p| p.exists()).unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// A second display for a screen of `w`×`h`: the same shape, at most 1080 pixels high,
+/// even sizes (what video encoders want).
+fn monitor_size((w, h): (u32, u32)) -> (u32, u32) {
+    // I hope nobody plugs in a 0-pixel-high phone. Just in case: max(1).
+    let height = h.min(1080);
+    let width = (u64::from(w) * u64::from(height) / u64::from(h.max(1))) as u32;
+    (width.max(2) & !1, height.max(2) & !1)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn monitor_takes_the_phone_shape() {
+        assert_eq!(super::monitor_size((2400, 1080)), (2400, 1080));
+        assert_eq!(super::monitor_size((2800, 1272)), (2376, 1080));
+        assert_eq!(super::monitor_size((1280, 800)), (1280, 800));
+    }
 }
