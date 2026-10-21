@@ -526,8 +526,16 @@ controls under its camera preview: front/back (when both `lenses` exist), the
 `zoom_presets` as chips, torch (`has_torch`), click on the preview → `focus_point`
 (+ `"focus":"point"`, and an Auto Focus button when the focus isn't `auto`), and in a
 menu `exposure`, `white_balance`, `quality`, `orientation`, `stabilization`
-(`has_stabilization`). It redraws from every `camera_state`, so the phone's own controls
-and the computer's stay in step. `size`/`fps` aren't sent yet.
+(`has_stabilization`), and **60 fps** (when `fps_options` has 60). It redraws from every
+`camera_state`, so the phone's own controls and the computer's stay in step.
+
+**60 fps (desktop 0.5.9, `docs/android-app.md` §2.8).** The computer's webcam device advertises
+the rate the phone sends. When `fps` changes, whether the computer sent
+`{"type":"camera_control","fps":60}` or the phone's own control did it (seen in
+`camera_state.fps`), the computer restarts its webcam at the new rate within the same
+session, and decoding resumes at the phone's next keyframe with SPS/PPS (which the phone
+already sends after the change). Apps using the camera see it blink once. So the phone
+must keep reporting `fps` in every `camera_state`. `size` isn't supported yet.
 
 **Webcam latency (desktop 0.5.7).** The computer now decodes with slice threading
 instead of libav's frame threading, which held one frame per CPU thread: about 400 ms
@@ -996,3 +1004,6 @@ robust against any encoder (GPU ones may slice too):
   it dropped after the screen timeout on a realme 15 Pro); the computer offers
   "Reconnect" when a display drops. Desktop also checks `/linksy-relay` (§4.12) once a day
   for updates now; the phone can do the same with `latest.android`.
+- **2026-10-21** — Desktop 0.5.9: 60 fps webcams (`docs/android-app.md` §2.8): the computer follows
+  `fps` from `camera_state` or its own `camera_control`, restarting its webcam device at
+  that rate in the same session; a "60 Frames per Second" switch in its camera settings.
