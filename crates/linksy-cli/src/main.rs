@@ -27,6 +27,11 @@ Usage:
   linksy open <device> <url>         open a web link in its browser
   linksy ring <device> [--stop]      make it ring so you can find it
   linksy locate <phone>              ask a phone where it is (it can say no)
+  linksy terminal                    terminals for phones: code set, allowed, running
+  linksy terminal code               set the code a phone types to open a terminal here
+  linksy terminal allow|deny <phone> let a phone open terminals here, or stop it
+  linksy terminal unlock <phone>     after too many wrong codes
+  linksy terminal end <id>           end a running terminal
   linksy files <phone>               open a phone's files in the file manager
   linksy texts <phone> [thread]      a phone's conversations, or one conversation
   linksy text <phone> <number> <message…>
@@ -178,6 +183,40 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             println!("{phone} is at {:.5}, {:.5}{accuracy}", l.lat, l.lon);
             println!("https://www.openstreetmap.org/?mlat={:.5}&mlon={:.5}#map=17/{:.5}/{:.5}", l.lat, l.lon, l.lat, l.lon);
         }
+        ("terminal", []) => {
+            let t = c.terminal_status().await.map_err(err)?;
+            println!("Code: {}", if t.code_set { "set" } else { "not set (terminals are off)" });
+            let name = |id: &linksy_ipc::linksy_core::Fingerprint| id.short();
+            println!("Allowed: {}", if t.allowed.is_empty() { "none".into() } else { t.allowed.iter().map(name).collect::<Vec<_>>().join(", ") });
+            if !t.locked.is_empty() {
+                println!("Locked: {}", t.locked.iter().map(name).collect::<Vec<_>>().join(", "));
+            }
+            for r in &t.running {
+                println!("{}  {}  {}{}", r.id, r.device.short(), r.title, if r.attached { "" } else { "  (detached)" });
+            }
+        }
+        ("terminal", [what]) if what == "code" => {
+            let code = std::env::var("LINKSY_TERMINAL_CODE").ok().or_else(|| {
+                eprint!("New terminal code (6+ characters): ");
+                let mut line = String::new();
+                std::io::stdin().read_line(&mut line).ok()?;
+                Some(line.trim().to_string())
+            });
+            c.set_terminal_code(code).await.map_err(err)?;
+            println!("Terminal code set.");
+        }
+        ("terminal", [what, phone]) if what == "allow" || what == "deny" => {
+            c.allow_terminal(phone, what == "allow").await.map_err(err)?;
+            println!("{} {phone}.", if what == "allow" { "Terminals allowed for" } else { "Terminals no longer allowed for" });
+        }
+        ("terminal", [what, phone]) if what == "unlock" => {
+            c.unlock_terminal(phone).await.map_err(err)?;
+            println!("Unlocked for {phone}.");
+        }
+        ("terminal", [what, id]) if what == "end" => {
+            c.end_terminal(id).await.map_err(err)?;
+            println!("Ended.");
+        }
         ("open", [to, url]) => {
             c.open_url(to.clone(), url.clone()).await.map_err(err)?;
             println!("Opened on {to}.");
@@ -248,6 +287,7 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                     Shared::Camera { seconds } => format!("shared this camera ({seconds} s)"),
                     Shared::Microphone { seconds } if e.direction == Direction::Incoming => format!("used their microphone ({seconds} s)"),
                     Shared::Microphone { seconds } => format!("shared this microphone ({seconds} s)"),
+                    Shared::Terminal { seconds } => format!("a terminal here ({seconds} s)"),
                     Shared::Screen { seconds, display: true } => format!("second display ({seconds} s)"),
                     Shared::Screen { seconds, .. } if e.direction == Direction::Incoming => format!("watched their screen ({seconds} s)"),
                     Shared::Screen { seconds, .. } => format!("shared this screen ({seconds} s)"),
@@ -419,11 +459,13 @@ async fn watch(c: &Client) -> Result<(), String> {
                     linksy_ipc::linksy_core::SessionKind::Camera => println!("{} wants to use your camera.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Input => println!("{} wants to use your mouse and keyboard.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Microphone => println!("{} wants to use your microphone.", from.name),
+                    linksy_ipc::linksy_core::SessionKind::Terminal => println!("{} wants a terminal on this computer (the right code was typed).", from.name),
                 }
                 let ok = ask("Allow?").await;
                 let _ = c.respond(request, ok).await;
             }
             Event::SessionStarted { peer, kind: linksy_ipc::linksy_core::SessionKind::Input, .. } => println!("{} is your touchpad and keyboard", peer.name),
+            Event::SessionStarted { peer, kind: linksy_ipc::linksy_core::SessionKind::Terminal, .. } => println!("{} has a terminal open here", peer.name),
             Event::SessionStarted { peer, sharing: true, .. } => println!("Sharing your screen with {}", peer.name),
             Event::SessionEnded { .. } => println!("Session ended"),
             _ => {}
