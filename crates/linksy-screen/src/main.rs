@@ -210,6 +210,16 @@ fn encoder() -> (&'static str, &'static str) {
     }
 }
 
+/// A decoder that hands each frame on as soon as it's decoded. libav's default frame
+/// threading holds one frame per CPU thread first: about 400 ms on a 12-thread laptop,
+/// against 40 ms with slice threading.
+fn low_latency(decoder: &str) -> &str {
+    match decoder {
+        "avdec_h264" => "avdec_h264 thread-type=slice",
+        other => other,
+    }
+}
+
 /// The "Linksy Camera" V4L2 device (v4l2loopback, made by linksy-camera-setup), if this
 /// computer has one: every app can use a camera there, browsers and Zoom included.
 pub fn camera_device() -> Option<PathBuf> {
@@ -228,6 +238,7 @@ fn webcam(socket: &std::path::Path, name: &str) -> Result<(), String> {
         .into_iter()
         .find(|d| gst::ElementFactory::make(d).build().is_ok())
         .ok_or("no H.264 decoder: install gstreamer1-plugin-openh264 or gstreamer1-plugin-libav")?;
+    let decoder = low_latency(decoder);
     // Offered the way webcams are, YUY2 at a fixed 30 fps (what the phone sends): apps like
     // OBS list a camera's formats and rates from this, and skip what they can't name.
     // Quotes would break the property string; keep the name plain.

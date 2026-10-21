@@ -661,8 +661,11 @@ fn mouse_button(gdk_button: u32) -> Option<MouseButton> {
 /// The best H.264 decoder that actually loads. Picked by hand: decodebin skips OpenH264,
 /// which Fedora ranks "marginal" and is often the only one present; and a listed decoder
 /// may not load (a stale plugin registry), so each is tried for real.
+/// libav's default frame threading holds one frame per CPU thread before showing any
+/// (about 400 ms on a 12-thread laptop); slice threading shows each as it's decoded.
 fn decoder() -> Option<&'static str> {
-    ["avdec_h264", "vah264dec", "openh264dec"].into_iter().find(|name| gst::ElementFactory::make(name).build().is_ok())
+    let name = ["avdec_h264", "vah264dec", "openh264dec"].into_iter().find(|name| gst::ElementFactory::make(name).build().is_ok())?;
+    Some(if name == "avdec_h264" { "avdec_h264 thread-type=slice" } else { name })
 }
 
 /// What a window adds around its picture before it's laid out: the header bar.
