@@ -79,6 +79,7 @@ struct State {
     preview: Option<(Fingerprint, gstreamer::Element)>,
     /// Opening Linksy starts its service once, if it isn't running.
     started_service: bool,
+    restarted_service: bool,
 }
 
 pub struct Window {
@@ -566,6 +567,34 @@ impl Window {
         self.wait_for_service();
     }
 
+    /// The service still running an older Linksy after an update: stop it and start the
+    /// installed one, once per window.
+    fn restart_service(self: &Rc<Self>) {
+        use std::process::{Command, Stdio};
+        if std::env::var_os("LINKSY_SOCKET").is_some() || std::mem::replace(&mut self.state.borrow_mut().restarted_service, true) {
+            return;
+        }
+        let Some(c) = self.client() else { return };
+        let w = self.clone();
+        let call = self.bridge.call(&c, |c| async move { c.quit().await });
+        glib::spawn_future_local(async move {
+            if call.await.is_err() && std::env::var_os("FLATPAK_ID").is_none() {
+                // Older than Quit: a systemd service can still be restarted from here.
+                let _ = Command::new("systemctl").args(["--user", "restart", "linksyd.service"]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+                glib::timeout_future(Duration::from_millis(500)).await;
+                return w.wait_for_service();
+            }
+            // Wait for it to go, then start the new one.
+            for _ in 0..20 {
+                glib::timeout_future(Duration::from_millis(150)).await;
+                if std::fs::metadata(linksy_ipc::socket_path()).is_err() {
+                    break;
+                }
+            }
+            w.start_service();
+        });
+    }
+
     fn wait_for_service(self: &Rc<Self>) {
         self.stack.set_visible_child_name("loading");
         let w = self.clone();
@@ -600,6 +629,9 @@ impl Window {
         let call = self.bridge.call(&c, |c| async move { c.status().await });
         glib::spawn_future_local(async move {
             if let Ok(s) = call.await {
+                if s.version != env!("CARGO_PKG_VERSION") {
+                    w.restart_service();
+                }
                 w.me_label.set_label(&format!("This device: {}", s.device.name));
                 let mut state = w.state.borrow_mut();
                 state.download_dir = Some(s.download_dir);
