@@ -322,11 +322,13 @@ impl DevicePage {
         self.extend.set_visible(d.trusted);
         self.extend_row.set_subtitle(&glib::markup_escape_text(&format!("Extend this computer's desktop onto {}", d.device.name)));
         self.webcam_row.set_subtitle(&glib::markup_escape_text(&format!("{}'s camera appears in your apps as “Linksy Camera”", d.device.name)));
-        self.ring_row.set_visible(matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet));
-        self.lock_row.set_visible(d.device.kind == DeviceKind::Phone);
-        self.messages_row.set_visible(d.device.kind == DeviceKind::Phone);
-        self.files_row.set_visible(matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet));
-        self.files_row.set_subtitle(&glib::markup_escape_text(&format!("Open {} in Files, like a USB drive", d.device.name)));
+        self.extend_row.set_visible(super::can(&d.device, "display"));
+        self.webcam_row.set_visible(super::can(&d.device, "camera"));
+        self.ring_row.set_visible(matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet) && super::can(&d.device, "ring"));
+        self.lock_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "heartbeat"));
+        self.messages_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "sms"));
+        self.files_row.set_visible(matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet) && super::can(&d.device, "fs"));
+        self.files_row.set_subtitle(&glib::markup_escape_text(&format!("Open the folder {} shares in Files, like a USB drive", d.device.name)));
         self.messages_row.set_subtitle(&glib::markup_escape_text(&format!("Read and send {}'s texts here", d.device.name)));
         self.lock_row.set_subtitle(&glib::markup_escape_text(&format!("Lock this computer when {} leaves. It never unlocks it.", d.device.name)));
         self.syncing.set(true);

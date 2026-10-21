@@ -1325,3 +1325,13 @@ fn shortcuts_window() -> gtk::ShortcutsWindow {
 </interface>"#;
     gtk::Builder::from_string(UI).object("shortcuts").expect("shortcuts window")
 }
+
+/// Whether a device does `feature` for others: what it says, or for devices that don't say,
+/// everything except what an Android phone can't (Linksy for Android ships outside the
+/// Play Store, where texting, notification access and input control are blocked).
+pub(crate) fn can(d: &DeviceInfo, feature: &str) -> bool {
+    if !d.features.is_empty() {
+        return d.features.iter().any(|f| f == feature);
+    }
+    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control"))
+}

@@ -22,8 +22,12 @@ use super::Window;
 impl Window {
     /// Ask a device to share its screen and open a viewer once it does.
     pub(super) fn view_screen(self: &Rc<Self>, id: Fingerprint) {
-        let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
-        Viewer::open(self, id, &name).start(SessionKind::Screen);
+        let device = self.device(&id);
+        let name = device.as_ref().map(|d| d.device.name.clone()).unwrap_or_default();
+        let viewer = Viewer::open(self, id, &name);
+        // Android phones can't be controlled (no input injection for apps outside the store).
+        viewer.control.set_visible(device.is_none_or(|d| super::can(&d.device, "control")));
+        viewer.start(SessionKind::Screen);
     }
 
     /// Use a device as a second display: this computer gets a new virtual monitor that

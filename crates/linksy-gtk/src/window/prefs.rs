@@ -76,7 +76,11 @@ impl Window {
         page.add(&device);
         page.add(&receiving);
         page.add(&connection);
-        page.add(&self.phone_notifications_group(&dialog, notifications));
+        // Only if a paired phone can send its notifications at all.
+        let any = self.state.borrow().devices.iter().any(|d| d.trusted && super::can(&d.device, "notifications") && d.device.os == "android");
+        if any {
+            page.add(&self.phone_notifications_group(&dialog, notifications));
+        }
         dialog.add(&page);
 
         // Save `change` applied to the current settings; `undo` resets the widget on failure.
