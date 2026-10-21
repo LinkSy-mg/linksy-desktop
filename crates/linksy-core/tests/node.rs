@@ -1064,6 +1064,38 @@ async fn not_reachable_from_away_without_its_address() {
 }
 
 #[tokio::test]
+async fn terminals_are_judged_before_anyone_is_asked() {
+    use linksy_core::{TerminalOpen, Verdict, protocol::control_frame};
+    let (a, b) = paired().await;
+    let idb = b.node.info().id;
+    // Beta runs terminals: a wrong code is refused, the right one opens at once.
+    let mut calls = b.node.incoming_terminals().unwrap();
+    tokio::spawn(async move {
+        while let Some(call) = calls.recv().await {
+            let verdict = if call.open.code == "482913" { Verdict::Accept { terminal: "t1".into() } } else { Verdict::Decline { reason: "code".into(), tries_left: Some(4) } };
+            call.answer(verdict);
+        }
+    });
+    let mut sessions = b.node.incoming_sessions().unwrap();
+    let open = |code: &str| TerminalOpen { code: code.into(), cols: 80, rows: 24, resume: None };
+    match a.node.request_terminal(&idb, open("000000")).await {
+        Err(Error::Refused { reason, tries_left }) => assert_eq!((reason.as_str(), tries_left), ("code", Some(4))),
+        other => panic!("{other:?}"),
+    }
+    let (mut session, id) = a.node.request_terminal(&idb, open("482913")).await.expect("terminal");
+    assert_eq!(id, "t1");
+    let mut theirs = tokio::time::timeout(Duration::from_secs(5), sessions.recv()).await.unwrap().unwrap();
+    assert_eq!(theirs.kind, SessionKind::Terminal);
+    session.send.write_all(&control_frame(&ControlMsg::TermInput { data: "ls\r".into() })).await.unwrap();
+    let mut len = [0u8; 4];
+    theirs.recv.read_exact(&mut len).await.unwrap();
+    theirs.send.write_all(b"$ ").await.unwrap();
+    let mut out = [0u8; 2];
+    session.recv.read_exact(&mut out).await.unwrap();
+    assert_eq!(&out, b"$ ");
+}
+
+#[tokio::test]
 async fn locate_asks_once_and_hears_back() {
     let (a, b) = paired().await;
     let (ida, idb) = (a.node.info().id, b.node.info().id);

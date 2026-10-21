@@ -109,6 +109,9 @@ pub enum SessionKind {
     /// The receiver shares its microphone; the requester uses it as a microphone. Raw
     /// 16-bit 48 kHz mono PCM, little-endian (docs/protocol.md §4.8).
     Microphone,
+    /// A shell on the receiver (a computer), shown on the requester (a phone): raw
+    /// terminal output one way, `term_*` control messages the other (docs/protocol.md §4.15).
+    Terminal,
 }
 
 impl SessionKind {
@@ -144,6 +147,11 @@ pub enum ControlMsg {
     PointerBy { dx: f64, dy: f64 },
     /// Type this text, as if on a keyboard.
     Text { text: String },
+    /// Terminal sessions: what was typed, as the terminal's bytes (xterm sequences).
+    TermInput { data: String },
+    TermResize { cols: u16, rows: u16 },
+    /// End the shell, not just this view of it.
+    TermClose,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,7 +210,13 @@ pub fn read_control_frames(mut r: impl std::io::Read, mut f: impl FnMut(ControlM
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum SessionMsg {
-    SessionRequest { id: Uuid, kind: SessionKind },
+    SessionRequest {
+        id: Uuid,
+        kind: SessionKind,
+        /// For a `terminal`: the code, the size, and which one to reattach.
+        #[serde(flatten, default, skip_serializing_if = "Option::is_none")]
+        terminal: Option<TerminalOpen>,
+    },
     /// For a `display`, the accepting device may give its screen's size (landscape), so
     /// the second display is made in its shape.
     SessionAccept {
@@ -210,13 +224,40 @@ pub enum SessionMsg {
         width: Option<u32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         height: Option<u32>,
+        /// For a `terminal`: its id, to reattach later.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        terminal: Option<String>,
     },
     /// `reason: "unsupported"` when the device can't do this kind of session at all (as
     /// opposed to its user saying no). Absent otherwise.
     SessionDecline {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+        /// A wrong terminal code: how many tries are left before it locks.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tries_left: Option<u32>,
     },
+}
+
+/// What a phone sends to open a terminal (docs/protocol.md §4.15).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalOpen {
+    /// The terminal code as typed; only the computer can check it.
+    pub code: String,
+    pub cols: u16,
+    pub rows: u16,
+    /// A running terminal to reattach, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume: Option<String>,
+}
+
+/// A running terminal, as `terminals` lists it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalInfo {
+    pub id: String,
+    /// The shell's window title (OSC 0/2), or the shell's name.
+    pub title: String,
+    pub started_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -279,6 +320,9 @@ pub enum Message {
     /// "Where are you?" (computer → phone, docs/protocol.md §4.14): answered once with
     /// `location` or `location_refused`. Nothing is kept or tracked.
     Locate,
+    /// Which terminals are running here for the asker (docs/protocol.md §4.15).
+    TerminalList,
+    Terminals { list: Vec<TerminalInfo> },
     /// Where the sender is now: degrees, accuracy in metres, when it was measured.
     Location {
         lat: f64,
@@ -509,6 +553,25 @@ pub async fn read_msg<T: for<'de> Deserialize<'de>>(s: &mut quinn::RecvStream) -
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn terminal_requests_round_trip() {
+        let id = Uuid::nil();
+        let open = TerminalOpen { code: "482913".into(), cols: 80, rows: 24, resume: None };
+        let msg = SessionMsg::SessionRequest { id, kind: SessionKind::Terminal, terminal: Some(open) };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains(r#""code":"482913""#) && json.contains(r#""kind":"terminal""#), "{json}");
+        assert_eq!(serde_json::from_str::<SessionMsg>(&json).unwrap(), msg);
+        // As the node reads it: a JSON value first.
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(serde_json::from_value::<SessionMsg>(value).unwrap(), msg);
+        // Other sessions carry no terminal part.
+        let screen = SessionMsg::SessionRequest { id, kind: SessionKind::Screen, terminal: None };
+        let json = serde_json::to_string(&screen).unwrap();
+        assert_eq!(serde_json::from_str::<SessionMsg>(&json).unwrap(), screen);
+        assert_eq!(serde_json::from_str::<SessionMsg>(r#"{"type":"session_request","id":"00000000-0000-0000-0000-000000000000","kind":"screen"}"#).unwrap(), screen);
+    }
+
     use super::*;
 
     #[test]

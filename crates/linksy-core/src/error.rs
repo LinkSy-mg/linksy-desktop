@@ -43,6 +43,9 @@ pub enum Error {
     /// its user said so for this device.
     #[error("the other device allows this only on the same network")]
     NotFromAway,
+    /// A terminal turned down, with why (`off`, `code`, `locked`).
+    #[error("terminal refused: {reason}")]
+    Refused { reason: String, tries_left: Option<u32> },
     #[error("timed out waiting for an answer")]
     Timeout,
     #[error("file failed integrity check: {0}")]

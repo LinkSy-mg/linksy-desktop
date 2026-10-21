@@ -179,6 +179,10 @@ pub enum Event {
     Location { from: DeviceInfo, lat: f64, lon: f64, accuracy_m: Option<f64>, at_ms: u64 },
     /// A device wouldn't or couldn't say where it is.
     LocationRefused { from: DeviceInfo, reason: String },
+    /// A device asks which terminals run here for it (answer with `send_terminals`).
+    TerminalListRequest { from: DeviceInfo },
+    /// The terminals running on a device for this one.
+    Terminals { from: DeviceInfo, list: Vec<crate::protocol::TerminalInfo> },
     /// A device wants this one's clipboard as it changes (`on`), or no longer.
     ClipboardWatch { from: DeviceInfo, on: bool },
     /// A paired device put a file on this one's clipboard (an image…): it's at `path`.
@@ -208,6 +212,39 @@ pub struct Session {
     pub recv: quinn::RecvStream,
     _busy: Option<Busy>,
     events: broadcast::Sender<Event>,
+}
+
+/// A device wants a terminal here (docs/protocol.md §4.15). Whoever runs terminals (the daemon)
+/// checks the code and its own rules and gives a [`Verdict`]; nothing is asked of the
+/// user before that, so a wrong code never bothers them.
+pub struct TerminalCall {
+    pub request: Uuid,
+    pub from: DeviceInfo,
+    pub open: crate::protocol::TerminalOpen,
+    verdict: tokio::sync::oneshot::Sender<Verdict>,
+}
+
+impl TerminalCall {
+    pub fn answer(self, verdict: Verdict) {
+        let _ = self.verdict.send(verdict);
+    }
+}
+
+impl std::fmt::Debug for TerminalCall {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never the code.
+        f.debug_struct("TerminalCall").field("request", &self.request).field("from", &self.from.name).finish()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    /// Open it now, as terminal `terminal` (new, or the one to reattach).
+    Accept { terminal: String },
+    /// Right code, but the user says yes first (`Event::SessionRequest`, kind `terminal`).
+    Confirm { terminal: String },
+    /// `off`, `code` (with the tries left), `locked`, `unsupported`.
+    Decline { reason: String, tries_left: Option<u32> },
 }
 
 impl Drop for Session {
@@ -343,6 +380,9 @@ struct Inner {
     /// File requests from other devices, for whoever serves this device's files (phones).
     fs: Mutex<Option<mpsc::UnboundedReceiver<FsCall>>>,
     fs_tx: mpsc::UnboundedSender<FsCall>,
+    /// Terminal requests, for whoever runs terminals (the daemon on a computer).
+    terminals: Mutex<Option<mpsc::UnboundedReceiver<TerminalCall>>>,
+    terminals_tx: mpsc::UnboundedSender<TerminalCall>,
     /// Session requests answered "this device can't do that", not "no".
     unsupported: Mutex<std::collections::HashSet<Uuid>>,
     /// Screen sizes to give with an accept (a second display shown here).
@@ -383,6 +423,7 @@ impl Node {
         let (events, _) = broadcast::channel(1024);
         let (sessions_tx, sessions) = mpsc::unbounded_channel();
         let (fs_tx, fs) = mpsc::unbounded_channel();
+        let (terminals_tx, terminals) = mpsc::unbounded_channel();
         let node = Self {
             inner: Arc::new(Inner {
                 id: info.id,
@@ -406,6 +447,8 @@ impl Node {
                 sessions_tx,
                 fs: Mutex::new(Some(fs)),
                 fs_tx,
+                terminals: Mutex::new(Some(terminals)),
+                terminals_tx,
                 unsupported: Mutex::new(Default::default()),
                 session_sizes: Mutex::default(),
                 away: Mutex::new(None),
@@ -771,6 +814,30 @@ impl Node {
         self.send_message(to, &Message::LocationRefused { reason: reason.into() }).await
     }
 
+    /// Ask a computer which terminals run there for this device (`Event::Terminals`).
+    pub async fn list_terminals(&self, to: &Fingerprint) -> Result<()> {
+        self.send_message(to, &Message::TerminalList).await
+    }
+
+    /// Answer `Event::TerminalListRequest`.
+    pub async fn send_terminals(&self, to: &Fingerprint, list: Vec<crate::protocol::TerminalInfo>) -> Result<()> {
+        self.send_message(to, &Message::Terminals { list }).await
+    }
+
+    /// Terminal requests from other devices, for the code that runs terminals. Until
+    /// something takes it, this device answers that it can't.
+    pub fn incoming_terminals(&self) -> Option<mpsc::UnboundedReceiver<TerminalCall>> {
+        self.inner.terminals.lock().unwrap().take()
+    }
+
+    /// Open (or with `open.resume`, reattach) a terminal on `to`. Resolves with the
+    /// session (its output on `recv`; `ControlMsg::Term*` frames on `send`) and the
+    /// terminal's id.
+    pub async fn request_terminal(&self, to: &Fingerprint, open: crate::protocol::TerminalOpen) -> Result<(Session, String)> {
+        let (session, terminal) = self.open_session(to, SessionKind::Terminal, Some(open)).await?;
+        Ok((session, terminal.unwrap_or_default()))
+    }
+
     /// Tell the device using this one's camera (session `session`) what it can do and how
     /// it's set (a phone, after every change).
     pub async fn send_camera_state(&self, to: &Fingerprint, session: Uuid, state: serde_json::Value) -> Result<()> {
@@ -893,23 +960,28 @@ impl Node {
     /// with us; for [`SessionKind::Display`], to show ours as its second display. Resolves
     /// once its user allowed it (or fails if they declined).
     pub async fn request_session(&self, to: &Fingerprint, kind: SessionKind) -> Result<Session> {
+        Ok(self.open_session(to, kind, None).await?.0)
+    }
+
+    async fn open_session(&self, to: &Fingerprint, kind: SessionKind, terminal: Option<crate::protocol::TerminalOpen>) -> Result<(Session, Option<String>)> {
         let (conn, activity) = self.ensure_connection(to).await?;
         let busy = activity.hold();
         let peer = self.peer_info(to).ok_or(Error::Unreachable)?;
         let id = Uuid::new_v4();
         let (mut send, mut recv) = conn.open_bi().await?;
-        write_msg(&mut send, &SessionMsg::SessionRequest { id, kind }).await?;
-        let size = match tokio::time::timeout(OFFER_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
-            SessionMsg::SessionAccept { width: Some(w), height: Some(h) } if w > 0 && h > 0 => Some((w, h)),
-            SessionMsg::SessionAccept { .. } => None,
-            SessionMsg::SessionDecline { reason: Some(r) } if r == "unsupported" => return Err(Error::Unsupported),
-            SessionMsg::SessionDecline { reason: Some(r) } if r == "away" => return Err(Error::NotFromAway),
+        write_msg(&mut send, &SessionMsg::SessionRequest { id, kind, terminal }).await?;
+        let (size, terminal) = match tokio::time::timeout(OFFER_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
+            SessionMsg::SessionAccept { width: Some(w), height: Some(h), terminal } if w > 0 && h > 0 => (Some((w, h)), terminal),
+            SessionMsg::SessionAccept { terminal, .. } => (None, terminal),
+            SessionMsg::SessionDecline { reason: Some(r), .. } if r == "unsupported" => return Err(Error::Unsupported),
+            SessionMsg::SessionDecline { reason: Some(r), .. } if r == "away" => return Err(Error::NotFromAway),
+            SessionMsg::SessionDecline { reason: Some(reason), tries_left } => return Err(Error::Refused { reason, tries_left }),
             SessionMsg::SessionDecline { .. } => return Err(Error::Declined),
             other => return Err(protocol(format!("unexpected {other:?}"))),
         };
         let sharing = kind.requester_shares();
         self.emit(Event::SessionStarted { session: id, peer: peer.clone(), kind, sharing });
-        Ok(Session { id, peer, kind, sharing, size, send, recv, _busy: Some(busy), events: self.inner.events.clone() })
+        Ok((Session { id, peer, kind, sharing, size, send, recv, _busy: Some(busy), events: self.inner.events.clone() }, terminal))
     }
 
     /// Sessions this device accepted. Can be taken once; the taker runs the media (capture
@@ -1406,6 +1478,8 @@ impl Node {
                                 Ok(Message::ClipboardWatch { on }) => node.emit(Event::ClipboardWatch { from, on }),
                                 Ok(Message::CameraState { session, state }) => node.emit(Event::CameraState { from, session, state }),
                                 Ok(Message::Locate) => node.emit(Event::LocateRequest { from }),
+                                Ok(Message::TerminalList) => node.emit(Event::TerminalListRequest { from }),
+                                Ok(Message::Terminals { list }) => node.emit(Event::Terminals { from, list }),
                                 Ok(Message::Location { lat, lon, accuracy_m, at_ms }) => {
                                     if lat.is_finite() && lon.is_finite() && lat.abs() <= 90.0 && lon.abs() <= 180.0 {
                                         node.emit(Event::Location { from, lat, lon, accuracy_m: accuracy_m.filter(|a| a.is_finite() && *a >= 0.0), at_ms });
@@ -1476,7 +1550,7 @@ impl Node {
                 _ => debug!("bad offer from {}", from.name),
             },
             Some("session_request") => match serde_json::from_value(first) {
-                Ok(SessionMsg::SessionRequest { id, kind }) => self.handle_session(from, send, recv, id, kind).await,
+                Ok(SessionMsg::SessionRequest { id, kind, terminal }) => self.handle_session(from, send, recv, id, kind, terminal).await,
                 _ => debug!("bad session request from {}", from.name),
             },
             Some("fs") => {
@@ -1503,27 +1577,60 @@ impl Node {
         }
     }
 
-    async fn handle_session(self, from: DeviceInfo, mut send: quinn::SendStream, recv: quinn::RecvStream, id: Uuid, kind: SessionKind) {
-        // From away, screens, control, camera and microphone need the user's yes for this
-        // device beforehand; it isn't even asked otherwise.
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_session(self, from: DeviceInfo, mut send: quinn::SendStream, recv: quinn::RecvStream, id: Uuid, kind: SessionKind, terminal: Option<crate::protocol::TerminalOpen>) {
+        let decline = |reason: &str, tries_left: Option<u32>| SessionMsg::SessionDecline { reason: Some(reason.into()), tries_left };
+        // From away, screens, control, camera, microphone and terminals need the user's yes
+        // for this device beforehand; it isn't even asked otherwise.
         if !self.allowed_from_here(&from.id) {
-            let _ = write_msg(&mut send, &SessionMsg::SessionDecline { reason: Some("away".into()) }).await;
+            let _ = write_msg(&mut send, &decline("away", None)).await;
             let _ = send.finish();
             return;
         }
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
-        // Always asks: nothing like auto-accept applies to someone seeing your screen.
-        let answer = self.expect_answer(id);
-        self.emit(Event::SessionRequest { request: id, from: from.clone(), kind });
-        let accepted = self.await_answer(id, answer, OFFER_TIMEOUT).await;
+        // A terminal: whoever runs them judges the code first.
+        let mut terminal_id = None;
+        let mut ask = true;
+        if kind == SessionKind::Terminal {
+            let verdict = match terminal {
+                Some(open) => {
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    let call = TerminalCall { request: id, from: from.clone(), open, verdict: tx };
+                    match self.inner.terminals_tx.send(call) {
+                        Ok(()) => tokio::time::timeout(Duration::from_secs(20), rx).await.ok().and_then(|v| v.ok()),
+                        Err(_) => None,
+                    }
+                }
+                None => None,
+            };
+            match verdict.unwrap_or(Verdict::Decline { reason: "unsupported".into(), tries_left: None }) {
+                Verdict::Accept { terminal } => {
+                    terminal_id = Some(terminal);
+                    ask = false;
+                }
+                Verdict::Confirm { terminal } => terminal_id = Some(terminal),
+                Verdict::Decline { reason, tries_left } => {
+                    let _ = write_msg(&mut send, &decline(&reason, tries_left)).await;
+                    let _ = send.finish();
+                    return;
+                }
+            }
+        }
+        // Otherwise always asks: nothing like auto-accept applies to someone seeing your
+        // screen.
+        let accepted = !ask || {
+            let answer = self.expect_answer(id);
+            self.emit(Event::SessionRequest { request: id, from: from.clone(), kind });
+            self.await_answer(id, answer, OFFER_TIMEOUT).await
+        };
         let unsupported = self.inner.unsupported.lock().unwrap().remove(&id);
         let reply = match (accepted, unsupported) {
             (true, _) => {
                 let size = self.inner.session_sizes.lock().unwrap().remove(&id);
-                SessionMsg::SessionAccept { width: size.map(|s| s.0), height: size.map(|s| s.1) }
+                SessionMsg::SessionAccept { width: size.map(|s| s.0), height: size.map(|s| s.1), terminal: terminal_id }
             }
-            (false, true) => SessionMsg::SessionDecline { reason: Some("unsupported".into()) },
-            (false, false) => SessionMsg::SessionDecline { reason: None },
+            (false, true) => decline("unsupported", None),
+            (false, false) => SessionMsg::SessionDecline { reason: None, tries_left: None },
         };
         if write_msg(&mut send, &reply).await.is_err() || !accepted {
             let _ = send.finish();

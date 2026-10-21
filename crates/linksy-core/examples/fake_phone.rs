@@ -27,6 +27,11 @@
 //! `--picture FILE` sends that JPEG or PNG as the phone's picture.
 //! `--location LAT,LON` answers "Locate" with that position (else it says no).
 //! `--away` turns on away from home, through LINKSY_RELAY or Linksy's relay.
+//! `--terminal CODE` opens a terminal on the computer, types `--type TEXT` (default
+//! `echo linksy-$((6*7))`) and prints what comes back for 3 s, then detaches.
+//! `--resume` reattaches the first terminal `terminal_list` gives instead, and
+//! `--close` ends it after; `--watch-terminal SECONDS` watches longer than 3 s (it stops
+//! early when the computer ends the terminal).
 
 use std::time::Duration;
 
@@ -48,6 +53,9 @@ async fn main() {
     let mut no_discovery = false;
     let mut files: Option<std::path::PathBuf> = None;
     let mut clip_file: Option<std::path::PathBuf> = None;
+    let mut terminal: Option<String> = None;
+    let mut typed = "echo linksy-$((6*7))".to_string();
+    let (mut resume, mut close, mut watch_for) = (false, false, 3u64);
     let mut watch_clipboard = false;
     let mut camera = false;
     let mut picture: Option<std::path::PathBuf> = None;
@@ -69,6 +77,11 @@ async fn main() {
             "--import" => import = Some(value().into()),
             "--touchpad" => touchpad = true,
             "--clip-file" => clip_file = Some(value().into()),
+            "--terminal" => terminal = Some(value()),
+            "--type" => typed = value(),
+            "--resume" => resume = true,
+            "--close" => close = true,
+            "--watch-terminal" => watch_for = value().parse().expect("--watch-terminal SECONDS"),
             "--watch-clipboard" => watch_clipboard = true,
             "--camera" => camera = true,
             "--picture" => picture = Some(value().into()),
@@ -108,7 +121,7 @@ async fn main() {
     let mut events = node.subscribe();
     println!("{} ({}) up", node.info().name, node.info().id.short());
 
-    if level.is_some() || clip_file.is_some() || watch_clipboard || picture.is_some() {
+    if level.is_some() || clip_file.is_some() || watch_clipboard || picture.is_some() || terminal.is_some() {
         // These need the computer connected first.
         let _ = tokio::time::timeout(Duration::from_secs(30), async {
             while !matches!(events.recv().await, Ok(Event::Connected { .. }) | Err(_)) {}
@@ -177,6 +190,49 @@ async fn main() {
             }
             let r = node.send_picture(&t.device.id, &String::from_utf8(b64).unwrap()).await;
             println!("picture to {}: {:?}", t.device.name, r.map_err(|e| e.to_string()));
+        }
+        if let Some(code) = &terminal {
+            use linksy_core::protocol::control_frame;
+            use linksy_core::{ControlMsg, TerminalOpen};
+            let mut id = None;
+            if resume {
+                let _ = node.list_terminals(&t.device.id).await;
+                id = tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        if let Ok(Event::Terminals { list, .. }) = events.recv().await {
+                            println!("terminals: {:?}", list.iter().map(|t| (&t.id, &t.title)).collect::<Vec<_>>());
+                            return list.first().map(|t| t.id.clone());
+                        }
+                    }
+                })
+                .await
+                .ok()
+                .flatten();
+            }
+            let open = TerminalOpen { code: code.clone(), cols: 80, rows: 24, resume: id };
+            match node.request_terminal(&t.device.id, open).await {
+                Ok((mut s, id)) => {
+                    println!("terminal {id} on {}", t.device.name);
+                    let _ = s.send.write_all(&control_frame(&ControlMsg::TermInput { data: format!("{typed}\r") })).await;
+                    let mut out = Vec::new();
+                    let mut buf = vec![0u8; 8192];
+                    let watched = std::time::Instant::now();
+                    let _ = tokio::time::timeout(Duration::from_secs(watch_for), async {
+                        while let Ok(Some(n)) = s.recv.read(&mut buf).await {
+                            out.extend_from_slice(&buf[..n]);
+                        }
+                    })
+                    .await;
+                    println!("terminal output: {:?}", String::from_utf8_lossy(&out));
+                    println!("terminal watched for {:.1} s", watched.elapsed().as_secs_f64());
+                    if close {
+                        let _ = s.send.write_all(&control_frame(&ControlMsg::TermClose)).await;
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                    let _ = s.send.finish();
+                }
+                Err(e) => println!("terminal refused: {e:?}"),
+            }
         }
         if let Some(path) = &clip_file {
             let r = node.send_clipboard_file(&t.device.id, path.clone()).await;
