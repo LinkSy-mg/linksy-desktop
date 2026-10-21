@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.7.0" date="2026-10-22">
+      <description>
+        <p>Terminal from your phone: a shell on this computer, behind a code you set, allowed per phone, ended from either side. Set Up Everything: Finish Setup checks the firewall, autostart and screen sharing too, and fixes it all with one password.</p>
+      </description>
+    </release>
     <release version="0.6.4" date="2026-10-21">
       <description>
         <p>Received files go to Downloads/Linksy by default. The device page fits any window size.</p>

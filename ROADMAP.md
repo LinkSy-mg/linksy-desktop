@@ -13,7 +13,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.4 | Phone as a tool | Photo auto-import (desktop done in 0.4.0) · Touchpad, keyboard & presentation remote (desktop done in 0.4.1) |
 | 0.5 | Phone on the desktop | Texting from the desktop (desktop done in 0.5.0) · Phone in the Files sidebar (desktop done in 0.5.1) · USB cable, microphone, camera controls (desktop done in 0.5.7) |
 | 0.6 | Anywhere | Away from home over the internet, with a 7-day lease · Locate the phone · 1080p webcam (desktop done in 0.6.0) |
-| 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (spec in `docs/protocol.md` §4.15) |
+| 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 
 Not planned: Bluetooth LE presence, and automatic clipboard sync on GNOME (needs a Shell
 extension; manual Send Clipboard stays).

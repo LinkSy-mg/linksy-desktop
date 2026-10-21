@@ -124,6 +124,8 @@ Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
 - [x] "Send with Linksy" in Files (right-click → Scripts), "Open With Linksy" for files and folders
 - [x] Away from home: paired devices reach each other over the internet (iroh, Linksy's relay), for a week after they last met on the same network; screens, files, camera and microphone stay local unless allowed per device
 - [x] Locate a phone (`linksy locate`), asked once, never tracked
+- [x] Terminal from the phone (`linksy terminal`): a shell here behind a code set on this computer, allowed per phone
+- [x] Finish Setup: everything a feature needs (packages, camera device, USB, firewall, autostart) in one go
 - [x] QR-code pairing
 - [x] Android app (Flutter, separate repository; see `docs/protocol.md`)
 - [ ] Tray icon (GNOME has none by default)

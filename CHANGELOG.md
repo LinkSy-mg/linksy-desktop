@@ -2,6 +2,24 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.7.0
+
+### Added
+- **Terminal from your phone**: open a shell on this computer from Linksy for Android,
+  and run anything a terminal runs (Claude Code, neovim, git, builds). It's off until you
+  set a terminal code in Preferences and turn on "Allow Terminal" on the phone's page.
+  The phone asks for the code every time; 5 wrong codes lock it out until you unlock it
+  here; this computer asks you once a day; from away only if you allow everything from
+  away for that phone. A terminal keeps running when the phone leaves, so you can come
+  back to it (for a day), and ends for good when closed on the phone or with End on the
+  phone's page here. Needs the Linksy for Android update. `linksy terminal` does the
+  same from the command line.
+- **Set Up Everything**: Finish Setup now also checks the firewall (and opens UDP 47200
+  and mDNS so your devices can find this computer), that Linksy starts when you log in,
+  and that your desktop can share its screen, and fixes everything missing in one go,
+  asking for your password once. It opens by itself the first time Linksy starts with
+  something missing. The .deb and .rpm open the firewall when they're installed.
+
 ## 0.6.4
 
 ### Changed
