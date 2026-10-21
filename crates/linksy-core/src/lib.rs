@@ -15,7 +15,7 @@ pub mod trust;
 
 pub use error::{Error, Result};
 pub use identity::{DeviceInfo, DeviceKind, Fingerprint};
-pub use node::{Config, DeviceView, Direction, Event, MAX_CLIPBOARD, Node, Session};
+pub use node::{Config, DeviceView, Direction, Event, MAX_CLIPBOARD, Node, Session, over_usb};
 pub use protocol::{Battery, CallState, ControlMsg, FileEntry, FsEntry, FsReply, FsRequest, MediaCommand, MediaPlayer, MediaState, MouseButton, NotificationButton, RemoteNotification, SessionKind, SmsMessage, SmsThread};
 pub use settings::{MAX_NAME, Settings};
 pub use trust::TrustedDevice;

@@ -65,7 +65,10 @@ impl TrustStore {
             return Ok(());
         }
         d.device = device.clone();
-        d.last_addr = Some(addr);
+        // A USB bridge's address is only good while the cable is in: keep the network one.
+        if !crate::node::over_usb(addr) || d.last_addr.is_none() {
+            d.last_addr = Some(addr);
+        }
         self.save()
     }
 

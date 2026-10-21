@@ -212,6 +212,15 @@ pub struct DeviceView {
     /// Last battery level the device reported since this one started, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub battery: Option<Battery>,
+    /// Connected through a USB cable (docs/protocol.md §4.11) rather than the network.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub usb: bool,
+}
+
+/// A connection that arrives through a USB bridge: its packets come from this computer
+/// itself (docs/protocol.md §4.11).
+pub fn over_usb(addr: SocketAddr) -> bool {
+    addr.ip().to_canonical().is_loopback()
 }
 
 struct Peer {
@@ -430,6 +439,7 @@ impl Node {
             .map(|t| DeviceView {
                 battery: batteries.get(&t.device.id).copied(),
                 connected: peers.contains_key(&t.device.id),
+                usb: peers.get(&t.device.id).is_some_and(|p| over_usb(p.conn.remote_address())),
                 nearby: nearby.contains_key(&t.device.id),
                 // Newest name we know: the live connection, then the network announcement
                 // (which doesn't carry features: those come from the last handshake).
@@ -449,7 +459,7 @@ impl Node {
             .collect();
         for (id, (device, _)) in nearby.iter() {
             if !trust.contains(id) {
-                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None });
+                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false });
             }
         }
         // Paired and reachable first, then devices to pair, then paired ones that are away.
@@ -1190,9 +1200,12 @@ impl Node {
         {
             let mut peers = self.inner.peers.lock().unwrap();
             if let Some(existing) = peers.get(&id).filter(|p| p.conn.stable_id() != conn.stable_id()) {
-                // Both sides dialed at once: keep the connection opened by the smaller id,
-                // which both sides agree on without talking.
-                if existing.conn.close_reason().is_none() && existing.dialer < dialer {
+                // A cable beats the network, and both sides see which one is the cable.
+                // Otherwise both sides dialed at once: keep the connection opened by the
+                // smaller id, which both sides agree on without talking.
+                let (new_usb, old_usb) = (over_usb(conn.remote_address()), over_usb(existing.conn.remote_address()));
+                let keep_old = if new_usb != old_usb { old_usb } else { existing.dialer < dialer };
+                if existing.conn.close_reason().is_none() && keep_old {
                     conn.close(0u32.into(), b"duplicate");
                     return;
                 }
