@@ -75,6 +75,10 @@ pub enum TransferMsg {
         files: Vec<FileEntry>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         import: bool,
+        /// One file (≤ 10 MiB) for the receiver's clipboard (an image, or a file to paste),
+        /// taken without asking.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        clipboard: bool,
     },
     /// `offsets[i]` is how many bytes of file `i` the receiver already has.
     Accept { offsets: Vec<u64> },
@@ -252,6 +256,9 @@ pub enum Message {
     Heartbeat,
     /// Ask the receiver for a `heartbeat` every `every_s` seconds (`on`), or to stop.
     HeartbeatWatch { on: bool, every_s: u32 },
+    /// Ask the receiver to send `clipboard` whenever its clipboard changes (`on`), or to
+    /// stop. Not every desktop allows watching it (GNOME doesn't).
+    ClipboardWatch { on: bool },
     /// Texting from the computer. Requests (computer → phone):
     SmsListThreads { limit: u32 },
     SmsListMessages {

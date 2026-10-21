@@ -43,6 +43,8 @@ const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const MAX_CLIPBOARD: usize = 256 * 1024;
 /// Most conversations or messages in one texting answer.
 const MAX_SMS: u32 = 100;
+/// Largest file one device may put on another's clipboard.
+const MAX_CLIPBOARD_FILE: u64 = 10 << 20;
 /// Longest link accepted for "Open on PC".
 const MAX_URL: usize = 8 * 1024;
 /// Mirrored notifications: longest key, and largest icon (base64 of a 64 KiB PNG).
@@ -157,6 +159,10 @@ pub enum Event {
     Heartbeat { from: DeviceInfo },
     /// A device wants this one to check in every `every_s` seconds (`on`), or no longer.
     HeartbeatWatch { from: DeviceInfo, on: bool, every_s: u32 },
+    /// A device wants this one's clipboard as it changes (`on`), or no longer.
+    ClipboardWatch { from: DeviceInfo, on: bool },
+    /// A paired device put a file on this one's clipboard (an image…): it's at `path`.
+    ClipboardFile { from: DeviceInfo, path: PathBuf },
     /// Texting: what a computer asks of this phone…
     SmsListThreads { from: DeviceInfo, limit: u32 },
     SmsListMessages { from: DeviceInfo, thread: String, before_ms: Option<u64>, limit: u32 },
@@ -670,6 +676,23 @@ impl Node {
         self.send_message(to, &Message::CallState { state, contact: contact.map(Into::into) }).await
     }
 
+    /// Ask a device for its clipboard whenever it changes (`on`), or stop.
+    pub async fn watch_clipboard(&self, to: &Fingerprint, on: bool) -> Result<()> {
+        self.send_message(to, &Message::ClipboardWatch { on }).await
+    }
+
+    /// Put one file (≤ 10 MiB: an image, say) on another device's clipboard.
+    pub async fn send_clipboard_file(&self, to: &Fingerprint, path: PathBuf) -> Result<Uuid> {
+        let meta = std::fs::metadata(&path)?;
+        if !meta.is_file() {
+            return Err(invalid("only a single file can go on the clipboard"));
+        }
+        if meta.len() > MAX_CLIPBOARD_FILE {
+            return Err(invalid("too big for the clipboard (10 MB at most); send it as a file instead"));
+        }
+        self.offer_with(to, vec![path], false, true).await
+    }
+
     /// Check in with a device that asked for heartbeats.
     pub async fn heartbeat(&self, to: &Fingerprint) -> Result<()> {
         self.send_message(to, &Message::Heartbeat).await
@@ -812,6 +835,10 @@ impl Node {
     }
 
     async fn offer(&self, to: &Fingerprint, paths: Vec<PathBuf>, import: bool) -> Result<Uuid> {
+        self.offer_with(to, paths, import, false).await
+    }
+
+    async fn offer_with(&self, to: &Fingerprint, paths: Vec<PathBuf>, import: bool, clipboard: bool) -> Result<Uuid> {
         let (conn, activity) = self.ensure_connection(to).await?;
         let busy = activity.hold();
         let peer = self.peer_info(to).ok_or(Error::Unreachable)?;
@@ -828,7 +855,7 @@ impl Node {
             let total = entries.iter().map(|f| f.size).sum();
             let result = async {
                 let (mut send, mut recv) = conn.open_bi().await?;
-                write_msg(&mut send, &TransferMsg::Offer { id, files: entries.clone(), import }).await?;
+                write_msg(&mut send, &TransferMsg::Offer { id, files: entries.clone(), import, clipboard }).await?;
                 node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries, total, import });
                 let offsets = match read_msg(&mut recv).await? {
                     TransferMsg::Accept { offsets } => offsets,
@@ -1240,6 +1267,7 @@ impl Node {
                                 Ok(Message::MediaWatch { on }) => node.emit(Event::MediaWatch { from, on }),
                                 Ok(Message::CallState { state, contact }) => node.emit(Event::CallState { from, state, contact }),
                                 Ok(Message::Heartbeat) => node.emit(Event::Heartbeat { from }),
+                                Ok(Message::ClipboardWatch { on }) => node.emit(Event::ClipboardWatch { from, on }),
                                 Ok(Message::SmsListThreads { limit }) => node.emit(Event::SmsListThreads { from, limit }),
                                 Ok(Message::SmsListMessages { thread, before_ms, limit }) => {
                                     node.emit(Event::SmsListMessages { from, thread, before_ms, limit })
@@ -1293,7 +1321,7 @@ impl Node {
         };
         match first.get("type").and_then(|t| t.as_str()) {
             Some("offer") => match serde_json::from_value(first) {
-                Ok(TransferMsg::Offer { id, files, import }) => self.handle_offer(from, send, recv, id, files, import).await,
+                Ok(TransferMsg::Offer { id, files, import, clipboard }) => self.handle_offer(from, send, recv, id, files, import, clipboard).await,
                 _ => debug!("bad offer from {}", from.name),
             },
             Some("session_request") => match serde_json::from_value(first) {
@@ -1345,11 +1373,28 @@ impl Node {
         let _ = self.inner.sessions_tx.send(session);
     }
 
-    async fn handle_offer(self, from: DeviceInfo, mut send: quinn::SendStream, mut recv: quinn::RecvStream, id: Uuid, files: Vec<FileEntry>, import: bool) {
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_offer(self, from: DeviceInfo, mut send: quinn::SendStream, mut recv: quinn::RecvStream, id: Uuid, files: Vec<FileEntry>, import: bool, clipboard: bool) {
         let total: u64 = files.iter().map(|f| f.size).sum();
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
+        // Clipboard files: one small file, into a folder of their own, kept until the next.
+        let clipboard_to = if clipboard {
+            let total: u64 = files.iter().map(|f| f.size).sum();
+            if files.len() != 1 || total > MAX_CLIPBOARD_FILE {
+                let _ = write_msg(&mut send, &TransferMsg::Decline).await;
+                let _ = send.finish();
+                return;
+            }
+            let dir = self.inner.config.data_dir.join("clipboard");
+            let _ = std::fs::remove_dir_all(&dir);
+            Some(dir)
+        } else {
+            None
+        };
         // Imports go to their own folder, never ask, and are refused where not taken.
-        let import_to = if import {
+        let import_to = if clipboard_to.is_some() {
+            clipboard_to.clone()
+        } else if import {
             let base = self.inner.import_dir.lock().unwrap().clone();
             match base {
                 Some(base) => Some(base.join(folder_name(&from.name))),
@@ -1376,6 +1421,8 @@ impl Node {
         }
 
         let node = self.clone();
+        let from_clip = from.clone();
+        let to_clipboard = clipboard_to.is_some();
         let task = tokio::spawn(async move {
             let result = async {
                 let dir = match import_to {
@@ -1386,7 +1433,10 @@ impl Node {
                 let offsets: Vec<u64> = plan.iter().map(|f| f.offset).collect();
                 let start = offsets.iter().sum();
                 write_msg(&mut send, &TransferMsg::Accept { offsets }).await?;
-                node.emit(Event::TransferStarted { transfer: id, peer: from, direction: Direction::Incoming, files, total, import });
+                // A clipboard file isn't a download: it shows up as `ClipboardFile` only.
+                if !to_clipboard {
+                    node.emit(Event::TransferStarted { transfer: id, peer: from, direction: Direction::Incoming, files, total, import });
+                }
                 let events = node.inner.events.clone();
                 let mut report = move |bytes| {
                     let _ = events.send(Event::TransferProgress { transfer: id, bytes, total });
@@ -1397,6 +1447,11 @@ impl Node {
             .await;
             node.inner.transfers.lock().unwrap().remove(&id);
             drop(busy);
+            if let (true, Ok(saved)) = (to_clipboard, &result)
+                && let Some(path) = saved.first()
+            {
+                node.emit(Event::ClipboardFile { from: from_clip, path: path.clone() });
+            }
             node.emit(match result {
                 Ok(saved) => Event::TransferComplete { transfer: id, saved },
                 Err(e) => Event::TransferFailed { transfer: id, reason: e.to_string() },
