@@ -1,8 +1,9 @@
 //! Finish Setup: the system pieces some features need and a distribution may not have
 //! (the webcam in every app, fast video, screen sharing, the clipboard), what's missing,
 //! and one click to add it. Installing goes through PackageKit (GNOME Software asks to
-//! confirm and for the password); the camera device is made by `linksy-camera-setup`,
-//! run as root with pkexec (the desktop asks for the password).
+//! confirm and for the password); the camera device is made by `linksy-camera-setup`, and
+//! USB access for phones added by `linksy-usb-setup`, both run as root with pkexec (the
+//! desktop asks for the password).
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -110,6 +111,16 @@ pub fn check() -> Vec<Item> {
         why: "Browsers, Zoom and Discord only see this kind of camera. Without it, the phone's camera works in OBS and PipeWire apps only.",
         need: camera,
     }];
+    // A Flatpak can't add a udev rule, and can't see whether the system has one.
+    if !flatpak() {
+        let rule = ["/usr/lib/udev/rules.d/70-linksy-usb.rules", "/etc/udev/rules.d/70-linksy-usb.rules"].iter().any(|p| std::path::Path::new(p).exists());
+        items.push(Item {
+            id: "usb",
+            title: "Phones by USB Cable",
+            why: "Plug a phone in for a faster webcam and microphone, with no Wi-Fi needed.",
+            need: if rule { Need::Ready } else { Need::SetUp },
+        });
+    }
     // In a Flatpak, codecs and tools come with the runtime and the app.
     if !flatpak() {
         let video = has_element(&["avdec_h264", "vah264dec", "openh264dec"]) && has_element(&["vah264lpenc", "vah264enc", "x264enc", "openh264enc"]);
@@ -145,14 +156,19 @@ pub fn missing(items: &[Item]) -> usize {
     items.iter().filter(|i| i.need != Need::Ready).count()
 }
 
-/// The root helper that makes the camera device: installed next to Linksy, or with the
-/// package, or in the source tree when run from it.
-fn setup_script() -> Option<PathBuf> {
+/// A root helper (`linksy-camera-setup`, `linksy-usb-setup`): installed next to Linksy, or
+/// with the package, or in the source tree when run from it.
+fn setup_script(name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    [dir.join("linksy-camera-setup"), PathBuf::from("/usr/libexec/linksy/linksy-camera-setup"), dir.join("../../data/linksy-camera-setup")]
-        .into_iter()
-        .find(|p| p.is_file())
+    [dir.join(name), PathBuf::from("/usr/libexec/linksy").join(name), dir.join("../../data").join(name)].into_iter().find(|p| p.is_file())
+}
+
+/// Run a root helper with pkexec; its exit code, and what it said on failure.
+async fn run_as_root(script: &std::path::Path) -> Result<(i32, String), String> {
+    let out = gio::Subprocess::newv(&[std::ffi::OsStr::new("pkexec"), script.as_os_str()], gio::SubprocessFlags::STDERR_PIPE).map_err(|e| e.to_string())?;
+    let (_, err) = out.communicate_utf8_future(None).await.map_err(|e| e.to_string())?;
+    Ok((out.exit_status(), err.map(|e| e.trim().to_string()).unwrap_or_default()))
 }
 
 impl Window {
@@ -233,15 +249,20 @@ impl Window {
         }
         if item.id == "camera" {
             // Now installed (or was already): make the device, as root.
-            let script = setup_script().ok_or("Linksy's camera setup helper is missing; reinstall Linksy.")?;
-            let out = gio::Subprocess::newv(&[std::ffi::OsStr::new("pkexec"), script.as_os_str()], gio::SubprocessFlags::STDERR_PIPE)
-                .map_err(|e| e.to_string())?;
-            let (_, err) = out.communicate_utf8_future(None).await.map_err(|e| e.to_string())?;
-            return match out.exit_status() {
-                0 => Ok(()),
-                4 => Err("Restart your computer to approve the new camera driver (Secure Boot asks once), then set it up again.".into()),
-                126 | 127 => Err("Not set up: the password wasn't given.".into()),
-                _ => Err(format!("Camera setup failed: {}", err.map(|e| e.trim().to_string()).unwrap_or_default())),
+            let script = setup_script("linksy-camera-setup").ok_or("Linksy's camera setup helper is missing; reinstall Linksy.")?;
+            return match run_as_root(&script).await? {
+                (0, _) => Ok(()),
+                (4, _) => Err("Restart your computer to approve the new camera driver (Secure Boot asks once), then set it up again.".into()),
+                (126 | 127, _) => Err("Not set up: the password wasn't given.".into()),
+                (_, err) => Err(format!("Camera setup failed: {err}")),
+            };
+        }
+        if item.id == "usb" {
+            let script = setup_script("linksy-usb-setup").ok_or("Linksy's USB setup helper is missing; reinstall Linksy.")?;
+            return match run_as_root(&script).await? {
+                (0, _) => Ok(()),
+                (126 | 127, _) => Err("Not set up: the password wasn't given.".into()),
+                (_, err) => Err(format!("USB setup failed: {err}")),
             };
         }
         Ok(())

@@ -1282,6 +1282,7 @@ fn sidebar_row(d: &DeviceView) -> gtk::ListBoxRow {
 
 fn status_text(d: &DeviceView) -> &'static str {
     match (d.trusted, d.connected, d.nearby) {
+        (true, true, _) if d.usb => "Connected by USB",
         (true, true, _) => "Connected",
         (true, false, true) => "Nearby",
         (true, false, false) => "Not nearby",
