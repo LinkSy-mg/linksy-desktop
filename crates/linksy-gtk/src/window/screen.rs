@@ -382,6 +382,25 @@ impl Viewer {
         header.pack_start(&control);
         header.pack_start(&disconnect);
         header.pack_end(&fullscreen);
+        // Android 15 can black out a phone's status bar and notification shade in a share;
+        // only the phone's user can turn that off.
+        if owner.device(&device).is_some_and(|d| d.device.os == "android") {
+            let tip = gtk::Label::builder()
+                .label("Top bar black? Android hides it from screen sharing on some phones. On the phone: Developer options › Disable screen share protections, then share again.")
+                .wrap(true)
+                .max_width_chars(36)
+                .margin_top(8)
+                .margin_bottom(8)
+                .margin_start(8)
+                .margin_end(8)
+                .build();
+            let hint = gtk::MenuButton::builder()
+                .icon_name("dialog-information-symbolic")
+                .tooltip_text("Top Bar Black?")
+                .popover(&gtk::Popover::builder().child(&tip).build())
+                .build();
+            header.pack_end(&hint);
+        }
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&stack));
         let toolbar = adw::ToolbarView::builder().content(&toasts).build();
