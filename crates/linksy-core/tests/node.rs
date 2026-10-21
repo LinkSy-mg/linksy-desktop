@@ -1009,3 +1009,44 @@ async fn unsupported_sessions_say_so() {
     let err = a.node.request_session(&b.node.info().id, SessionKind::Control).await.unwrap_err();
     assert!(matches!(err, Error::Unsupported), "{err:?}");
 }
+
+/// Away from home (docs/protocol.md §4.13): after the direct connection goes, the two reach each
+/// other through iroh, Linksy's own handshake runs inside, both see the link as away, and
+/// screens are refused until allowed for that device.
+#[tokio::test]
+async fn away_from_home_connects_and_keeps_screens_local() {
+    use linksy_core::Link;
+    let tweak = |c: &mut Config| {
+        c.idle_after = Duration::from_millis(1500);
+        c.away = true;
+    };
+    let (a, b) = paired_with(tweak).await;
+    let (ida, idb) = (a.node.info().id, b.node.info().id);
+    // Without a network address to dial, iroh has nothing to try: skip on such machines.
+    if b.node.info().away.is_none_or(|w| w.addrs.is_empty()) {
+        return eprintln!("no network address: skipped");
+    }
+    let mut ra = a.node.subscribe();
+    wait_for(&mut ra, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
+
+    a.node.connect_away(&idb).await.expect("away connection");
+    assert_eq!(a.node.link(&idb), Some(Link::Away));
+    let mut rb = b.node.subscribe();
+    a.node.send_clipboard(&idb, "from far away").await.unwrap();
+    let text = wait_for(&mut rb, |e| match e {
+        Event::Clipboard { text, .. } => Some(text.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(text, "from far away");
+    assert_eq!(b.node.link(&ida), Some(Link::Away));
+
+    // A screen from away: refused without asking Beta's user...
+    let _incoming = b.node.incoming_sessions();
+    let err = a.node.request_session(&idb, SessionKind::Screen).await.unwrap_err();
+    assert!(matches!(err, Error::NotFromAway), "{err:?}");
+    // ...until Beta allows everything from away for Alpha.
+    b.node.set_away_all(&ida, true).unwrap();
+    auto_answer(&b.node, true);
+    a.node.request_session(&idb, SessionKind::Screen).await.expect("allowed from away");
+}
