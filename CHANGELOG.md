@@ -9,6 +9,9 @@ Linksy for Linux. Each version's section becomes its release notes.
   old version after an update until you logged out, so new features (like away from
   home) didn't work yet. It now restarts into the new version by itself within a
   minute, and opening Linksy restarts a service left on an older version.
+- **"Allow Everything From Away"** only shows for a device once the two can actually
+  reach each other away from home: after they've met on the same Wi-Fi with both
+  running Linksy 0.6.
 
 ## 0.6.0
 
