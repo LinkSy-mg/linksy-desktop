@@ -72,6 +72,8 @@ struct State {
     messages_open: Option<Fingerprint>,
     /// Devices that lock this computer when they leave, and after how long.
     lock: linksy_ipc::LockPrefs,
+    /// Terminals for phones; none where the service can't run them (a Flatpak).
+    terminals: Option<linksy_ipc::TerminalStatus>,
     /// Pictures devices sent of themselves (docs/android-app.md §2.7), and which were looked up.
     pictures: HashMap<Fingerprint, gdk::Texture>,
     pictures_checked: std::collections::HashSet<Fingerprint>,
@@ -468,6 +470,9 @@ impl Window {
                 }
                 page::Action::ClearHistory => w.clear_history(id),
                 page::Action::FilterActivity => w.render_activity(),
+                page::Action::AllowTerminal(on) => w.terminal_call(move |c| async move { c.allow_terminal(&id.to_string(), on).await }),
+                page::Action::UnlockTerminal => w.terminal_call(move |c| async move { c.unlock_terminal(&id.to_string()).await }),
+                page::Action::EndTerminal(t) => w.terminal_call(move |c| async move { c.end_terminal(&t).await }),
                 page::Action::Cancel(t) => w.cancel(t),
                 page::Action::Open(paths) => w.open_received(&paths),
                 page::Action::ShowInFolder(path) => {
@@ -531,6 +536,7 @@ impl Window {
                     w.join_pending_displays();
                     w.restore_sessions();
                     w.refresh_updates();
+                    w.refresh_terminals();
                     while let Ok(update) = updates.recv().await {
                         match update {
                             Update::Event(ev) => w.handle_event(ev),
@@ -754,6 +760,33 @@ impl Window {
     }
 
     /// Show "Linksy X Is Available" when the service found a newer version.
+    pub(super) fn refresh_terminals(self: &Rc<Self>) {
+        let Some(c) = self.client() else { return };
+        let w = self.clone();
+        let call = self.bridge.call(&c, |c| async move { c.terminal_status().await });
+        glib::spawn_future_local(async move {
+            w.state.borrow_mut().terminals = call.await.ok();
+            w.render_page();
+        });
+    }
+
+    /// Run a terminal request to the service, then show what changed.
+    fn terminal_call<F, Fut>(self: &Rc<Self>, f: F)
+    where
+        F: FnOnce(Arc<Client>) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<(), linksy_ipc::ClientError>> + Send + 'static,
+    {
+        let Some(c) = self.client() else { return };
+        let w = self.clone();
+        let call = self.bridge.call(&c, f);
+        glib::spawn_future_local(async move {
+            if let Err(e) = call.await {
+                w.toast_error(&e, None);
+            }
+            w.refresh_terminals();
+        });
+    }
+
     fn refresh_updates(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
         let w = self.clone();
@@ -845,12 +878,20 @@ impl Window {
             }
             Event::SettingsChanged { .. } => self.refresh_status(),
             Event::SessionRequest { request, from, kind } => self.show_session_request(request, &from, kind),
+            // Terminals show on the phone's page, with End; the service notifies.
+            Event::SessionStarted { session, kind: SessionKind::Terminal, .. } => {
+                self.close_offer_dialog(&session);
+                self.refresh_terminals();
+            }
             Event::SessionStarted { session, peer, kind, sharing } if sharing || kind.is_device() => {
                 self.sharing_started(session, &peer, kind, sharing)
             }
             Event::SessionStarted { kind: SessionKind::Display, .. } => self.join_pending_displays(),
             Event::SessionStarted { .. } => {}
-            Event::SessionEnded { session } => self.session_ended(session),
+            Event::SessionEnded { session } => {
+                self.session_ended(session);
+                self.refresh_terminals();
+            }
             Event::CameraState { session, state, .. } => {
                 if self.state.borrow().camera.is_some_and(|(s, _)| s == session) {
                     self.camera_controls.show(state);
@@ -883,7 +924,7 @@ impl Window {
             Event::MediaState { .. } | Event::MediaCommand { .. } | Event::MediaWatch { .. } | Event::CallState { .. } => {}
             Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } | Event::ClipboardWatch { .. } | Event::ClipboardFile { .. } => {}
             // Locate is answered through the service (it waits for the reply).
-            Event::LocateRequest { .. } | Event::Location { .. } | Event::LocationRefused { .. } => {}
+            Event::LocateRequest { .. } | Event::Location { .. } | Event::LocationRefused { .. } | Event::TerminalListRequest { .. } | Event::Terminals { .. } => {}
             Event::SmsMessage { from, thread, message } => self.sms_arrived(from.id, thread, message),
             // Answers go to whoever asked (the service waits for them); requests are a phone's.
             Event::SmsThreads { .. }
@@ -1083,6 +1124,7 @@ impl Window {
                 self.content.set_title(&d.device.name);
                 let locks = self.state.borrow().lock.devices.contains(&d.device.id);
                 self.page.show_device(&d, &staged, locks);
+                self.page.show_terminals(&d, self.state.borrow().terminals.as_ref());
                 self.page.avatar.set_custom_image(self.state.borrow().pictures.get(&d.device.id));
                 let camera = self.state.borrow().camera.filter(|(_, id)| *id == d.device.id);
                 self.page.set_camera(camera.map(|_| setup::camera_name(&d.device.name)).as_deref());

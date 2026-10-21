@@ -17,16 +17,16 @@ impl Window {
     pub(super) fn show_preferences(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
         let w = self.clone();
-        let call = self.bridge.call(&c, |c| async move { Ok((c.settings().await?, c.notification_prefs().await?, c.photo_prefs().await?, c.updates().await.ok())) });
+        let call = self.bridge.call(&c, |c| async move { Ok((c.settings().await?, c.notification_prefs().await?, c.photo_prefs().await?, c.updates().await.ok(), c.terminal_status().await.ok())) });
         glib::spawn_future_local(async move {
             match call.await {
-                Ok((s, n, p, u)) => w.present_preferences(s, n, p, u),
+                Ok((s, n, p, u, t)) => w.present_preferences(s, n, p, u, t),
                 Err(e) => w.toast_error(&e, None),
             }
         });
     }
 
-    fn present_preferences(self: &Rc<Self>, settings: Settings, notifications: NotificationPrefs, photos: PhotoPrefs, updates: Option<UpdateInfo>) {
+    fn present_preferences(self: &Rc<Self>, settings: Settings, notifications: NotificationPrefs, photos: PhotoPrefs, updates: Option<UpdateInfo>, terminals: Option<linksy_ipc::TerminalStatus>) {
         let dialog = adw::PreferencesDialog::builder().title("Preferences").search_enabled(false).build();
         let current = Rc::new(RefCell::new(settings.clone()));
         // Set while a widget is being reset after a failed save, so it doesn't save again.
@@ -86,6 +86,9 @@ impl Window {
         let any = self.state.borrow().devices.iter().any(|d| d.trusted && super::can(&d.device, "notifications") && d.device.os == "android");
         if any {
             page.add(&self.phone_notifications_group(&dialog, notifications));
+        }
+        if let Some(t) = terminals {
+            page.add(&self.terminal_group(&dialog, t.code_set));
         }
         if let Some(u) = updates {
             page.add(&self.updates_group(&dialog, u));
@@ -210,6 +213,91 @@ impl Window {
             });
         }
         group
+    }
+
+    /// The terminal code: what a phone types to open a terminal here (only its hash is
+    /// kept, by the service). Without one, no phone can open a terminal.
+    fn terminal_group(self: &Rc<Self>, dialog: &adw::PreferencesDialog, code_set: bool) -> adw::PreferencesGroup {
+        let group = adw::PreferencesGroup::builder()
+            .title("Terminal")
+            .description("Phones you allow (on their page) can open a shell on this computer after typing this code. It's checked here; the phone never keeps it.")
+            .build();
+        let row = adw::ActionRow::builder()
+            .title("Terminal Code")
+            .subtitle(if code_set { "Set" } else { "Not set: no phone can open a terminal" })
+            .build();
+        row.add_prefix(&gtk::Image::builder().icon_name("utilities-terminal-symbolic").build());
+        let set = gtk::Button::builder().label(if code_set { "Change…" } else { "Set Code…" }).valign(gtk::Align::Center).build();
+        row.add_suffix(&set);
+        if code_set {
+            let off = gtk::Button::builder().label("Turn Off").valign(gtk::Align::Center).css_classes(["flat", "destructive-label"]).tooltip_text("Forget the code: no phone can open a terminal, and running ones end").build();
+            let (w, dialog, row2, off2, set2) = (self.clone(), dialog.clone(), row.clone(), off.clone(), set.clone());
+            off.connect_clicked(move |_| {
+                let Some(c) = w.client() else { return };
+                let call = w.bridge.call(&c, |c| async move { c.set_terminal_code(None).await });
+                let (w, dialog, row, off, set) = (w.clone(), dialog.clone(), row2.clone(), off2.clone(), set2.clone());
+                glib::spawn_future_local(async move {
+                    match call.await {
+                        Ok(()) => {
+                            row.set_subtitle("Not set: no phone can open a terminal");
+                            set.set_label("Set Code…");
+                            off.set_visible(false);
+                        }
+                        Err(e) => dialog.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e)))),
+                    }
+                    w.refresh_terminals();
+                });
+            });
+            row.add_suffix(&off);
+        }
+        let (w, dialog, r) = (self.clone(), dialog.clone(), row.clone());
+        set.connect_clicked(move |b| w.ask_terminal_code(&dialog, &r, b));
+        group.add(&row);
+        group
+    }
+
+    fn ask_terminal_code(self: &Rc<Self>, prefs: &adw::PreferencesDialog, row: &adw::ActionRow, button: &gtk::Button) {
+        let ask = adw::AlertDialog::new(Some("Terminal Code"), Some("At least 6 characters (digits are easiest on a phone). A phone asks for it every time a terminal opens; 5 wrong in a row lock it out."));
+        let first = gtk::PasswordEntry::builder().show_peek_icon(true).placeholder_text("New code").activates_default(true).build();
+        let again = gtk::PasswordEntry::builder().show_peek_icon(true).placeholder_text("Same code again").activates_default(true).build();
+        let fields = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
+        fields.append(&first);
+        fields.append(&again);
+        ask.set_extra_child(Some(&fields));
+        ask.add_responses(&[("cancel", "Cancel"), ("save", "Save")]);
+        ask.set_response_appearance("save", adw::ResponseAppearance::Suggested);
+        ask.set_default_response(Some("save"));
+        ask.set_close_response("cancel");
+        ask.set_response_enabled("save", false);
+        let check = {
+            let (ask, first, again) = (ask.clone(), first.clone(), again.clone());
+            move || {
+                let (a, b) = (first.text(), again.text());
+                ask.set_response_enabled("save", a.chars().count() >= 6 && a == b);
+            }
+        };
+        let c1 = check.clone();
+        first.connect_changed(move |_| c1());
+        again.connect_changed(move |_| check());
+        let (w, prefs2, row, button) = (self.clone(), prefs.clone(), row.clone(), button.clone());
+        ask.connect_response(Some("save"), move |_, _| {
+            let code = first.text().to_string();
+            let Some(c) = w.client() else { return };
+            let call = w.bridge.call(&c, move |c| async move { c.set_terminal_code(Some(code)).await });
+            let (w, prefs, row, button) = (w.clone(), prefs2.clone(), row.clone(), button.clone());
+            glib::spawn_future_local(async move {
+                match call.await {
+                    Ok(()) => {
+                        row.set_subtitle("Set");
+                        button.set_label("Change…");
+                        prefs.add_toast(adw::Toast::new("Terminal code set"));
+                    }
+                    Err(e) => prefs.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e)))),
+                }
+                w.refresh_terminals();
+            });
+        });
+        ask.present(Some(prefs));
     }
 
     /// "Check for Updates": once a day from the website, nothing about the user sent.

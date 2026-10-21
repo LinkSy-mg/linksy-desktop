@@ -150,6 +150,10 @@ impl Window {
                 format!("{} Wants to See Your Screen", from.name),
                 format!("{} will see everything on your screen until you stop sharing. You'll pick which screen next.", from.name),
             ),
+            SessionKind::Terminal => (
+                format!("{} Wants a Terminal", from.name),
+                format!("The right terminal code was typed on {}. Its terminal runs commands as you until it's ended, here or on the phone. Linksy asks once a day.", from.name),
+            ),
         };
         let dialog = adw::AlertDialog::new(Some(&heading), Some(&body));
         dialog.add_responses(&[("deny", "Don't Allow"), ("allow", "Allow")]);
@@ -190,12 +194,13 @@ impl Window {
             SessionKind::Control => format!("{} is controlling your screen", peer.name),
             SessionKind::Input => format!("{} is your touchpad and keyboard", peer.name),
             SessionKind::Screen => format!("{} is watching your screen", peer.name),
+            SessionKind::Terminal => format!("{} has a terminal open here", peer.name),
         };
         // "Stop Sharing" only when this device's screen or camera is what's shared.
         let label = match kind {
             SessionKind::Screen | SessionKind::Control => "Stop Sharing",
             SessionKind::Camera | SessionKind::Microphone if sharing => "Stop Sharing",
-            SessionKind::Camera | SessionKind::Microphone | SessionKind::Display | SessionKind::Input => "Stop",
+            SessionKind::Camera | SessionKind::Microphone | SessionKind::Display | SessionKind::Input | SessionKind::Terminal => "Stop",
         };
         self.sharing_banner.set_button_label(Some(label));
         self.sharing_banner.set_title(&title);
@@ -483,7 +488,7 @@ impl Viewer {
             SessionKind::Display => true,
             SessionKind::Control => self.control.is_active(),
             // The viewer never runs these: a computer doesn't ask to be a touchpad.
-            SessionKind::Screen | SessionKind::Camera | SessionKind::Microphone | SessionKind::Input => false,
+            SessionKind::Screen | SessionKind::Camera | SessionKind::Microphone | SessionKind::Input | SessionKind::Terminal => false,
         };
         on && self.input.borrow().is_some()
     }
@@ -591,7 +596,7 @@ impl Viewer {
         self.kind.set(kind);
         let (title, description) = match kind {
             // Viewers never start these: the service runs both.
-            SessionKind::Display | SessionKind::Camera | SessionKind::Microphone | SessionKind::Input => (format!("Waiting for {}…", self.name), String::new()),
+            SessionKind::Display | SessionKind::Camera | SessionKind::Microphone | SessionKind::Input | SessionKind::Terminal => (format!("Waiting for {}…", self.name), String::new()),
             SessionKind::Control => (format!("Asking to control {}…", self.name), format!("{} needs to allow control and pick a screen.", self.name)),
             SessionKind::Screen => (format!("Asking {}…", self.name), format!("{} needs to allow sharing and pick a screen.", self.name)),
         };
