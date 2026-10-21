@@ -71,6 +71,14 @@ pub enum Request {
     SetUpdatePrefs { prefs: UpdatePrefs },
     /// Stop the service (the app starts the new one after an update).
     Quit,
+    /// Terminals for phones (docs/protocol.md §4.15): what's set and running.
+    TerminalStatus,
+    /// Set the terminal code (6+ characters), or with none forget it (terminals off).
+    SetTerminalCode { code: Option<String> },
+    AllowTerminal { target: String, on: bool },
+    UnlockTerminal { target: String },
+    /// (Not `id`: the envelope has that.)
+    EndTerminal { terminal: String },
     Settings,
     UpdateSettings { settings: Settings },
     /// A pairing QR code (`linksy://pair?…`); valid five minutes or until cancelled.
@@ -184,6 +192,11 @@ pub enum Shared {
         #[serde(default)]
         seconds: u64,
     },
+    /// A terminal a phone opened here; `seconds` once it ended (detached or closed).
+    Terminal {
+        #[serde(default)]
+        seconds: u64,
+    },
     /// A screen shared one way or the other; `seconds` once it ended.
     Screen {
         #[serde(default)]
@@ -225,6 +238,26 @@ pub struct Location {
     pub accuracy_m: Option<f64>,
     /// When the phone measured it, in milliseconds since the epoch.
     pub at_ms: u64,
+}
+
+/// Terminals for phones: whether a code is set, which phones may open one, which are
+/// locked out (too many wrong codes), and what runs now.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TerminalStatus {
+    pub code_set: bool,
+    pub allowed: Vec<Fingerprint>,
+    pub locked: Vec<Fingerprint>,
+    pub running: Vec<RunningTerminal>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RunningTerminal {
+    pub id: String,
+    pub device: Fingerprint,
+    pub title: String,
+    pub started_ms: u64,
+    /// Someone's looking at it now (else it's detached, still running).
+    pub attached: bool,
 }
 
 /// Whether Linksy checks linksy.diary.mg once a day for a newer version.
@@ -529,6 +562,26 @@ impl Client {
         self.call(Request::Quit).await
     }
 
+    pub async fn terminal_status(&self) -> Result<TerminalStatus, ClientError> {
+        self.call(Request::TerminalStatus).await
+    }
+
+    pub async fn set_terminal_code(&self, code: Option<String>) -> Result<(), ClientError> {
+        self.call(Request::SetTerminalCode { code }).await
+    }
+
+    pub async fn allow_terminal(&self, target: &str, on: bool) -> Result<(), ClientError> {
+        self.call(Request::AllowTerminal { target: target.into(), on }).await
+    }
+
+    pub async fn unlock_terminal(&self, target: &str) -> Result<(), ClientError> {
+        self.call(Request::UnlockTerminal { target: target.into() }).await
+    }
+
+    pub async fn end_terminal(&self, id: &str) -> Result<(), ClientError> {
+        self.call(Request::EndTerminal { terminal: id.into() }).await
+    }
+
     pub async fn lock_prefs(&self) -> Result<LockPrefs, ClientError> {
         self.call(Request::LockPrefs).await
     }
@@ -591,5 +644,19 @@ impl Client {
 
     pub async fn forget(&self, target: impl Into<String>) -> Result<bool, ClientError> {
         self.call(Request::Forget { target: target.into() }).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_requests_survive_the_envelope() {
+        // The envelope's own `id` is flattened beside the request's fields.
+        let env = Envelope { id: 7, request: Request::EndTerminal { terminal: "t1".into() } };
+        let back: Envelope = serde_json::from_str(&serde_json::to_string(&env).unwrap()).unwrap();
+        assert_eq!(back.id, 7);
+        assert!(matches!(back.request, Request::EndTerminal { terminal } if terminal == "t1"));
     }
 }
