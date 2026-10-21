@@ -1,0 +1,37 @@
+#!/bin/sh
+# Everything Linksy's Finish Setup does as root, in one go, so the computer asks for the
+# password once: `linksy-system-setup camera usb firewall` (any of them). Linksy starts
+# it with pkexec. Exit codes: 0 done, 4 the camera driver needs a restart to approve
+# (Secure Boot), else the first failure's.
+set -u
+HERE=$(dirname "$(readlink -f "$0")")
+status=0
+
+firewall() {
+  # Linksy: UDP 47200 between devices, and mDNS (UDP 5353) to find them.
+  if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
+    if firewall-cmd --get-services | tr ' ' '\n' | grep -qx linksy; then
+      firewall-cmd --permanent --add-service=linksy >/dev/null || return 1
+    else
+      firewall-cmd --permanent --add-port=47200/udp --add-service=mdns >/dev/null || return 1
+    fi
+    firewall-cmd --reload >/dev/null || return 1
+  fi
+  if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    ufw allow 47200/udp >/dev/null || return 1
+    ufw allow 5353/udp >/dev/null || return 1
+  fi
+  mkdir -p /etc/linksy && touch /etc/linksy/firewall
+  echo "Nearby devices can find this computer"
+}
+
+for task in "$@"; do
+  case "$task" in
+    camera) "$HERE/linksy-camera-setup"; code=$? ;;
+    usb) "$HERE/linksy-usb-setup"; code=$? ;;
+    firewall) firewall; code=$? ;;
+    *) echo "unknown task: $task" >&2; code=2 ;;
+  esac
+  if [ "$code" -ne 0 ] && [ "$status" -eq 0 ]; then status=$code; fi
+done
+exit "$status"

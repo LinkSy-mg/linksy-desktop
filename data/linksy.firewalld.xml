@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <short>Linksy</short>
+  <description>Linksy connects your devices: UDP 47200 between them, and mDNS to find them on the network.</description>
+  <port protocol="udp" port="47200"/>
+  <port protocol="udp" port="5353"/>
+</service>

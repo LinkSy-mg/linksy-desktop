@@ -9,7 +9,7 @@ BIN="$HOME/.local/bin"
 SHARE="${XDG_DATA_HOME:-$HOME/.local/share}"
 UNITS="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 
-for b in linksyd linksy linksy-app linksy-screen linksy-camera-setup linksy-usb-setup; do
+for b in linksyd linksy linksy-app linksy-screen linksy-camera-setup linksy-usb-setup linksy-system-setup; do
   install -Dm755 "bin/$b" "$BIN/$b"
 done
 # Before 0.1.2 the app ID was app.linksy.Linksy.
