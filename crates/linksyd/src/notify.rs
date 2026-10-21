@@ -65,6 +65,10 @@ pub async fn run(node: Node) {
                         format!("{} wants to see your screen", from.name),
                         format!("{} will see everything on your screen until you stop sharing.", from.name),
                     ),
+                    SessionKind::Terminal => (
+                        format!("{} wants a terminal on this computer", from.name),
+                        format!("The right code was typed on {}. Its terminal runs commands as you until it's ended. Linksy asks once a day.", from.name),
+                    ),
                 };
                 prompt(node.clone(), request, summary, body, "Allow");
             }

@@ -12,6 +12,8 @@ mod photos;
 mod pictures;
 mod update;
 mod sessions;
+#[cfg(target_os = "linux")]
+mod terminal;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
 // their own native notifications with their apps.
 #[cfg(target_os = "linux")]
@@ -58,6 +60,9 @@ fn parse_args() -> Result<Args, String> {
     config.features = FEATURES.iter().map(|f| f.to_string()).collect();
     if clipboard::can_watch() {
         config.features.push("clipboard_watch".into());
+    }
+    if cfg!(target_os = "linux") && std::env::var_os("FLATPAK_ID").is_none() {
+        config.features.push("terminal".into());
     }
     config.port = DEFAULT_PORT;
     let mut socket = linksy_ipc::socket_path();
@@ -184,6 +189,13 @@ async fn main() -> ExitCode {
     if args.usb {
         tokio::spawn(usb::Usb::new(node.clone(), data_dir.clone(), args.notifications).run());
     }
+    // Terminals for phones; not from a Flatpak, whose shell would be the sandbox's.
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("FLATPAK_ID").is_none() {
+        let terminals = terminal::Terminals::load(&data_dir);
+        let _ = terminal::TERMINALS.set(terminals.clone());
+        tokio::spawn(terminals.run(node.clone()));
+    }
     let photos = photos::Photos::load(data_dir.join("photos.json"), &node);
     let away = lock::Away::load(data_dir.join("lock.json"));
     tokio::spawn(away.clone().run(node.clone(), history.clone()));
@@ -198,6 +210,11 @@ async fn main() -> ExitCode {
             info!("Linksy was updated, restarting");
             updated = Some(exe);
         }
+    }
+    // Shells don't outlive the service that runs them.
+    #[cfg(target_os = "linux")]
+    if let Some(t) = terminal::TERMINALS.get() {
+        t.end_all();
     }
     node.shutdown().await;
     let _ = std::fs::remove_file(&socket);

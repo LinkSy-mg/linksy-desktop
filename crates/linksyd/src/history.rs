@@ -183,6 +183,7 @@ impl History {
                             SessionKind::Camera => Shared::Camera { seconds: 0 },
                             SessionKind::Microphone => Shared::Microphone { seconds: 0 },
                             SessionKind::Input => Shared::Remote { seconds: 0 },
+                            SessionKind::Terminal => Shared::Terminal { seconds: 0 },
                             _ => Shared::Screen { seconds: 0, display: kind == SessionKind::Display },
                         },
                         status: HistoryStatus::InProgress,
@@ -192,7 +193,7 @@ impl History {
                     let seconds = started.remove(&session).map(|t| t.elapsed().as_secs()).unwrap_or(0);
                     self.update(session, |e| {
                         e.status = HistoryStatus::Done;
-                        if let Shared::Screen { seconds: s, .. } | Shared::Camera { seconds: s } | Shared::Microphone { seconds: s } | Shared::Remote { seconds: s } = &mut e.what {
+                        if let Shared::Screen { seconds: s, .. } | Shared::Camera { seconds: s } | Shared::Microphone { seconds: s } | Shared::Remote { seconds: s } | Shared::Terminal { seconds: s } = &mut e.what {
                             *s = seconds;
                         }
                     });

@@ -268,6 +268,22 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
             });
             Ok(Value::Null)
         }
+        Request::TerminalStatus => json(serde_json::to_value(terminals()?.status())),
+        Request::SetTerminalCode { code } => {
+            terminals()?.set_code(code).await?;
+            Ok(Value::Null)
+        }
+        Request::AllowTerminal { target, on } => {
+            terminals()?.allow(resolve_any(node, history, &target)?, on);
+            Ok(Value::Null)
+        }
+        Request::UnlockTerminal { target } => {
+            terminals()?.unlock(resolve_any(node, history, &target)?);
+            Ok(Value::Null)
+        }
+        Request::EndTerminal { terminal } => {
+            if terminals()?.end(&terminal) { Ok(Value::Null) } else { Err("that terminal isn't running".into()) }
+        }
         Request::LockPrefs => serde_json::to_value(away.prefs()).map_err(|e| e.to_string()),
         Request::SetLockPrefs { prefs } => {
             away.set_prefs(node, prefs).await?;
@@ -329,6 +345,10 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
 }
 
 /// Find a device by full id, short id, or name (case-insensitive).
+fn terminals() -> Result<&'static crate::terminal::Terminals, String> {
+    crate::terminal::TERMINALS.get().ok_or_else(|| "terminals aren't available here".to_string())
+}
+
 fn resolve(node: &Node, target: &str) -> Result<Fingerprint, String> {
     if let Ok(fp) = target.parse::<Fingerprint>() {
         return Ok(fp);

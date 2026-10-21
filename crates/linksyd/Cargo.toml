@@ -14,6 +14,8 @@ ureq = { version = "3.4.2", default-features = false, features = ["rustls"] }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "signal", "process"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "ansi"] }
+argon2 = "0.5.3"
+libc = "0.2.191"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 notify-rust = "4.18.2"

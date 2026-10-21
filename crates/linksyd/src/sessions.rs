@@ -141,7 +141,12 @@ impl Sessions {
     pub async fn run(self, node: Node) {
         let Some(mut incoming) = node.incoming_sessions() else { return };
         while let Some(session) = incoming.recv().await {
-            if session.sharing {
+            if session.kind == SessionKind::Terminal {
+                #[cfg(target_os = "linux")]
+                if let Some(t) = crate::terminal::TERMINALS.get() {
+                    t.attach(session);
+                }
+            } else if session.sharing {
                 self.spawn_share(session);
             } else if let Err(e) = self.show(session) {
                 warn!("could not show a second display: {e}");
@@ -216,6 +221,8 @@ impl Sessions {
             SessionKind::Input => {
                 cmd.arg("--input-only");
             }
+            // Run by the terminal module, never here.
+            SessionKind::Terminal => return Err(std::io::Error::other("not a media session")),
         }
         // Each kind remembers its own answer to the desktop's dialog.
         let kind = format!("{:?}", session.kind).to_lowercase();
