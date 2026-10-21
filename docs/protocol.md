@@ -63,7 +63,10 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | USB cable (no Wi-Fi, lower latency) | Done | To do | Android Open Accessory + UDP bridge (§4.11) |
 | Camera controls from the computer | Done | Done (needs `camera_state`) | §4.8; docs/android-app.md §2.8 |
 | Device pictures | Done | Done (needs `picture`) | §4.5; docs/android-app.md §2.7 |
-| Bluetooth LE presence | To do | To do | |
+| Away from home (over the internet) | Done | To do | iroh, Linksy's relay, 7-day lease (§4.13) |
+| Locate the phone | Done | To do | `locate` / `location` (§4.14) |
+| 1080p webcam | Done | To do | `size` in `camera_control`, `size_options` (§4.8) |
+| Bluetooth LE presence | Not planned | Not planned | |
 
 ## 3. How to build the phone app (recommendation)
 
@@ -710,6 +713,67 @@ How the apps use it:
   wrong relay can only fail to connect (everything is end-to-end encrypted with keys
   pinned at pairing).
 
+### 4.13 Away from home (desktop 0.6.0)
+
+Paired devices reach each other over the internet, through **iroh** (`iroh` 1.4, already
+in `linksy-core`): a direct path when the networks allow it, else through Linksy's relay
+`https://linksy-relay.diary.mg` (§4.12 lists it; `linksy-server`). Everything stays
+Linksy's own QUIC, encrypted end to end with the keys pinned at pairing: iroh only
+carries its packets, like the USB cable (§4.11).
+
+- **In the core, nearly all done.** Set `Config.away = true` and `Config.relay =
+  Some(<first relays[].url from §4.12, cached; else https://linksy-relay.diary.mg>)`. The
+  node then makes an away key (`away.key` in the data dir), puts its away address in
+  `DeviceInfo.away` (`{"id","relay","addrs"}`, in the handshake only), takes away
+  connections from paired devices, and **falls back to away by itself** when a device
+  doesn't answer on the network (`ensure_connection`). `node.connect_away(id)` forces it.
+- **Links.** Away connections come from `127.0.0.2` (the bridge), USB from other loopback
+  addresses, the network from anywhere else: `link_of(addr)` / `node.link(id)` →
+  `Link::{Usb, Lan, Away}`. A better link replaces a worse one to the same device (both
+  sides agree), and finding the device on the network again replaces away.
+  `DeviceView.away` is true when connected away.
+- **The lease: 7 days.** A device may connect from away for a week after it was last
+  connected on the same network or by cable (`TrustedDevice.last_met`, renewed on every
+  such connection; pairing counts). After that its away connections are refused until
+  they meet again. `DeviceView.away_until` says until when.
+- **What's refused from away** unless the user allowed everything for that device
+  (`node.set_away_all(id, true)`, `TrustedDevice.away_all`): every media or input session
+  (screen, control, display, camera, microphone, input), answered
+  `{"type":"session_decline","reason":"away"}` (`Error::NotFromAway` for the requester),
+  and file browsing (`fs`, answered with an error). Always allowed: clipboard, links,
+  files sent (asked as usual), ring, battery, notifications, media controls, locate.
+- **Lock When Away** must ignore heartbeats that arrive from away (`node.link(id) ==
+  Some(Link::Away)`): far away is not nearby. The computer does.
+- **Settings:** `Settings.away` (default on) turns it off entirely.
+
+**Phone to-do:** turn it on in `Config` (above); a Settings switch "Away from home"
+(`Settings.away`) and, per computer, "Allow everything from away" (`set_away_all`);
+show "Connected away from home" when `DeviceView.away`, and "Reachable from away until
+<date>" from `away_until`. With "Keep running in the background" the phone stays
+reachable from away; otherwise it connects when opened. Test against a computer:
+`fake_phone --away` plays the phone, and the core test
+`away_from_home_connects_and_keeps_screens_local` shows the whole flow.
+
+### 4.14 Locate (desktop 0.6.0)
+
+The computer asks a phone where it is, once; nothing is kept and there's no tracking.
+
+```json
+{"type":"locate"}                                                     // computer → phone
+{"type":"location","lat":-18.8792,"lon":47.5079,"accuracy_m":15,"at_ms":1792...}  // phone → computer
+{"type":"location_refused","reason":"Location is off on this phone"}  // or this
+```
+
+Core: `Event::LocateRequest { from }` on the phone; answer with `node.send_location(from,
+lat, lon, accuracy_m, at_ms)` or `node.refuse_location(from, reason)` within 30 s. The
+computer shows the position with an "Open Map" link (OpenStreetMap). **Phone to-do:** a
+setting "Let computers locate this phone" (off by default); when on, take one fresh fix
+(`FusedLocationProviderClient.getCurrentLocation`, or `LocationManager`), which needs
+`ACCESS_FINE_LOCATION` granted while in use (and `ACCESS_BACKGROUND_LOCATION` for when the
+app is in the background; fine for a sideloaded app, and the setting explains why);
+otherwise refuse with a reason. Announce `locate` in `features` (§4.10); the computer
+only offers it then. It works away from home too (§4.13).
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -725,6 +789,8 @@ node.watch_clipboard(id, on)                // Event::ClipboardWatch { from, on 
 node.send_picture(id, base64)               // Event::Picture { from, image } on the receiver
 node.send_camera_state(id, session, json)   // Event::CameraState { from, session, state }
 node.connect(addr)                          // USB: dial the computer through the bridge (§4.11)
+node.connect_away(id)  node.link(id) -> Link  node.set_away_all(id, on)   // away from home (§4.13)
+node.locate(id)  node.send_location(id, lat, lon, acc, at_ms)  node.refuse_location(id, why)  // §4.14
 node.open_url(id, url)                      // Event::OpenUrl { from, url } on the receiver
 node.send_battery(id, Battery { level, charging })   node.ring(id, on)   // Event::Battery / Event::Ring
 DeviceView.battery: Option<Battery>         // last level each device reported
@@ -1018,3 +1084,10 @@ robust against any encoder (GPU ones may slice too):
   that rate in the same session; a "60 Frames per Second" switch in its camera settings.
 - **2026-10-21** — Desktop 0.6.0: 1080p webcams (§4.8): `camera_control {"size":[w,h]}`,
   `camera_state` gains `size_options`; the computer follows `width`/`height`.
+- **2026-10-21** — Desktop 0.6.0: **away from home** (§4.13): iroh in the core carries
+  Linksy's QUIC between paired devices over the internet, through Linksy's relay when
+  needed; 7-day lease renewed on the same network or cable; screens, control, display,
+  camera, microphone, input and file browsing refused from away unless allowed per device
+  (`reason: "away"`); `Config.away`/`relay`, `Settings.away`, `DeviceInfo.away`,
+  `Link`, `DeviceView.away`/`away_all`/`away_until`. **Locate** (§4.14): `locate`,
+  `location`, `location_refused`. `Message` lost `Eq` (positions are floats).
