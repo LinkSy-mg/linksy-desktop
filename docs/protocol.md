@@ -547,46 +547,6 @@ fine for a sideloaded app). Announce `microphone` in `features` (§4.10); until 
 computer doesn't offer it for Android phones. Core: `SessionKind::Microphone`; the phone
 writes to `session.send`. Desktop to desktop works too (`linksy mic <device>`).
 
-### 4.11 USB cable (desktop 0.5.7)
-
-Lower latency and no Wi-Fi needed, for the webcam and microphone above all, with **no
-developer options**: the computer uses **Android Open Accessory (AOA 1.0)**.
-
-1. When an Android phone is plugged in (and an Android phone is paired), the computer
-   asks once per phone ("Pixel 9 is plugged in. Use it with Linksy over the cable?").
-   On yes it sends AOA's control requests (51 get protocol, 52 strings, 53 start) with
-   **manufacturer `Linksy`, model `Linksy`**, description "Linksy over USB", version
-   `1` (the framing below), URI `https://linksy.diary.mg`. The phone re-enumerates as an
-   accessory (Google's 18d1:2d00–2d05).
-2. **Phone app:** declare the accessory in the manifest
-   (`<uses-feature android:name="android.hardware.usb.accessory"/>`, an activity with
-   the `USB_ACCESSORY_ATTACHED` intent filter and `res/xml/accessory_filter.xml`:
-   `<usb-accessory manufacturer="Linksy" model="Linksy"/>`). Android then offers to
-   open Linksy; "always" makes it automatic. Open it with
-   `UsbManager.openAccessory(accessory)` → a `ParcelFileDescriptor` with an input and an
-   output stream.
-3. **What crosses the cable: Linksy's own QUIC packets**, unchanged and still encrypted
-   end to end, each as a **2-byte big-endian length + the UDP payload**. On the phone, a
-   tiny bridge: bind a UDP socket on `127.0.0.1:0` (port P); for each datagram the
-   phone's node sends to it, write `len + bytes` to the accessory; for each `len + bytes`
-   read from the accessory, send the bytes back to the node's address (learned from the
-   first datagram). Batch several frames in one write when they're waiting.
-4. **Then dial the computer through it:** `node.connect(127.0.0.1:P)` (the core's normal
-   reconnect, to a known paired device). The handshake checks the computer's pinned key
-   as always. On the computer the packets arrive from `127.0.0.1`, which is how both
-   sides know this connection is the cable: **a USB connection replaces a Wi-Fi one** to
-   the same device (both cores agree without talking: the one over loopback wins), and
-   its address is never saved as the device's address. `DeviceView.usb` is true for it;
-   the computer shows "Connected by USB".
-5. Unplugging ends the accessory streams → the connection drops → the normal Wi-Fi
-   reconnect takes over. Start sessions after plugging in: a running session doesn't
-   move to the cable.
-
-Linux needs permission to switch the phone and to use it as an accessory: the .deb and
-.rpm install a udev rule (`70-linksy-usb.rules`); Finish Setup adds it otherwise (not
-possible from the Flatpak). Try the bridge without a phone: `cargo test -p linksyd usb`
-runs QUIC through an in-memory cable between two nodes.
-
 ### 4.9 Browsing files ("phone in the Files sidebar") — `src/fs.rs`
 
 A computer browses the phone's files with one request per **bidirectional stream**. The
@@ -638,6 +598,46 @@ except `clipboard_watch` where its desktop doesn't let apps watch the clipboard 
 When a device sends no list (older versions), the desktop assumes everything except, for
 `os == "android"`, `sms`, `notifications`, `media_state`, `control`, `clipboard_file`,
 `clipboard_watch` and `microphone`.
+
+### 4.11 USB cable (desktop 0.5.7)
+
+Lower latency and no Wi-Fi needed, for the webcam and microphone above all, with **no
+developer options**: the computer uses **Android Open Accessory (AOA 1.0)**.
+
+1. When an Android phone is plugged in (and an Android phone is paired), the computer
+   asks once per phone ("Pixel 9 is plugged in. Use it with Linksy over the cable?").
+   On yes it sends AOA's control requests (51 get protocol, 52 strings, 53 start) with
+   **manufacturer `Linksy`, model `Linksy`**, description "Linksy over USB", version
+   `1` (the framing below), URI `https://linksy.diary.mg`. The phone re-enumerates as an
+   accessory (Google's 18d1:2d00–2d05).
+2. **Phone app:** declare the accessory in the manifest
+   (`<uses-feature android:name="android.hardware.usb.accessory"/>`, an activity with
+   the `USB_ACCESSORY_ATTACHED` intent filter and `res/xml/accessory_filter.xml`:
+   `<usb-accessory manufacturer="Linksy" model="Linksy"/>`). Android then offers to
+   open Linksy; "always" makes it automatic. Open it with
+   `UsbManager.openAccessory(accessory)` → a `ParcelFileDescriptor` with an input and an
+   output stream.
+3. **What crosses the cable: Linksy's own QUIC packets**, unchanged and still encrypted
+   end to end, each as a **2-byte big-endian length + the UDP payload**. On the phone, a
+   tiny bridge: bind a UDP socket on `127.0.0.1:0` (port P); for each datagram the
+   phone's node sends to it, write `len + bytes` to the accessory; for each `len + bytes`
+   read from the accessory, send the bytes back to the node's address (learned from the
+   first datagram). Batch several frames in one write when they're waiting.
+4. **Then dial the computer through it:** `node.connect(127.0.0.1:P)` (the core's normal
+   reconnect, to a known paired device). The handshake checks the computer's pinned key
+   as always. On the computer the packets arrive from `127.0.0.1`, which is how both
+   sides know this connection is the cable: **a USB connection replaces a Wi-Fi one** to
+   the same device (both cores agree without talking: the one over loopback wins), and
+   its address is never saved as the device's address. `DeviceView.usb` is true for it;
+   the computer shows "Connected by USB".
+5. Unplugging ends the accessory streams → the connection drops → the normal Wi-Fi
+   reconnect takes over. Start sessions after plugging in: a running session doesn't
+   move to the cable.
+
+Linux needs permission to switch the phone and to use it as an accessory: the .deb and
+.rpm install a udev rule (`70-linksy-usb.rules`); Finish Setup adds it otherwise (not
+possible from the Flatpak). Try the bridge without a phone: `cargo test -p linksyd usb`
+runs QUIC through an in-memory cable between two nodes.
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 
