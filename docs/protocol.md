@@ -33,7 +33,7 @@ Decisions already made with the owner:
 
 ## 2. Feature status
 
-Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 2026-10-21).
+Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, phone 0.1.16, 2026-10-21).
 "Not possible" rows are hidden by the desktop for Android phones (see §4.10).
 
 | Feature | Desktop (Linux) | Android | Notes |
@@ -57,15 +57,16 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Controlling the phone from the computer | Done | Not possible | AccessibilityService is blocked for sideloaded apps |
 | Texting from the computer | Done | Not possible | SMS permissions are blocked for sideloaded apps |
 | Phone notifications on the computer, reply | Done | Not possible | notification-listener access is blocked |
-| Images/files on the clipboard | Done | To do | offer with `"clipboard":true` (§4.5) |
-| Automatic clipboard sync, computer → phone | Done (not on GNOME) | To do | `clipboard_watch` (§4.5) |
-| Phone as microphone | Done | To do | session `microphone`, raw PCM (§4.8) |
-| USB cable (no Wi-Fi, lower latency) | Done | To do | Android Open Accessory + UDP bridge (§4.11) |
-| Camera controls from the computer | Done | Done (needs `camera_state`) | §4.8; docs/android-app.md §2.8 |
-| Device pictures | Done | Done (needs `picture`) | §4.5; docs/android-app.md §2.7 |
-| Away from home (over the internet) | Done | To do | iroh, Linksy's relay, 7-day lease (§4.13) |
-| Locate the phone | Done | To do | `locate` / `location` (§4.14) |
-| 1080p webcam | Done | To do | `size` in `camera_control`, `size_options` (§4.8) |
+| Images/files on the clipboard | Done | Done | offer with `"clipboard":true` (§4.5) |
+| Automatic clipboard sync, computer → phone | Done (not on GNOME) | Done (phone asks) | `clipboard_watch` (§4.5) |
+| Phone as microphone | Done | Done | session `microphone`, raw PCM (§4.8) |
+| USB cable (no Wi-Fi, lower latency) | Done | Built, untested on hardware | Android Open Accessory + UDP bridge (§4.11) |
+| Camera controls from the computer | Done | Done | §4.8; docs/android-app.md §2.8 |
+| Device pictures | Done | Done | §4.5; docs/android-app.md §2.7 |
+| Away from home (over the internet) | Done | Done | iroh, Linksy's relay, 7-day lease (§4.13) |
+| Locate the phone | Done | Done (while the app is open) | `locate` / `location` (§4.14) |
+| 1080p webcam | Done | Done | `size` in `camera_control`, `size_options` (§4.8) |
+| Terminal on the computer, from the phone | Planned (0.7) | To do | session `terminal`, code set on the computer (§4.15) |
 | Bluetooth LE presence | Not planned | Not planned | |
 
 ## 3. How to build the phone app (recommendation)
@@ -776,6 +777,96 @@ app is in the background; fine for a sideloaded app, and the setting explains wh
 otherwise refuse with a reason. Announce `locate` in `features` (§4.10); the computer
 only offers it then. It works away from home too (§4.13).
 
+### 4.15 Terminal (planned for desktop 0.7; spec first, so the phone can start)
+
+A real shell on the computer, shown on the phone: Claude Code, neovim, htop, git, builds.
+**The phone opens it; the computer never opens one on the phone.** Nothing is built on the
+desktop yet; this is the contract both sides build to. Questions or changes: say so in
+`docs/android-app.md` before building around them.
+
+**Safety, in layers (all enforced by the computer, never by the phone):**
+
+1. Paired devices only, end to end encrypted as everything else.
+2. **Off by default, per phone**: "Allow Terminal" on the computer, for that phone.
+3. **A terminal code set on the computer** (Preferences › Terminal: 6+ digits or a
+   passphrase). The computer keeps only a hash (Argon2id). The phone asks for it **every
+   time a terminal opens** and never stores it (no "remember me", no biometric shortcut).
+   5 wrong codes in a row lock the terminal for that phone until it's unlocked on the
+   computer, which says so in a notification.
+4. **The computer asks its user** the first time each day ("Pixel 9 wants a terminal",
+   Allow / Don't Allow), as for screens.
+5. **Not from away** (§4.13) unless "Allow Everything From Away" is on for that phone.
+6. Visible while open: a notification on the computer ("Terminal open from Pixel 9",
+   End), and each opening in the activity history.
+7. The user's normal account, never root (`sudo` still asks the computer's password).
+   Unpairing ends that phone's terminals at once.
+
+**Feature:** computers that can do it announce `"terminal"` in `features` (§4.10); the
+phone shows "Terminal" only for them. Whether it's allowed for *this* phone is only known
+by asking (it can change any time).
+
+**Opening (a media-style session, §4.8; the phone is the requester):**
+
+```json
+{"type":"session_request","id":"<uuid>","kind":"terminal",
+ "code":"<the code as typed>","cols":80,"rows":24,
+ "resume":"<terminal id>"}                    // optional: reattach (below)
+```
+
+Answers:
+
+```json
+{"type":"session_accept","terminal":"<terminal id>"}
+{"type":"session_decline","reason":"off"}      // terminal not allowed for this phone
+{"type":"session_decline","reason":"code"}     // wrong code; "tries_left": 3
+{"type":"session_decline","reason":"locked"}   // too many wrong codes; unlock on the computer
+{"type":"session_decline","reason":"away"}     // from away and not allowed
+{"type":"session_decline"}                     // the computer's user said no
+{"type":"session_decline","reason":"unsupported"}
+```
+
+Show each reason as such ("Wrong code, 3 tries left", "Turn on Allow Terminal for this
+phone on the computer", "Unlock the terminal on the computer"…).
+
+**After `session_accept`:**
+
+- **Computer → phone:** the raw terminal output (bytes from the pseudo-terminal, UTF-8
+  with escape sequences), no framing, until the stream ends. Feed it straight to the
+  terminal view. The shell runs with `TERM=xterm-256color`, `COLORTERM=truecolor`, in the
+  user's home, as their login shell.
+- **Phone → computer:** framed JSON (u32 BE length + JSON, as `control` sessions):
+
+  ```json
+  {"type":"term_input","data":"ls -la\r"}      // what was typed, as text (Ctrl+C is "\u0003")
+  {"type":"term_resize","cols":64,"rows":30}    // on rotation, keyboard shown or hidden, font size
+  {"type":"term_close"}                         // end the shell (the computer then ends the stream)
+  ```
+
+  Keys map to the usual xterm sequences: Enter `\r`, Backspace `\u007f`, Tab `\t`, Esc
+  `\u001b`, arrows `\u001b[A`…`\u001b[D`, Ctrl+letter = letter & 0x1f, Alt+key = `\u001b`
+  then the key. Mouse reporting and bracketed paste are whatever the program asks for;
+  send them as `term_input` too.
+
+**Terminals outlive the connection.** Finishing the stream *without* `term_close`
+(network change, app closed, phone locked) only detaches: the shell keeps running on the
+computer for up to 24 hours. Reattach with `"resume":"<terminal id>"` (the code is asked
+again); the computer redraws the screen on attach. Several terminals at once are fine
+(tabs), each its own session. To list the running ones:
+
+```json
+{"type":"terminal_list"}                                            // phone → computer (connection message, §4.5)
+{"type":"terminals","list":[{"id":"…","title":"claude — ~/Project","started_ms":1792…}]}
+```
+
+`title` follows the shell's window title (OSC 0/2). A terminal whose shell exits finishes
+its stream and leaves the list.
+
+**Phone to-do:** a terminal view (xterm.dart or similar) with true colour, mouse and
+resize; a key bar above the keyboard (Esc, Ctrl, Alt, Tab, arrows, `|`, `~`, `/`, `-`);
+the code prompt before each open (numeric or text keyboard, masked); tabs for several
+terminals and reattach from `terminal_list`; a clear "Detached, still running on the
+computer" state. Until the desktop ships it, computers don't announce `terminal`.
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -1101,3 +1192,8 @@ robust against any encoder (GPU ones may slice too):
   info button in its header): "Top bar black? … Developer options › Disable screen share
   protections, then share again", answering docs/android-app.md §2.2. Desktop 0.6.2 redesigned
   the device page; nothing changes in the protocol.
+- **2026-10-21** — §4.15 Terminal: the contract for a shell on the computer from the
+  phone (session `terminal`, a code set on the computer, `term_input`/`term_resize`/
+  `term_close`, detach and `resume`, `terminal_list`). Planned for desktop 0.7; spec
+  first so the phone can build its side. §2 status refreshed from phone 0.1.16. Desktop
+  0.6.4 saves received files to Downloads/Linksy, like the phone.
