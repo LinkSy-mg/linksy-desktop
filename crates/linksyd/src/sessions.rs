@@ -12,6 +12,7 @@ use linksy_core::{Node, Session, SessionKind, Uuid};
 use linksy_ipc::{ActiveSession, PendingSession};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
 use tracing::{info, warn};
 
@@ -32,12 +33,56 @@ pub struct Sessions {
     /// Share a test pattern instead of the screen, and never open the app (development,
     /// tests).
     test_pattern: bool,
+    /// Cameras used here: where `camera_control` frames go, and the last `camera_state`
+    /// each one sent (docs/protocol.md §4.8).
+    cameras: Arc<Mutex<HashMap<Uuid, Camera>>>,
+}
+
+#[derive(Default)]
+struct Camera {
+    control: Option<mpsc::UnboundedSender<Vec<u8>>>,
+    state: Option<serde_json::Value>,
 }
 
 impl Sessions {
     pub fn new(data_dir: PathBuf, socket: PathBuf) -> Self {
         let test_pattern = std::env::var_os("LINKSY_SCREEN_TEST").is_some();
-        Self { running: Arc::default(), pending: Arc::default(), data_dir, socket, test_pattern }
+        Self { running: Arc::default(), pending: Arc::default(), data_dir, socket, test_pattern, cameras: Arc::default() }
+    }
+
+    /// Keep each camera's last `camera_state`, for a window opened later.
+    pub async fn watch_cameras(self, node: Node) {
+        let mut events = node.subscribe();
+        loop {
+            match events.recv().await {
+                // The phone may say before the webcam here is up: keep it either way.
+                Ok(linksy_core::Event::CameraState { session, state, .. }) => {
+                    self.cameras.lock().unwrap().entry(session).or_default().state = Some(state);
+                }
+                Ok(linksy_core::Event::SessionEnded { session }) => {
+                    self.cameras.lock().unwrap().remove(&session);
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(_) => break,
+            }
+        }
+    }
+
+    /// Change a camera used here: `control` holds `camera_control` keys (zoom, torch…).
+    pub fn camera_control(&self, session: Uuid, control: serde_json::Value) -> Result<(), String> {
+        let serde_json::Value::Object(mut keys) = control else { return Err("camera controls are an object".into()) };
+        keys.insert("type".into(), "camera_control".into());
+        let body = serde_json::to_vec(&keys).map_err(|e| e.to_string())?;
+        let mut frame = (body.len() as u32).to_be_bytes().to_vec();
+        frame.extend(body);
+        let cameras = self.cameras.lock().unwrap();
+        let tx = cameras.get(&session).and_then(|c| c.control.as_ref()).ok_or("that camera isn't on")?;
+        tx.send(frame).map_err(|_| "that camera isn't on".to_string())
+    }
+
+    /// What a camera used here last said it can do and how it's set.
+    pub fn camera_state(&self, session: Uuid) -> Option<serde_json::Value> {
+        self.cameras.lock().unwrap().get(&session).and_then(|c| c.state.clone())
     }
 
     /// Serve the sessions this device accepted.
@@ -137,7 +182,14 @@ impl Sessions {
         };
         let _ = std::fs::remove_file(&path);
         let (stream, _) = accepted.map_err(|_| std::io::Error::other("no screen was picked in time"))??;
-        relay(&mut session, stream).await;
+        // A camera used here takes `camera_control` frames from the app instead of the
+        // helper, which sends nothing back.
+        let control = (device && session.kind == SessionKind::Camera).then(|| {
+            let (tx, rx) = mpsc::unbounded_channel();
+            self.cameras.lock().unwrap().entry(session.id).or_default().control = Some(tx);
+            rx
+        });
+        relay(&mut session, stream, control).await;
         let _ = child.kill().await;
         Ok(())
     }
@@ -183,7 +235,7 @@ impl Sessions {
             let _ = std::fs::remove_file(&path);
             pending.lock().unwrap().remove(&id);
             if let Ok(Ok((stream, _))) = accepted {
-                relay(&mut session, stream).await;
+                relay(&mut session, stream, None).await;
             }
             running.lock().unwrap().remove(&id);
         });
@@ -213,11 +265,27 @@ impl Sessions {
 
 /// Copy media and control between the network and the local process until either side
 /// stops. Dropping the session afterwards closes it on the other device.
-async fn relay(session: &mut Session, local: UnixStream) {
+/// Copy the session to the helper's socket and back; with `control`, what goes to the
+/// other device comes from there instead of the helper.
+async fn relay(session: &mut Session, local: UnixStream, control: Option<mpsc::UnboundedReceiver<Vec<u8>>>) {
     let (mut local_rx, mut local_tx) = local.into_split();
     let (send, recv) = (&mut session.send, &mut session.recv);
+    let to_peer = async {
+        match control {
+            Some(mut frames) => {
+                while let Some(frame) = frames.recv().await {
+                    if send.write_all(&frame).await.is_err() {
+                        break;
+                    }
+                }
+            }
+            None => {
+                let _ = tokio::io::copy(&mut local_rx, send).await;
+            }
+        }
+    };
     tokio::select! {
-        _ = tokio::io::copy(&mut local_rx, send) => {}
+        _ = to_peer => {}
         _ = tokio::io::copy(recv, &mut local_tx) => {}
     }
     let _ = session.send.shutdown().await;

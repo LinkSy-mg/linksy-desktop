@@ -265,6 +265,15 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
         Request::PendingSessions => json(serde_json::to_value(sessions.pending())),
         Request::ActiveSessions => json(serde_json::to_value(sessions.active())),
         Request::EndSession { session } => Ok(Value::Bool(sessions.end(session))),
+        Request::CameraControl { session, control } => {
+            sessions.camera_control(session, control)?;
+            Ok(Value::Null)
+        }
+        Request::CameraState { session } => Ok(sessions.camera_state(session).unwrap_or(Value::Null)),
+        Request::DevicePicture { device } => {
+            let id = resolve_any(node, history, &device)?;
+            json(serde_json::to_value(crate::pictures::path(&id)))
+        }
         Request::Settings => json(serde_json::to_value(node.settings())),
         Request::UpdateSettings { settings } => {
             let applied = node.update_settings(settings).await.map_err(|e| e.to_string())?;

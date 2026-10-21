@@ -9,6 +9,7 @@ mod links;
 mod lock;
 mod mirror;
 mod photos;
+mod pictures;
 mod sessions;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
 // their own native notifications with their apps.
@@ -32,7 +33,7 @@ use tracing::{error, info};
 const FEATURES: &[&str] = &[
     "files", "clipboard", "open_url", "ring", "battery", "media_state", "media_remote", "call_state", "heartbeat",
     "import", "fs", "input", "screen", "control", "display", "camera", "watch", "notifications", "sms",
-    "clipboard_file", "microphone",
+    "clipboard_file", "microphone", "picture",
 ];
 
 /// Fixed default port so a peer's last known address stays valid across restarts.
@@ -156,6 +157,8 @@ async fn main() -> ExitCode {
     let socket = args.socket.clone();
     let sessions = sessions::Sessions::new(data_dir.clone(), socket.clone());
     tokio::spawn(sessions.clone().run(node.clone()));
+    tokio::spawn(sessions.clone().watch_cameras(node.clone()));
+    tokio::spawn(pictures::run(node.clone(), data_dir.clone()));
     let icons = linksy_ipc::runtime_dir().unwrap_or_else(std::env::temp_dir).join("linksy-icons");
     #[cfg(target_os = "linux")]
     tokio::spawn(media::run(node.clone(), icons.join("art")));

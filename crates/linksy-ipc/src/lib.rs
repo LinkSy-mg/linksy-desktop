@@ -78,6 +78,12 @@ pub enum Request {
     ActiveSessions,
     /// Stop a running session, from either side.
     EndSession { session: Uuid },
+    /// Change a camera used here: `camera_control` keys (docs/protocol.md §4.8).
+    CameraControl { session: Uuid, control: serde_json::Value },
+    /// What a camera used here last said it can do and how it's set (`null` until it says).
+    CameraState { session: Uuid },
+    /// A device's picture, if it sent one: the image file's path.
+    DevicePicture { device: String },
     ClearHistory { with: Option<String> },
     Forget { target: String },
 }
@@ -496,6 +502,18 @@ impl Client {
 
     pub async fn end_session(&self, session: Uuid) -> Result<bool, ClientError> {
         self.call(Request::EndSession { session }).await
+    }
+
+    pub async fn camera_control(&self, session: Uuid, control: serde_json::Value) -> Result<(), ClientError> {
+        self.call(Request::CameraControl { session, control }).await
+    }
+
+    pub async fn camera_state(&self, session: Uuid) -> Result<Option<serde_json::Value>, ClientError> {
+        self.call(Request::CameraState { session }).await
+    }
+
+    pub async fn device_picture(&self, device: impl Into<String>) -> Result<Option<PathBuf>, ClientError> {
+        self.call(Request::DevicePicture { device: device.into() }).await
     }
 
     pub async fn settings(&self) -> Result<Settings, ClientError> {
