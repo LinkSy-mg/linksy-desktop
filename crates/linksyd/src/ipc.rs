@@ -226,6 +226,14 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
             photos.set_prefs(node, prefs)?;
             Ok(Value::Null)
         }
+        Request::Updates => match crate::update::UPDATES.get() {
+            Some(u) => json(serde_json::to_value(u.info())),
+            None => Err("update checks aren't running".into()),
+        },
+        Request::SetUpdatePrefs { prefs } => {
+            crate::update::UPDATES.get().ok_or("update checks aren't running")?.set_prefs(prefs);
+            Ok(Value::Null)
+        }
         Request::LockPrefs => serde_json::to_value(away.prefs()).map_err(|e| e.to_string()),
         Request::SetLockPrefs { prefs } => {
             away.set_prefs(node, prefs).await?;

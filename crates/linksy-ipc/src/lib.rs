@@ -61,6 +61,9 @@ pub enum Request {
     /// Which devices lock this computer when they leave, and after how long.
     LockPrefs,
     SetLockPrefs { prefs: LockPrefs },
+    /// This version, the newest one if it's newer, and whether Linksy checks.
+    Updates,
+    SetUpdatePrefs { prefs: UpdatePrefs },
     Settings,
     UpdateSettings { settings: Settings },
     /// A pairing QR code (`linksy://pair?…`); valid five minutes or until cancelled.
@@ -202,6 +205,28 @@ impl Default for LockPrefs {
     fn default() -> Self {
         Self { devices: Vec::new(), grace_s: 60 }
     }
+}
+
+/// Whether Linksy checks linksy.diary.mg once a day for a newer version.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UpdatePrefs {
+    pub check: bool,
+}
+
+impl Default for UpdatePrefs {
+    fn default() -> Self {
+        Self { check: true }
+    }
+}
+
+/// This version and, when there's a newer one, which and its release notes.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateInfo {
+    pub current: String,
+    pub latest: Option<String>,
+    pub notes: Option<String>,
+    pub prefs: UpdatePrefs,
 }
 
 /// How phone notifications show on this computer.
@@ -462,6 +487,14 @@ impl Client {
 
     pub async fn set_photo_prefs(&self, prefs: PhotoPrefs) -> Result<(), ClientError> {
         self.call(Request::SetPhotoPrefs { prefs }).await
+    }
+
+    pub async fn updates(&self) -> Result<UpdateInfo, ClientError> {
+        self.call(Request::Updates).await
+    }
+
+    pub async fn set_update_prefs(&self, prefs: UpdatePrefs) -> Result<(), ClientError> {
+        self.call(Request::SetUpdatePrefs { prefs }).await
     }
 
     pub async fn lock_prefs(&self) -> Result<LockPrefs, ClientError> {

@@ -10,6 +10,7 @@ mod lock;
 mod mirror;
 mod photos;
 mod pictures;
+mod update;
 mod sessions;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
 // their own native notifications with their apps.
@@ -159,6 +160,8 @@ async fn main() -> ExitCode {
     tokio::spawn(sessions.clone().run(node.clone()));
     tokio::spawn(sessions.clone().watch_cameras(node.clone()));
     tokio::spawn(pictures::run(node.clone(), data_dir.clone()));
+    let updates = update::UPDATES.get_or_init(|| update::Updates::load(data_dir.join("update.json"), args.notifications)).clone();
+    tokio::spawn(updates.run());
     let icons = linksy_ipc::runtime_dir().unwrap_or_else(std::env::temp_dir).join("linksy-icons");
     #[cfg(target_os = "linux")]
     tokio::spawn(media::run(node.clone(), icons.join("art")));
