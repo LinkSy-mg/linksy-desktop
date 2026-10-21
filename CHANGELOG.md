@@ -2,6 +2,20 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.5.8
+
+### Added
+- **Update check**: once a day Linksy looks at linksy.diary.mg for a newer version and
+  says so in a notification and at the bottom of its sidebar. Nothing about you is sent;
+  turn it off in Preferences.
+- **Reconnect a second display**: when a phone or tablet used as a second display drops
+  (its screen turned off, the Wi-Fi blinked), Linksy says so and offers Reconnect.
+
+### Fixed
+- A phone controlling a second display or this screen could do nothing when "Allow
+  remote interaction" was off in the sharing dialog, or after a remembered choice without
+  it: Linksy now asks again next time instead of reusing it.
+
 ## 0.5.7
 
 ### Added

@@ -1118,7 +1118,7 @@ checksum = "65cd87c9a6d60536580b316ad985726104730a5151c99845f2490428ef91240a"
 
 [[package]]
 name = "linksy"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "linksy-ipc",
  "qrcode",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "linksy-app"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "async-channel",
  "gstreamer",
@@ -1141,7 +1141,7 @@ dependencies = [
 
 [[package]]
 name = "linksy-core"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "blake3",
  "hex",
@@ -1162,7 +1162,7 @@ dependencies = [
 
 [[package]]
 name = "linksy-ipc"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "linksy-core",
  "serde",
@@ -1172,7 +1172,7 @@ dependencies = [
 
 [[package]]
 name = "linksy-screen"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "ashpd",
  "gstreamer",
@@ -1182,7 +1182,7 @@ dependencies = [
 
 [[package]]
 name = "linksyd"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "base64",
  "futures-util",

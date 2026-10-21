@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.5.8" date="2026-10-21">
+      <description>
+        <p>Linksy tells you when a new version is out, offers to reconnect a second display that dropped, and asks again when remote control wasn't allowed.</p>
+      </description>
+    </release>
     <release version="0.5.7" date="2026-10-21">
       <description>
         <p>Use a phone as a microphone, connect it with a USB cable for lower latency, control its camera from the computer, and see device pictures. The webcam shows up about 0.4 seconds sooner.</p>
