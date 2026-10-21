@@ -67,6 +67,11 @@ pub fn file_name(rel: &str) -> String {
     rel.rsplit('/').next().unwrap_or(rel).to_string()
 }
 
+/// A moment (seconds since the epoch) as a short local day: "Tue 28 Oct".
+pub fn day(epoch_s: u64) -> String {
+    gtk::glib::DateTime::from_unix_local(epoch_s as i64).and_then(|d| d.format("%a %e %b")).map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default()
+}
+
 pub fn capitalize(s: &str) -> String {
     let mut c = s.chars();
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()

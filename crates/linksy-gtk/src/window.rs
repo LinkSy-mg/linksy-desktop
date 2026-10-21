@@ -397,6 +397,8 @@ impl Window {
                 page::Action::Messages => w.open_messages(id),
                 page::Action::BrowseFiles => w.browse_files(id),
                 page::Action::LockWhenAway(on) => w.lock_when_away(id, on),
+                page::Action::AwayAll(on) => w.away_all(id, on),
+                page::Action::Locate => w.locate(id),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
                 page::Action::Webcam => w.use_camera(id),
@@ -628,6 +630,49 @@ impl Window {
         });
     }
 
+    /// Allow everything from away for a device, or only the small things.
+    fn away_all(self: &Rc<Self>, id: Fingerprint, on: bool) {
+        let Some(c) = self.client() else { return };
+        let w = self.clone();
+        let call = self.bridge.call(&c, move |c| async move { c.set_away_all(id.to_string(), on).await });
+        glib::spawn_future_local(async move {
+            if let Err(e) = call.await {
+                w.toast_error(&e, Some(id));
+            }
+            w.refresh_devices();
+        });
+    }
+
+    /// Ask a phone where it is, then show it, with a map link.
+    fn locate(self: &Rc<Self>, id: Fingerprint) {
+        let Some(c) = self.client() else { return };
+        let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
+        self.toast(&format!("Asking {name} where it is…"));
+        let w = self.clone();
+        let call = self.bridge.call(&c, move |c| async move { c.locate(id.to_string()).await });
+        glib::spawn_future_local(async move {
+            let l = match call.await {
+                Ok(l) => l,
+                Err(e) => return w.toast(&format!("{name} didn't say: {}", fmt::capitalize(&e))),
+            };
+            let accuracy = l.accuracy_m.map(|a| format!(", within {a:.0} m")).unwrap_or_default();
+            let when = glib::DateTime::from_unix_local((l.at_ms / 1000) as i64).and_then(|d| d.format("%H:%M")).map(|t| format!(" at {t}")).unwrap_or_default();
+            let dialog = adw::AlertDialog::new(
+                Some(&format!("{name} Is Here")),
+                Some(&format!("{:.5}, {:.5}{accuracy}{when}. Opening the map shows it on OpenStreetMap in your browser.", l.lat, l.lon)),
+            );
+            dialog.add_responses(&[("close", "Close"), ("map", "Open Map")]);
+            dialog.set_response_appearance("map", adw::ResponseAppearance::Suggested);
+            dialog.set_default_response(Some("map"));
+            let url = format!("https://www.openstreetmap.org/?mlat={:.5}&mlon={:.5}#map=17/{:.5}/{:.5}", l.lat, l.lon, l.lat, l.lon);
+            let win = w.window.clone();
+            dialog.connect_response(Some("map"), move |_, _| {
+                gtk::UriLauncher::new(&url).launch(Some(&win), gio::Cancellable::NONE, |_| {});
+            });
+            dialog.present(Some(&w.window));
+        });
+    }
+
     /// Show "Linksy X Is Available" when the service found a newer version.
     fn refresh_updates(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
@@ -757,6 +802,8 @@ impl Window {
             // Media players are the service's (MPRIS, so GNOME's own controls show them).
             Event::MediaState { .. } | Event::MediaCommand { .. } | Event::MediaWatch { .. } | Event::CallState { .. } => {}
             Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } | Event::ClipboardWatch { .. } | Event::ClipboardFile { .. } => {}
+            // Locate is answered through the service (it waits for the reply).
+            Event::LocateRequest { .. } | Event::Location { .. } | Event::LocationRefused { .. } => {}
             Event::SmsMessage { from, thread, message } => self.sms_arrived(from.id, thread, message),
             // Answers go to whoever asked (the service waits for them); requests are a phone's.
             Event::SmsThreads { .. }
@@ -1380,6 +1427,7 @@ fn sidebar_row(d: &DeviceView, picture: Option<&gdk::Texture>) -> gtk::ListBoxRo
 fn status_text(d: &DeviceView) -> &'static str {
     match (d.trusted, d.connected, d.nearby) {
         (true, true, _) if d.usb => "Connected by USB",
+        (true, true, _) if d.away => "Connected away from home",
         (true, true, _) => "Connected",
         (true, false, true) => "Nearby",
         (true, false, false) => "Not nearby",
@@ -1485,5 +1533,5 @@ pub(crate) fn can(d: &DeviceInfo, feature: &str) -> bool {
     if !d.features.is_empty() {
         return d.features.iter().any(|f| f == feature);
     }
-    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone"))
+    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate"))
 }

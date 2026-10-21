@@ -36,6 +36,9 @@ pub enum Action {
     OpenLink(String),
     Ring,
     LockWhenAway(bool),
+    /// Allow everything from away for this device, or only the small things.
+    AwayAll(bool),
+    Locate,
     Messages,
     BrowseFiles,
 }
@@ -69,6 +72,9 @@ pub struct DevicePage {
     files_row: adw::ActionRow,
     /// "Lock When Away", for phones; `syncing` while it's set from the service's state.
     lock_row: adw::SwitchRow,
+    /// "Allow Everything From Away" (docs/protocol.md §4.13), and "Locate" for phones.
+    away_row: adw::SwitchRow,
+    locate_row: adw::ActionRow,
     syncing: Rc<std::cell::Cell<bool>>,
     pair_box: gtk::Box,
     staged: adw::Banner,
@@ -191,11 +197,26 @@ impl DevicePage {
                 e(Action::LockWhenAway(row.is_active()));
             }
         });
+        let locate_row = adw::ActionRow::builder().title("Locate").activatable(true).build();
+        locate_row.add_prefix(&gtk::Image::builder().icon_name("find-location-symbolic").build());
+        locate_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
+        let e = emit.clone();
+        locate_row.connect_activated(move |_| e(Action::Locate));
+        let away_row = adw::SwitchRow::builder().title("Allow Everything From Away").subtitle_lines(3).build();
+        away_row.add_prefix(&gtk::Image::builder().icon_name("network-wireless-hotspot-symbolic").build());
+        let (e, s) = (emit.clone(), syncing.clone());
+        away_row.connect_active_notify(move |row| {
+            if !s.get() {
+                e(Action::AwayAll(row.is_active()));
+            }
+        });
         let extend = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         extend.append(&messages_row);
         extend.append(&files_row);
         extend.append(&ring_row);
         extend.append(&lock_row);
+        extend.append(&locate_row);
+        extend.append(&away_row);
         extend.append(&extend_row);
         extend.append(&webcam_row);
         extend.append(&mic_row);
@@ -291,7 +312,7 @@ impl DevicePage {
             e(Action::Forget);
         });
 
-        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, mic_row, ring_row, messages_row, files_row, lock_row, syncing, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
+        Self { root, menu, avatar, kind, name, status, dot, tiles, extend, extend_row, webcam_row, mic_row, ring_row, messages_row, files_row, lock_row, away_row, locate_row, syncing, pair_box, staged, drop_hint, drop_label, activity_box, activity, on_activate, empty, handler, received , camera, camera_row }
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
@@ -341,8 +362,18 @@ impl DevicePage {
         self.files_row.set_subtitle(&glib::markup_escape_text(&format!("Open the folder {} shares in Files, like a USB drive", d.device.name)));
         self.messages_row.set_subtitle(&glib::markup_escape_text(&format!("Read and send {}'s texts here", d.device.name)));
         self.lock_row.set_subtitle(&glib::markup_escape_text(&format!("Lock this computer when {} leaves. It never unlocks it.", d.device.name)));
+        self.locate_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "locate"));
+        self.locate_row.set_subtitle(&glib::markup_escape_text(&format!("Ask {} where it is, once. It can say no.", d.device.name)));
+        // Away from home: only for devices that told this one how to reach them.
+        self.away_row.set_visible(d.trusted && d.device.away.is_some());
+        let until = d.away_until.map(fmt::day).unwrap_or_default();
+        self.away_row.set_subtitle(&glib::markup_escape_text(&format!(
+            "Away from home, {} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too. Reachable until {until}; being on the same Wi-Fi renews it.",
+            d.device.name
+        )));
         self.syncing.set(true);
         self.lock_row.set_active(locks);
+        self.away_row.set_active(d.away_all);
         self.syncing.set(false);
         self.ring_row.set_subtitle(&glib::markup_escape_text(&format!("Play a loud sound on {} to find it, even on silent", d.device.name)));
         self.pair_box.set_visible(!d.trusted);
