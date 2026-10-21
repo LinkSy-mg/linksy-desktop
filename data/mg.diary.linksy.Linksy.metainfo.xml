@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.6.4" date="2026-10-21">
+      <description>
+        <p>Received files go to Downloads/Linksy by default. The device page fits any window size.</p>
+      </description>
+    </release>
     <release version="0.6.3" date="2026-10-21">
       <description>
         <p>The screen viewer explains a black status bar when watching some Android phones, and how to fix it on the phone.</p>

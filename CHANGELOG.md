@@ -2,6 +2,16 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.6.4
+
+### Changed
+- **Received files go to Downloads/Linksy** by default (like the phone), instead of
+  straight into Downloads. A folder you chose in Preferences stays as it is.
+- **The device page fits any window**: it lays itself out by the space it has beside
+  the device list, stacking the actions, the "Use as" cards and the header as it gets
+  narrower, instead of running off the edge.
+- The Linksy logo sits at the left of the sidebar.
+
 ## 0.6.3
 
 ### Added
