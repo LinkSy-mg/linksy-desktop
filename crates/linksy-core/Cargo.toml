@@ -19,6 +19,8 @@ thiserror = "2.0.21"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "fs", "io-util", "sync", "time", "net"] }
 tracing = "0.1.44"
 uuid = { version = "1.28.0", features = ["v4", "serde"] }
+# Away from home: iroh finds a path (direct, or through a relay) and carries Linksy's own QUIC.
+iroh = { version = "1.4.0", default-features = false, features = ["tls-ring", "portmapper"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
