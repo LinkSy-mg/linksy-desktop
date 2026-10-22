@@ -668,7 +668,20 @@ developer options**: the computer uses **Android Open Accessory (AOA 1.0)**.
 
 Linux needs permission to switch the phone and to use it as an accessory: the .deb and
 .rpm install a udev rule (`70-linksy-usb.rules`); Finish Setup adds it otherwise (not
-possible from the Flatpak). Try the bridge without a phone: `cargo test -p linksyd usb`
+possible from the Flatpak).
+
+**Desktop 0.8.0: Connect by USB Cable.** The computer's app has a guide (a phone's page,
+"Faster by USB Cable"; or the main menu) that follows each step live and switches the
+phone itself with a Connect button, so the notification is no longer the only way in.
+It also switches a phone that **isn't paired yet**. Phone side, please:
+
+- [ ] When the accessory opens and no paired computer answers through it within a few
+      seconds, **offer to pair over the cable**: `node.pair(127.0.0.1:P)` through the same
+      bridge (both screens show the code as on Wi-Fi). The computer accepts pairing
+      requests that arrive over the cable like any other.
+- [ ] The "open with" prompt is the step people get stuck on: when the accessory opens,
+      bring Linksy to the front with a clear "Connected by USB cable" state, and say on
+      the device page that the cable is in use. Try the bridge without a phone: `cargo test -p linksyd usb`
 runs QUIC through an in-memory cable between two nodes.
 
 ### 4.12 Service information (planned for 0.6)
@@ -1225,3 +1238,18 @@ robust against any encoder (GPU ones may slice too):
   and `<!-- linux:end -->`, rewritten by the desktop's release script), screenshots
   (the phone ones are the website's), features, privacy. Please edit it in place rather
   than replacing it, and keep "latest" on the APK releases.
+- **2026-10-22** — **Public releases renamed (please keep to this):** APKs carry their
+  version, `linksy-0.2.1.apk`, `linksy-0.2.1-arm64.apk`, `linksy-0.2.1-armv7.apk`, and
+  releases are titled **"Mobile release · Linksy X for Android"** (desktop ones "Desktop
+  release · Linksy X for Linux"). Every earlier release was renamed the same way, and
+  `tool/publish_public.sh` in linksy-mobile now uploads versioned names with that title.
+  The `/releases/latest/download/linksy.apk` links no longer exist: the newest APK is
+  **https://linksy.diary.mg/download/android** (also `android-arm64`, `android-armv7`),
+  which the website serves itself (downloads stalled at 99% from GitHub) under the
+  versioned name. The service information's `latest.android.download` points there.
+- **2026-10-22** — Desktop 0.8.0 (in progress): the app speaks the phone app's ten
+  languages (en, de, es, fr, it, ja, mg, pt, ru, zh), following the system or a choice in
+  Preferences; Connect by USB Cable guide and pairing over the cable (§4.11, phone items
+  there); the microphone card shows a live level with Listen and Stop; Finish Setup
+  installs through the system's own package tool in one password (KDE included), turns
+  on RPM Fusion for the camera driver, and walks through Secure Boot's approval.
