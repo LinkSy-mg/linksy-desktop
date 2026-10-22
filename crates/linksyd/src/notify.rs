@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use linksy_core::{CallState, Direction, Event, Fingerprint, Node, SessionKind, Uuid};
+use linksy_i18n::t;
 use notify_rust::{Hint, Notification, Timeout, Urgency};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::debug;
@@ -28,49 +29,49 @@ pub async fn run(node: Node) {
         };
         match event {
             Event::PairingRequest { request, device, code, .. } => {
-                let body = format!("Check that {} shows the code {}.", device.name, spaced(&code));
-                prompt(node.clone(), request, format!("Pair with {}?", device.name), body, "Pair");
+                let body = t!("Check that {device} shows the code {code}.", device = device.name, code = spaced(&code));
+                prompt(node.clone(), request, t!("Pair with {device}?", device = device.name), body, t!("Pair"));
             }
             Event::TransferRequest { transfer, from, files, total } => {
                 let what = match files.as_slice() {
                     [one] => display_name(&one.path),
-                    many => format!("{} items", many.len()),
+                    many => t!("{n} items", n = many.len()),
                 };
                 let body = format!("{what} · {}", human_size(total));
-                prompt(node.clone(), transfer, format!("{} wants to send you files", from.name), body, "Accept");
+                prompt(node.clone(), transfer, t!("{device} wants to send you files", device = from.name), body, t!("Accept"));
             }
             Event::SessionRequest { request, from, kind } => {
                 let (summary, body) = match kind {
                     SessionKind::Control => (
-                        format!("{} wants to control your screen", from.name),
-                        format!("{} will see your screen and use your mouse and keyboard until you stop.", from.name),
+                        t!("{device} wants to control your screen", device = from.name),
+                        t!("{device} will see your screen and use your mouse and keyboard until you stop.", device = from.name),
                     ),
                     SessionKind::Camera => (
-                        format!("{} wants to use your camera", from.name),
-                        format!("Your camera will be on and {} will see it until you stop.", from.name),
+                        t!("{device} wants to use your camera", device = from.name),
+                        t!("Your camera will be on and {device} will see it until you stop.", device = from.name),
                     ),
                     SessionKind::Display => (
-                        format!("{} wants to use this screen as a second display", from.name),
-                        format!("Linksy will fill this screen with {}'s second display, and your mouse and keyboard here will work on it.", from.name),
+                        t!("{device} wants to use this screen as a second display", device = from.name),
+                        t!("Linksy will fill this screen with {device}'s second display, and your mouse and keyboard here will work on it.", device = from.name),
                     ),
                     SessionKind::Microphone => (
-                        format!("{} wants to use your microphone", from.name),
-                        format!("Your microphone will be on and {} will hear it until you stop.", from.name),
+                        t!("{device} wants to use your microphone", device = from.name),
+                        t!("Your microphone will be on and {device} will hear it until you stop.", device = from.name),
                     ),
                     SessionKind::Input => (
-                        format!("{} wants to use your mouse and keyboard", from.name),
-                        format!("{} becomes a touchpad and keyboard for this computer until you stop. It doesn't see your screen.", from.name),
+                        t!("{device} wants to use your mouse and keyboard", device = from.name),
+                        t!("{device} becomes a touchpad and keyboard for this computer until you stop. It doesn't see your screen.", device = from.name),
                     ),
                     SessionKind::Screen => (
-                        format!("{} wants to see your screen", from.name),
-                        format!("{} will see everything on your screen until you stop sharing.", from.name),
+                        t!("{device} wants to see your screen", device = from.name),
+                        t!("{device} will see everything on your screen until you stop sharing.", device = from.name),
                     ),
                     SessionKind::Terminal => (
-                        format!("{} wants a terminal on this computer", from.name),
-                        format!("The right code was typed on {}. Its terminal runs commands as you until it's ended. Linksy asks once a day.", from.name),
+                        t!("{device} wants a terminal on this computer", device = from.name),
+                        t!("The right code was typed on {device}. Its terminal runs commands as you until it's ended. Linksy asks once a day.", device = from.name),
                     ),
                 };
-                prompt(node.clone(), request, summary, body, "Allow");
+                prompt(node.clone(), request, summary, body, t!("Allow"));
             }
             Event::TransferStarted { transfer, peer, direction: Direction::Incoming, import, .. } => {
                 incoming.insert(transfer, (peer.name, import));
@@ -84,17 +85,18 @@ pub async fn run(node: Node) {
                 if let Some((from, _)) = incoming.remove(&transfer)
                     && reason != "cancelled"
                 {
-                    show(format!("Transfer from {from} failed"), capitalize(&reason));
+                    show(t!("Transfer from {device} failed", device = from), capitalize(&reason));
                 }
             }
-            Event::Paired { device } => show(format!("Paired with {}", device.name), "You can now share files and more.".into()),
+            Event::Paired { device } => show(t!("Paired with {device}", device = device.name), t!("You can now share files and more.").into()),
             Event::Notification { from, title, body } => {
-                let body = if body.is_empty() { format!("From {}", from.name) } else { format!("{body}\nFrom {}", from.name) };
+                let from = t!("From {device}", device = from.name);
+                let body = if body.is_empty() { from } else { format!("{body}\n{from}") };
                 show(title, body);
             }
             Event::Battery { from, battery } if battery.level <= LOW_BATTERY && !battery.charging => {
                 if warned.insert(from.id) {
-                    show(format!("{} is low on battery", from.name), format!("{}% left", battery.level));
+                    show(t!("{device} is low on battery", device = from.name), t!("{level}% left", level = battery.level));
                 }
             }
             Event::Battery { from, battery } if battery.charging || battery.level > LOW_BATTERY + 5 => {
@@ -102,11 +104,11 @@ pub async fn run(node: Node) {
             }
             Event::CallState { from, state: CallState::Ringing, contact } => {
                 let summary = match contact {
-                    Some(c) => format!("Call from {c}"),
-                    None => "Incoming call".to_string(),
+                    Some(c) => t!("Call from {contact}", contact = c),
+                    None => t!("Incoming call").to_string(),
                 };
                 tokio::task::spawn_blocking(move || {
-                    let mut n = base(&summary, &format!("On {}", from.name));
+                    let mut n = base(&summary, &t!("On {device}", device = from.name));
                     n.hint(Hint::Transient(true)).timeout(Timeout::Milliseconds(20_000));
                     if let Err(e) = n.show() {
                         debug!("notification failed: {e}");
@@ -115,7 +117,7 @@ pub async fn run(node: Node) {
             }
             Event::Ring { from, on: true } => {
                 tokio::task::spawn_blocking(move || {
-                    let mut n = base(&format!("{} is looking for this computer", from.name), "Here it is!");
+                    let mut n = base(&t!("{device} is looking for this computer", device = from.name), t!("Here it is!"));
                     n.urgency(Urgency::Critical).hint(Hint::SoundName("phone-incoming-call".into()));
                     if let Err(e) = n.show() {
                         debug!("notification failed: {e}");
@@ -146,7 +148,7 @@ fn prompt(node: Node, request: Uuid, summary: String, body: String, accept_label
     tokio::task::spawn_blocking(move || {
         let mut n = base(&summary, &body);
         n.action("accept", accept_label)
-            .action("decline", "Decline")
+            .action("decline", t!("Decline"))
             .urgency(Urgency::Critical)
             .hint(Hint::Resident(true))
             .timeout(Timeout::Never);
@@ -172,10 +174,10 @@ fn imported(from: String, saved: Vec<PathBuf>) {
         return;
     }
     tokio::task::spawn_blocking(move || {
-        let what = if saved.len() == 1 { "1 photo".to_string() } else { format!("{} photos", saved.len()) };
+        let summary = if saved.len() == 1 { t!("Imported 1 photo from {device}", device = from) } else { t!("Imported {n} photos from {device}", n = saved.len(), device = from) };
         let folder = saved[0].parent().map(Path::to_path_buf).unwrap_or_default();
-        let mut n = base(&format!("Imported {what} from {from}"), &folder.display().to_string());
-        n.action("default", "Show Photos");
+        let mut n = base(&summary, &folder.display().to_string());
+        n.action("default", t!("Show Photos"));
         match n.show() {
             Ok(handle) => handle.wait_for_action(|action| {
                 if action == "default" {
@@ -190,14 +192,14 @@ fn imported(from: String, saved: Vec<PathBuf>) {
 fn received(from: String, saved: Vec<PathBuf>) {
     tokio::task::spawn_blocking(move || {
         let (summary, target) = match saved.as_slice() {
-            [one] => (format!("Received {}", file_name(one)), one.clone()),
+            [one] => (t!("Received {name}", name = file_name(one)), one.clone()),
             many => (
-                format!("Received {} items", many.len()),
+                t!("Received {n} items", n = many.len()),
                 many.first().and_then(|p| p.parent()).map(Path::to_path_buf).unwrap_or_default(),
             ),
         };
-        let mut n = base(&summary, &format!("From {from}"));
-        n.action("default", "Open").action("show", "Show in Folder");
+        let mut n = base(&summary, &t!("From {device}", device = from));
+        n.action("default", t!("Open")).action("show", t!("Show in Folder"));
         match n.show() {
             Ok(handle) => handle.wait_for_action(|action| {
                 let path = match action {

@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
 use linksy_core::{ControlMsg, Event, Fingerprint, Node, Session, TerminalCall, TerminalInfo, Uuid, Verdict};
+use linksy_i18n::t;
 use linksy_ipc::{RunningTerminal, TerminalStatus};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
@@ -239,7 +240,7 @@ impl Terminals {
                 st.prefs.failures.remove(&from.id);
                 st.prefs.locked.push(from.id);
                 warn!("terminal locked for {} after {MAX_TRIES} wrong codes", from.name);
-                crate::notify::show(format!("Terminal locked for {}", from.name), format!("{MAX_TRIES} wrong codes in a row. Unlock it in Linksy on this computer if it was you."));
+                crate::notify::show(t!("Terminal locked for {device}", device = from.name), t!("{tries} wrong codes in a row. Unlock it in Linksy on this computer if it was you.", tries = MAX_TRIES));
                 decline("locked", None)
             } else {
                 decline("code", Some(MAX_TRIES - failures))
@@ -293,7 +294,7 @@ impl Terminals {
             self.save(&st);
             (attach, replay, master)
         };
-        crate::notify::show(format!("Terminal open from {}", p.owner_name), "It runs as you until it's ended on the phone, or here in Linksy.".into());
+        crate::notify::show(t!("Terminal open from {device}", device = p.owner_name), t!("It runs as you until it's ended on the phone, or here in Linksy.").into());
         // The phone's size; a resize also makes full-screen programs redraw.
         resize(&master, p.size);
         session.send.write_all(&replay).await?;

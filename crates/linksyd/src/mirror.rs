@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use linksy_core::{DeviceInfo, Fingerprint, Node, RemoteNotification};
+use linksy_i18n::t;
 use linksy_ipc::{MutedApp, NotificationPrefs};
 use tracing::warn;
 
@@ -138,12 +139,12 @@ impl Mirror {
                 note.id(previous);
             }
             if n.can_reply {
-                note.action("reply", "Reply");
+                note.action("reply", t!("Reply"));
             }
             if let Some(b) = n.actions.first() {
                 note.action(&format!("act:{}", b.id), &b.label);
             }
-            note.action("mute", &format!("Mute {}", n.app_name));
+            note.action("mute", &t!("Mute {app}", app = n.app_name));
             // The desktop may have dropped the one to update; then it's a new one.
             let shown = note.show().or_else(|e| if previous != 0 { note.id(0).show() } else { Err(e) });
             let handle = match shown {

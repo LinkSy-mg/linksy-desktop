@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use linksy_core::Node;
+use linksy_i18n::t;
 use linksy_ipc::{UsbPhone, UsbState, UsbStatus};
 use nusb::hotplug::HotplugEvent;
 use nusb::transfer::{Bulk, ControlIn, ControlOut, ControlType, In, Out, Recipient};
@@ -216,10 +217,10 @@ fn looks_like_phone(d: &DeviceInfo) -> bool {
 /// "Use Pixel 9 with Linksy over USB?" Some(answer), or None when dismissed.
 fn ask(name: &str) -> Option<bool> {
     let mut n = crate::notify::base(
-        &format!("{name} is plugged in"),
-        "Use it with Linksy over the cable? Its webcam and microphone get faster. File transfer by cable stops until you unplug it.",
+        &t!("{name} is plugged in", name),
+        t!("Use it with Linksy over the cable? Its webcam and microphone get faster. File transfer by cable stops until you unplug it."),
     );
-    n.action("connect", "Use Over USB").action("never", "Not This Phone");
+    n.action("connect", t!("Use Over USB")).action("never", t!("Not This Phone"));
     let handle = n.show().ok()?;
     let mut answer = None;
     handle.wait_for_action(|action| {

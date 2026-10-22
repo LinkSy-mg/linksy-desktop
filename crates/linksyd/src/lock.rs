@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use linksy_core::{DeviceInfo, Event, Fingerprint, Node};
+use linksy_i18n::t;
 use linksy_ipc::{LockPrefs, Shared};
 use tokio::sync::broadcast::error::RecvError;
 use tracing::{info, warn};
@@ -76,7 +77,7 @@ impl Away {
                         if lock_screen().await {
                             history.record_incoming(&device, Shared::Locked);
                             #[cfg(target_os = "linux")]
-                            crate::notify::show(format!("Locked because {} left", device.name), "It locks whenever it leaves. Change this on its page in Linksy.".into());
+                            crate::notify::show(t!("Locked because {device} left", device = device.name), t!("It locks whenever it leaves. Change this on its page in Linksy.").into());
                         }
                     }
                 }

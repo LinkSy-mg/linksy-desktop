@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use linksy_i18n::t;
 use linksy_ipc::{UpdateInfo, UpdatePrefs};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
@@ -175,11 +176,11 @@ impl Updates {
         #[cfg(target_os = "linux")]
         if self.notifications {
             let notes = self.state.lock().unwrap().latest.as_ref().and_then(|l| l.notes.clone());
-            let summary = format!("Linksy {version} is available");
+            let summary = t!("Linksy {version} is available", version);
             tokio::task::spawn_blocking(move || {
-                let mut n = crate::notify::base(&summary, "See what's new and how to update.");
+                let mut n = crate::notify::base(&summary, t!("See what's new and how to update."));
                 if notes.is_some() {
-                    n.action("default", "What's New").action("notes", "What's New");
+                    n.action("default", t!("What's New")).action("notes", t!("What's New"));
                 }
                 let Ok(handle) = n.show() else { return };
                 if let Some(url) = notes {

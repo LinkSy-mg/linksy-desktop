@@ -13,6 +13,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use linksy_core::{Event, Fingerprint, Node};
+use linksy_i18n::t;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -65,11 +66,11 @@ pub async fn run(node: Node, notifications: bool) {
                     #[cfg(target_os = "linux")]
                     if notifications {
                         let body = match (copied.is_ok(), image_type(&path)) {
-                            (true, Some(_)) => "Image ready to paste".to_string(),
-                            (true, None) => format!("{} ready to paste", file_name(&path)),
-                            (false, _) => format!("Couldn't copy {}", file_name(&path)),
+                            (true, Some(_)) => t!("Image ready to paste").to_string(),
+                            (true, None) => t!("{name} ready to paste", name = file_name(&path)),
+                            (false, _) => t!("Couldn't copy {name}", name = file_name(&path)),
                         };
-                        let _ = crate::notify::base(&format!("Copied from {from}"), &body).show();
+                        let _ = crate::notify::base(&t!("Copied from {device}", device = from), &body).show();
                     }
                 });
             }
@@ -162,13 +163,13 @@ fn announce(from: &str, text: &str, copied: bool) {
     if preview.len() < text.len() {
         preview = format!("{}…", preview.trim_end());
     }
-    let summary = if copied { format!("Copied from {from}") } else { format!("Clipboard from {from}") };
+    let summary = if copied { t!("Copied from {device}", device = from) } else { t!("Clipboard from {device}", device = from) };
     let mut n = crate::notify::base(&summary, &preview);
     if copied {
         let _ = n.show();
         return;
     }
-    n.action("default", "Copy").action("copy", "Copy");
+    n.action("default", t!("Copy")).action("copy", t!("Copy"));
     if let Ok(handle) = n.show() {
         handle.wait_for_action(|action| {
             if matches!(action, "default" | "copy") {
