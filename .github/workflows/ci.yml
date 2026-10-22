@@ -1,8 +1,19 @@
 name: CI
 
-# Manual only: builds and tests run on our machine (no Actions minutes).
+# Every pull request and every push to main: the repository is public, so Actions are free.
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
+
+# A newer push to the same branch or PR cancels the run still going.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,9 +27,11 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo test -p linksy-core
 
   service:
@@ -29,11 +42,12 @@ jobs:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
 
@@ -43,7 +57,7 @@ jobs:
     container: registry.fedoraproject.org/fedora:latest
     steps:
       - run: dnf install -y --setopt=install_weak_deps=False gcc git gtk4-devel libadwaita-devel gstreamer1-devel gstreamer1-plugins-base-devel rust cargo clippy
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: cargo clippy -p linksy-app -p linksy-screen -- -D warnings
 
   gtk-opensuse:
@@ -53,8 +67,9 @@ jobs:
     steps:
       # The toolchain comes from rustup (needs curl): openSUSE's rust packages don't carry clippy.
       - run: zypper --non-interactive install --no-recommends gcc git tar gzip curl gtk4-devel libadwaita-devel gstreamer-devel gstreamer-plugins-base-devel
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           components: clippy
       - run: cargo clippy -p linksy-app -p linksy-screen -- -D warnings
