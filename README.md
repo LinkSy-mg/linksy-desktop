@@ -148,8 +148,7 @@ Screenshots are in `docs/screenshots/`.
 
 ## License
 
-Linksy is freeware: free to use on all your devices, for personal or commercial use, and
-free to share unmodified, but not open source. See [LICENSE](LICENSE). The open-source
+Linksy is open source under the [MIT License](LICENSE). The open-source
 libraries it builds in are credited, with their licenses, in
 [THIRD-PARTY-NOTICES](THIRD-PARTY-NOTICES); regenerate it with
 `scripts/third-party-notices.py > THIRD-PARTY-NOTICES` after `Cargo.lock` changes.
