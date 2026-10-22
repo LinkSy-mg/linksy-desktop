@@ -13,7 +13,7 @@ grep -q "release version=\"$V\"" data/mg.diary.linksy.Linksy.metainfo.xml || { e
 [ -z "$(git status --porcelain)" ] || { echo "commit your changes first"; exit 1; }
 
 sed -i "s/^        tag: v.*/        tag: v$V/" packaging/flatpak/mg.diary.linksy.Linksy.yml
-if ! git diff --quiet; then git commit -qam "flatpak: build v$V"; fi
+if ! git diff --quiet; then git commit -qam "build(flatpak): build v$V"; fi
 
 scripts/package-linux.sh
 scripts/package-flatpak.sh >/dev/null
