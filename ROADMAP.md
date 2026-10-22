@@ -18,7 +18,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Problem logs (`logs.txt`) · Lighter at rest |
 | **0.10** | **At home on KDE** | A Qt 6 app for KDE Plasma, beside the GTK one |
 | **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply |
-| **0.12** | **No Wi-Fi needed** | Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
+| **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
 | **0.13** | **The cable, for real** | USB that works on every phone, end to end |
 | **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay |
 | **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth |
@@ -106,7 +106,36 @@ Builds on 0.5 (the Messages page and `sms_received`).
 - **Done when:** a text arrives on the computer within a second, and replying from the
   notification sends it from the phone.
 
-## 0.12 — No Wi-Fi needed
+## 0.12 — Fast on any link
+
+### Lower latency on every connection — L
+Linksy connects five ways: the local network, directly over the internet, through the
+relay, over Bluetooth and over the cable. Each gets measured and tuned, so screens, the
+touchpad and the webcam feel immediate.
+- **Measure:** round-trip time, frame delay (captured to shown) and input delay for each
+  way, written down so each release can compare.
+- **Video:** frames go as QUIC datagrams instead of a stream, so a lost packet drops one
+  frame instead of holding back the next ones. The bitrate follows the link (today a fixed
+  8 Mbit/s); low-latency decoding on the phone (`KEY_LOW_LATENCY`); late frames skipped.
+- **Input:** pointer moves as datagrams too, merged when they pile up.
+- **Paths:** a session moves to a better path while it runs: relay to direct to the local
+  network as soon as one works. Reconnecting after a network change or sleep happens at
+  once (network and mDNS events), not on the next 15-second retry. BBR congestion control
+  over the internet.
+- **Seen:** the device page shows how it's connected and the live delay, so a good link
+  shows.
+- **Done when:** on the local network, the phone's touch reaches the computer's screen and
+  back within 50 ms, and switching networks reconnects in under 2 seconds.
+
+### 60 fps screens — M
+Today screens run at up to 30 fps (the webcam already does 60).
+- **Both ways:** the computer's screen on the phone, controlling it, Sidecar, and the
+  phone's screen on the computer, at 60 fps where both ends can encode and decode it.
+- **Phone:** 60 fps decoding and display, and 60 fps capture of its own screen; asks the
+  display for its highest refresh rate while showing a screen.
+- **Falls back:** to 30 fps on a slow link or device, on its own.
+- **Done when:** scrolling a page on the computer is smooth on the phone, at 60 fps, on
+  the local network.
 
 ### Transfers with no shared network — M
 No Wi-Fi network around, or one that blocks devices from seeing each other (hotels,
