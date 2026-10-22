@@ -2,6 +2,35 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.8.0
+
+### Added
+- **Linksy speaks your language**: English, Deutsch, Español, Français, Italiano, 日本語,
+  Malagasy, Português, Русский and 中文, the same as Linksy for Android. It follows your
+  system, or choose one in Preferences.
+- **Connect by USB Cable**: a guide from a phone's page ("Faster by USB Cable") or the
+  main menu walks through each step live (allow the cable, plug in, switch, open Linksy
+  on the phone, connected) with a Connect button, instead of a notification that was
+  easy to miss.
+- **Microphone preview**: while a phone's microphone is on, its card shows how loud it is
+  right now, with Listen to hear it on this computer and Stop.
+
+### Changed
+- **Finish Setup works on KDE and other desktops**: it installs what's missing with your
+  system's own package tool (dnf, apt or pacman) in the same single password prompt,
+  turns on RPM Fusion on Fedora for the camera driver, and shows each step as it goes.
+  When Secure Boot holds the camera driver, it gives the exact steps and a code to type
+  at the next restart. "Prefer a Terminal?" shows the same setup as one command.
+- **Downloads from linksy.diary.mg** come from the site itself and resume when a
+  connection drops; APKs are named with their version.
+
+### Fixed
+- **Watching a screen failed with "gtk4paintablesink" missing** (KDE): GTK's video part
+  is now required by the .rpm and .deb, checked by Finish Setup, and the viewer offers
+  Finish Setup when a video part is missing.
+- **Stop on the webcam card could stop the microphone instead** (and the other way
+  round) when both were on.
+
 ## 0.7.2
 
 ### Fixed
