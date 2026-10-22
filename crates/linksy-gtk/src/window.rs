@@ -1091,7 +1091,7 @@ impl Window {
         let labels = gtk::Box::builder().orientation(gtk::Orientation::Vertical).valign(gtk::Align::Center).hexpand(true).build();
         labels.append(&name);
         labels.append(&kind);
-        let pair = gtk::Button::builder().label("Pair").valign(gtk::Align::Center).css_classes(["pill", "small"]).build();
+        let pair = gtk::Button::builder().label(t!("Pair")).valign(gtk::Align::Center).css_classes(["pill", "small"]).build();
         let id = d.device.id;
         let w = Rc::downgrade(self);
         pair.connect_clicked(move |b| {
