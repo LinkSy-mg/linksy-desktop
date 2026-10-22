@@ -263,7 +263,7 @@ impl Window {
         };
         let pipeline = match gst::parse::launch(&format!("{source} ! videoconvert ! gtk4paintablesink name=sink sync=false")) {
             Ok(p) => p,
-            Err(e) => return self.toast(&format!("Can't preview the camera: {e}")),
+            Err(_) => return self.missing_part_toast("Can't preview: a video part is missing"),
         };
         if let Some(paintable) = pipeline.downcast_ref::<gst::Bin>().and_then(|b| b.by_name("sink")).map(|s| s.property::<gdk::Paintable>("paintable")) {
             self.camera_picture.set_paintable(Some(&paintable));
@@ -346,6 +346,8 @@ struct Viewer {
     heading: adw::WindowTitle,
     control: gtk::ToggleButton,
     again: gtk::Button,
+    /// Finish Setup, when a part this computer lacks stopped the video.
+    fix: gtk::Button,
     /// Second displays: leave (the requester keeps its other screens).
     disconnect: gtk::Button,
     pipeline: Rc<RefCell<Option<gst::Element>>>,
@@ -369,7 +371,11 @@ impl Viewer {
             .css_classes(["screen-view"])
             .build();
         let again = gtk::Button::builder().label("Watch Again").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
-        let ended = adw::StatusPage::builder().icon_name("video-display-symbolic").child(&again).build();
+        let fix = gtk::Button::builder().label("Finish Setup").action_name("app.finish-setup").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).visible(false).build();
+        let ended_buttons = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).halign(gtk::Align::Center).build();
+        ended_buttons.append(&fix);
+        ended_buttons.append(&again);
+        let ended = adw::StatusPage::builder().icon_name("video-display-symbolic").child(&ended_buttons).build();
         let stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).build();
         stack.add_named(&waiting, Some("waiting"));
         stack.add_named(&picture, Some("video"));
@@ -441,6 +447,7 @@ impl Viewer {
             heading,
             control: control.clone(),
             again: again.clone(),
+            fix,
             disconnect: disconnect.clone(),
             pipeline: Rc::default(),
             watch: Rc::default(),
@@ -646,12 +653,10 @@ impl Viewer {
             *self.input.borrow_mut() = Some(input);
         }
         let socket = OwnedFd::from(stream);
-        let Some(decoder) = decoder() else {
-            return self.ended(
-                "Can't Play This Screen",
-                "This computer has no H.264 video decoder. Install gstreamer1-plugin-openh264 (or gstreamer1-plugin-libav) and try again.",
-            );
-        };
+        let Some(decoder) = decoder() else { return self.missing_part() };
+        if gst::ElementFactory::find("gtk4paintablesink").is_none() {
+            return self.missing_part();
+        }
         let description = format!("fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! gtk4paintablesink name=sink sync=false", socket.as_raw_fd());
         let pipeline = match gst::parse::launch(&description) {
             Ok(p) => p,
@@ -674,10 +679,7 @@ impl Viewer {
             match msg.view() {
                 gst::MessageView::StateChanged(s) if s.current() == gst::State::Playing => v.playing(),
                 gst::MessageView::Eos(_) => v.ended("Sharing Stopped", &format!("{} stopped sharing its screen.", v.name)),
-                gst::MessageView::Error(e) if e.error().matches(gst::CoreError::MissingPlugin) => v.ended(
-                    "Can't Play This Screen",
-                    "This computer has no H.264 video decoder. Install gstreamer1-plugin-openh264 (or gstreamer1-plugin-libav) and try again.",
-                ),
+                gst::MessageView::Error(e) if e.error().matches(gst::CoreError::MissingPlugin) => v.missing_part(),
                 gst::MessageView::Error(e) => v.ended("Sharing Stopped", &format!("The stream ended: {}", e.error())),
                 _ => {}
             }
@@ -708,7 +710,15 @@ impl Viewer {
         }
     }
 
+    /// A video part this computer lacks (the H.264 decoder, GTK's video sink): Finish
+    /// Setup adds it.
+    fn missing_part(&self) {
+        self.ended("Can't Show This Screen", "This computer is missing a video part Linksy needs. Finish Setup adds it, then watch again.");
+        self.fix.set_visible(true);
+    }
+
     fn ended(&self, title: &str, description: &str) {
+        self.fix.set_visible(false);
         let display = self.kind.get() == SessionKind::Display;
         self.stop();
         let (title, description) = if display && title == "Sharing Stopped" {

@@ -259,6 +259,16 @@ fn main() -> glib::ExitCode {
     });
     app.add_action(&about);
 
+    // From any window (a screen viewer missing a video part): the main window's Finish Setup.
+    let finish = gio::SimpleAction::new("finish-setup", None);
+    let (a, w) = (app.clone(), window.clone());
+    finish.connect_activate(move |_, _| {
+        let win = main_window(&a, &w);
+        win.window.present();
+        win.show_setup();
+    });
+    app.add_action(&finish);
+
     let open_dl = gio::SimpleAction::new("open-downloads", None);
     let w = window.clone();
     open_dl.connect_activate(move |_, _| {

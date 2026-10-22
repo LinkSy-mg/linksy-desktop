@@ -1563,6 +1563,12 @@ impl Window {
         toast.set_timeout(3);
         self.toasts.add_toast(toast);
     }
+
+    /// Something failed for a part this computer lacks: say so, with Finish Setup.
+    pub(super) fn missing_part_toast(&self, text: &str) {
+        let toast = adw::Toast::builder().title(glib::markup_escape_text(text)).button_label("Finish Setup").action_name("win.setup").timeout(8).build();
+        self.toasts.add_toast(toast);
+    }
 }
 
 fn main_menu() -> gtk::MenuButton {
