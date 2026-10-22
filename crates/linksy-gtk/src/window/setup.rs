@@ -1,11 +1,12 @@
 //! Finish Setup: the system pieces some features need and a distribution may not have
-//! (the webcam in every app, fast video, screen sharing, the clipboard, an open firewall,
+//! (the webcam in every app, video, screen sharing, the clipboard, an open firewall,
 //! starting with the computer), what's missing, and one click to add it all ("Set Up
-//! Everything"), or each on its own. Installing goes through PackageKit (GNOME Software
-//! asks to confirm and for the password); what needs root (the camera device, USB access
-//! for phones, the firewall) is done by `linksy-system-setup` with pkexec, in one go, so
-//! the computer asks for the password once. It opens by itself the first time each
-//! version of Linksy starts with something missing.
+//! Everything"), or each on its own. Everything that needs root, installing packages
+//! included, is done by `linksy-system-setup` with pkexec, in one go: the computer asks
+//! for the password once, on any desktop (GNOME, KDE or other), with the distribution's
+//! own package tool (dnf, apt, pacman). The same command is shown to run in a terminal
+//! instead. It opens by itself the first time each version of Linksy starts with
+//! something missing.
 
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -27,8 +28,8 @@ pub struct Item {
 #[derive(Clone, PartialEq)]
 pub enum Need {
     Ready,
-    /// Distribution packages that bring it.
-    Install(Vec<&'static str>),
+    /// Distribution packages that bring it (then, for the camera, the device is made).
+    Install(Vec<String>),
     /// Installed, but the camera device still has to be made (as root).
     SetUp,
     /// Nothing Linksy can do from here; what to do instead.
@@ -39,6 +40,7 @@ pub enum Need {
 enum Family {
     Fedora,
     Debian,
+    Arch,
     Other,
 }
 
@@ -54,6 +56,8 @@ fn family() -> Family {
         Family::Fedora
     } else if ids.iter().any(|i| matches!(*i, "debian" | "ubuntu")) {
         Family::Debian
+    } else if ids.iter().any(|i| *i == "arch") {
+        Family::Arch
     } else {
         Family::Other
     }
@@ -61,6 +65,30 @@ fn family() -> Family {
 
 fn flatpak() -> bool {
     std::env::var_os("FLATPAK_ID").is_some()
+}
+
+/// Fedora Atomic (Silverblue, Kinoite): packages are layered with rpm-ostree, then a restart.
+fn atomic() -> bool {
+    std::path::Path::new("/run/ostree-booted").exists()
+}
+
+/// The running kernel's version (`uname -r`).
+fn kernel() -> String {
+    std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default().trim().to_string()
+}
+
+/// The camera driver's packages; a driver built here (DKMS) needs the kernel's headers.
+fn loopback_packages(fam: Family) -> Vec<String> {
+    let k = kernel();
+    match fam {
+        Family::Fedora => vec!["akmod-v4l2loopback".into(), "v4l2loopback".into()],
+        Family::Debian => vec!["v4l2loopback-dkms".into(), "v4l2loopback-utils".into(), format!("linux-headers-{k}")],
+        Family::Arch => {
+            let headers = ["lts", "zen", "hardened"].iter().find(|f| k.ends_with(*f)).map_or("linux-headers".to_string(), |f| format!("linux-{f}-headers"));
+            vec!["v4l2loopback-dkms".into(), "v4l2loopback-utils".into(), headers]
+        }
+        Family::Other => Vec::new(),
+    }
 }
 
 fn has_element(names: &[&str]) -> bool {
@@ -167,10 +195,14 @@ fn loopback_installed() -> bool {
 /// What this computer has and lacks, right now.
 pub fn check() -> Vec<Item> {
     let fam = family();
-    let pick = |fedora: Vec<&'static str>, debian: Vec<&'static str>, manual: &'static str| match fam {
-        Family::Fedora => Need::Install(fedora),
-        Family::Debian => Need::Install(debian),
-        Family::Other => Need::Manual(manual),
+    let pick = |fedora: &[&str], debian: &[&str], arch: &[&str], manual: &'static str| {
+        let names = match fam {
+            Family::Fedora => fedora,
+            Family::Debian => debian,
+            Family::Arch => arch,
+            Family::Other => return Need::Manual(manual),
+        };
+        Need::Install(names.iter().map(|n| n.to_string()).collect())
     };
     let camera = if camera_device().is_some() {
         Need::Ready
@@ -178,8 +210,10 @@ pub fn check() -> Vec<Item> {
         Need::Manual("A Flatpak can't add this. Install Linksy's .deb or .rpm instead, or v4l2loopback and run linksy-camera-setup once.")
     } else if loopback_installed() {
         Need::SetUp
+    } else if fam == Family::Other {
+        Need::Manual("Install v4l2loopback from your distribution, then come back here.")
     } else {
-        pick(vec!["v4l2loopback", "akmod-v4l2loopback"], vec!["v4l2loopback-dkms", "v4l2loopback-utils"], "Install v4l2loopback from your distribution, then come back here.")
+        Need::Install(loopback_packages(fam))
     };
     let mut items = vec![Item {
         id: "camera",
@@ -199,36 +233,47 @@ pub fn check() -> Vec<Item> {
     }
     // In a Flatpak, codecs and tools come with the runtime and the app.
     if !flatpak() {
-        let video = has_element(&["avdec_h264", "vah264dec", "openh264dec"]) && has_element(&["vah264lpenc", "vah264enc", "x264enc", "openh264enc"]);
+        // H.264 both ways, and GTK's video sink to show it in a window.
+        let (mut fedora, mut debian, mut arch) = (Vec::new(), Vec::new(), Vec::new());
+        if !(has_element(&["avdec_h264", "vah264dec", "openh264dec"]) && has_element(&["vah264lpenc", "vah264enc", "x264enc", "openh264enc"])) {
+            fedora.extend(["gstreamer1-plugin-openh264", "gstreamer1-plugin-libav"]);
+            debian.extend(["gstreamer1.0-libav", "gstreamer1.0-plugins-ugly"]);
+            arch.extend(["gst-libav", "gst-plugins-ugly"]);
+        }
+        if !has_element(&["gtk4paintablesink"]) {
+            fedora.push("gstreamer1-plugin-gtk4");
+            debian.push("gstreamer1.0-gtk4");
+            arch.push("gst-plugin-gtk4");
+        }
         items.push(Item {
             id: "video",
             title: "Video for Screens and Cameras",
-            why: "H.264, to send and show screens, second displays and the phone's camera.",
-            need: if video {
-                Need::Ready
-            } else {
-                pick(vec!["gstreamer1-plugin-openh264", "gstreamer1-plugin-libav"], vec!["gstreamer1.0-libav", "gstreamer1.0-plugins-ugly"], "Install the GStreamer H.264 plugins (openh264 or libav) from your distribution.")
-            },
+            why: "To send and show screens, second displays and the phone's camera.",
+            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, "Install GStreamer's H.264 plugins (openh264 or libav) and its GTK 4 video sink (gtk4paintablesink) from your distribution.") },
         });
-        let mut packages = Vec::new();
+        let (mut fedora, mut debian, mut arch) = (Vec::new(), Vec::new(), Vec::new());
         if !has_element(&["pipewiresrc"]) {
-            packages.push(if fam == Family::Debian { "gstreamer1.0-pipewire" } else { "pipewire-gstreamer" });
+            fedora.push("pipewire-gstreamer");
+            debian.push("gstreamer1.0-pipewire");
+            arch.push("gst-plugin-pipewire");
         }
         if !screencast_portal() {
-            packages.push(portal_package());
+            for list in [&mut fedora, &mut debian, &mut arch] {
+                list.push(portal_package());
+            }
         }
         items.push(Item {
             id: "pipewire",
             title: "Screen Sharing",
             why: "Reading this computer's screen, and offering the phone's camera to apps.",
-            need: if packages.is_empty() { Need::Ready } else { pick(packages.clone(), packages, "Install PipeWire's GStreamer plugin and your desktop's screen sharing portal.") },
+            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, "Install PipeWire's GStreamer plugin and your desktop's screen sharing portal.") },
         });
         let clip = in_path("wl-copy") || in_path("xclip") || in_path("xsel");
         items.push(Item {
             id: "clipboard",
             title: "Clipboard From Your Phone",
             why: "Putting text your phone shares on this computer's clipboard while Linksy's window is closed.",
-            need: if clip { Need::Ready } else { pick(vec!["wl-clipboard"], vec!["wl-clipboard"], "Install wl-clipboard.") },
+            need: if clip { Need::Ready } else { pick(&["wl-clipboard"], &["wl-clipboard"], &["wl-clipboard"], "Install wl-clipboard.") },
         });
         if let Some(need) = firewall_need() {
             items.push(Item {
@@ -250,14 +295,10 @@ pub fn check() -> Vec<Item> {
     items
 }
 
-/// What "Set Up Everything" can do from here (not the things to do by hand).
+/// What "Set Up Everything" can do from here (not the things to do by hand). On Fedora
+/// Atomic, packages are for rpm-ostree, in a terminal.
 fn actionable(items: &[Item]) -> Vec<Item> {
-    items.iter().filter(|i| matches!(i.need, Need::Install(_) | Need::SetUp)).cloned().collect()
-}
-
-/// The root part of an item, as a `linksy-system-setup` task.
-fn root_task(item: &Item) -> Option<&'static str> {
-    matches!(item.id, "camera" | "usb" | "firewall").then_some(item.id)
+    items.iter().filter(|i| matches!(i.need, Need::SetUp) || (matches!(i.need, Need::Install(_)) && !atomic())).cloned().collect()
 }
 
 /// How many things are missing (what the sidebar's Finish Setup shows).
@@ -273,31 +314,99 @@ fn setup_script(name: &str) -> Option<PathBuf> {
     [dir.join(name), PathBuf::from("/usr/libexec/linksy").join(name), dir.join("../../data").join(name)].into_iter().find(|p| p.is_file())
 }
 
-/// Do `tasks` as root (one password for all of them); a message on failure.
-async fn run_as_root(tasks: &[&str]) -> Result<(), String> {
-    let script = setup_script("linksy-system-setup").ok_or("Linksy's setup helper is missing; reinstall Linksy.")?;
+/// What `linksy-system-setup` gets to set up `items` as root, in one run: RPM Fusion when
+/// Fedora's camera driver needs it, the packages, then the camera, USB and firewall.
+fn root_args(items: &[Item]) -> Vec<String> {
+    let packages: Vec<String> = items.iter().flat_map(|i| if let Need::Install(p) = &i.need { p.clone() } else { Vec::new() }).collect();
+    let mut args = Vec::new();
+    if family() == Family::Fedora && packages.iter().any(|p| p.contains("v4l2loopback")) && !std::path::Path::new("/etc/yum.repos.d/rpmfusion-free.repo").exists() {
+        args.push("rpmfusion".to_string());
+    }
+    args.extend(packages.iter().map(|p| format!("pkg:{p}")));
+    args.extend(items.iter().filter(|i| matches!(i.id, "camera" | "usb" | "firewall")).map(|i| i.id.to_string()));
+    args
+}
+
+/// The same as Set Up Everything, to run in a terminal: for whoever prefers to, or when
+/// the password dialog can't appear.
+fn terminal_command(items: &[Item]) -> Option<String> {
+    if atomic() {
+        let packages: Vec<String> = items.iter().flat_map(|i| if let Need::Install(p) = &i.need { p.clone() } else { Vec::new() }).collect();
+        return (!packages.is_empty()).then(|| format!("sudo rpm-ostree install {} && systemctl reboot", packages.join(" ")));
+    }
+    let args = root_args(&actionable(items));
+    let script = setup_script("linksy-system-setup")?;
+    let mut command = if args.is_empty() { String::new() } else { format!("sudo {} {}", script.display(), args.join(" ")) };
+    if items.iter().any(|i| i.id == "autostart" && i.need != Need::Ready) {
+        command = [command, "systemctl --user enable --now linksyd.service".into()].iter().filter(|c| !c.is_empty()).cloned().collect::<Vec<_>>().join(" && ");
+    }
+    (!command.is_empty()).then_some(command)
+}
+
+/// Why setting up stopped.
+enum Failure {
+    Message(String),
+    /// The camera driver waits for Secure Boot's approval at the next restart; with the
+    /// code to type in the blue screen then, when there is one.
+    Restart(Option<String>),
+}
+
+/// Run `linksy-system-setup` as root (one password for all of it), showing each step.
+async fn run_as_root(args: &[String], progress: &gtk::Label) -> Result<(), Failure> {
+    let script = setup_script("linksy-system-setup").ok_or_else(|| Failure::Message("Linksy's setup helper is missing; reinstall Linksy.".into()))?;
     let mut argv = vec![std::ffi::OsStr::new("pkexec"), script.as_os_str()];
-    argv.extend(tasks.iter().map(std::ffi::OsStr::new));
-    let out = gio::Subprocess::newv(&argv, gio::SubprocessFlags::STDERR_PIPE).map_err(|e| e.to_string())?;
-    let (_, err) = out.communicate_utf8_future(None).await.map_err(|e| e.to_string())?;
-    match out.exit_status() {
+    argv.extend(args.iter().map(std::ffi::OsStr::new));
+    let run = gio::Subprocess::newv(&argv, gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_MERGE).map_err(|e| Failure::Message(e.to_string()))?;
+    let lines = gio::DataInputStream::new(&run.stdout_pipe().expect("stdout pipe"));
+    let (mut enroll, mut last) = (None, std::collections::VecDeque::new());
+    progress.set_label("Waiting for your password…");
+    progress.set_visible(true);
+    while let Ok(Some(line)) = lines.read_line_utf8_future(glib::Priority::DEFAULT).await {
+        if let Some(step) = line.strip_prefix("STEP ") {
+            progress.set_label(&format!("{step}…"));
+        } else if let Some(code) = line.strip_prefix("ENROLL ") {
+            enroll = Some(code.trim().to_string());
+        } else if !line.trim().is_empty() {
+            last.push_back(line.trim().to_string());
+            if last.len() > 3 {
+                last.pop_front();
+            }
+        }
+    }
+    let _ = run.wait_future().await;
+    progress.set_visible(false);
+    match run.exit_status() {
         0 => Ok(()),
-        4 => Err("Restart your computer to approve the new camera driver (Secure Boot asks once), then set it up again.".into()),
-        126 | 127 => Err("Not set up: the password wasn't given.".into()),
-        _ => Err(format!("Setup didn't finish: {}", err.map(|e| e.trim().to_string()).unwrap_or_default())),
+        4 => Err(Failure::Restart(enroll)),
+        126 | 127 => Err(Failure::Message("Not set up: the password wasn't given.".into())),
+        _ => Err(Failure::Message(format!("Setup didn't finish: {}", last.into_iter().collect::<Vec<_>>().join(" ")))),
     }
 }
 
 /// Turn on the background service at every login (no password: it's the user's own).
-async fn enable_autostart() -> Result<(), String> {
-    let run = gio::Subprocess::newv(&["systemctl".as_ref(), "--user".as_ref(), "enable".as_ref(), "--now".as_ref(), "linksyd.service".as_ref()], gio::SubprocessFlags::STDERR_SILENCE).map_err(|e| e.to_string())?;
-    run.wait_future().await.map_err(|e| e.to_string())?;
-    if run.exit_status() == 0 { Ok(()) } else { Err("Couldn't turn on starting with your computer.".into()) }
+async fn enable_autostart() -> Result<(), Failure> {
+    let failed = || Failure::Message("Couldn't turn on starting with your computer.".into());
+    let run = gio::Subprocess::newv(&["systemctl".as_ref(), "--user".as_ref(), "enable".as_ref(), "--now".as_ref(), "linksyd.service".as_ref()], gio::SubprocessFlags::STDERR_SILENCE).map_err(|_| failed())?;
+    run.wait_future().await.map_err(|_| failed())?;
+    if run.exit_status() == 0 { Ok(()) } else { Err(failed()) }
 }
 
 /// Where Linksy notes which version last offered Finish Setup by itself.
 fn offered_file() -> PathBuf {
     glib::user_config_dir().join("linksy").join("setup-offered")
+}
+
+/// The parts of the Finish Setup dialog that change as things get set up.
+#[derive(Clone)]
+struct SetupView {
+    dialog: adw::Dialog,
+    list: gtk::ListBox,
+    toasts: adw::ToastOverlay,
+    everything: gtk::Button,
+    progress: gtk::Label,
+    /// "Prefer a Terminal?", in its own list.
+    terminal: gtk::ListBox,
+    command: gtk::Label,
 }
 
 impl Window {
@@ -322,56 +431,65 @@ impl Window {
         self.show_setup();
     }
 
-    pub(super) fn show_setup(self: &Rc<Self>) {
-        let dialog = adw::Dialog::builder().title("Finish Setup").content_width(520).build();
+    pub fn show_setup(self: &Rc<Self>) {
+        let dialog = adw::Dialog::builder().title("Finish Setup").content_width(560).build();
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         let intro = gtk::Label::builder()
-            .label("A few parts of your system make every feature work. Linksy can add what's missing in one go; your computer asks for your password once.")
+            .label("A few parts of your system make every feature work. Linksy adds what's missing in one go; your computer asks for your password once.")
             .wrap(true)
             .xalign(0.0)
             .css_classes(["dim-label"])
             .build();
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).margin_top(6).margin_bottom(24).margin_start(24).margin_end(24).build();
         let everything = gtk::Button::builder().label("Set Up Everything").halign(gtk::Align::Center).css_classes(["pill", "suggested-action"]).build();
+        let progress = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).css_classes(["dim-label"]).visible(false).build();
+        // The same, by hand: one command to paste in a terminal.
+        let command = gtk::Label::builder().wrap(true).wrap_mode(gtk::pango::WrapMode::Char).selectable(true).xalign(0.0).css_classes(["monospace"]).margin_top(12).margin_bottom(12).margin_start(12).margin_end(12).build();
+        let copy = gtk::Button::builder().icon_name("edit-copy-symbolic").tooltip_text("Copy").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let terminal = adw::ExpanderRow::builder().title("Prefer a Terminal?").subtitle("Run this instead, then reopen Finish Setup").build();
+        terminal.add_suffix(&copy);
+        terminal.add_row(&command);
+        let terminal_list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
+        terminal_list.append(&terminal);
         body.append(&intro);
         body.append(&everything);
+        body.append(&progress);
         body.append(&list);
+        body.append(&terminal_list);
+        let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).child(&body).build();
         let view = adw::ToolbarView::new();
         view.add_top_bar(&adw::HeaderBar::new());
-        view.set_content(Some(&body));
+        view.set_content(Some(&scroller));
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&view));
         dialog.set_child(Some(&toasts));
-        self.fill_setup(&list, &toasts, &everything);
-        let (w, l, t, e) = (self.clone(), list.clone(), toasts.clone(), everything.clone());
-        everything.connect_clicked(move |b| {
-            b.set_sensitive(false);
-            b.set_child(Some(&adw::Spinner::new()));
-            let (w, l, t, e) = (w.clone(), l.clone(), t.clone(), e.clone());
-            glib::spawn_future_local(async move {
-                match w.fix_all(&actionable(&check())).await {
-                    Ok(()) => t.add_toast(adw::Toast::new("All set")),
-                    Err(err) => t.add_toast(adw::Toast::builder().title(glib::markup_escape_text(&err)).timeout(8).build()),
-                }
-                e.set_label("Set Up Everything");
-                e.set_sensitive(true);
-                w.fill_setup(&l, &t, &e);
-                w.refresh_setup();
-            });
+        let v = SetupView { dialog: dialog.clone(), list, toasts, everything: everything.clone(), progress, terminal: terminal_list.clone(), command: command.clone() };
+        let c = command.clone();
+        copy.connect_clicked(move |b| {
+            b.clipboard().set_text(&c.label());
+            b.set_icon_name("object-select-symbolic");
         });
+        self.fill_setup(&v);
+        let (w, view) = (self.clone(), v.clone());
+        everything.connect_clicked(move |_| w.clone().fix(view.clone(), actionable(&check())));
         let w = self.clone();
         dialog.connect_closed(move |_| w.refresh_setup());
         dialog.present(Some(&self.window));
     }
 
-    fn fill_setup(self: &Rc<Self>, list: &gtk::ListBox, toasts: &adw::ToastOverlay, everything: &gtk::Button) {
-        while let Some(row) = list.first_child() {
-            list.remove(&row);
+    fn fill_setup(self: &Rc<Self>, v: &SetupView) {
+        while let Some(row) = v.list.first_child() {
+            v.list.remove(&row);
         }
         let items = check();
-        everything.set_visible(actionable(&items).len() > 1);
+        v.everything.set_visible(actionable(&items).len() > 1);
+        v.everything.set_sensitive(true);
+        v.everything.set_label("Set Up Everything");
+        let command = terminal_command(&items);
+        v.terminal.set_visible(command.is_some());
+        v.command.set_label(command.as_deref().unwrap_or_default());
         for item in items {
-            let row = adw::ActionRow::builder().title(item.title).subtitle(item.why).subtitle_lines(3).build();
+            let row = adw::ActionRow::builder().title(item.title).subtitle(item.why).subtitle_lines(4).build();
             match &item.need {
                 Need::Ready => {
                     let ok = gtk::Image::builder().icon_name("object-select-symbolic").css_classes(["success"]).tooltip_text("Ready").build();
@@ -381,89 +499,63 @@ impl Window {
                     row.set_subtitle(&glib::markup_escape_text(&format!("{} {what}", item.why)));
                     row.add_prefix(&gtk::Image::builder().icon_name("dialog-information-symbolic").css_classes(["dim-label"]).build());
                 }
+                Need::Install(_) if atomic() => {
+                    row.set_subtitle(&glib::markup_escape_text(&format!("{} On Fedora Atomic: the command at the bottom, then restart.", item.why)));
+                    row.add_prefix(&gtk::Image::builder().icon_name("dialog-information-symbolic").css_classes(["dim-label"]).build());
+                }
                 need => {
                     let label = if matches!(need, Need::SetUp) { "Set Up" } else { "Install" };
                     let button = gtk::Button::builder().label(label).valign(gtk::Align::Center).css_classes(["suggested-action"]).build();
                     row.add_suffix(&button);
-                    let (w, list, toasts, item, everything) = (self.clone(), list.clone(), toasts.clone(), item.clone(), everything.clone());
+                    let (w, v, item) = (self.clone(), v.clone(), item.clone());
                     button.connect_clicked(move |b| {
                         b.set_sensitive(false);
                         b.set_child(Some(&adw::Spinner::new()));
-                        let (w, list, toasts, item, everything) = (w.clone(), list.clone(), toasts.clone(), item.clone(), everything.clone());
-                        glib::spawn_future_local(async move {
-                            let result = w.fix_all(std::slice::from_ref(&item)).await;
-                            if let Err(e) = result {
-                                toasts.add_toast(adw::Toast::builder().title(glib::markup_escape_text(&e)).timeout(8).build());
-                            }
-                            w.fill_setup(&list, &toasts, &everything);
-                            w.refresh_setup();
-                        });
+                        w.clone().fix(v.clone(), vec![item.clone()]);
                     });
                 }
             }
-            list.append(&row);
+            v.list.append(&row);
         }
     }
 
-    /// Set up `items`: every package in one install, then everything that needs root in
-    /// one run (one password), then what the user's own account does.
-    async fn fix_all(self: &Rc<Self>, items: &[Item]) -> Result<(), String> {
-        let packages: Vec<&'static str> = items.iter().flat_map(|i| if let Need::Install(p) = &i.need { p.clone() } else { Vec::new() }).collect();
-        if !packages.is_empty() {
-            install(&self.window, &packages).await?;
-        }
-        let tasks: Vec<&str> = items.iter().filter_map(root_task).collect();
-        if !tasks.is_empty() {
-            run_as_root(&tasks).await?;
-        }
-        if items.iter().any(|i| i.id == "autostart") {
-            enable_autostart().await?;
-        }
-        Ok(())
+    /// Set up `items` (everything that needs root in one run, one password; then what the
+    /// user's own account does), then show what's left.
+    fn fix(self: Rc<Self>, v: SetupView, items: Vec<Item>) {
+        v.everything.set_sensitive(false);
+        v.everything.set_child(Some(&adw::Spinner::new()));
+        glib::spawn_future_local(async move {
+            let args = root_args(&items);
+            let mut result = if args.is_empty() { Ok(()) } else { run_as_root(&args, &v.progress).await };
+            if result.is_ok() && items.iter().any(|i| i.id == "autostart") {
+                result = enable_autostart().await;
+            }
+            match result {
+                Ok(()) => v.toasts.add_toast(adw::Toast::new("All set")),
+                Err(Failure::Message(err)) => v.toasts.add_toast(adw::Toast::builder().title(glib::markup_escape_text(&err)).timeout(10).build()),
+                Err(Failure::Restart(code)) => self.ask_restart(&v.dialog, code.as_deref()),
+            }
+            self.fill_setup(&v);
+            self.refresh_setup();
+        });
     }
-}
 
-/// Install distribution packages: through GNOME Software (or whatever answers PackageKit's
-/// session interface), else PackageKit's command line, which also asks for the password.
-async fn install(window: &adw::ApplicationWindow, packages: &[&'static str]) -> Result<(), String> {
-    let names: Vec<String> = packages.iter().map(|p| p.to_string()).collect();
-    let bus = window.application().and_then(|a| a.dbus_connection()).ok_or("no session bus")?;
-    let asked = bus
-        .call_future(
-            Some("org.freedesktop.PackageKit"),
-            "/org/freedesktop/PackageKit",
-            "org.freedesktop.PackageKit.Modify",
-            "InstallPackageNames",
-            Some(&(0u32, names.clone(), "hide-finished").to_variant()),
-            None,
-            gio::DBusCallFlags::NONE,
-            -1,
-        )
-        .await;
-    match asked {
-        Ok(_) => return Ok(()),
-        // Cancelled in the store's dialog: say so, don't fall through.
-        Err(e) if e.to_string().contains("Cancelled") || e.to_string().contains("cancelled") => return Err("Not installed: cancelled.".into()),
-        // Nothing answers PackageKit's session interface: try its command line.
-        Err(_) => {}
+    /// Secure Boot holds the new camera driver until it's approved at the next restart:
+    /// the exact steps, and the code to type.
+    fn ask_restart(&self, parent: &adw::Dialog, code: Option<&str>) {
+        let steps = match code {
+            Some(code) => format!(
+                "Secure Boot asks you to approve the camera driver once.\n\n1. Restart your computer.\n2. A blue screen appears: choose Enroll MOK, then Continue, then Yes.\n3. Type this code: {code}\n4. Choose Reboot.\n\nLinksy Camera is then ready, nothing else to do. Write the code down: it's needed on that blue screen."
+            ),
+            None => "Restart your computer to finish. If a blue screen appears, choose Enroll MOK, then Continue, Yes, and Reboot. Then open Finish Setup again.".to_string(),
+        };
+        let alert = adw::AlertDialog::builder().heading("Restart to Finish").body(steps).build();
+        alert.add_responses(&[("later", "Later"), ("restart", "Restart Now")]);
+        alert.set_response_appearance("restart", adw::ResponseAppearance::Suggested);
+        alert.set_default_response(Some("later"));
+        alert.connect_response(Some("restart"), |_, _| {
+            let _ = gio::Subprocess::newv(&["systemctl".as_ref(), "reboot".as_ref()], gio::SubprocessFlags::NONE);
+        });
+        alert.present(Some(parent));
     }
-    let mut argv: Vec<String> = vec!["pkcon".into(), "install".into(), "-y".into()];
-    argv.extend(names.iter().cloned());
-    let args: Vec<&std::ffi::OsStr> = argv.iter().map(std::ffi::OsStr::new).collect();
-    let run = gio::Subprocess::newv(&args, gio::SubprocessFlags::STDERR_PIPE | gio::SubprocessFlags::STDOUT_SILENCE).map_err(|_| manual(&names))?;
-    let (_, err) = run.communicate_utf8_future(None).await.map_err(|e| e.to_string())?;
-    if run.exit_status() == 0 {
-        Ok(())
-    } else {
-        let err = err.unwrap_or_default();
-        if err.contains("not found") || err.contains("No packages") {
-            Err(format!("Couldn't find {} in your software sources. On Fedora it's in RPM Fusion (rpmfusion.org).", names.join(", ")))
-        } else {
-            Err(manual(&names))
-        }
-    }
-}
-
-fn manual(names: &[String]) -> String {
-    format!("Couldn't install automatically. In a terminal: install {}", names.join(" "))
 }
