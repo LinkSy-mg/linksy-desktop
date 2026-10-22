@@ -1296,3 +1296,7 @@ robust against any encoder (GPU ones may slice too):
   127.0.0.1:P"; `connectAddress` is called and its error; the first `output.write`. The
   desktop logs "USB link: first packet from the phone" as soon as one arrives.
 
+- **2026-10-22** — Desktop 0.8.3, nothing to change on the phone: a `control` request no
+  longer fails at once when the computer's remembered screen choice went stale (it asks
+  again); screen sharing works on GPUs whose low-power encoder can't keep a constant
+  bitrate (Intel Kaby Lake).
