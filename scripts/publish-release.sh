@@ -36,6 +36,8 @@ NOTES
   cat "$D/notes.md"
 } > "$D/release-notes.md"
 
+# Others push here too: catch up first.
+git pull -q --rebase origin main
 git push -q origin main
 git tag -a "v$V" -m "Linksy $V"
 git push -q origin "v$V"
