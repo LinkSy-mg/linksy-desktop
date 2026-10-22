@@ -10,6 +10,7 @@ License:        LicenseRef-Linksy-Freeware
 URL:            https://github.com/LinkSy-mg/linksy-releases
 ExclusiveArch:  x86_64
 Requires:       gstreamer1-plugins-good
+Requires:       gstreamer1-plugin-gtk4
 Requires:       pipewire-gstreamer
 Requires:       xdg-desktop-portal
 Recommends:     gstreamer1-plugin-openh264
