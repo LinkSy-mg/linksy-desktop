@@ -53,6 +53,9 @@ pub struct Usb {
     plugged: Arc<Mutex<HashMap<DeviceId, (DeviceInfo, UsbPhone)>>>,
     /// Phones' names by key, to name one back in accessory mode (it shows Google's ids).
     names: Arc<Mutex<HashMap<String, String>>>,
+    /// Phones whose app never answered over the cable (Android gives up on the accessory
+    /// after a few seconds): not switched again by themselves, which would loop.
+    unanswered: Arc<Mutex<std::collections::HashSet<String>>>,
     watching: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -86,6 +89,7 @@ impl Usb {
             ask,
             plugged: Arc::default(),
             names: Arc::default(),
+            unanswered: Arc::default(),
             watching: Arc::default(),
         }
     }
@@ -121,6 +125,7 @@ impl Usb {
     pub async fn connect(&self, key: &str) -> Result<(), String> {
         let found = self.plugged.lock().unwrap().iter().find(|(_, (_, p))| p.key == key).map(|(id, (d, _))| (*id, d.clone()));
         let (id, d) = found.ok_or("that phone isn't plugged in anymore")?;
+        self.unanswered.lock().unwrap().remove(key);
         self.choices.lock().unwrap().set(key.to_string(), true);
         self.switch(id, &d).await
     }
@@ -148,10 +153,14 @@ impl Usb {
             // Most phones keep their serial in accessory mode: name it as before.
             let name = self.names.lock().unwrap().get(&key).cloned().unwrap_or_else(|| "Your phone".into());
             let id = d.id();
-            self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key, name, state: UsbState::Accessory, error: None }));
+            self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name, state: UsbState::Accessory, error: None }));
             tokio::spawn(async move {
                 match bridge(&d, self.node.local_addr().map(|a| a.port()).unwrap_or(0)).await {
-                    Ok(()) => info!("USB link ended"),
+                    Ok(0) => {
+                        info!("USB link ended: the phone app never answered");
+                        self.unanswered.lock().unwrap().insert(key);
+                    }
+                    Ok(_) => info!("USB link ended"),
                     Err(e) => {
                         warn!("USB link: {e}");
                         self.set_state(id, UsbState::Failed, Some(e));
@@ -166,11 +175,17 @@ impl Usb {
         let name = d.product_string().unwrap_or("A phone").to_string();
         self.names.lock().unwrap().insert(key.clone(), name.clone());
         let choice = self.choices.lock().unwrap().phones.get(&key).copied();
-        let state = if choice == Some(false) { UsbState::Declined } else { UsbState::Plugged };
+        let unanswered = self.unanswered.lock().unwrap().contains(&key);
+        let (state, error) = match choice {
+            _ if unanswered => (UsbState::Failed, Some("Linksy on the phone didn't take the cable. Open Linksy on the phone first".to_string())),
+            Some(false) => (UsbState::Declined, None),
+            _ => (UsbState::Plugged, None),
+        };
         let id = d.id();
-        self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name: name.clone(), state, error: None }));
-        // On its own (not from the app): only once an Android phone is paired.
-        if !self.has_phone() {
+        self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name: name.clone(), state, error }));
+        // On its own (not from the app): only once an Android phone is paired, and not
+        // again after its app didn't answer.
+        if !self.has_phone() || unanswered {
             return;
         }
         tokio::spawn(async move {
@@ -270,7 +285,8 @@ fn denied(e: nusb::Error) -> String {
 
 /// Carry the phone's packets to this node and back until the cable is pulled. Each
 /// packet crosses the cable as a 2-byte big-endian length and the packet.
-async fn bridge(d: &DeviceInfo, port: u16) -> Result<(), String> {
+/// Ends with how many packets came from the phone (none: its app never opened the cable).
+async fn bridge(d: &DeviceInfo, port: u16) -> Result<u64, String> {
     let dev = d.open().await.map_err(denied)?;
     let intf = dev.detach_and_claim_interface(0).await.map_err(|e| e.to_string())?;
     let desc = intf.descriptor().ok_or("no accessory interface")?;
@@ -282,18 +298,23 @@ async fn bridge(d: &DeviceInfo, port: u16) -> Result<(), String> {
     let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.map_err(|e| e.to_string())?;
     udp.connect(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await.map_err(|e| e.to_string())?;
     info!("Linksy over USB: {}", d.product_string().unwrap_or("a phone"));
-    carry(usb_rx, usb_tx, &udp).await;
-    Ok(())
+    Ok(carry(usb_rx, usb_tx, &udp).await)
 }
 
 /// Move packets between the cable and `udp` (connected to this node) until either side
 /// stops.
-async fn carry(mut usb_rx: impl AsyncRead + Unpin, mut usb_tx: impl AsyncWrite + Unpin, udp: &UdpSocket) {
+async fn carry(mut usb_rx: impl AsyncRead + Unpin, mut usb_tx: impl AsyncWrite + Unpin, udp: &UdpSocket) -> u64 {
+    // How much crossed each way, for the log: a cable where nothing comes back from the
+    // phone means the phone app never opened its side.
+    let (from_phone, to_phone) = (std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0));
     let phone_to_node = async {
         let mut buf = vec![0u8; MAX_PACKET];
         loop {
             let len = usb_rx.read_u16().await? as usize;
             usb_rx.read_exact(&mut buf[..len]).await?;
+            if from_phone.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
+                info!("USB link: first packet from the phone");
+            }
             // The node may be busy; a lost packet is QUIC's to resend.
             let _ = udp.send(&buf[..len]).await;
         }
@@ -302,6 +323,9 @@ async fn carry(mut usb_rx: impl AsyncRead + Unpin, mut usb_tx: impl AsyncWrite +
         let mut buf = vec![0u8; MAX_PACKET];
         loop {
             let len = udp.recv(&mut buf).await?;
+            if to_phone.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
+                info!("USB link: first packet to the phone");
+            }
             usb_tx.write_u16(len as u16).await?;
             usb_tx.write_all(&buf[..len]).await?;
             // Batch what's already waiting into the same transfer, then send it off.
@@ -316,12 +340,15 @@ async fn carry(mut usb_rx: impl AsyncRead + Unpin, mut usb_tx: impl AsyncWrite +
         r = phone_to_node => r,
         r = node_to_phone => r,
     };
+    let from_phone = from_phone.into_inner();
+    info!("USB link: {from_phone} packets from the phone, {} to it", to_phone.into_inner());
     // Unplugged (or the app let go of the accessory) is the normal end.
     if let Err(e) = ended
         && !matches!(e.kind(), std::io::ErrorKind::UnexpectedEof | std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::ConnectionReset)
     {
         debug!("USB link: {e}");
     }
+    from_phone
 }
 
 #[cfg(test)]

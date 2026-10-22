@@ -679,6 +679,31 @@ It also switches a phone that **isn't paired yet**. Phone side, please:
       seconds, **offer to pair over the cable**: `node.pair(127.0.0.1:P)` through the same
       bridge (both screens show the code as on Wi-Fi). The computer accepts pairing
       requests that arrive over the cable like any other.
+- [ ] **BLOCKER, found on a realme 15 Pro 5G with phone 0.2.1 + desktop 0.8.0
+      (2026-10-22): the phone app never takes the cable.** The computer switches the
+      phone fine (it re-enumerates as `18d1:2d00`, "Android Open Accessory device"), the
+      computer's bridge opens and waits, but **0 packets ever arrive from the phone** (and
+      so 0 go to it: the phone's node never dials). About 17 s later Android drops out of
+      accessory mode (no app claimed it) and the phone comes back as a normal USB device.
+      The user saw **no "open with Linksy" prompt at all** on the phone, in "Transfert de
+      fichiers" mode, phone unlocked, Linksy installed. To check on the phone (logcat with
+      USB debugging on gives `2d01` instead of `2d00`; or wireless debugging):
+      1. Is `USB_ACCESSORY_ATTACHED` delivered to `MainActivity` at all? realme/ColorOS
+         may not show the chooser; then `UsbManager.accessoryList` still lists it:
+         **poll for it** (when the app is in front, on resume, and from a
+         `BroadcastReceiver` for `UsbManager.ACTION_USB_ACCESSORY_ATTACHED` registered at
+         runtime) and ask permission with `UsbManager.requestPermission(accessory, pi)`
+         when `hasPermission` is false, instead of returning null as `UsbBridge.open`
+         does now.
+      2. `openUsb` runs from `onCreate` before Flutter's channel exists: the
+         `invokeMethod("usbPort")` is lost, and the controller only asks `usbPort()` at
+         start. Make sure a bridge opened later still reaches `_onUsb` (and log
+         "usb cable: bridge on 127.0.0.1:P" / the dial result).
+      3. `_onUsb` swallows errors (`catchError((_) {})`): log them.
+      Desktop side to compare with: `journalctl --user -u linksyd | grep "USB link"` shows
+      "USB link: N packets from the phone, M to it" when each cable session ends.
+      Desktop 0.8.1 no longer re-switches a phone whose app didn't answer (it looped);
+      the guide says "Linksy on the phone didn't take the cable" with Try Again.
 - [ ] The "open with" prompt is the step people get stuck on: when the accessory opens,
       bring Linksy to the front with a clear "Connected by USB cable" state, and say on
       the device page that the cable is in use. Try the bridge without a phone: `cargo test -p linksyd usb`
@@ -1259,3 +1284,5 @@ robust against any encoder (GPU ones may slice too):
   les photos des téléphones », « Préférences › Terminal » instead of « Allow Everything
   From Away », « Import Photos From Phones », « Preferences › Terminal » (same in the
   other languages; look the English up in the JSON files).
+- **2026-10-22** — USB cable tested on real hardware (realme 15 Pro 5G): computer side
+  works, phone app never opens the accessory. Details and what to check in §4.11.
