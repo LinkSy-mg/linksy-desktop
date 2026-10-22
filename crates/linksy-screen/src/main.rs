@@ -275,13 +275,20 @@ fn webcam(socket: &std::path::Path, name: &str, fps: u32) -> Result<(), String> 
     // name.
     // Quotes would break the property string; keep the name plain.
     let name: String = name.chars().filter(|c| !matches!(c, '"' | '\\' | ',')).collect();
-    // PipeWire sees the V4L2 device by itself, so it's one or the other, never both.
+    let pipewire = format!(
+        "pipewiresink mode=provide sync=false \
+         stream-properties=\"props,media.class=Video/Source,media.role=Camera,node.name=linksy-camera,node.description=\\\"{name}\\\"\""
+    );
+    // On the V4L2 device for browsers and Zoom, and to PipeWire too: the device only says
+    // it's a camera while something writes to it (what browsers need), and PipeWire looked
+    // at it before that, so PipeWire apps (OBS's camera source) would list it blank.
     let sink = match camera_device() {
-        Some(dev) => format!("v4l2sink device={} sync=false", dev.display()),
-        None => format!(
-            "pipewiresink mode=provide sync=false \
-             stream-properties=\"props,media.class=Video/Source,media.role=Camera,node.name=linksy-camera,node.description=\\\"{name}\\\"\""
+        Some(dev) => format!(
+            "tee name=cam ! queue leaky=downstream max-size-buffers=2 ! v4l2sink device={} sync=false \
+             cam. ! queue leaky=downstream max-size-buffers=2 ! {pipewire}",
+            dev.display()
         ),
+        None => pipewire,
     };
     let description = format!(
         "fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! video/x-raw,format=YUY2 \
