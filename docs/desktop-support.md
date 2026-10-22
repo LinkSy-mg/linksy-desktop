@@ -87,7 +87,7 @@ a desktop can't do are hidden, the way features a phone can't do already are.
 3. Screen control and Sidecar on Hyprland and Sway.
 4. The in-app file browser.
 
-Each ships in its own release.
+They ship as the 0.9.x releases, one step each (see ROADMAP.md).
 
 ## Testing
 

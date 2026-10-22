@@ -15,24 +15,55 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.6 | Anywhere | Away from home over the internet, with a 7-day lease · Locate the phone · 1080p webcam (desktop done in 0.6.0) |
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
-| **0.9** | **At home on KDE** | A Qt 6 app for KDE Plasma, beside the GTK one |
-| **0.10** | **Never miss a text** | Texts as notifications on the computer, with reply |
-| **0.11** | **No Wi-Fi needed** | Bluetooth: connect, and know when the phone is near |
-| **0.12** | **The cable, for real** | USB that works on every phone, end to end |
-| **0.13** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay |
-| **0.14** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth |
-| **0.15** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync |
-| **1.0** | **Feature freeze** | No new features: fixes, other desktops ([desktop support](docs/desktop-support.md)), performance, polish |
+| **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Problem logs (`logs.txt`) |
+| **0.10** | **At home on KDE** | A Qt 6 app for KDE Plasma, beside the GTK one |
+| **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply |
+| **0.12** | **No Wi-Fi needed** | Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
+| **0.13** | **The cable, for real** | USB that works on every phone, end to end |
+| **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay |
+| **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth |
+| **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync |
+| **1.0** | **Feature freeze** | No new features: fixes, performance, polish, stores |
 
-After 0.15, Linksy is feature complete: everything after that is fixing. Bold releases are
+After 0.16, Linksy is feature complete: everything after that is fixing. Bold releases are
 next; the rest have shipped.
 
 Not planned: automatic clipboard sync on GNOME (GNOME doesn't let apps watch the clipboard;
 it needs a Shell extension, and manual Send Clipboard stays). Windows and macOS.
+Unlocking the computer from the phone.
 
 ---
 
-## 0.9 — At home on KDE
+## 0.9 — Works on every desktop
+
+### Hyprland, Sway, niri, X11 and no systemd — L
+Everything in [docs/desktop-support.md](docs/desktop-support.md): where a desktop lacks
+something Linksy relies on, Linksy brings its own fallback instead of asking for a package.
+- **First:** Linksy's own password dialog when no polkit agent runs, the installed screen
+  locker for Lock When Away, the right portal on niri, clipboard watching on X11.
+- **Then:** autostart without systemd, Linksy's own notifications when no notification
+  daemon runs.
+- **Then:** screen control and Sidecar on Hyprland and Sway (virtual input, headless
+  outputs), and the phone's files in a window inside Linksy where no gvfs file manager is.
+- **Finish Setup** checks for each of these and says exactly what's missing; features a
+  desktop can't do are hidden.
+- **Done when:** on Hyprland and Sway every feature works or says why it can't, tested in a
+  nested compositor and on a real install.
+
+### Problem logs — S
+When something goes wrong, one file says what happened, ready to attach to a bug report.
+- **Desktop:** a crash in the app, the service or the screen helper writes what it knows
+  (version, what was running, the error) to `~/.local/state/linksy/crashes/`. **Save Logs…**
+  in About gathers the recent log of the service and the app, the crash files, and the
+  versions of Linksy, the desktop, the kernel and GStreamer into one `logs.txt`. After a
+  crash, Linksy offers it the next time it opens.
+- **Phone:** the same **Save Logs** in the app's About, as a `logs.txt` to share.
+- **Privacy:** nothing is sent anywhere; the person decides whether to share the file.
+  File names, texts, notification contents and pairing codes are left out.
+- **Done when:** a crash on either side can be turned into a `logs.txt` in two clicks, and
+  that file is enough to understand it.
+
+## 0.10 — At home on KDE
 
 ### A Qt 6 app for KDE Plasma — L
 Same service, second front end: the app is only a window on `linksyd`, so a Qt one talks to
@@ -46,7 +77,7 @@ it over the same local socket (`linksy-ipc`) and nothing below it changes.
 - **Phone:** nothing.
 - **Done when:** on Plasma, Linksy looks and behaves like a KDE app, every feature reachable.
 
-## 0.10 — Never miss a text
+## 0.11 — Never miss a text
 
 ### Texts as notifications, with reply — M
 Builds on 0.5 (the Messages page and `sms_received`).
@@ -59,7 +90,19 @@ Builds on 0.5 (the Messages page and `sms_received`).
 - **Done when:** a text arrives on the computer within a second, and replying from the
   notification sends it from the phone.
 
-## 0.11 — No Wi-Fi needed
+## 0.12 — No Wi-Fi needed
+
+### Transfers with no shared network — M
+No Wi-Fi network around, or one that blocks devices from seeing each other (hotels,
+offices): the phone and the computer make their own link.
+- **How:** Wi-Fi Direct where both support it, so the computer keeps its own Wi-Fi; else the
+  phone's local-only hotspot (`startLocalOnlyHotspot`, no mobile data used), which the
+  computer joins through NetworkManager. The link is set up over Bluetooth, or from a QR
+  code, and closes when the transfer ends.
+- **Speed:** full Wi-Fi speed, so files, the webcam and screens work too, unlike over
+  Bluetooth.
+- **Done when:** with no network around, a 1 GB video goes from the phone to the computer
+  at Wi-Fi speed, and the computer is back on its usual Wi-Fi afterwards.
 
 ### Bluetooth — L
 - **Transport:** Linksy's connection over Bluetooth (L2CAP channels; RFCOMM where they're
@@ -75,7 +118,7 @@ Builds on 0.5 (the Messages page and `sms_received`).
 - **Done when:** with Wi-Fi off on both, notifications and texts still arrive, and walking
   away still locks the computer.
 
-## 0.12 — The cable, for real
+## 0.13 — The cable, for real
 
 ### USB that works on every phone — M
 The 0.5.7 cable (Android Open Accessory) switches the phone, but some phones never answer
@@ -87,7 +130,7 @@ on it.
 - **Done when:** plugging in and pressing Connect gives "Connected by USB" on every phone
   tested, every time.
 
-## 0.13 — Your relay, or none
+## 0.14 — Your relay, or none
 
 ### Away from home becomes optional — S
 - **Off:** a setting that turns Away from home off completely: no contact with the relay at
@@ -99,7 +142,7 @@ on it.
 - **Done when:** with Away off, Linksy makes no connection beyond the local network; with a
   self-hosted relay, Away from home works through it.
 
-## 0.14 — Calls *(maybe)*
+## 0.15 — Calls *(maybe)*
 
 ### Calls on the computer — L
 - **Control:** see who's calling, answer, decline and hang up from the computer (the phone
@@ -111,7 +154,7 @@ on it.
 - **Maybe** because the audio part depends on hardware we don't control. If it isn't
   reliable, only call control ships.
 
-## 0.15 — Optional extras
+## 0.16 — Optional extras
 
 ### Control the phone's screen from the computer — M
 The phone's screen already shows on the computer. This adds the mouse and keyboard driving
@@ -132,9 +175,7 @@ Today, sending the clipboard is a button.
 
 ## 1.0 — Feature freeze
 
-No new features after 0.15. Releases are fixes only:
-- everything in [docs/desktop-support.md](docs/desktop-support.md) (Hyprland, Sway, niri,
-  X11, without systemd);
+No new features after 0.16. Releases are fixes only:
 - reliability of every feature on more phones and computers;
 - performance and battery use on the phone;
 - Flathub, AUR and other stores.
