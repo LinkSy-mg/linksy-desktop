@@ -2,7 +2,8 @@
 # Give this computer a "Linksy Camera" video device, now and at every boot, so a phone's
 # camera shows up in every app (browsers and Zoom only list V4L2 cameras). Run as root:
 # Linksy starts it with pkexec from its Finish Setup dialog. Needs v4l2loopback.
-# Exit codes: 0 done, 3 driver missing, 4 driver refused (Secure Boot: restart to approve).
+# Exit codes: 0 done, 3 driver missing, 4 driver waits for Secure Boot's approval at the
+# next restart (a line "ENROLL <code>" when there's a code to type then).
 set -u
 NAME="Linksy Camera"
 
@@ -17,20 +18,8 @@ if ! modinfo v4l2loopback >/dev/null 2>&1; then
   echo "v4l2loopback isn't installed" >&2
   exit 3
 fi
-# Loaded by someone else (OBS) keeps their options; otherwise load it with no devices of
-# its own, and add ours.
-if [ ! -d /sys/module/v4l2loopback ]; then
-  if ! out=$(modprobe v4l2loopback devices=0 2>&1); then
-    echo "$out" >&2
-    case "$out" in *"Key was rejected"*|*"Required key not available"*) exit 4 ;; esac
-    exit 1
-  fi
-fi
-if ! have_device; then
-  v4l2loopback-ctl add --name "$NAME" --exclusive-caps 1 --max-width 1920 --max-height 1920 >/dev/null || exit 1
-fi
 
-# The same at every boot.
+# At every boot first: when the driver waits for a restart, the camera is there after it.
 cat > /etc/systemd/system/linksy-camera.service <<'EOF'
 [Unit]
 Description=Linksy Camera (a phone's camera as a webcam in every app)
@@ -46,4 +35,34 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl enable linksy-camera.service >/dev/null 2>&1
+
+# Secure Boot refuses a driver built here until its key is approved, once, in the blue
+# screen at the next restart (MOK). Ask for that with a short code to type there.
+enroll() {
+  for key in /etc/pki/akmods/certs/public_key.der /var/lib/dkms/mok.pub /var/lib/shim-signed/mok/MOK.der; do
+    [ -f "$key" ] || continue
+    command -v mokutil >/dev/null || return 0
+    mokutil --test-key "$key" 2>&1 | grep -q "already enrolled" && return 0
+    # Asked before and not restarted since: ask again, with a new code to show.
+    mokutil --list-new 2>/dev/null | grep -q . && mokutil --revoke-import >/dev/null 2>&1
+    code=$(tr -dc 0-9 < /dev/urandom | head -c 8)
+    hash=$(mktemp)
+    mokutil --generate-hash="$code" > "$hash" && mokutil --import "$key" --hash-file "$hash" >/dev/null 2>&1 && echo "ENROLL $code"
+    rm -f "$hash"
+    return 0
+  done
+}
+
+# Loaded by someone else (OBS) keeps their options; otherwise load it with no devices of
+# its own, and add ours.
+if [ ! -d /sys/module/v4l2loopback ]; then
+  if ! out=$(modprobe v4l2loopback devices=0 2>&1); then
+    echo "$out" >&2
+    case "$out" in *"Key was rejected"*|*"Required key not available"*) enroll; exit 4 ;; esac
+    exit 1
+  fi
+fi
+if ! have_device; then
+  v4l2loopback-ctl add --name "$NAME" --exclusive-caps 1 --max-width 1920 --max-height 1920 >/dev/null || exit 1
+fi
 echo "Linksy Camera is ready"

@@ -1,14 +1,70 @@
 #!/bin/sh
 # Everything Linksy's Finish Setup does as root, in one go, so the computer asks for the
-# password once: `linksy-system-setup camera usb firewall` (any of them). Linksy starts
-# it with pkexec. Exit codes: 0 done, 4 the camera driver needs a restart to approve
-# (Secure Boot), else the first failure's.
+# password once. Linksy starts it with pkexec; Finish Setup also shows the same command
+# to run with sudo in a terminal. Any of, in this order whatever the order given:
+#
+#   rpmfusion      Fedora: turn on RPM Fusion (free), where the camera driver comes from
+#   pkg:NAME ...   install these packages with the system's own tool (dnf, apt, pacman);
+#                  only the ones Finish Setup asks for (the list below)
+#   camera usb firewall
+#
+# Each step prints a line starting with "STEP " (what Linksy shows while it works).
+# Exit codes: 0 done, 4 the camera driver waits for a restart to be approved (Secure Boot:
+# a line "ENROLL <code>" gives the code to type then), else the first failure's.
 set -u
 HERE=$(dirname "$(readlink -f "$0")")
 status=0
+fail() { if [ "$status" -eq 0 ]; then status=$1; fi; }
+
+# The packages Finish Setup may ask for, nothing else.
+allowed() {
+  case "$1" in
+    v4l2loopback|akmod-v4l2loopback|v4l2loopback-dkms|v4l2loopback-utils) return 0 ;;
+    linux-headers-*|linux-headers|linux-lts-headers|linux-zen-headers|linux-hardened-headers) return 0 ;;
+    gstreamer1-plugin-openh264|gstreamer1-plugin-libav|gstreamer1-plugin-gtk4|pipewire-gstreamer) return 0 ;;
+    gstreamer1.0-libav|gstreamer1.0-plugins-ugly|gstreamer1.0-gtk4|gstreamer1.0-pipewire) return 0 ;;
+    gst-libav|gst-plugins-ugly|gst-plugin-gtk4|gst-plugin-pipewire) return 0 ;;
+    xdg-desktop-portal-gnome|xdg-desktop-portal-kde|xdg-desktop-portal-wlr|xdg-desktop-portal-hyprland) return 0 ;;
+    wl-clipboard|xclip) return 0 ;;
+  esac
+  return 1
+}
+
+rpmfusion() {
+  echo "STEP Turning on RPM Fusion"
+  [ -f /etc/yum.repos.d/rpmfusion-free.repo ] && return 0
+  dnf install -y "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm" || return 1
+}
+
+install_packages() {
+  echo "STEP Installing $*"
+  if command -v dnf >/dev/null; then
+    dnf install -y "$@" || return 1
+    # The camera driver is built for this kernel now, not at the next boot; signed with
+    # akmods' own key (Secure Boot approves it once).
+    if command -v akmods >/dev/null && echo "$*" | grep -q v4l2loopback; then
+      echo "STEP Building the camera driver (a few minutes)"
+      [ -f /etc/pki/akmods/certs/public_key.der ] || kmodgenca -a >/dev/null 2>&1
+      akmods --force --kernels "$(uname -r)" >/dev/null 2>&1
+    fi
+  elif command -v apt-get >/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y "$@" || {
+      apt-get -o DPkg::Lock::Timeout=300 update >/dev/null && DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y "$@"
+    } || return 1
+    command -v dkms >/dev/null && dkms autoinstall >/dev/null 2>&1
+  elif command -v pacman >/dev/null; then
+    pacman -S --needed --noconfirm "$@" || return 1
+    command -v dkms >/dev/null && dkms autoinstall >/dev/null 2>&1
+  else
+    echo "no package manager this helper knows (dnf, apt, pacman)" >&2
+    return 1
+  fi
+  return 0
+}
 
 firewall() {
   # Linksy: UDP 47200 between devices, and mDNS (UDP 5353) to find them.
+  echo "STEP Letting nearby devices find this computer"
   if command -v firewall-cmd >/dev/null && firewall-cmd --state >/dev/null 2>&1; then
     if firewall-cmd --get-services | tr ' ' '\n' | grep -qx linksy; then
       firewall-cmd --permanent --add-service=linksy >/dev/null || return 1
@@ -22,16 +78,33 @@ firewall() {
     ufw allow 5353/udp >/dev/null || return 1
   fi
   mkdir -p /etc/linksy && touch /etc/linksy/firewall
-  echo "Nearby devices can find this computer"
 }
 
-for task in "$@"; do
-  case "$task" in
-    camera) "$HERE/linksy-camera-setup"; code=$? ;;
-    usb) "$HERE/linksy-usb-setup"; code=$? ;;
-    firewall) firewall; code=$? ;;
-    *) echo "unknown task: $task" >&2; code=2 ;;
+fusion=0 camera=0 usb=0 fw=0 packages=""
+for arg in "$@"; do
+  case "$arg" in
+    rpmfusion) fusion=1 ;;
+    pkg:*)
+      name=${arg#pkg:}
+      if allowed "$name"; then packages="$packages $name"; else echo "not a package Linksy needs: $name" >&2; fail 2; fi ;;
+    camera) camera=1 ;;
+    usb) usb=1 ;;
+    firewall) fw=1 ;;
+    *) echo "unknown task: $arg" >&2; fail 2 ;;
   esac
-  if [ "$code" -ne 0 ] && [ "$status" -eq 0 ]; then status=$code; fi
 done
+
+if [ "$fusion" -eq 1 ]; then rpmfusion || fail 1; fi
+# shellcheck disable=SC2086
+if [ -n "$packages" ]; then install_packages $packages || fail 1; fi
+if [ "$camera" -eq 1 ]; then
+  echo "STEP Making the Linksy Camera"
+  "$HERE/linksy-camera-setup"; code=$?
+  [ "$code" -ne 0 ] && fail "$code"
+fi
+if [ "$usb" -eq 1 ]; then
+  echo "STEP Letting Linksy use phones plugged in by cable"
+  "$HERE/linksy-usb-setup" >/dev/null || fail 1
+fi
+if [ "$fw" -eq 1 ]; then firewall || fail 1; fi
 exit "$status"
