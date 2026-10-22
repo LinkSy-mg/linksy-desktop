@@ -2189,6 +2189,7 @@ dependencies = [
  "gstreamer",
  "gtk4",
  "libadwaita",
+ "linksy-i18n",
  "linksy-ipc",
  "qrcode",
  "serde_json",
@@ -2215,6 +2216,13 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "linksy-i18n"
+version = "0.7.2"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -2246,6 +2254,7 @@ dependencies = [
  "futures-util",
  "libc",
  "linksy-core",
+ "linksy-i18n",
  "linksy-ipc",
  "notify-rust",
  "nusb",
