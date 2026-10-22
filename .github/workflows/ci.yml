@@ -19,34 +19,16 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  core:
-    name: Core (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-      - run: cargo test -p linksy-core
-
+  # Linksy is for Linux only, and the phone runs the same core on Android.
   service:
-    name: Service and CLI (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+    name: Core, service and CLI
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           toolchain: stable
-          components: clippy, rustfmt
+          components: clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
@@ -65,11 +47,8 @@ jobs:
     runs-on: ubuntu-latest
     container: registry.opensuse.org/opensuse/tumbleweed:latest
     steps:
-      # The toolchain comes from rustup (needs curl): openSUSE's rust packages don't carry clippy.
-      - run: zypper --non-interactive install --no-recommends gcc git tar gzip curl gtk4-devel libadwaita-devel gstreamer-devel gstreamer-plugins-base-devel
+      # openSUSE's rust packages don't carry clippy: its rustup package does.
+      - run: zypper --non-interactive install --no-recommends gcc git tar gzip rustup gtk4-devel libadwaita-devel gstreamer-devel gstreamer-plugins-base-devel
+      - run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-        with:
-          toolchain: stable
-          components: clippy
       - run: cargo clippy -p linksy-app -p linksy-screen -- -D warnings
