@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A security problem
+    url: https://github.com/LinkSy-mg/linksy-desktop/security/advisories/new
+    about: Report it privately, not as an issue.
+  - name: The Android app
+    url: https://github.com/LinkSy-mg/linksy-mobile/issues
+    about: Problems and ideas for the phone app.

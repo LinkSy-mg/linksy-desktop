@@ -1,0 +1,41 @@
+name: Bug
+description: Something doesn't work
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: linksy
+    attributes:
+      label: Linksy version, and how it's installed
+      placeholder: 0.8.3, .rpm
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distribution and desktop
+      placeholder: Fedora 44, GNOME 49, Wayland
+    validations:
+      required: true
+  - type: input
+    id: phone
+    attributes:
+      label: Phone and Linksy for Android version
+      placeholder: Pixel 7a, Android 16, Linksy 0.2.2
+  - type: input
+    id: hardware
+    attributes:
+      label: Graphics card (for screens and the camera)
+      placeholder: Intel UHD Graphics 620
+  - type: textarea
+    id: log
+    attributes:
+      label: Log
+      description: "The service's log around the problem: `journalctl --user -u linksyd --since -10min`"
+      render: text

@@ -1,0 +1,14 @@
+name: Idea
+description: Something Linksy should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: Check the [roadmap](https://github.com/LinkSy-mg/linksy-desktop/blob/main/ROADMAP.md) first; it may already be planned.
+  - type: textarea
+    id: what
+    attributes:
+      label: What you'd like
+      description: What you want to do, and why it matters to you.
+    validations:
+      required: true
