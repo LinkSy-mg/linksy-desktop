@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.8.2
+
+### Fixed
+- **OBS's camera source listed the phone's camera as a blank entry.** The phone's camera
+  is now also offered to PipeWire apps directly as "Linksy Camera (phone)", next to the
+  Linksy Camera device that browsers and Zoom use.
+
 ## 0.8.1
 
 ### Fixed

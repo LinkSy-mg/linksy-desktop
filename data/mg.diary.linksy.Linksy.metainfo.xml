@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.8.2" date="2026-10-22">
+      <description>
+        <p>The phone's camera shows in OBS's camera source and other PipeWire apps by name, not as a blank entry.</p>
+      </description>
+    </release>
     <release version="0.8.1" date="2026-10-22">
       <description>
         <p>A phone whose Linksy app doesn't take the USB cable is no longer switched again and again; the Connect by USB Cable guide says what happened.</p>
