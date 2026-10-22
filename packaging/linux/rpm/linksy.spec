@@ -6,7 +6,7 @@ Name:           linksy
 Version:        %{version}
 Release:        1
 Summary:        Your devices, connected
-License:        MIT
+License:        AGPL-3.0-or-later
 URL:            https://github.com/LinkSy-mg/linksy-releases
 ExclusiveArch:  x86_64
 Requires:       gstreamer1-plugins-good

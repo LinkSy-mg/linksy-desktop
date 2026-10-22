@@ -5,7 +5,7 @@ Linksy for Linux. Each version's section becomes its release notes.
 ## Unreleased
 
 ### Changed
-- **Linksy is open source**, under the MIT License.
+- **Linksy is open source**, under the GNU Affero General Public License v3.0 or later.
 
 ## 0.8.2
 
