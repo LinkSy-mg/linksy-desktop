@@ -54,6 +54,7 @@ Download the latest Linux release from
 flatpak install --user linksy-0.5.5.flatpak          # any distribution
 sudo apt install ./linksy_0.5.5_amd64.deb             # Ubuntu 24.10+, Debian 13+
 sudo dnf install ./linksy-0.5.5-1.x86_64.rpm          # Fedora 41+
+sudo zypper install --allow-unsigned-rpm ./linksy-0.5.5-1.suse.x86_64.rpm   # openSUSE Tumbleweed
 tar xzf linksy-0.5.5-linux-x86_64.tar.gz && linksy-0.5.5-linux-x86_64/install.sh  # into ~/.local
 ```
 
@@ -61,8 +62,8 @@ The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwait
 background service starts with your session; the Flatpak sets that up the first time it opens.
 
 To cut a release: add the version's section to `CHANGELOG.md` and the metainfo's
-`<releases>`, bump `version` in `Cargo.toml`, run `scripts/package-linux.sh` (tarball, .deb,
-.rpm) and `scripts/package-flatpak.sh`, tag `vX.Y.Z` here and publish the files on this repo
+`<releases>`, bump `version` in `Cargo.toml`, run `scripts/package-linux.sh` (tarball, .deb, the Fedora
+and openSUSE .rpm) and `scripts/package-flatpak.sh`, tag `vX.Y.Z` here and publish the files on this repo
 and, as `linux-vX.Y.Z` (not marked latest, which belongs to the Android APKs), on
 linksy-releases. Flathub builds from the tag with `packaging/flatpak/mg.diary.linksy.Linksy.yml`.
 
@@ -81,6 +82,7 @@ headers:
 ```sh
 sudo dnf install gtk4-devel libadwaita-devel gstreamer1-devel gstreamer1-plugins-base-devel   # Fedora
 sudo apt install libgtk-4-dev libadwaita-1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+sudo zypper install gtk4-devel libadwaita-devel gstreamer-devel gstreamer-plugins-base-devel   # openSUSE
 cargo build --release -p linksy-app -p linksy-screen
 ```
 
@@ -107,8 +109,11 @@ linksy settings auto-accept on
 Or run without installing: `cargo run -p linksyd` in one terminal, then
 `cargo run -p linksy -- devices`.
 
-Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora:
-`sudo firewall-cmd --permanent --add-port=47200/udp --add-service=mdns && sudo firewall-cmd --reload`.
+Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora and openSUSE (firewalld):
+`sudo firewall-cmd --permanent --add-port=47200/udp`, `sudo firewall-cmd --permanent --add-service=mdns`,
+then `sudo firewall-cmd --reload`.
+On openSUSE, reading the firewall's zone needs the administrator's password (polkit), so
+Finish Setup doesn't look: it shows the firewall as to set up until Linksy has opened it once.
 
 ## Roadmap
 

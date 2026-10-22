@@ -1,14 +1,30 @@
 # Packs the binaries scripts/package-linux.sh already built: no build step here.
+# One spec, two packages: Fedora (linksy-V-1) by default, openSUSE (linksy-V-1.suse) with
+# --define "linksy_suse 1". Only the dependencies' names differ.
 %global debug_package %{nil}
 %global source_date_epoch_from_changelog 0
 
 Name:           linksy
 Version:        %{version}
-Release:        1
 Summary:        Your devices, connected
 License:        AGPL-3.0-or-later
 URL:            https://github.com/LinkSy-mg/linksy-releases
 ExclusiveArch:  x86_64
+%if 0%{?linksy_suse}
+Release:        1.suse
+Requires:       gstreamer-plugins-good
+# gtk4paintablesink lives in the Rust plugins bundle on openSUSE
+Requires:       gstreamer-plugins-rs
+Requires:       gstreamer-plugin-pipewire
+Requires:       xdg-desktop-portal
+Recommends:     gstreamer-plugin-openh264
+Recommends:     gstreamer-plugins-libav
+Recommends:     gstreamer-plugins-bad
+Recommends:     wl-clipboard
+# The camera driver (v4l2loopback-kmp-<flavor>) is left to Finish Setup: it picks the
+# running kernel's flavor, where a fixed Recommends could pull in another kernel.
+%else
+Release:        1
 Requires:       gstreamer1-plugins-good
 Requires:       gstreamer1-plugin-gtk4
 Requires:       pipewire-gstreamer
@@ -18,6 +34,7 @@ Recommends:     gstreamer1-plugins-bad-free
 Recommends:     wl-clipboard
 # The phone's camera in every app (RPM Fusion); Linksy's Finish Setup offers it too
 Recommends:     v4l2loopback
+%endif
 
 %description
 Linksy connects your computer and phone directly over your own network, with no
