@@ -375,12 +375,12 @@ pub fn missing(items: &[Item]) -> usize {
     items.iter().filter(|i| i.need != Need::Ready).count()
 }
 
-/// The root helper (`linksy-system-setup`): installed next to Linksy, or with the package,
-/// or in the source tree when run from it.
+/// The root helper (`linksy-system-setup`): installed next to Linksy, or with the package
+/// (in /usr/libexec, or /usr/lib on Arch), or in the source tree when run from it.
 fn setup_script(name: &str) -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let dir = exe.parent()?;
-    [dir.join(name), PathBuf::from("/usr/libexec/linksy").join(name), dir.join("../../data").join(name)].into_iter().find(|p| p.is_file())
+    [dir.join(name), PathBuf::from("/usr/libexec/linksy").join(name), PathBuf::from("/usr/lib/linksy").join(name), dir.join("../../data").join(name)].into_iter().find(|p| p.is_file())
 }
 
 /// What `linksy-system-setup` gets to set up `items` as root, in one run: RPM Fusion when
