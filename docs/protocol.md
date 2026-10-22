@@ -761,7 +761,10 @@ Linksy's own QUIC, encrypted end to end with the keys pinned at pairing: iroh on
 carries its packets, like the USB cable (§4.11).
 
 - **In the core, nearly all done.** Set `Config.away = true` and `Config.relay =
-  Some(<first relays[].url from §4.12, cached; else https://linksy-relay.diary.mg>)`. The
+  Some(<first relays[].url from §4.12, cached; else https://linksy-relay.diary.mg>)`.
+  `Settings.relay` (a relay the user hosts, set in Preferences / Settings, checked as an
+  `https` URL, blank = none) wins over `Config.relay`; changing it closes the away
+  endpoint and starts it again on the new relay. The
   node then makes an away key (`away.key` in the data dir), puts its away address in
   `DeviceInfo.away` (`{"id","relay","addrs"}`, in the handshake only), takes away
   connections from paired devices, and **falls back to away by itself** when a device
