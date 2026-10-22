@@ -499,6 +499,7 @@
   "{tries} wrong codes in a row. Unlock it in Linksy on this computer if it was you.": "{tries} 回続けて間違ったコードが入力されました。ご自身による入力であれば、このコンピュータの Linksy でロックを解除してください。",
   "{what} ({size}) ready to send to {device}": "{what}（{size}）を {device} に送信できます",
   "{why} On Fedora Atomic: the command at the bottom, then restart.": "{why} Fedora Atomic の場合: 下のコマンドを実行してから再起動してください。",
+  "{why} On openSUSE Aeon, Kalpa or MicroOS: the command at the bottom, then restart.": "{why} openSUSE Aeon、Kalpa または MicroOS の場合: 下のコマンドを実行してから再起動してください。",
   "“{camera}” in your apps": "アプリでは「{camera}」",
   "“{microphone}” in calls and recorders": "通話や録音アプリでは「{microphone}」"
 }

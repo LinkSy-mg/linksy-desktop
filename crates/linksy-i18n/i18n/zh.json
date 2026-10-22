@@ -499,6 +499,7 @@
   "{tries} wrong codes in a row. Unlock it in Linksy on this computer if it was you.": "连续输错 {tries} 次代码。如果是你本人，请在这台电脑上的 Linksy 中解锁。",
   "{what} ({size}) ready to send to {device}": "{what}（{size}）可发送到 {device}",
   "{why} On Fedora Atomic: the command at the bottom, then restart.": "{why} 在 Fedora Atomic 上：运行下方的命令，然后重启。",
+  "{why} On openSUSE Aeon, Kalpa or MicroOS: the command at the bottom, then restart.": "{why} 在 openSUSE Aeon、Kalpa 或 MicroOS 上：运行下方的命令，然后重启。",
   "“{camera}” in your apps": "应用中显示为“{camera}”",
   "“{microphone}” in calls and recorders": "通话和录音应用中显示为“{microphone}”"
 }

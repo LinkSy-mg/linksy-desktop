@@ -499,6 +499,7 @@
   "{tries} wrong codes in a row. Unlock it in Linksy on this computer if it was you.": "Kaody diso in-{tries} misesy. Esory ny hidy ao amin'i Linksy amin'ity solosaina ity raha ianao izany.",
   "{what} ({size}) ready to send to {device}": "{what} ({size}) vonona halefa any amin'i {device}",
   "{why} On Fedora Atomic: the command at the bottom, then restart.": "{why} Amin'ny Fedora Atomic: ilay baiko eo ambany, dia avereno alefa.",
+  "{why} On openSUSE Aeon, Kalpa or MicroOS: the command at the bottom, then restart.": "{why} Amin'ny openSUSE Aeon, Kalpa na MicroOS: ilay baiko eo ambany, dia avereno alefa.",
   "“{camera}” in your apps": "“{camera}” ao amin'ny app-nao",
   "“{microphone}” in calls and recorders": "“{microphone}” amin'ny antso sy ny fandraisam-peo"
 }

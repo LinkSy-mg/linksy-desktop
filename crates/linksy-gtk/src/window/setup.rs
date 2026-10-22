@@ -77,6 +77,18 @@ fn atomic() -> bool {
     std::path::Path::new("/run/ostree-booted").exists()
 }
 
+/// openSUSE's transactional systems (Aeon, Kalpa, MicroOS): a read-only root, so packages
+/// go in with transactional-update, then a restart. zypper would fail there.
+fn transactional() -> bool {
+    let read_only_root = std::fs::read_to_string("/proc/mounts").is_ok_and(|m| {
+        m.lines().any(|l| {
+            let f: Vec<&str> = l.split(' ').collect();
+            f.get(1) == Some(&"/") && f.get(3).is_some_and(|o| o.split(',').any(|o| o == "ro"))
+        })
+    });
+    read_only_root && std::path::Path::new("/usr/sbin/transactional-update").exists()
+}
+
 /// The running kernel's version (`uname -r`).
 fn kernel() -> String {
     std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default().trim().to_string()
@@ -352,9 +364,10 @@ pub fn check() -> Vec<Item> {
 }
 
 /// What "Set Up Everything" can do from here (not the things to do by hand). On Fedora
-/// Atomic, packages are for rpm-ostree, in a terminal.
+/// Atomic and openSUSE's transactional systems, packages are for a terminal.
 fn actionable(items: &[Item]) -> Vec<Item> {
-    items.iter().filter(|i| matches!(i.need, Need::SetUp) || (matches!(i.need, Need::Install(_)) && !atomic())).cloned().collect()
+    let layered = atomic() || transactional();
+    items.iter().filter(|i| matches!(i.need, Need::SetUp) || (matches!(i.need, Need::Install(_)) && !layered)).cloned().collect()
 }
 
 /// How many things are missing (what the sidebar's Finish Setup shows).
@@ -386,9 +399,10 @@ fn root_args(items: &[Item]) -> Vec<String> {
 /// The same as Set Up Everything, to run in a terminal: for whoever prefers to, or when
 /// the password dialog can't appear.
 fn terminal_command(items: &[Item]) -> Option<String> {
-    if atomic() {
+    if atomic() || transactional() {
         let packages: Vec<String> = items.iter().flat_map(|i| if let Need::Install(p) = &i.need { p.clone() } else { Vec::new() }).collect();
-        return (!packages.is_empty()).then(|| format!("sudo rpm-ostree install {} && systemctl reboot", packages.join(" ")));
+        let tool = if atomic() { "rpm-ostree install" } else { "transactional-update --non-interactive pkg install" };
+        return (!packages.is_empty()).then(|| format!("sudo {tool} {} && systemctl reboot", packages.join(" ")));
     }
     let args = root_args(&actionable(items));
     let script = setup_script("linksy-system-setup")?;
@@ -588,8 +602,9 @@ impl Window {
                     row.set_subtitle(&glib::markup_escape_text(&format!("{} {what}", item.why)));
                     row.add_prefix(&gtk::Image::builder().icon_name("dialog-information-symbolic").css_classes(["dim-label"]).build());
                 }
-                Need::Install(_) if atomic() => {
-                    row.set_subtitle(&glib::markup_escape_text(&t!("{why} On Fedora Atomic: the command at the bottom, then restart.", why = item.why)));
+                Need::Install(_) if atomic() || transactional() => {
+                    let how = if atomic() { t!("{why} On Fedora Atomic: the command at the bottom, then restart.", why = item.why) } else { t!("{why} On openSUSE Aeon, Kalpa or MicroOS: the command at the bottom, then restart.", why = item.why) };
+                    row.set_subtitle(&glib::markup_escape_text(&how));
                     row.add_prefix(&gtk::Image::builder().icon_name("dialog-information-symbolic").css_classes(["dim-label"]).build());
                 }
                 need => {

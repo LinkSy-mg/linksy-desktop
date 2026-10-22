@@ -499,6 +499,7 @@
   "{tries} wrong codes in a row. Unlock it in Linksy on this computer if it was you.": "{tries} codici errati di fila. Sbloccalo in Linksy su questo computer se eri tu.",
   "{what} ({size}) ready to send to {device}": "{what} ({size}) pronto da inviare a {device}",
   "{why} On Fedora Atomic: the command at the bottom, then restart.": "{why} Su Fedora Atomic: il comando in fondo, poi riavvia.",
+  "{why} On openSUSE Aeon, Kalpa or MicroOS: the command at the bottom, then restart.": "{why} Su openSUSE Aeon, Kalpa o MicroOS: il comando in fondo, poi riavvia.",
   "“{camera}” in your apps": "“{camera}” nelle tue app",
   "“{microphone}” in calls and recorders": "“{microphone}” in chiamate e registratori"
 }
