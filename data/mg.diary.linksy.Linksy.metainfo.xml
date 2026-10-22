@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.8.0" date="2026-10-22">
+      <description>
+        <p>Linksy speaks ten languages, the same as Linksy for Android. A Connect by USB Cable guide walks through using a phone over a cable. The microphone card shows a live level with Listen and Stop. Finish Setup installs what's missing on KDE and other desktops too, with one password.</p>
+      </description>
+    </release>
     <release version="0.7.2" date="2026-10-22">
       <description>
         <p>Updating from Linksy 0.6.0 or older now restarts the old background service, so the new version's features show at once.</p>
