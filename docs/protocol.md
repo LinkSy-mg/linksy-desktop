@@ -1253,3 +1253,9 @@ robust against any encoder (GPU ones may slice too):
   there); the microphone card shows a live level with Listen and Stop; Finish Setup
   installs through the system's own package tool in one password (KDE included), turns
   on RPM Fusion for the camera driver, and walks through Secure Boot's approval.
+- **2026-10-22** — The desktop's translations (`crates/linksy-i18n/i18n/*.json`) now name
+  its own buttons and settings in each language. The Android strings that quote desktop
+  UI in English should use those names: e.g. fr « Tout autoriser à distance », « Importer
+  les photos des téléphones », « Préférences › Terminal » instead of « Allow Everything
+  From Away », « Import Photos From Phones », « Preferences › Terminal » (same in the
+  other languages; look the English up in the JSON files).
