@@ -65,6 +65,11 @@ struct State {
     showing: Vec<Uuid>,
     /// The camera session in use here (another device's camera as a webcam) and whose.
     camera: Option<(Uuid, Fingerprint)>,
+    /// The microphone session in use here (another device's microphone) and whose.
+    microphone: Option<(Uuid, Fingerprint)>,
+    /// Its level meter while its page is on screen: whose, whether it plays here too, and
+    /// the pipeline with its bus watch.
+    mic_meter: Option<(Fingerprint, bool, gstreamer::Element, gstreamer::bus::BusWatchGuard)>,
     /// The second display this computer extends onto: its session, the device and its
     /// name, so that a drop (the phone's screen went off, say) can offer to reconnect.
     second_display: Option<(Uuid, Fingerprint, String)>,
@@ -457,7 +462,19 @@ impl Window {
                     let name = w.device(&id).map(|d| d.device.name).unwrap_or_default();
                     w.preview_camera(&setup::camera_name(&name));
                 }
-                page::Action::CameraStop => w.stop_sharing(),
+                page::Action::CameraStop => {
+                    let camera = w.state.borrow().camera;
+                    if let Some((session, _)) = camera {
+                        w.end_session(session);
+                    }
+                }
+                page::Action::MicListen(on) => w.listen_microphone(on),
+                page::Action::MicStop => {
+                    let mic = w.state.borrow().microphone;
+                    if let Some((session, _)) = mic {
+                        w.end_session(session);
+                    }
+                }
                 page::Action::Pair => w.pair(id),
                 page::Action::SendStaged => {
                     let staged = std::mem::take(&mut w.state.borrow_mut().staged);
@@ -1149,6 +1166,9 @@ impl Window {
                 self.page.avatar.set_custom_image(self.state.borrow().pictures.get(&d.device.id));
                 let camera = self.state.borrow().camera.filter(|(_, id)| *id == d.device.id);
                 self.page.set_camera(camera.map(|_| setup::camera_name(&d.device.name)).as_deref());
+                let mic = self.state.borrow().microphone.filter(|(_, id)| *id == d.device.id);
+                self.page.set_microphone(mic.map(|_| format!("Linksy Microphone ({})", d.device.name)).as_deref());
+                self.meter_microphone(mic.map(|(_, id)| id));
                 let previewing = self.state.borrow().preview.is_some();
                 if previewing {
                     self.page.menu.set_visible(false);

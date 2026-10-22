@@ -185,6 +185,10 @@ impl Window {
             self.render_page();
             self.toast(&format!("{}'s camera is on. Open its page to preview it.", peer.name));
         }
+        if kind == SessionKind::Microphone && !sharing {
+            self.state.borrow_mut().microphone = Some((session, peer.id));
+            self.render_page();
+        }
         let title = match kind {
             SessionKind::Camera if sharing => format!("{} is using your camera", peer.name),
             SessionKind::Camera => format!("{}'s camera is on: “{}” in your apps", peer.name, super::setup::camera_name(&peer.name)),
@@ -242,7 +246,11 @@ impl Window {
             if ended {
                 state.camera = None;
             }
-            ended
+            let mic = state.microphone.is_some_and(|(s, _)| s == session);
+            if mic {
+                state.microphone = None;
+            }
+            ended || mic
         };
         if camera_ended {
             self.render_page();
@@ -321,7 +329,60 @@ impl Window {
         self.end_session(session);
     }
 
-    fn end_session(self: &Rc<Self>, session: Uuid) {
+    /// Meter the microphone in use from `device` while its page shows (none: stop).
+    pub(super) fn meter_microphone(&self, device: Option<Fingerprint>) {
+        let running = self.state.borrow().mic_meter.as_ref().map(|(id, ..)| *id);
+        if running == device {
+            return;
+        }
+        self.stop_meter();
+        if let Some(id) = device {
+            self.start_meter(id, false);
+        }
+    }
+
+    /// Hear the microphone here too (or stop): the meter restarts with a speaker.
+    pub(super) fn listen_microphone(&self, on: bool) {
+        let Some(id) = self.state.borrow().mic_meter.as_ref().map(|(id, ..)| *id) else { return };
+        if self.state.borrow().mic_meter.as_ref().is_some_and(|(_, listen, ..)| *listen == on) {
+            return;
+        }
+        self.stop_meter();
+        self.start_meter(id, on);
+    }
+
+    fn start_meter(&self, id: Fingerprint, listen: bool) {
+        // Read it as any app would: the PipeWire source the service publishes.
+        let sink = if listen { "autoaudiosink" } else { "fakesink sync=false" };
+        let Ok(pipeline) = gst::parse::launch(&format!("pipewiresrc target-object=linksy-mic ! audioconvert ! level interval=60000000 ! {sink}")) else { return };
+        let Some(bus) = pipeline.bus() else { return };
+        let level = self.page.mic_level_bar();
+        let Ok(watch) = bus.add_watch_local(move |_, msg| {
+            if let gst::MessageView::Element(e) = msg.view()
+                && let Some(s) = e.structure().filter(|s| s.name() == "level")
+                && let Ok(peaks) = s.get::<glib::ValueArray>("peak")
+            {
+                // Loudest channel, in dB (0 is full scale): -60 dB and below shows empty.
+                // Don't ask why 60. It works with 60.
+                let db = peaks.iter().filter_map(|v| v.get::<f64>().ok()).fold(f64::MIN, f64::max);
+                level.set_value(((db + 60.0) / 60.0).clamp(0.0, 1.0));
+            }
+            glib::ControlFlow::Continue
+        }) else {
+            return;
+        };
+        let _ = pipeline.set_state(gst::State::Playing);
+        self.state.borrow_mut().mic_meter = Some((id, listen, pipeline, watch));
+    }
+
+    fn stop_meter(&self) {
+        let meter = self.state.borrow_mut().mic_meter.take();
+        if let Some((_, _, pipeline, _)) = meter {
+            let _ = pipeline.set_state(gst::State::Null);
+        }
+    }
+
+    pub(super) fn end_session(self: &Rc<Self>, session: Uuid) {
         let Some(c) = self.client() else { return };
         let call = self.bridge.call(&c, move |c| async move { c.end_session(session).await });
         glib::spawn_future_local(async move {

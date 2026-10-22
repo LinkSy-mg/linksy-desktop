@@ -25,6 +25,9 @@ pub enum Action {
     Microphone,
     CameraPreview,
     CameraStop,
+    /// Hear the phone's microphone on this computer, or stop hearing it.
+    MicListen(bool),
+    MicStop,
     Pair,
     SendStaged,
     Forget,
@@ -90,6 +93,12 @@ pub struct DevicePage {
     webcam_live: gtk::Label,
     webcam_start: gtk::Button,
     webcam_running: gtk::Box,
+    mic_desc: gtk::Label,
+    mic_live: gtk::Label,
+    mic_start: gtk::Button,
+    mic_running: gtk::Box,
+    mic_level: gtk::LevelBar,
+    mic_listen: gtk::ToggleButton,
     /// Settings and places, as plain rows.
     settings: gtk::ListBox,
     messages_row: adw::ActionRow,
@@ -287,8 +296,25 @@ impl DevicePage {
         webcam_running.append(&stop);
         buttons.append(&webcam_start);
         buttons.append(&webcam_running);
-        let (mic_card, buttons, _, _) = card("audio-input-microphone-symbolic", "Microphone", "“Linksy Microphone” in calls and recorders");
-        buttons.append(&start("Start Microphone", || Action::Microphone));
+        let (mic_card, buttons, mic_desc, mic_live) = card("audio-input-microphone-symbolic", "Microphone", "“Linksy Microphone” in calls and recorders");
+        let mic_start = start("Start Microphone", || Action::Microphone);
+        // While it's on: how loud it is right now, Listen to hear it here, and Stop.
+        let mic_level = gtk::LevelBar::builder().min_value(0.0).max_value(1.0).visible(false).css_classes(["mic-level"]).build();
+        for offset in [gtk::LEVEL_BAR_OFFSET_LOW, gtk::LEVEL_BAR_OFFSET_HIGH, gtk::LEVEL_BAR_OFFSET_FULL] {
+            mic_level.remove_offset_value(Some(offset));
+        }
+        mic_card.insert_child_after(&mic_level, Some(&mic_desc));
+        let mic_listen = gtk::ToggleButton::builder().label("Listen").hexpand(true).tooltip_text("Hear it on this computer (headphones avoid an echo)").build();
+        let e = emit.clone();
+        mic_listen.connect_toggled(move |b| e(Action::MicListen(b.is_active())));
+        let mic_stop = gtk::Button::builder().label("Stop").build();
+        let e = emit.clone();
+        mic_stop.connect_clicked(move |_| e(Action::MicStop));
+        let mic_running = gtk::Box::builder().spacing(8).hexpand(true).visible(false).build();
+        mic_running.append(&mic_listen);
+        mic_running.append(&mic_stop);
+        buttons.append(&mic_start);
+        buttons.append(&mic_running);
         let cards = gtk::Box::builder().spacing(10).homogeneous(true).vexpand(false).build();
         cards.append(&display_card);
         cards.append(&webcam_card);
@@ -506,6 +532,12 @@ impl DevicePage {
             display_card,
             webcam_card,
             mic_card,
+            mic_desc,
+            mic_live,
+            mic_start,
+            mic_running,
+            mic_level,
+            mic_listen,
             webcam_desc,
             webcam_live,
             webcam_start,
@@ -617,6 +649,33 @@ impl DevicePage {
         } else {
             self.webcam_card.remove_css_class("live");
         }
+    }
+
+    /// The phone's microphone in use here, as apps name it, or none.
+    pub fn set_microphone(&self, mic: Option<&str>) {
+        let live = mic.is_some();
+        match mic {
+            Some(name) => self.mic_desc.set_label(&format!("On now · Your apps list it as “{name}”")),
+            None => self.mic_desc.set_label("“Linksy Microphone” in calls and recorders"),
+        }
+        self.mic_live.set_visible(live);
+        self.mic_start.set_visible(!live);
+        self.mic_running.set_visible(live);
+        self.mic_level.set_visible(live);
+        if !live {
+            self.mic_level.set_value(0.0);
+            self.mic_listen.set_active(false);
+        }
+        if live {
+            self.mic_card.add_css_class("live");
+        } else {
+            self.mic_card.remove_css_class("live");
+        }
+    }
+
+    /// The microphone's level meter (0 to 1), for whatever measures it.
+    pub fn mic_level_bar(&self) -> gtk::LevelBar {
+        self.mic_level.clone()
     }
 
     pub fn set_drop_active(&self, on: bool) {
