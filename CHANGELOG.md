@@ -4,8 +4,21 @@ Linksy for Linux. Each version's section becomes its release notes.
 
 ## Unreleased
 
+### Added
+- **openSUSE.** Each release now has an .rpm for openSUSE Tumbleweed
+  (`linksy-X.Y.Z-1.suse.x86_64.rpm`, installed with zypper), and Finish Setup knows
+  openSUSE's packages: the camera driver as the running kernel's KMP, GStreamer's GTK 4
+  sink from gstreamer-plugins-rs, openh264 and libav, and PipeWire's plugin, installed
+  with zypper.
+
 ### Changed
 - **Linksy is open source**, under the GNU Affero General Public License v3.0 or later.
+
+### Fixed
+- **On openSUSE, Linksy asked for the administrator's password every time it opened.**
+  Reading the firewall's zone needs it there (firewalld's polkit policy). Linksy now asks
+  polkit first and, where a password would be needed, doesn't read the zone: the firewall
+  shows as to set up until Linksy has opened it itself, once, when asked to.
 
 ## 0.8.2
 

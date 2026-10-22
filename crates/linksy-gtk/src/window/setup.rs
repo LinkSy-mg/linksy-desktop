@@ -4,7 +4,7 @@
 //! Everything"), or each on its own. Everything that needs root, installing packages
 //! included, is done by `linksy-system-setup` with pkexec, in one go: the computer asks
 //! for the password once, on any desktop (GNOME, KDE or other), with the distribution's
-//! own package tool (dnf, apt, pacman). The same command is shown to run in a terminal
+//! own package tool (dnf, apt, zypper, pacman). The same command is shown to run in a terminal
 //! instead. It opens by itself the first time each version of Linksy starts with
 //! something missing.
 
@@ -42,6 +42,8 @@ enum Family {
     Fedora,
     Debian,
     Arch,
+    /// openSUSE (Tumbleweed, Leap) and SUSE Linux Enterprise.
+    Suse,
     Other,
 }
 
@@ -57,8 +59,10 @@ fn family() -> Family {
         Family::Fedora
     } else if ids.iter().any(|i| matches!(*i, "debian" | "ubuntu")) {
         Family::Debian
-    } else if ids.iter().any(|i| *i == "arch") {
+    } else if ids.contains(&"arch") {
         Family::Arch
+    } else if ids.iter().any(|i| i.starts_with("opensuse") || matches!(*i, "suse" | "sles")) {
+        Family::Suse
     } else {
         Family::Other
     }
@@ -79,10 +83,16 @@ fn kernel() -> String {
 }
 
 /// The camera driver's packages; a driver built here (DKMS) needs the kernel's headers.
+/// openSUSE ships it prebuilt and signed per kernel flavor (the end of `uname -r`: default,
+/// longterm), so no building and no Secure Boot step there.
 fn loopback_packages(fam: Family) -> Vec<String> {
     let k = kernel();
     match fam {
         Family::Fedora => vec!["akmod-v4l2loopback".into(), "v4l2loopback".into()],
+        Family::Suse => {
+            let flavor = k.rsplit('-').next().filter(|f| !f.is_empty()).unwrap_or("default");
+            vec![format!("v4l2loopback-kmp-{flavor}"), "v4l2loopback-utils".into()]
+        }
         Family::Debian => vec!["v4l2loopback-dkms".into(), "v4l2loopback-utils".into(), format!("linux-headers-{k}")],
         Family::Arch => {
             let headers = ["lts", "zen", "hardened"].iter().find(|f| k.ends_with(*f)).map_or("linux-headers".to_string(), |f| format!("linux-{f}-headers"));
@@ -150,13 +160,49 @@ fn output(argv: &[&str]) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Whether polkit lets this process do `action` right now without asking for a password.
+/// Anything but a clear no (polkit missing, D-Bus down) counts as yes: the call then
+/// decides for itself, as before.
+fn polkit_allows(action: &str) -> bool {
+    let Ok(bus) = gio::bus_get_sync(gio::BusType::System, gio::Cancellable::NONE) else { return true };
+    // The subject is this process: its pid, start time (field 22 of /proc/self/stat, after
+    // the command's closing parenthesis) and uid, so polkit needn't look them up.
+    let start_time = std::fs::read_to_string("/proc/self/stat").ok().and_then(|s| s.rsplit_once(") ")?.1.split_whitespace().nth(19)?.parse::<u64>().ok()).unwrap_or(0);
+    let uid = std::fs::read_to_string("/proc/self/status").ok().and_then(|s| s.lines().find_map(|l| l.strip_prefix("Uid:"))?.split_whitespace().next()?.parse::<i32>().ok()).unwrap_or(-1);
+    let subject: std::collections::HashMap<&str, glib::Variant> = [("pid", std::process::id().to_variant()), ("start-time", start_time.to_variant()), ("uid", uid.to_variant())].into();
+    let details: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    // Flags 0: never ask the user from here.
+    let args = (("unix-process", subject), action, details, 0u32, "").to_variant();
+    let Ok(reply) = bus.call_sync(
+        Some("org.freedesktop.PolicyKit1"),
+        "/org/freedesktop/PolicyKit1/Authority",
+        "org.freedesktop.PolicyKit1.Authority",
+        "CheckAuthorization",
+        Some(&args),
+        None,
+        gio::DBusCallFlags::NONE,
+        2000,
+        gio::Cancellable::NONE,
+    ) else {
+        return true;
+    };
+    // (is_authorized, is_challenge, details)
+    reply.child_value(0).child_value(0).get::<bool>().unwrap_or(true)
+}
+
 /// Whether a firewall would keep nearby devices out: None when there's none to open.
 fn firewall_need() -> Option<Need> {
     if std::path::Path::new("/etc/linksy/firewall").exists() {
         return Some(Need::Ready);
     }
     if in_path("firewall-cmd") && output(&["firewall-cmd", "--state"]).is_some() {
-        // Reading the zone needs no password; anything unclear gets opened.
+        // Reading the zone (firewalld's config.info action) needs no password on Fedora or
+        // Debian; on openSUSE it needs the administrator's, at every start. Then nothing
+        // is read: the firewall counts as closed until Linksy opens it itself (the marker
+        // above), one password, when asked to. Anything unclear gets opened.
+        if !polkit_allows("org.fedoraproject.FirewallD1.config.info") {
+            return Some(Need::SetUp);
+        }
         let Some(zone) = output(&["firewall-cmd", "--list-all"]) else { return Some(Need::SetUp) };
         let field = |name: &str| zone.lines().find_map(|l| l.trim().strip_prefix(&format!("{name}:")).map(|v| v.split_whitespace().map(str::to_string).collect::<Vec<_>>())).unwrap_or_default();
         let (services, ports) = (field("services"), field("ports"));
@@ -196,11 +242,12 @@ fn loopback_installed() -> bool {
 /// What this computer has and lacks, right now.
 pub fn check() -> Vec<Item> {
     let fam = family();
-    let pick = |fedora: &[&str], debian: &[&str], arch: &[&str], manual: &'static str| {
+    let pick = |fedora: &[&str], debian: &[&str], arch: &[&str], suse: &[&str], manual: &'static str| {
         let names = match fam {
             Family::Fedora => fedora,
             Family::Debian => debian,
             Family::Arch => arch,
+            Family::Suse => suse,
             Family::Other => return Need::Manual(manual),
         };
         Need::Install(names.iter().map(|n| n.to_string()).collect())
@@ -234,32 +281,36 @@ pub fn check() -> Vec<Item> {
     }
     // In a Flatpak, codecs and tools come with the runtime and the app.
     if !flatpak() {
-        // H.264 both ways, and GTK's video sink to show it in a window.
-        let (mut fedora, mut debian, mut arch) = (Vec::new(), Vec::new(), Vec::new());
+        // H.264 both ways, and GTK's video sink to show it in a window (on openSUSE, in
+        // the gstreamer-plugins-rs bundle).
+        let (mut fedora, mut debian, mut arch, mut suse) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         if !(has_element(&["avdec_h264", "vah264dec", "openh264dec"]) && has_element(&["vah264lpenc", "vah264enc", "x264enc", "openh264enc"])) {
             fedora.extend(["gstreamer1-plugin-openh264", "gstreamer1-plugin-libav"]);
             debian.extend(["gstreamer1.0-libav", "gstreamer1.0-plugins-ugly"]);
             arch.extend(["gst-libav", "gst-plugins-ugly"]);
+            suse.extend(["gstreamer-plugin-openh264", "gstreamer-plugins-libav"]);
         }
         if !has_element(&["gtk4paintablesink"]) {
             fedora.push("gstreamer1-plugin-gtk4");
             debian.push("gstreamer1.0-gtk4");
             arch.push("gst-plugin-gtk4");
+            suse.push("gstreamer-plugins-rs");
         }
         items.push(Item {
             id: "video",
             title: t!("Video for Screens and Cameras"),
             why: t!("To send and show screens, second displays and the phone's camera."),
-            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, t!("Install GStreamer's H.264 plugins (openh264 or libav) and its GTK 4 video sink (gtk4paintablesink) from your distribution.")) },
+            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, &suse, t!("Install GStreamer's H.264 plugins (openh264 or libav) and its GTK 4 video sink (gtk4paintablesink) from your distribution.")) },
         });
-        let (mut fedora, mut debian, mut arch) = (Vec::new(), Vec::new(), Vec::new());
+        let (mut fedora, mut debian, mut arch, mut suse) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
         if !has_element(&["pipewiresrc"]) {
             fedora.push("pipewire-gstreamer");
             debian.push("gstreamer1.0-pipewire");
             arch.push("gst-plugin-pipewire");
+            suse.push("gstreamer-plugin-pipewire");
         }
         if !screencast_portal() {
-            for list in [&mut fedora, &mut debian, &mut arch] {
+            for list in [&mut fedora, &mut debian, &mut arch, &mut suse] {
                 list.push(portal_package());
             }
         }
@@ -267,14 +318,14 @@ pub fn check() -> Vec<Item> {
             id: "pipewire",
             title: t!("Screen Sharing"),
             why: t!("Reading this computer's screen, and offering the phone's camera to apps."),
-            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, t!("Install PipeWire's GStreamer plugin and your desktop's screen sharing portal.")) },
+            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, &suse, t!("Install PipeWire's GStreamer plugin and your desktop's screen sharing portal.")) },
         });
         let clip = in_path("wl-copy") || in_path("xclip") || in_path("xsel");
         items.push(Item {
             id: "clipboard",
             title: t!("Clipboard From Your Phone"),
             why: t!("Putting text your phone shares on this computer's clipboard while Linksy's window is closed."),
-            need: if clip { Need::Ready } else { pick(&["wl-clipboard"], &["wl-clipboard"], &["wl-clipboard"], t!("Install wl-clipboard.")) },
+            need: if clip { Need::Ready } else { pick(&["wl-clipboard"], &["wl-clipboard"], &["wl-clipboard"], &["wl-clipboard"], t!("Install wl-clipboard.")) },
         });
         if let Some(need) = firewall_need() {
             items.push(Item {

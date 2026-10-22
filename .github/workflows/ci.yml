@@ -45,3 +45,16 @@ jobs:
       - run: dnf install -y --setopt=install_weak_deps=False gcc git gtk4-devel libadwaita-devel gstreamer1-devel gstreamer1-plugins-base-devel rust cargo clippy
       - uses: actions/checkout@v5
       - run: cargo clippy -p linksy-app -p linksy-screen -- -D warnings
+
+  gtk-opensuse:
+    name: GTK app and screen helper (openSUSE Tumbleweed)
+    runs-on: ubuntu-latest
+    container: registry.opensuse.org/opensuse/tumbleweed:latest
+    steps:
+      # The toolchain comes from rustup (needs curl): openSUSE's rust packages don't carry clippy.
+      - run: zypper --non-interactive install --no-recommends gcc git tar gzip curl gtk4-devel libadwaita-devel gstreamer-devel gstreamer-plugins-base-devel
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - run: cargo clippy -p linksy-app -p linksy-screen -- -D warnings

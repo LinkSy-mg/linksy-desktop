@@ -19,7 +19,7 @@ scripts/package-linux.sh
 scripts/package-flatpak.sh >/dev/null
 
 D="dist/v$V"
-FILES=("linksy-$V.flatpak" "linksy_${V}_amd64.deb" "linksy-$V-1.x86_64.rpm" "linksy-$V-linux-x86_64.tar.gz")
+FILES=("linksy-$V.flatpak" "linksy_${V}_amd64.deb" "linksy-$V-1.x86_64.rpm" "linksy-$V-1.suse.x86_64.rpm" "linksy-$V-linux-x86_64.tar.gz")
 (cd "$D" && sha256sum "${FILES[@]}" > SHA256SUMS)
 {
   cat <<NOTES
@@ -30,6 +30,7 @@ FILES=("linksy-$V.flatpak" "linksy_${V}_amd64.deb" "linksy-$V-1.x86_64.rpm" "lin
 | Any distribution | \`linksy-$V.flatpak\` | \`flatpak install --user linksy-$V.flatpak\` |
 | Ubuntu 24.10+, Debian 13+ | \`linksy_${V}_amd64.deb\` | \`sudo apt install ./linksy_${V}_amd64.deb\` |
 | Fedora 41+ | \`linksy-$V-1.x86_64.rpm\` | \`sudo dnf install ./linksy-$V-1.x86_64.rpm\` |
+| openSUSE Tumbleweed | \`linksy-$V-1.suse.x86_64.rpm\` | \`sudo zypper install --allow-unsigned-rpm ./linksy-$V-1.suse.x86_64.rpm\` |
 | Others (no root) | \`linksy-$V-linux-x86_64.tar.gz\` | extract, then \`./install.sh\` |
 
 NOTES
