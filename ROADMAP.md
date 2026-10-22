@@ -23,7 +23,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay |
 | **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth |
 | **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync |
-| **1.0** | **Feature freeze** | No new features: fixes, performance, polish, stores |
+| **1.0** | **Feature freeze** | No new features: fixes, performance, polish, stores · Onboarding |
 
 After 0.16, Linksy is feature complete: everything after that is fixing. Bold releases are
 next; the rest have shipped.
@@ -224,6 +224,15 @@ No new features after 0.16. Releases are fixes only:
 - reliability of every feature on more phones and computers;
 - performance and battery use on the phone;
 - Flathub, AUR and other stores.
+
+The one addition is a first run that finishes the install:
+
+### Onboarding — M
+At most five slides, skippable, shown once: welcome; get the phone app (a QR code to the
+download); pair; finish setup (the dependency check, each missing piece with its fix
+button); done, with where the main features are.
+- **Done when:** a fresh install goes from first launch to a paired phone, with every
+  feature the computer can do working, without opening a terminal.
 
 ---
 
