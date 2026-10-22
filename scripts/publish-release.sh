@@ -40,8 +40,8 @@ git push -q origin main
 git tag -a "v$V" -m "Linksy $V"
 git push -q origin "v$V"
 ASSETS=("${FILES[@]/#/$D/}" "$D/SHA256SUMS")
-gh release create "v$V" -R LinkSy-mg/linksy-desktop --title "Linksy $V for Linux" --notes-file "$D/release-notes.md" "${ASSETS[@]}"
-gh release create "linux-v$V" -R LinkSy-mg/linksy-releases --latest=false --title "Linksy $V for Linux" --notes-file "$D/release-notes.md" "${ASSETS[@]}"
+gh release create "v$V" -R LinkSy-mg/linksy-desktop --title "Desktop release · Linksy $V for Linux" --notes-file "$D/release-notes.md" "${ASSETS[@]}"
+gh release create "linux-v$V" -R LinkSy-mg/linksy-releases --latest=false --title "Desktop release · Linksy $V for Linux" --notes-file "$D/release-notes.md" "${ASSETS[@]}"
 
 # The public repo's front page: its Linux download links point at this version.
 PAGE=$(mktemp)
