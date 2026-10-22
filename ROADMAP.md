@@ -14,9 +14,130 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.5 | Phone on the desktop | Texting from the desktop (desktop done in 0.5.0) · Phone in the Files sidebar (desktop done in 0.5.1) · USB cable, microphone, camera controls (desktop done in 0.5.7) |
 | 0.6 | Anywhere | Away from home over the internet, with a 7-day lease · Locate the phone · 1080p webcam (desktop done in 0.6.0) |
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
+| 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
+| **0.9** | **At home on KDE** | A Qt 6 app for KDE Plasma, beside the GTK one |
+| **0.10** | **Never miss a text** | Texts as notifications on the computer, with reply |
+| **0.11** | **No Wi-Fi needed** | Bluetooth: connect, and know when the phone is near |
+| **0.12** | **The cable, for real** | USB that works on every phone, end to end |
+| **0.13** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay |
+| **0.14** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth |
+| **0.15** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync |
+| **1.0** | **Feature freeze** | No new features: fixes, other desktops ([desktop support](docs/desktop-support.md)), performance, polish |
 
-Not planned: Bluetooth LE presence, and automatic clipboard sync on GNOME (needs a Shell
-extension; manual Send Clipboard stays).
+After 0.15, Linksy is feature complete: everything after that is fixing. Bold releases are
+next; the rest have shipped.
+
+Not planned: automatic clipboard sync on GNOME (GNOME doesn't let apps watch the clipboard;
+it needs a Shell extension, and manual Send Clipboard stays). Windows and macOS.
+
+---
+
+## 0.9 — At home on KDE
+
+### A Qt 6 app for KDE Plasma — L
+Same service, second front end: the app is only a window on `linksyd`, so a Qt one talks to
+it over the same local socket (`linksy-ipc`) and nothing below it changes.
+- **Desktop:** a Qt 6 / Kirigami app with the GTK app's pages (devices, device page,
+  pairing, transfers, preferences, Finish Setup, USB guide), in Breeze, with KDE's own
+  notifications and file dialogs. Packaged as its own package (`linksy-qt`); installing
+  either app is enough, and the GTK one stays the default elsewhere.
+- **Translations:** the same catalogs as the GTK app (`linksy-i18n`), so every language
+  carries over.
+- **Phone:** nothing.
+- **Done when:** on Plasma, Linksy looks and behaves like a KDE app, every feature reachable.
+
+## 0.10 — Never miss a text
+
+### Texts as notifications, with reply — M
+Builds on 0.5 (the Messages page and `sms_received`).
+- **Protocol:** `sms_received` carries what the notification needs (sender, contact name and
+  picture, text, thread); reply goes back with `sms_send`.
+- **Desktop:** each new text as a notification with Reply and Mark as Read; the Messages page
+  opens on its thread when clicked. Not shown twice when the phone's own notification for
+  the messaging app is mirrored too.
+- **Phone:** push every incoming SMS as it arrives (`SMS_RECEIVED`), with the contact's name.
+- **Done when:** a text arrives on the computer within a second, and replying from the
+  notification sends it from the phone.
+
+## 0.11 — No Wi-Fi needed
+
+### Bluetooth — L
+- **Transport:** Linksy's connection over Bluetooth (L2CAP channels; RFCOMM where they're
+  missing) when there's no shared network. Same pairing, same encryption: only the carrier
+  changes. Bluetooth is slow, so it carries the light features (notifications, texts,
+  clipboard, battery, media controls, Ring, Locate); camera, screens and big files say
+  they need Wi-Fi or the cable.
+- **Presence:** Bluetooth LE tells whether the phone is near, for Lock When Away, without a
+  connection.
+- **Desktop:** BlueZ through D-Bus in `linksyd`; Bluetooth shown on the device page like
+  "Connected by USB".
+- **Phone:** a Bluetooth server socket and LE advertising, with the Nearby Devices permission.
+- **Done when:** with Wi-Fi off on both, notifications and texts still arrive, and walking
+  away still locks the computer.
+
+## 0.12 — The cable, for real
+
+### USB that works on every phone — M
+The 0.5.7 cable (Android Open Accessory) switches the phone, but some phones never answer
+on it.
+- **Desktop and phone:** find out why the accessory link stays silent on those phones and
+  fix it; test on several brands (realme, Samsung, Pixel, Xiaomi).
+- **Fallback:** where accessory mode can't work, connect over the phone's USB networking
+  (USB tethering) instead, so the cable still gives a fast link.
+- **Done when:** plugging in and pressing Connect gives "Connected by USB" on every phone
+  tested, every time.
+
+## 0.13 — Your relay, or none
+
+### Away from home becomes optional — S
+- **Off:** a setting that turns Away from home off completely: no contact with the relay at
+  all, not even to register.
+- **Removed:** a build option that leaves the relay code out, for distributions and people
+  who want none of it.
+- **Your own relay:** the relay's address becomes a setting, and the relay
+  (`linksy-relay`) is published with instructions to host one.
+- **Done when:** with Away off, Linksy makes no connection beyond the local network; with a
+  self-hosted relay, Away from home works through it.
+
+## 0.14 — Calls *(maybe)*
+
+### Calls on the computer — L
+- **Control:** see who's calling, answer, decline and hang up from the computer (the phone
+  answers with `ANSWER_PHONE_CALLS`). This part needs no Bluetooth.
+- **Audio:** talking through the computer's microphone and speakers needs the computer to
+  act as a Bluetooth hands-free device (HFP) for the phone, through PipeWire. It depends on
+  0.11, and on how well each computer's Bluetooth does HFP.
+- **Done when:** a call can be answered on the computer and held through its headset.
+- **Maybe** because the audio part depends on hardware we don't control. If it isn't
+  reliable, only call control ships.
+
+## 0.15 — Optional extras
+
+### Control the phone's screen from the computer — M
+The phone's screen already shows on the computer. This adds the mouse and keyboard driving
+it, like scrcpy.
+- **Phone:** taps, swipes and typing replayed through an accessibility service (a
+  sideloaded app can't inject input otherwise); asked for once, explained clearly.
+- **Desktop:** clicks, scrolls and keys on the phone's screen window sent as input.
+- **Done when:** a phone app can be used from the computer without touching the phone.
+
+### Automatic clipboard sync — M
+Today, sending the clipboard is a button.
+- **Computer to phone:** automatic wherever the desktop allows watching the clipboard
+  (KDE, Hyprland, Sway, X11; not GNOME).
+- **Phone to computer:** Android only lets the app in front, or the keyboard, read the
+  clipboard. Automatic while Linksy is open, and through a "Copy to Computer" entry in
+  Android's text menu otherwise.
+- **Done when:** text copied on one side is ready to paste on the other, with no button.
+
+## 1.0 — Feature freeze
+
+No new features after 0.15. Releases are fixes only:
+- everything in [docs/desktop-support.md](docs/desktop-support.md) (Hyprland, Sway, niri,
+  X11, without systemd);
+- reliability of every feature on more phones and computers;
+- performance and battery use on the phone;
+- Flathub, AUR and other stores.
 
 ---
 
