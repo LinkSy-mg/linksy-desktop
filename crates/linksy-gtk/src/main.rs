@@ -259,10 +259,8 @@ fn main() -> glib::ExitCode {
             .copyright("© 2026 Axel RAKOTOARIVAO")
             .website("https://linksy.diary.mg")
             .issue_url("https://github.com/LinkSy-mg/linksy-releases/issues")
-            // Freeware: free to use, not open source (LICENSE); the open-source parts it
-            // builds in are credited in Legal.
-            .license_type(gtk::License::Custom)
-            .license(t!("Linksy is freeware: free to use on all your devices, for personal or commercial use, and free to share unmodified. It isn't open source.\n\nThe full license: https://linksy.diary.mg/license"))
+            // The libraries it builds in are credited in Legal.
+            .license_type(gtk::License::MitX11)
             .build();
         dialog.add_legal_section(t!("Open-source components"), None, gtk::License::Custom, Some(t!("Linksy builds in open-source libraries under the MIT, Apache 2.0, BSD and similar licenses. Their notices ship with Linksy in the THIRD-PARTY-NOTICES file (in /usr/share/licenses/linksy on .deb and .rpm installs).")));
         if let Some(win) = w.borrow().as_ref() {

@@ -161,7 +161,6 @@
   "Links": "リンク",
   "Linksy Isn't Running": "Linksy が実行されていません",
   "Linksy builds in open-source libraries under the MIT, Apache 2.0, BSD and similar licenses. Their notices ship with Linksy in the THIRD-PARTY-NOTICES file (in /usr/share/licenses/linksy on .deb and .rpm installs).": "Linksy には、MIT、Apache 2.0、BSD などのライセンスによるオープンソースライブラリが組み込まれています。それらの告知は THIRD-PARTY-NOTICES ファイルとして Linksy に同梱されています（.deb および .rpm でインストールした場合は /usr/share/licenses/linksy にあります）。",
-  "Linksy is freeware: free to use on all your devices, for personal or commercial use, and free to share unmodified. It isn't open source.\n\nThe full license: https://linksy.diary.mg/license": "Linksy はフリーウェアです。個人利用・商用利用を問わず、すべてのデバイスで無料で使え、改変しなければ自由に配布できます。オープンソースではありません。\n\nライセンス全文: https://linksy.diary.mg/license",
   "Linksy isn't running": "Linksy が実行されていません",
   "Linksy starts in the background with your computer, so phones can reach it with the window closed.": "Linksy はコンピュータの起動時にバックグラウンドで起動するため、ウィンドウを閉じていてもスマートフォンから接続できます。",
   "Linksy stays ready for your devices when its window is closed.": "ウィンドウを閉じても、Linksy はデバイスからの接続に備えています。",

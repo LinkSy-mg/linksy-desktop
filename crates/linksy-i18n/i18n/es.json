@@ -161,7 +161,6 @@
   "Links": "Enlaces",
   "Linksy Isn't Running": "Linksy no se está ejecutando",
   "Linksy builds in open-source libraries under the MIT, Apache 2.0, BSD and similar licenses. Their notices ship with Linksy in the THIRD-PARTY-NOTICES file (in /usr/share/licenses/linksy on .deb and .rpm installs).": "Linksy incluye bibliotecas de código abierto con licencias MIT, Apache 2.0, BSD y similares. Sus avisos se incluyen con Linksy en el archivo THIRD-PARTY-NOTICES (en /usr/share/licenses/linksy en las instalaciones .deb y .rpm).",
-  "Linksy is freeware: free to use on all your devices, for personal or commercial use, and free to share unmodified. It isn't open source.\n\nThe full license: https://linksy.diary.mg/license": "Linksy es freeware: gratis en todos tus dispositivos, para uso personal o comercial, y se puede compartir libremente sin modificar. No es de código abierto.\n\nLa licencia completa: https://linksy.diary.mg/license",
   "Linksy isn't running": "Linksy no se está ejecutando",
   "Linksy starts in the background with your computer, so phones can reach it with the window closed.": "Linksy se inicia en segundo plano con tu computadora, para que los teléfonos puedan conectarse con la ventana cerrada.",
   "Linksy stays ready for your devices when its window is closed.": "Linksy sigue disponible para tus dispositivos cuando su ventana está cerrada.",
