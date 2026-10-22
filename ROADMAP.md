@@ -15,7 +15,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.6 | Anywhere | Away from home over the internet, with a 7-day lease · Locate the phone · 1080p webcam (desktop done in 0.6.0) |
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
-| **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Problem logs (`logs.txt`) |
+| **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Problem logs (`logs.txt`) · Lighter at rest |
 | **0.10** | **At home on KDE** | A Qt 6 app for KDE Plasma, beside the GTK one |
 | **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply |
 | **0.12** | **No Wi-Fi needed** | Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
@@ -62,6 +62,22 @@ When something goes wrong, one file says what happened, ready to attach to a bug
   File names, texts, notification contents and pairing codes are left out.
 - **Done when:** a crash on either side can be turned into a `logs.txt` in two clicks, and
   that file is enough to understand it.
+
+### Lighter at rest — M
+Linksy runs all day, so what it holds while idle matters more than its speed. Today: the
+service 25 MB, the app 49 MB, the phone app about 200 MB.
+- **Service:** a smaller binary (12 MB of the 25 is the 20 MB program itself): trim unused
+  dependency features, and weigh `opt-level = "s"` for code that isn't hot. Fewer malloc
+  arenas (`MALLOC_ARENA_MAX=2` in the unit) and memory handed back after a transfer or a
+  session ends.
+- **App:** pages built when first opened, not all at start; pictures decoded at the size
+  they're shown; the window's memory released when it closes. Check the GL renderer
+  against Vulkan, whose driver alone takes 3 MB.
+- **Phone:** when the app is closed, only the service and the core stay; the screens and
+  their engine are released. Image cache capped, thumbnails at their shown size, and caches
+  dropped when Android asks.
+- **Done when:** idle, the service stays under 15 MB, the app under 35 MB and the phone app
+  under 100 MB in the background, measured the same way each release.
 
 ## 0.10 — At home on KDE
 
