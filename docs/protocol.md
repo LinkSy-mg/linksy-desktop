@@ -1286,3 +1286,13 @@ robust against any encoder (GPU ones may slice too):
   other languages; look the English up in the JSON files).
 - **2026-10-22** — USB cable tested on real hardware (realme 15 Pro 5G): computer side
   works, phone app never opens the accessory. Details and what to check in §4.11.
+- **2026-10-22 10:58** — **Retested after the phone app update: still 0 packets.** Desktop
+  log: "Linksy over USB: realme 15 Pro 5G" (bridge open, phone in accessory mode
+  `18d1:2d00`), then "USB link: 0 packets from the phone, 0 to it". The user chose
+  Linksy on the phone. So the phone's node never dials through the bridge, or the bridge
+  never writes to the accessory. Please get logcat from the realme (wireless debugging
+  works while the cable is in accessory mode) and check, in order: the ATTACHED intent
+  arrives; `hasPermission`; `openAccessory` returns an fd; "usb cable: bridge on
+  127.0.0.1:P"; `connectAddress` is called and its error; the first `output.write`. The
+  desktop logs "USB link: first packet from the phone" as soon as one arrives.
+
