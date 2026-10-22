@@ -77,8 +77,12 @@ pub enum Request {
     SetTerminalCode { code: Option<String> },
     AllowTerminal { target: String, on: bool },
     UnlockTerminal { target: String },
-    /// (Not `id`: the envelope has that.)
+    /// End a terminal. Its field is `terminal`, not `id`: the envelope has an `id` already.
     EndTerminal { terminal: String },
+    /// Phones plugged in by USB cable, and how far each got.
+    UsbStatus,
+    /// Use this plugged-in phone with Linksy over the cable (and from now on).
+    UsbConnect { phone: String },
     Settings,
     UpdateSettings { settings: Settings },
     /// A pairing QR code (`linksy://pair?…`); valid five minutes or until cancelled.
@@ -248,6 +252,38 @@ pub struct TerminalStatus {
     pub allowed: Vec<Fingerprint>,
     pub locked: Vec<Fingerprint>,
     pub running: Vec<RunningTerminal>,
+}
+
+/// Phones plugged into this computer by USB cable (docs/protocol.md §4.11).
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct UsbStatus {
+    /// The service watches for phones (not when started with --no-usb, or without USB).
+    pub watching: bool,
+    pub phones: Vec<UsbPhone>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UsbPhone {
+    /// Its USB serial (or vendor:product): what `UsbConnect` takes.
+    pub key: String,
+    pub name: String,
+    pub state: UsbState,
+    /// Why it failed, when it did.
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UsbState {
+    /// Plugged in, not used with Linksy (yet).
+    Plugged,
+    /// Someone said "Not This Phone".
+    Declined,
+    /// Asked to restart as a Linksy accessory.
+    Switching,
+    /// In accessory mode: the cable carries Linksy once the phone app opens it.
+    Accessory,
+    Failed,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -580,6 +616,14 @@ impl Client {
 
     pub async fn end_terminal(&self, id: &str) -> Result<(), ClientError> {
         self.call(Request::EndTerminal { terminal: id.into() }).await
+    }
+
+    pub async fn usb_status(&self) -> Result<UsbStatus, ClientError> {
+        self.call(Request::UsbStatus).await
+    }
+
+    pub async fn usb_connect(&self, phone: &str) -> Result<(), ClientError> {
+        self.call(Request::UsbConnect { phone: phone.into() }).await
     }
 
     pub async fn lock_prefs(&self) -> Result<LockPrefs, ClientError> {

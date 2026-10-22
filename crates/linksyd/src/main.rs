@@ -187,7 +187,9 @@ async fn main() -> ExitCode {
     let _ = dav::BRIDGES.set(dav::Bridges::start(data_dir.join("files.json"), node.clone()).await);
     #[cfg(target_os = "linux")]
     if args.usb {
-        tokio::spawn(usb::Usb::new(node.clone(), data_dir.clone(), args.notifications).run());
+        let usb = usb::Usb::new(node.clone(), data_dir.clone(), args.notifications);
+        let _ = usb::USB.set(usb.clone());
+        tokio::spawn(usb.run());
     }
     // Terminals for phones; not from a Flatpak, whose shell would be the sandbox's.
     #[cfg(target_os = "linux")]

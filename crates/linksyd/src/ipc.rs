@@ -290,6 +290,15 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
         Request::EndTerminal { terminal } => {
             if terminals()?.end(&terminal) { Ok(Value::Null) } else { Err("that terminal isn't running".into()) }
         }
+        Request::UsbStatus => json(serde_json::to_value(usb_status())),
+        Request::UsbConnect { phone } => {
+            #[cfg(target_os = "linux")]
+            if let Some(usb) = crate::usb::USB.get() {
+                return usb.connect(&phone).await.map(|()| Value::Null);
+            }
+            let _ = phone;
+            Err("Linksy isn't watching USB here".into())
+        }
         Request::LockPrefs => serde_json::to_value(away.prefs()).map_err(|e| e.to_string()),
         Request::SetLockPrefs { prefs } => {
             away.set_prefs(node, prefs).await?;
@@ -351,6 +360,14 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
 }
 
 /// Find a device by full id, short id, or name (case-insensitive).
+fn usb_status() -> linksy_ipc::UsbStatus {
+    #[cfg(target_os = "linux")]
+    if let Some(usb) = crate::usb::USB.get() {
+        return usb.status();
+    }
+    linksy_ipc::UsbStatus::default()
+}
+
 fn terminals() -> Result<&'static crate::terminal::Terminals, String> {
     crate::terminal::TERMINALS.get().ok_or_else(|| "terminals aren't available here".to_string())
 }

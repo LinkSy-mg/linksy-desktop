@@ -9,19 +9,22 @@
 //! knows the connection is the cable (and prefers it to Wi-Fi).
 //!
 //! Switching a phone drops its file-transfer (MTP) mode until it's unplugged, so Linksy
-//! asks once per phone; the answer is kept in `usb.json`.
+//! asks once per phone; the answer is kept in `usb.json`. The app shows the phones plugged
+//! in and how far each got (`status`), and can connect one itself (`connect`): its
+//! Connect by USB Cable guide, which also works before the phone is paired.
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use futures_util::StreamExt;
 use linksy_core::Node;
+use linksy_ipc::{UsbPhone, UsbState, UsbStatus};
 use nusb::hotplug::HotplugEvent;
 use nusb::transfer::{Bulk, ControlIn, ControlOut, ControlType, In, Out, Recipient};
-use nusb::DeviceInfo;
+use nusb::{DeviceId, DeviceInfo};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::UdpSocket;
 use tracing::{debug, info, warn};
@@ -38,11 +41,18 @@ const PHONE_VENDORS: &[u16] = &[0x18d1, 0x04e8, 0x2717, 0x2a70, 0x22b8, 0x1004, 
 const MAX_PACKET: usize = 65_535;
 const TIMEOUT: Duration = Duration::from_secs(1);
 
+pub static USB: OnceLock<Usb> = OnceLock::new();
+
 #[derive(Clone)]
 pub struct Usb {
     node: Node,
     choices: Arc<Mutex<Choices>>,
     ask: bool,
+    /// What's plugged in now that looks like a phone, and how far it got.
+    plugged: Arc<Mutex<HashMap<DeviceId, (DeviceInfo, UsbPhone)>>>,
+    /// Phones' names by key, to name one back in accessory mode (it shows Google's ids).
+    names: Arc<Mutex<HashMap<String, String>>>,
+    watching: Arc<std::sync::atomic::AtomicBool>,
 }
 
 struct Choices {
@@ -69,7 +79,14 @@ impl Usb {
     /// `ask`: whether a new phone may be offered with a notification (else only phones
     /// already said yes to are switched). `LINKSY_USB=always` switches every phone.
     pub fn new(node: Node, data_dir: PathBuf, ask: bool) -> Self {
-        Usb { node, choices: Arc::new(Mutex::new(Choices::load(data_dir.join("usb.json")))), ask }
+        Usb {
+            node,
+            choices: Arc::new(Mutex::new(Choices::load(data_dir.join("usb.json")))),
+            ask,
+            plugged: Arc::default(),
+            names: Arc::default(),
+            watching: Arc::default(),
+        }
     }
 
     pub async fn run(self) {
@@ -77,48 +94,105 @@ impl Usb {
             Ok(w) => w,
             Err(e) => return debug!("no USB hotplug: {e}"),
         };
+        self.watching.store(true, std::sync::atomic::Ordering::Relaxed);
         if let Ok(list) = nusb::list_devices().await {
             for d in list {
                 self.clone().plugged(d);
             }
         }
         while let Some(event) = watch.next().await {
-            if let HotplugEvent::Connected(d) = event {
-                self.clone().plugged(d);
+            match event {
+                HotplugEvent::Connected(d) => self.clone().plugged(d),
+                HotplugEvent::Disconnected(id) => {
+                    self.plugged.lock().unwrap().remove(&id);
+                }
             }
         }
     }
 
+    pub fn status(&self) -> UsbStatus {
+        let mut phones: Vec<UsbPhone> = self.plugged.lock().unwrap().values().map(|(_, p)| p.clone()).collect();
+        phones.sort_by(|a, b| a.name.cmp(&b.name));
+        UsbStatus { watching: self.watching.load(std::sync::atomic::Ordering::Relaxed), phones }
+    }
+
+    /// Use a plugged-in phone with Linksy (the app's Connect): remembered for next time.
+    pub async fn connect(&self, key: &str) -> Result<(), String> {
+        let found = self.plugged.lock().unwrap().iter().find(|(_, (_, p))| p.key == key).map(|(id, (d, _))| (*id, d.clone()));
+        let (id, d) = found.ok_or("that phone isn't plugged in anymore")?;
+        self.choices.lock().unwrap().set(key.to_string(), true);
+        self.switch(id, &d).await
+    }
+
+    fn set_state(&self, id: DeviceId, state: UsbState, error: Option<String>) {
+        if let Some((_, p)) = self.plugged.lock().unwrap().get_mut(&id) {
+            p.state = state;
+            p.error = error;
+        }
+    }
+
+    async fn switch(&self, id: DeviceId, d: &DeviceInfo) -> Result<(), String> {
+        self.set_state(id, UsbState::Switching, None);
+        let result = switch(d).await;
+        if let Err(e) = &result {
+            warn!("could not switch {} to Linksy over USB: {e}", d.product_string().unwrap_or("the phone"));
+            self.set_state(id, UsbState::Failed, Some(e.clone()));
+        }
+        result
+    }
+
     fn plugged(self, d: DeviceInfo) {
+        let key = d.serial_number().map(str::to_string).unwrap_or_else(|| format!("{:04x}:{:04x}", d.vendor_id(), d.product_id()));
         if d.vendor_id() == AOA_VENDOR && AOA_PRODUCTS.contains(&d.product_id()) {
+            // Most phones keep their serial in accessory mode: name it as before.
+            let name = self.names.lock().unwrap().get(&key).cloned().unwrap_or_else(|| "Your phone".into());
+            let id = d.id();
+            self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key, name, state: UsbState::Accessory, error: None }));
             tokio::spawn(async move {
                 match bridge(&d, self.node.local_addr().map(|a| a.port()).unwrap_or(0)).await {
                     Ok(()) => info!("USB link ended"),
-                    Err(e) => warn!("USB link: {e}"),
+                    Err(e) => {
+                        warn!("USB link: {e}");
+                        self.set_state(id, UsbState::Failed, Some(e));
+                    }
                 }
             });
             return;
         }
-        if !looks_like_phone(&d) || !self.has_phone() {
+        if !looks_like_phone(&d) {
+            return;
+        }
+        let name = d.product_string().unwrap_or("A phone").to_string();
+        self.names.lock().unwrap().insert(key.clone(), name.clone());
+        let choice = self.choices.lock().unwrap().phones.get(&key).copied();
+        let state = if choice == Some(false) { UsbState::Declined } else { UsbState::Plugged };
+        let id = d.id();
+        self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name: name.clone(), state, error: None }));
+        // On its own (not from the app): only once an Android phone is paired.
+        if !self.has_phone() {
             return;
         }
         tokio::spawn(async move {
-            let key = d.serial_number().map(str::to_string).unwrap_or_else(|| format!("{:04x}:{:04x}", d.vendor_id(), d.product_id()));
             let always = std::env::var("LINKSY_USB").is_ok_and(|v| v == "always");
-            let choice = self.choices.lock().unwrap().phones.get(&key).copied();
             let yes = match choice {
                 _ if always => true,
                 Some(c) => c,
                 None if self.ask => {
-                    let name = d.product_string().unwrap_or("A phone").to_string();
                     let Some(yes) = tokio::task::spawn_blocking(move || ask(&name)).await.ok().flatten() else { return };
+                    // Connected from the app meanwhile: nothing left to do.
+                    if self.plugged.lock().unwrap().get(&id).is_none_or(|(_, p)| p.state != UsbState::Plugged) {
+                        return;
+                    }
                     self.choices.lock().unwrap().set(key, yes);
+                    if !yes {
+                        self.set_state(id, UsbState::Declined, None);
+                    }
                     yes
                 }
                 None => false,
             };
-            if yes && let Err(e) = switch(&d).await {
-                warn!("could not switch {} to Linksy over USB: {e}", d.product_string().unwrap_or("the phone"));
+            if yes {
+                let _ = self.switch(id, &d).await;
             }
         });
     }
