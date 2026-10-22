@@ -1,37 +1,21 @@
-Linksy Freeware License
+MIT License
 
-Copyright (c) 2026 Axel RAKOTOARIVAO. All rights reserved.
+Copyright (c) 2026 Axel RAKOTOARIVAO
 
-Linksy (the desktop app, its background service, its command-line tool and their
-packages, together "the Software") is freeware: free to use, not open source.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-1. Use. You may install and use the Software, free of charge, on any number of
-   computers and devices you own or control, for personal or commercial purposes.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-2. Redistribution. You may copy and distribute the official, unmodified release
-   packages of the Software (for example through a Linux distribution's repository,
-   Flathub or a download mirror), free of charge, as long as this license and the
-   THIRD-PARTY-NOTICES file are included and the Software is not sold or bundled into
-   a product that is sold.
-
-3. Restrictions. You may not modify, translate, decompile, disassemble or reverse
-   engineer the Software, except to the extent the law where you live allows it
-   despite this restriction; sell, rent or sublicense it; or remove or change any
-   copyright notice or this license.
-
-4. Third-party components. The Software includes open-source components under their own
-   licenses, listed in THIRD-PARTY-NOTICES. Nothing in this license limits your rights
-   under those licenses for those components.
-
-5. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
-   OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-   FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-
-6. Limitation of liability. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM,
-   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
-   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
-
-7. Termination. This license ends automatically if you break its terms; you must then
-   stop using and distributing the Software.
-
-https://linksy.diary.mg
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

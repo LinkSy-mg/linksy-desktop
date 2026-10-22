@@ -2,7 +2,7 @@
 <component type="desktop-application">
   <id>mg.diary.linksy.Linksy</id>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>LicenseRef-proprietary=https://linksy.diary.mg/license</project_license>
+  <project_license>MIT</project_license>
   <name>Linksy</name>
   <summary>Your devices, connected</summary>
   <developer id="mg.diary.linksy">

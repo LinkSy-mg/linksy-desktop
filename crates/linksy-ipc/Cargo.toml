@@ -2,7 +2,7 @@
 name = "linksy-ipc"
 version.workspace = true
 edition.workspace = true
-license-file.workspace = true
+license.workspace = true
 
 [dependencies]
 linksy-core = { path = "../linksy-core" }

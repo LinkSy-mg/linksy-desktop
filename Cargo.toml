@@ -8,7 +8,7 @@ default-members = ["crates/linksy-core", "crates/linksy-ipc", "crates/linksyd", 
 [workspace.package]
 version = "0.8.2"
 edition = "2024"
-license-file = "LICENSE"
+license = "MIT"
 
 [profile.release]
 lto = "thin"
