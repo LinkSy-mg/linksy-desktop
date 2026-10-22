@@ -383,6 +383,24 @@ async fn run_as_root(args: &[String], progress: &gtk::Label) -> Result<(), Failu
     }
 }
 
+/// Whether phones can be used by cable here: Err says why not.
+pub(super) fn usb_ready() -> Result<(), String> {
+    if flatpak() {
+        return Err("The Flatpak can't use USB cables. Install Linksy's .rpm or .deb for this.".into());
+    }
+    let rule = ["/usr/lib/udev/rules.d/70-linksy-usb.rules", "/etc/udev/rules.d/70-linksy-usb.rules"].iter().any(|p| std::path::Path::new(p).exists());
+    if rule { Ok(()) } else { Err("Allow it once: your computer asks for your password.".into()) }
+}
+
+/// Let Linksy use phones by cable (the udev rule), as root.
+pub(super) async fn allow_usb() -> Result<(), String> {
+    match run_as_root(&["usb".to_string()], &gtk::Label::new(None)).await {
+        Ok(()) => Ok(()),
+        Err(Failure::Message(m)) => Err(m),
+        Err(Failure::Restart(_)) => Err("Restart your computer, then try again.".into()),
+    }
+}
+
 /// Turn on the background service at every login (no password: it's the user's own).
 async fn enable_autostart() -> Result<(), Failure> {
     let failed = || Failure::Message("Couldn't turn on starting with your computer.".into());

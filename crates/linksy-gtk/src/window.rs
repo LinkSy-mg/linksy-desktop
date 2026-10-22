@@ -9,6 +9,7 @@ mod page;
 mod prefs;
 mod screen;
 mod setup;
+mod usb;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -360,7 +361,7 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 10] = [
+        let actions: [(&str, Run); 11] = [
             ("choose-files", |w| w.choose_files()),
             ("toggle-sidebar", |w| w.split.set_show_sidebar(!w.split.shows_sidebar())),
             ("start-service", |w| w.start_service()),
@@ -371,6 +372,7 @@ impl Window {
             }),
             ("preferences", |w| w.show_preferences()),
             ("setup", |w| w.show_setup()),
+            ("usb-cable", |w| w.show_usb_cable()),
             ("add-device", |w| w.show_invite()),
             ("pair-address", |w| w.ask_pair_address()),
             ("preview-camera", |w| {
@@ -469,6 +471,7 @@ impl Window {
                     }
                 }
                 page::Action::MicListen(on) => w.listen_microphone(on),
+                page::Action::UsbCable => w.show_usb_cable(),
                 page::Action::MicStop => {
                     let mic = w.state.borrow().microphone;
                     if let Some((session, _)) = mic {
@@ -1132,6 +1135,10 @@ impl Window {
         }
     }
 
+    fn devices(&self) -> Vec<DeviceView> {
+        self.state.borrow().devices.clone()
+    }
+
     fn device(&self, id: &Fingerprint) -> Option<DeviceView> {
         self.state.borrow().devices.iter().find(|d| d.device.id == *id).cloned()
     }
@@ -1596,6 +1603,7 @@ fn main_menu() -> gtk::MenuButton {
     let section = gio::Menu::new();
     section.append(Some("Add Device…"), Some("win.add-device"));
     section.append(Some("Pair by Address…"), Some("win.pair-address"));
+    section.append(Some("Connect by USB Cable…"), Some("win.usb-cable"));
     section.append(Some("Open Received Files"), Some("app.open-downloads"));
     menu.append_section(None, &section);
     let section = gio::Menu::new();

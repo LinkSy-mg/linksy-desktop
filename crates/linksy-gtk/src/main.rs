@@ -102,6 +102,17 @@ button.soft-tile:active { background-color: alpha(currentColor, 0.13); }
   background-color: alpha(@accent_bg_color, 0.16);
   color: @accent_color;
 }
+/* Connect by USB Cable: numbered steps, the ones still ahead dimmed. */
+.step-number {
+  min-width: 22px;
+  min-height: 22px;
+  border-radius: 99px;
+  font-weight: 800;
+  font-size: 0.85em;
+  background-color: alpha(currentColor, 0.1);
+}
+row.dim-step .title { opacity: 0.6; }
+.usb-cable { font-size: 0.9em; padding: 2px 8px; min-height: 0; }
 .live-badge {
   padding: 2px 10px;
   border-radius: 99px;

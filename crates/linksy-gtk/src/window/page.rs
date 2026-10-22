@@ -28,6 +28,8 @@ pub enum Action {
     /// Hear the phone's microphone on this computer, or stop hearing it.
     MicListen(bool),
     MicStop,
+    /// The Connect by USB Cable guide.
+    UsbCable,
     Pair,
     SendStaged,
     Forget,
@@ -85,7 +87,9 @@ pub struct DevicePage {
     /// "Use the phone as": a card per feature, side by side.
     use_as: gtk::Box,
     use_as_title: gtk::Label,
-    use_as_hint: gtk::Label,
+    /// Connect by USB Cable (faster for all of these), or that it is.
+    use_as_hint: gtk::Button,
+    use_as_hint_content: adw::ButtonContent,
     display_card: gtk::Box,
     webcam_card: gtk::Box,
     mic_card: gtk::Box,
@@ -320,7 +324,10 @@ impl DevicePage {
         cards.append(&webcam_card);
         cards.append(&mic_card);
         let use_as_title = gtk::Label::builder().xalign(0.0).hexpand(true).wrap(true).css_classes(["title-4"]).build();
-        let use_as_hint = gtk::Label::builder().label("Faster over a USB cable").xalign(0.0).css_classes(["caption", "dim-label"]).build();
+        let use_as_hint_content = adw::ButtonContent::builder().icon_name("media-removable-symbolic").label("Faster by USB Cable").build();
+        let use_as_hint = gtk::Button::builder().child(&use_as_hint_content).tooltip_text("Connect by USB Cable").valign(gtk::Align::Center).css_classes(["flat", "usb-cable"]).build();
+        let e = emit.clone();
+        use_as_hint.connect_clicked(move |_| e(Action::UsbCable));
         let use_as_head = gtk::Box::builder().spacing(4).build();
         use_as_head.append(&use_as_title);
         use_as_head.append(&use_as_hint);
@@ -529,6 +536,7 @@ impl DevicePage {
             use_as,
             use_as_title,
             use_as_hint,
+            use_as_hint_content,
             display_card,
             webcam_card,
             mic_card,
@@ -725,7 +733,8 @@ impl DevicePage {
         self.mic_card.set_visible(super::can(&d.device, "microphone"));
         self.use_as.set_visible(d.trusted && (self.display_card.is_visible() || self.webcam_card.is_visible() || self.mic_card.is_visible()));
         self.use_as_title.set_label(&format!("Use {} as", d.device.name));
-        self.use_as_hint.set_visible(d.device.kind == DeviceKind::Phone);
+        self.use_as_hint.set_visible(d.device.os == "android");
+        self.use_as_hint_content.set_label(if d.connected && d.usb { "Connected by USB" } else { "Faster by USB Cable" });
 
         self.lock_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "heartbeat"));
         self.messages_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "sms"));
