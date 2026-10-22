@@ -15,10 +15,15 @@ Linksy for Linux. Each version's section becomes its release notes.
 - **Linksy is open source**, under the GNU Affero General Public License v3.0 or later.
 
 ### Fixed
-- **On openSUSE, Linksy asked for the administrator's password every time it opened.**
-  Reading the firewall's zone needs it there (firewalld's polkit policy). Linksy now asks
-  polkit first and, where a password would be needed, doesn't read the zone: the firewall
-  shows as to set up until Linksy has opened it itself, once, when asked to.
+- **On openSUSE, Linksy asked for the administrator's password every time it opened,
+  twice, and again after every setup step.** Asking firewalld anything, even whether it
+  runs, needs it there (firewalld's polkit policy). Linksy now asks systemd whether
+  firewalld runs, asks polkit before reading the zone and, where a password would be
+  needed, doesn't: the firewall shows as to set up until Linksy has opened it itself,
+  once, when asked to.
+- **Opening the firewall failed with firewalld 2.x** (openSUSE Tumbleweed, Fedora 42+),
+  which refuses to add a port and a service in one firewall-cmd call. The setup helper and
+  the .deb and .rpm post-install now make two.
 
 ## 0.8.2
 

@@ -73,7 +73,9 @@ firewall() {
     if firewall-cmd --get-services | tr ' ' '\n' | grep -qx linksy; then
       firewall-cmd --permanent --add-service=linksy >/dev/null || return 1
     else
-      firewall-cmd --permanent --add-port=47200/udp --add-service=mdns >/dev/null || return 1
+      # One change per call: firewall-cmd 2.x refuses --add-port with --add-service.
+      firewall-cmd --permanent --add-port=47200/udp >/dev/null || return 1
+      firewall-cmd --permanent --add-service=mdns >/dev/null || return 1
     fi
     firewall-cmd --reload >/dev/null || return 1
   fi

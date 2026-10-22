@@ -110,7 +110,8 @@ Or run without installing: `cargo run -p linksyd` in one terminal, then
 `cargo run -p linksy -- devices`.
 
 Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora and openSUSE (firewalld):
-`sudo firewall-cmd --permanent --add-port=47200/udp --add-service=mdns && sudo firewall-cmd --reload`.
+`sudo firewall-cmd --permanent --add-port=47200/udp`, `sudo firewall-cmd --permanent --add-service=mdns`,
+then `sudo firewall-cmd --reload`.
 On openSUSE, reading the firewall's zone needs the administrator's password (polkit), so
 Finish Setup doesn't look: it shows the firewall as to set up until Linksy has opened it once.
 

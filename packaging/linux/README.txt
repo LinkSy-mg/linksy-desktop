@@ -18,7 +18,8 @@ Requirements
     (gstreamer1-plugin-gtk4) and an H.264 codec (openh264, x264 or libav)
 
 Firewall: allow UDP 47200 (Linksy) and mDNS (UDP 5353). On Fedora and openSUSE (firewalld):
-    sudo firewall-cmd --permanent --add-port=47200/udp --add-service=mdns
+    sudo firewall-cmd --permanent --add-port=47200/udp
+    sudo firewall-cmd --permanent --add-service=mdns
     sudo firewall-cmd --reload
 
 More: https://github.com/LinkSy-mg/linksy-releases

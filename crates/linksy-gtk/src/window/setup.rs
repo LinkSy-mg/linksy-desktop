@@ -195,7 +195,11 @@ fn firewall_need() -> Option<Need> {
     if std::path::Path::new("/etc/linksy/firewall").exists() {
         return Some(Need::Ready);
     }
-    if in_path("firewall-cmd") && output(&["firewall-cmd", "--state"]).is_some() {
+    // Whether firewalld runs, from systemd: `firewall-cmd --state` asks firewalld, and on
+    // openSUSE even that needs the administrator's password (its state property falls
+    // under firewalld's config action).
+    let firewalld = std::process::Command::new("systemctl").args(["is-active", "--quiet", "firewalld.service"]).status().is_ok_and(|s| s.success());
+    if in_path("firewall-cmd") && firewalld {
         // Reading the zone (firewalld's config.info action) needs no password on Fedora or
         // Debian; on openSUSE it needs the administrator's, at every start. Then nothing
         // is read: the firewall counts as closed until Linksy opens it itself (the marker
