@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.8.1
+
+### Fixed
+- **A phone whose Linksy app doesn't take the USB cable was switched again and again.**
+  When the phone drops back without answering, Linksy now stops and the Connect by USB
+  Cable guide says so, with Try Again. The service's log also says how much crossed the
+  cable each time, to tell where a connection stops.
+
 ## 0.8.0
 
 ### Added

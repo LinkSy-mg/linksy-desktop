@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.8.1" date="2026-10-22">
+      <description>
+        <p>A phone whose Linksy app doesn't take the USB cable is no longer switched again and again; the Connect by USB Cable guide says what happened.</p>
+      </description>
+    </release>
     <release version="0.8.0" date="2026-10-22">
       <description>
         <p>Linksy speaks ten languages, the same as Linksy for Android. A Connect by USB Cable guide walks through using a phone over a cable. The microphone card shows a live level with Listen and Stop. Finish Setup installs what's missing on KDE and other desktops too, with one password.</p>
