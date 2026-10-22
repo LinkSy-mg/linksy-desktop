@@ -144,7 +144,17 @@ fn run(args: Args) -> Result<(), String> {
         (pattern, args.control.then_some(portal::Input::Log))
     } else {
         let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-        let screen = rt.block_on(portal::screen(token, args.control, args.virtual_size.is_some()))?;
+        let had_token = token.is_some();
+        let screen = match rt.block_on(portal::screen(token, args.control, args.virtual_size.is_some())) {
+            Ok(screen) => screen,
+            // A remembered choice can go stale (its monitor gone, say) and then restore no
+            // screen at all, every time: forget it and show the dialog.
+            Err(e) if had_token && !e.ends_with("cancelled") => {
+                eprintln!("linksy-screen: the remembered screen didn't restore ({e}), asking again");
+                rt.block_on(portal::screen(None, args.control, args.virtual_size.is_some()))?
+            }
+            Err(e) => return Err(e),
+        };
         // No token back (input refused, say): forget the old one so the dialog asks again.
         if let Some(path) = &args.token_file {
             let _ = match &screen.restore_token {
