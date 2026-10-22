@@ -18,7 +18,8 @@ SOURCES = [ROOT / "crates/linksy-gtk/src", ROOT / "crates/linksyd/src"]
 CATALOGS = ROOT / "crates/linksy-i18n/i18n"
 LANGS = ["de", "es", "fr", "it", "ja", "mg", "pt", "ru", "zh"]
 
-LITERAL = re.compile(r't!\(\s*"((?:[^"\\]|\\.)*)"', re.S)
+# Parsing Rust with a regex. Nothing could possibly go wrong.
+LITERAL = re.compile(r'(?<![A-Za-z0-9_])t!\(\s*"((?:[^"\\]|\\.)*)"', re.S)
 ESCAPE = re.compile(r'\\(u\{[0-9a-fA-F]+\}|.)')
 
 
