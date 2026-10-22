@@ -238,9 +238,9 @@ fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
 /// Baseline, which every H.264 decoder handles (OpenH264's, phones' hardware ones).
 fn encoder() -> (&'static str, &'static str) {
     let has = |name: &str| gst::ElementFactory::find(name).is_some();
-    if has("vah264lpenc") {
+    if has("vah264lpenc") && constant_bitrate("vah264lpenc") {
         ("vah264lpenc rate-control=cbr bitrate=8000 key-int-max=60 target-usage=7", "NV12")
-    } else if has("vah264enc") {
+    } else if has("vah264enc") && constant_bitrate("vah264enc") {
         ("vah264enc rate-control=cbr bitrate=8000 key-int-max=60 target-usage=7", "NV12")
     } else if has("x264enc") {
         // One slice per frame: zerolatency would cut each frame into a slice per thread,
@@ -249,6 +249,16 @@ fn encoder() -> (&'static str, &'static str) {
     } else {
         ("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate=8000000 gop-size=60", "I420")
     }
+}
+
+/// Whether a VA encoder can keep a constant bitrate. Its rate controls are the GPU's: the
+/// low-power one on Kaby Lake offers only constant QP, and the pipeline then never starts.
+fn constant_bitrate(name: &str) -> bool {
+    let Ok(encoder) = gst::ElementFactory::make(name).build() else { return false };
+    encoder
+        .find_property("rate-control")
+        .and_then(|p| p.downcast::<gst::glib::ParamSpecEnum>().ok())
+        .is_some_and(|p| p.enum_class().value_by_nick("cbr").is_some())
 }
 
 /// A decoder that hands each frame on as soon as it's decoded. libav's default frame
