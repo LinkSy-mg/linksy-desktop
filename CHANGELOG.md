@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.8.3
 
 ### Added
 - **openSUSE.** Each release now has an .rpm for openSUSE Tumbleweed
@@ -24,6 +24,14 @@ Linksy for Linux. Each version's section becomes its release notes.
 - **Opening the firewall failed with firewalld 2.x** (openSUSE Tumbleweed, Fedora 42+),
   which refuses to add a port and a service in one firewall-cmd call. The setup helper and
   the .deb and .rpm post-install now make two.
+- **Controlling the computer from the phone failed at once, every time,** once the
+  desktop's remembered screen choice went stale (with "no screen was chosen" in the log).
+  Linksy now forgets it and asks again.
+- **Screen sharing never started on Intel Kaby Lake GPUs**, whose low-power H.264 encoder
+  can't keep a constant bitrate. Linksy now checks first and uses the next encoder.
+- **On openSUSE Aeon, Kalpa and MicroOS, Finish Setup tried to install with zypper**, which
+  fails on their read-only system. It now gives the transactional-update command to run,
+  then a restart.
 
 ## 0.8.2
 

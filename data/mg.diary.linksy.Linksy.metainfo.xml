@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.8.3" date="2026-10-22">
+      <description>
+        <p>Linksy is open source, under the GNU AGPL v3.0 or later. There is an .rpm for openSUSE, and Finish Setup knows openSUSE, including Aeon, Kalpa and MicroOS. Controlling the computer from the phone works again when the remembered screen choice went stale, and screen sharing works on Intel Kaby Lake GPUs. openSUSE no longer asks for the administrator's password at every start, and opening the firewall works with firewalld 2.x.</p>
+      </description>
+    </release>
     <release version="0.8.2" date="2026-10-22">
       <description>
         <p>The phone's camera shows in OBS's camera source and other PipeWire apps by name, not as a blank entry.</p>
