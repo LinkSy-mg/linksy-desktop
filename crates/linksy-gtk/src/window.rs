@@ -22,6 +22,7 @@ use adw::prelude::*;
 use gtk::{gdk, gio, glib};
 use linksy_ipc::linksy_core::{DeviceInfo, DeviceKind, DeviceView, Event, FileEntry, Fingerprint, SessionKind, Uuid};
 use linksy_ipc::{Client, HistoryEntry};
+use linksy_i18n::t;
 
 use crate::bridge::{Bridge, Update};
 use crate::{fmt, mark};
@@ -150,15 +151,15 @@ impl Window {
         let paired_list = gtk::ListBox::builder().css_classes(["navigation-sidebar"]).build();
         let nearby_list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["navigation-sidebar"]).build();
         let nearby_group = gtk::Box::builder().orientation(gtk::Orientation::Vertical).visible(false).build();
-        nearby_group.append(&gtk::Label::builder().label("Nearby, Not Paired").xalign(0.0).css_classes(["sidebar-heading"]).build());
+        nearby_group.append(&gtk::Label::builder().label(t!("Nearby, Not Paired")).xalign(0.0).css_classes(["sidebar-heading"]).build());
         nearby_group.append(&nearby_list);
 
         let no_devices = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).css_classes(["sidebar-empty"]).visible(false).build();
         no_devices.append(&mark::new(40, true));
-        no_devices.append(&gtk::Label::builder().label("Looking for devices…").css_classes(["heading"]).build());
+        no_devices.append(&gtk::Label::builder().label(t!("Looking for devices…")).css_classes(["heading"]).build());
         no_devices.append(
             &gtk::Label::builder()
-                .label("Open Linksy on another device on this network, or add one.")
+                .label(t!("Open Linksy on another device on this network, or add one."))
                 .wrap(true)
                 .justify(gtk::Justification::Center)
                 .css_classes(["dim-label", "caption"])
@@ -172,10 +173,10 @@ impl Window {
         let sidebar_scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&sidebar_box).build();
 
         let add = gtk::Button::builder().action_name("win.add-device").css_classes(["pill"]).build();
-        add.set_child(Some(&adw::ButtonContent::builder().icon_name("list-add-symbolic").label("Add Device").build()));
+        add.set_child(Some(&adw::ButtonContent::builder().icon_name("list-add-symbolic").label(t!("Add Device")).build()));
         let me_label = gtk::Label::builder().css_classes(["dim-label", "caption"]).ellipsize(gtk::pango::EllipsizeMode::End).build();
         let setup_button = gtk::Button::builder().action_name("win.setup").css_classes(["flat", "setup-button"]).visible(false).build();
-        let update_button = gtk::Button::builder().css_classes(["flat", "update-button"]).tooltip_text("See what's new").visible(false).build();
+        let update_button = gtk::Button::builder().css_classes(["flat", "update-button"]).tooltip_text(t!("See what's new")).visible(false).build();
         let footer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).css_classes(["sidebar-footer"]).build();
         footer.append(&update_button);
         footer.append(&setup_button);
@@ -191,13 +192,13 @@ impl Window {
         // ---- content ----
         let page = page::DevicePage::new();
         let welcome_body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).halign(gtk::Align::Center).build();
-        welcome_body.append(&gtk::Button::builder().label("Add Device").action_name("win.add-device").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build());
+        welcome_body.append(&gtk::Button::builder().label(t!("Add Device")).action_name("win.add-device").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build());
         let welcome_mark = mark::new(96, false);
         welcome_mark.set_halign(gtk::Align::Center);
         let welcome_inner = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).valign(gtk::Align::Center).build();
         welcome_inner.append(&welcome_mark);
         welcome_inner.append(
-            &adw::StatusPage::builder().title("Your Devices, Connected").description("Pick a device to share with it, or add a new one.").child(&welcome_body).build(),
+            &adw::StatusPage::builder().title(t!("Your Devices, Connected")).description(t!("Pick a device to share with it, or add a new one.")).child(&welcome_body).build(),
         );
         // Sized by the page on show, not the widest of them (the camera controls).
         let content_stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).hhomogeneous(false).vhomogeneous(false).build();
@@ -225,11 +226,11 @@ impl Window {
         camera_picture.add_controller(click);
         let messages = messages::MessagesView::new();
         content_stack.add_named(&messages.root, Some("messages"));
-        let camera_back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text("Back").visible(false).build();
-        let camera_title = adw::WindowTitle::new("", "Camera Preview");
+        let camera_back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(t!("Back")).visible(false).build();
+        let camera_title = adw::WindowTitle::new("", t!("Camera Preview"));
         let content_header = adw::HeaderBar::builder().show_title(false).title_widget(&camera_title).build();
         // Hides the device list on wide windows; opens it over the page on narrow ones.
-        let sidebar_toggle = gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text("Toggle Sidebar").active(true).build();
+        let sidebar_toggle = gtk::ToggleButton::builder().icon_name("sidebar-show-symbolic").tooltip_text(t!("Toggle Sidebar")).active(true).build();
         content_header.pack_start(&sidebar_toggle);
         content_header.pack_start(&camera_back);
         content_header.pack_end(&page.menu);
@@ -237,7 +238,7 @@ impl Window {
         content_view.add_top_bar(&content_header);
         content_view.set_content(Some(&content_stack));
         let rail_list = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).build();
-        let rail_add = gtk::Button::builder().icon_name("list-add-symbolic").tooltip_text("Add Device").action_name("win.add-device").halign(gtk::Align::Center).css_classes(["circular", "rail-add"]).build();
+        let rail_add = gtk::Button::builder().icon_name("list-add-symbolic").tooltip_text(t!("Add Device")).action_name("win.add-device").halign(gtk::Align::Center).css_classes(["circular", "rail-add"]).build();
         let rail = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).visible(false).css_classes(["device-rail"]).build();
         rail.append(&rail_list);
         rail.append(&gtk::Box::builder().vexpand(true).build());
@@ -252,11 +253,11 @@ impl Window {
         sidebar_toggle.bind_property("active", &split, "show-sidebar").bidirectional().sync_create().build();
 
         // ---- offline / loading ----
-        let start = gtk::Button::builder().label("Start Linksy").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).action_name("win.start-service").build();
+        let start = gtk::Button::builder().label(t!("Start Linksy")).css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).action_name("win.start-service").build();
         let offline = adw::StatusPage::builder()
             .icon_name("network-offline-symbolic")
-            .title("Linksy Isn't Running")
-            .description("The background service lets nearby devices find this one and receives files, even when this window is closed.")
+            .title(t!("Linksy Isn't Running"))
+            .description(t!("The background service lets nearby devices find this one and receives files, even when this window is closed."))
             .child(&start)
             .build();
         let stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).build();
@@ -266,7 +267,7 @@ impl Window {
         stack.set_visible_child_name("loading");
 
         // Device names go in as plain text.
-        let sharing_banner = adw::Banner::builder().button_label("Stop Sharing").use_markup(false).revealed(false).build();
+        let sharing_banner = adw::Banner::builder().button_label(t!("Stop Sharing")).use_markup(false).revealed(false).build();
         let outer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         outer.append(&sharing_banner);
         stack.set_vexpand(true);
@@ -379,12 +380,12 @@ impl Window {
                 let on = w.state.borrow().camera;
                 match on.and_then(|(_, id)| w.device(&id)) {
                     Some(d) => w.preview_camera(&setup::camera_name(&d.device.name)),
-                    None => w.toast("No camera is on"),
+                    None => w.toast(t!("No camera is on")),
                 }
             }),
             ("view-screen", |w| match w.selected_device().filter(|d| d.trusted) {
                 Some(d) => w.view_screen(d.device.id),
-                None => w.toast("Pick a device first"),
+                None => w.toast(t!("Pick a device first")),
             }),
         ];
         for (name, run) in actions {
@@ -496,7 +497,7 @@ impl Window {
                     let w2 = w.clone();
                     w.ask_terminal_code(&w.window, move |result| match result {
                         Ok(()) => {
-                            w2.toast("Terminal code set");
+                            w2.toast(t!("Terminal code set"));
                             w2.terminal_call(move |c| async move { c.allow_terminal(&id.to_string(), true).await });
                         }
                         Err(e) => w2.toast_error(&e, None),
@@ -505,7 +506,7 @@ impl Window {
                 page::Action::ChangeTerminalCode => {
                     let w2 = w.clone();
                     w.ask_terminal_code(&w.window, move |result| match result {
-                        Ok(()) => w2.toast("Terminal code changed"),
+                        Ok(()) => w2.toast(t!("Terminal code changed")),
                         Err(e) => w2.toast_error(&e, None),
                     });
                 }
@@ -519,7 +520,7 @@ impl Window {
                 }
                 page::Action::Copy(text) => {
                     w.window.clipboard().set_text(&text);
-                    w.toast("Copied");
+                    w.toast(t!("Copied"));
                 }
                 page::Action::OpenLink(url) => gtk::UriLauncher::new(&url).launch(Some(&w.window), gio::Cancellable::NONE, |_| {}),
             }
@@ -624,7 +625,7 @@ impl Window {
                 .map(|_| ())
         };
         if let Err(e) = spawned {
-            self.toast(&format!("Could not start the service: {e}"));
+            self.toast(&t!("Could not start the service: {error}", error = e));
             return;
         }
         self.wait_for_service();
@@ -635,11 +636,11 @@ impl Window {
     fn start_sandboxed_service(self: &Rc<Self>) {
         use std::process::{Command, Stdio};
         if let Err(e) = Command::new("flatpak-spawn").arg("linksyd").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
-            self.toast(&format!("Could not start the service: {e}"));
+            self.toast(&t!("Could not start the service: {error}", error = e));
             return;
         }
         let options = glib::VariantDict::new(None);
-        options.insert("reason", "Linksy stays ready for your devices when its window is closed.");
+        options.insert("reason", t!("Linksy stays ready for your devices when its window is closed."));
         options.insert("autostart", true);
         options.insert("commandline", vec!["linksyd"]);
         if let Some(bus) = self.window.application().and_then(|app| app.dbus_connection()) {
@@ -726,7 +727,7 @@ impl Window {
                 if s.version != env!("CARGO_PKG_VERSION") {
                     w.restart_service();
                 }
-                w.me_label.set_label(&format!("This device: {}", s.device.name));
+                w.me_label.set_label(&t!("This device: {name}", name = s.device.name));
                 let mut state = w.state.borrow_mut();
                 state.download_dir = Some(s.download_dir);
                 state.port = Some(s.port);
@@ -773,21 +774,21 @@ impl Window {
     fn locate(self: &Rc<Self>, id: Fingerprint) {
         let Some(c) = self.client() else { return };
         let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
-        self.toast(&format!("Asking {name} where it is…"));
+        self.toast(&t!("Asking {name} where it is…", name));
         let w = self.clone();
         let call = self.bridge.call(&c, move |c| async move { c.locate(id.to_string()).await });
         glib::spawn_future_local(async move {
             let l = match call.await {
                 Ok(l) => l,
-                Err(e) => return w.toast(&format!("{name} didn't say: {}", fmt::capitalize(&e))),
+                Err(e) => return w.toast(&t!("{name} didn't say: {reason}", name, reason = fmt::capitalize(&e))),
             };
-            let accuracy = l.accuracy_m.map(|a| format!(", within {a:.0} m")).unwrap_or_default();
-            let when = glib::DateTime::from_unix_local((l.at_ms / 1000) as i64).and_then(|d| d.format("%H:%M")).map(|t| format!(" at {t}")).unwrap_or_default();
+            let accuracy = l.accuracy_m.map(|a| t!(", within {meters} m", meters = format!("{a:.0}"))).unwrap_or_default();
+            let when = glib::DateTime::from_unix_local((l.at_ms / 1000) as i64).and_then(|d| d.format("%H:%M")).map(|time| t!(" at {time}", time)).unwrap_or_default();
             let dialog = adw::AlertDialog::new(
-                Some(&format!("{name} Is Here")),
-                Some(&format!("{:.5}, {:.5}{accuracy}{when}. Opening the map shows it on OpenStreetMap in your browser.", l.lat, l.lon)),
+                Some(&t!("{name} Is Here", name)),
+                Some(&t!("{coordinates}{accuracy}{when}. Opening the map shows it on OpenStreetMap in your browser.", coordinates = format!("{:.5}, {:.5}", l.lat, l.lon), accuracy, when)),
             );
-            dialog.add_responses(&[("close", "Close"), ("map", "Open Map")]);
+            dialog.add_responses(&[("close", t!("Close")), ("map", t!("Open Map"))]);
             dialog.set_response_appearance("map", adw::ResponseAppearance::Suggested);
             dialog.set_default_response(Some("map"));
             let url = format!("https://www.openstreetmap.org/?mlat={:.5}&mlon={:.5}#map=17/{:.5}/{:.5}", l.lat, l.lon, l.lat, l.lon);
@@ -836,7 +837,7 @@ impl Window {
             let latest = call.await.ok().filter(|u| u.prefs.check).and_then(|u| Some((u.latest?, u.notes)));
             w.update_button.set_visible(latest.is_some());
             if let Some((version, notes)) = latest {
-                w.update_button.set_label(&format!("Linksy {version} Is Available"));
+                w.update_button.set_label(&t!("Linksy {version} Is Available", version));
                 *w.update_notes.borrow_mut() = notes;
             }
         });
@@ -890,7 +891,7 @@ impl Window {
             Event::Paired { device } => {
                 self.close_pair_dialog(&device.id);
                 self.close_invite_dialog();
-                self.toast(&format!("Paired with {}", device.name));
+                self.toast(&t!("Paired with {name}", name = device.name));
                 // Open the new device's page.
                 self.state.borrow_mut().selected = Some(device.id);
                 self.refresh_devices();
@@ -899,7 +900,7 @@ impl Window {
             Event::PairingFailed { device, reason } => {
                 self.close_pair_dialog(&device.id);
                 if reason.contains("other device") {
-                    self.toast(&format!("{} didn't confirm the code", device.name));
+                    self.toast(&t!("{name} didn't confirm the code", name = device.name));
                 }
                 self.render_page();
             }
@@ -948,12 +949,12 @@ impl Window {
                 if self.window.is_active() {
                     self.window.clipboard().set_text(&text);
                 }
-                self.toast(&format!("Copied from {}", from.name));
+                self.toast(&t!("Copied from {name}", name = from.name));
             }
             // The service opens it; the timeline shows it.
             Event::OpenUrl { .. } => {}
             Event::Battery { .. } => self.refresh_devices(),
-            Event::Ring { from, on: true } => self.toast(&format!("{} is looking for this computer", from.name)),
+            Event::Ring { from, on: true } => self.toast(&t!("{name} is looking for this computer", name = from.name)),
             Event::Ring { on: false, .. } => {}
             // Phone notifications are the service's to show, as desktop notifications.
             Event::NotificationPosted { .. }
@@ -1212,17 +1213,17 @@ impl Window {
         self.state.borrow_mut().staged = paths;
         self.render_page();
         if has && self.selected_device().is_none_or(|d| !d.trusted) {
-            self.toast("Pick a device to send to");
+            self.toast(t!("Pick a device to send to"));
         }
     }
 
     /// Choose files and send them to the selected device.
     fn choose_files(self: &Rc<Self>) {
         let Some(d) = self.selected_device().filter(|d| d.trusted) else {
-            self.toast("Pick a device first");
+            self.toast(t!("Pick a device first"));
             return;
         };
-        let dialog = gtk::FileDialog::builder().title(format!("Send to {}", d.device.name)).accept_label("Send").modal(true).build();
+        let dialog = gtk::FileDialog::builder().title(t!("Send to {name}", name = d.device.name)).accept_label(t!("Send")).modal(true).build();
         let w = self.clone();
         let id = d.device.id;
         dialog.open_multiple(Some(&self.window), gio::Cancellable::NONE, move |res| {
@@ -1265,11 +1266,11 @@ impl Window {
         glib::spawn_future_local(async move {
             let text = match clipboard.read_text_future().await {
                 Ok(Some(t)) if !t.is_empty() => t.to_string(),
-                _ => return w.toast("There's no text on the clipboard"),
+                _ => return w.toast(t!("There's no text on the clipboard")),
             };
             let Some(c) = w.client() else { return };
             match w.bridge.call(&c, move |c| async move { c.send_clipboard(id.to_string(), text).await }).await {
-                Ok(()) => w.toast(&format!("Clipboard sent to {name}")),
+                Ok(()) => w.toast(&t!("Clipboard sent to {name}", name)),
                 Err(e) => w.toast_error(&e, Some(id)),
             }
         });
@@ -1282,7 +1283,7 @@ impl Window {
             Err(_) => Vec::new(),
         };
         if paths.is_empty() {
-            return self.toast("There's nothing to send on the clipboard");
+            return self.toast(t!("There's nothing to send on the clipboard"));
         }
         let small = paths.len() == 1 && std::fs::metadata(&paths[0]).is_ok_and(|m| m.is_file() && m.len() <= MAX_CLIPBOARD_FILE);
         if !small || !self.device(&id).is_some_and(|d| can(&d.device, "clipboard_file")) {
@@ -1294,16 +1295,16 @@ impl Window {
     /// A copied image (a screenshot…), as a PNG on the device's clipboard.
     async fn send_clipboard_image(self: &Rc<Self>, id: Fingerprint, name: String, clipboard: gdk::Clipboard) {
         if !self.device(&id).is_some_and(|d| can(&d.device, "clipboard_file")) {
-            return self.toast(&format!("{name} can't take images on its clipboard yet"));
+            return self.toast(&t!("{name} can't take images on its clipboard yet", name));
         }
         let Ok(texture) = clipboard.read_texture_future().await else {
-            return self.toast("Couldn't read the image on the clipboard");
+            return self.toast(t!("Couldn't read the image on the clipboard"));
         };
-        let Some(texture) = texture else { return self.toast("There's nothing to send on the clipboard") };
+        let Some(texture) = texture else { return self.toast(t!("There's nothing to send on the clipboard")) };
         let path = glib::user_cache_dir().join("linksy").join("Clipboard image.png");
         let saved = std::fs::create_dir_all(path.parent().unwrap()).and_then(|()| std::fs::write(&path, texture.save_to_png_bytes()));
         if saved.is_err() {
-            return self.toast("Couldn't read the image on the clipboard");
+            return self.toast(t!("Couldn't read the image on the clipboard"));
         }
         self.send_clipboard_file(id, name, path).await;
     }
@@ -1311,7 +1312,7 @@ impl Window {
     async fn send_clipboard_file(self: &Rc<Self>, id: Fingerprint, name: String, path: PathBuf) {
         let Some(c) = self.client() else { return };
         match self.bridge.call(&c, move |c| async move { c.send_clipboard_file(id.to_string(), path).await }).await {
-            Ok(_) => self.toast(&format!("Clipboard sent to {name}")),
+            Ok(_) => self.toast(&t!("Clipboard sent to {name}", name)),
             Err(e) => self.toast_error(&e, Some(id)),
         }
     }
@@ -1323,7 +1324,7 @@ impl Window {
         let w = self.clone();
         glib::spawn_future_local(async move {
             match call.await {
-                Ok(()) => w.toast(&format!("Pinged {name}")),
+                Ok(()) => w.toast(&t!("Pinged {name}", name)),
                 Err(e) => w.toast_error(&e, Some(id)),
             }
         });
@@ -1338,7 +1339,7 @@ impl Window {
         glib::spawn_future_local(async move {
             match call.await {
                 Ok(()) if on => {
-                    let toast = adw::Toast::builder().title(glib::markup_escape_text(&format!("Ringing {name}…"))).button_label("Stop").timeout(30).build();
+                    let toast = adw::Toast::builder().title(glib::markup_escape_text(&t!("Ringing {name}…", name))).button_label(t!("Stop")).timeout(30).build();
                     let w2 = w.clone();
                     toast.connect_button_clicked(move |_| w2.ring(id, false));
                     w.toasts.add_toast(toast);
@@ -1353,7 +1354,7 @@ impl Window {
     fn browse_files(self: &Rc<Self>, id: Fingerprint) {
         let Some(c) = self.client() else { return };
         let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
-        self.toast(&format!("Opening {name}…"));
+        self.toast(&t!("Opening {name}…", name));
         let call = self.bridge.call(&c, move |c| async move { c.browse_files(id.to_string()).await });
         let w = self.clone();
         glib::spawn_future_local(async move {
@@ -1416,8 +1417,8 @@ impl Window {
     // ---- forgetting ----
 
     fn confirm_forget(self: &Rc<Self>, id: Fingerprint, name: &str) {
-        let dialog = adw::AlertDialog::new(Some(&format!("Forget {name}?")), Some("You'll need to pair again before sharing with this device."));
-        dialog.add_responses(&[("cancel", "Cancel"), ("forget", "Forget")]);
+        let dialog = adw::AlertDialog::new(Some(&t!("Forget {name}?", name)), Some(t!("You'll need to pair again before sharing with this device.")));
+        dialog.add_responses(&[("cancel", t!("Cancel")), ("forget", t!("Forget"))]);
         dialog.set_response_appearance("forget", adw::ResponseAppearance::Destructive);
         dialog.set_default_response(Some("cancel"));
         dialog.set_close_response("cancel");
@@ -1456,10 +1457,10 @@ impl Window {
 
     /// For networks that block discovery: pair with a device by its IP address.
     fn ask_pair_address(self: &Rc<Self>) {
-        let dialog = adw::AlertDialog::new(Some("Pair by Address"), Some("If a device doesn't show up, enter the address shown in its Linksy Preferences."));
+        let dialog = adw::AlertDialog::new(Some(t!("Pair by Address")), Some(t!("If a device doesn't show up, enter the address shown in its Linksy Preferences.")));
         let entry = gtk::Entry::builder().placeholder_text("192.168.1.20").activates_default(true).input_purpose(gtk::InputPurpose::Url).build();
         dialog.set_extra_child(Some(&entry));
-        dialog.add_responses(&[("cancel", "Cancel"), ("pair", "Pair")]);
+        dialog.add_responses(&[("cancel", t!("Cancel")), ("pair", t!("Pair"))]);
         dialog.set_response_appearance("pair", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("pair"));
         dialog.set_close_response("cancel");
@@ -1487,14 +1488,14 @@ impl Window {
 
     fn show_pairing(self: &Rc<Self>, request: Uuid, device: DeviceInfo, code: String, incoming: bool) {
         let (heading, body) = if incoming {
-            (format!("{} Wants to Pair", device.name), format!("Pair only if {} shows this same code.", device.name))
+            (t!("{name} Wants to Pair", name = device.name), t!("Pair only if {name} shows this same code.", name = device.name))
         } else {
-            (format!("Pair with {}", device.name), format!("Check that {} shows this same code, then confirm on both devices.", device.name))
+            (t!("Pair with {name}", name = device.name), t!("Check that {name} shows this same code, then confirm on both devices.", name = device.name))
         };
         let dialog = adw::AlertDialog::new(Some(&heading), Some(&body));
         let code_label = gtk::Label::builder().label(fmt::spaced_code(&code)).css_classes(["pair-code"]).build();
         dialog.set_extra_child(Some(&code_label));
-        dialog.add_responses(&[("decline", if incoming { "Decline" } else { "Cancel" }), ("accept", "Pair")]);
+        dialog.add_responses(&[("decline", if incoming { t!("Decline") } else { t!("Cancel") }), ("accept", t!("Pair"))]);
         dialog.set_response_appearance("accept", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("accept"));
         dialog.set_close_response("decline");
@@ -1508,7 +1509,7 @@ impl Window {
             }
             w.respond(request, response == "accept");
             if response == "accept" {
-                w.toast("Waiting for the other device to confirm…");
+                w.toast(t!("Waiting for the other device to confirm…"));
             }
         });
         self.state.borrow_mut().pair_dialogs.insert(id, dialog.clone());
@@ -1530,18 +1531,18 @@ impl Window {
             [one] => fmt::file_name(&one.path),
             many => fmt::plural(many.len(), "item"),
         };
-        let dialog = adw::AlertDialog::new(Some(&format!("{from} Wants to Share")), Some(&format!("{what} · {}", fmt::size(total))));
+        let dialog = adw::AlertDialog::new(Some(&t!("{name} Wants to Share", name = from)), Some(&format!("{what} · {}", fmt::size(total))));
         if files.len() > 1 {
             let list = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).css_classes(["offer-list", "card"]).build();
             for f in files.iter().take(6) {
                 list.append(&gtk::Label::builder().label(&f.path).xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::Middle).css_classes(["caption"]).build());
             }
             if files.len() > 6 {
-                list.append(&gtk::Label::builder().label(format!("and {} more", files.len() - 6)).xalign(0.0).css_classes(["caption", "dim-label"]).build());
+                list.append(&gtk::Label::builder().label(t!("and {count} more", count = files.len() - 6)).xalign(0.0).css_classes(["caption", "dim-label"]).build());
             }
             dialog.set_extra_child(Some(&list));
         }
-        dialog.add_responses(&[("decline", "Decline"), ("accept", "Accept")]);
+        dialog.add_responses(&[("decline", t!("Decline")), ("accept", t!("Accept"))]);
         dialog.set_response_appearance("accept", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("accept"));
         dialog.set_close_response("decline");
@@ -1579,7 +1580,7 @@ impl Window {
     fn toast_error(&self, error: &str, about: Option<Fingerprint>) {
         let name = about.and_then(|id| self.device(&id).map(|d| d.device.name));
         let text = match (error, name) {
-            ("device isn't reachable right now", Some(n)) => format!("{n} isn't reachable. Check that it's on and on this network."),
+            ("device isn't reachable right now", Some(n)) => t!("{name} isn't reachable. Check that it's on and on this network.", name = n),
             (e, _) => fmt::capitalize(e),
         };
         self.toast(&text);
@@ -1593,7 +1594,7 @@ impl Window {
 
     /// Something failed for a part this computer lacks: say so, with Finish Setup.
     pub(super) fn missing_part_toast(&self, text: &str) {
-        let toast = adw::Toast::builder().title(glib::markup_escape_text(text)).button_label("Finish Setup").action_name("win.setup").timeout(8).build();
+        let toast = adw::Toast::builder().title(glib::markup_escape_text(text)).button_label(t!("Finish Setup")).action_name("win.setup").timeout(8).build();
         self.toasts.add_toast(toast);
     }
 }
@@ -1601,18 +1602,18 @@ impl Window {
 fn main_menu() -> gtk::MenuButton {
     let menu = gio::Menu::new();
     let section = gio::Menu::new();
-    section.append(Some("Add Device…"), Some("win.add-device"));
-    section.append(Some("Pair by Address…"), Some("win.pair-address"));
-    section.append(Some("Connect by USB Cable…"), Some("win.usb-cable"));
-    section.append(Some("Open Received Files"), Some("app.open-downloads"));
+    section.append(Some(t!("Add Device…")), Some("win.add-device"));
+    section.append(Some(t!("Pair by Address…")), Some("win.pair-address"));
+    section.append(Some(t!("Connect by USB Cable…")), Some("win.usb-cable"));
+    section.append(Some(t!("Open Received Files")), Some("app.open-downloads"));
     menu.append_section(None, &section);
     let section = gio::Menu::new();
-    section.append(Some("Preferences"), Some("win.preferences"));
-    section.append(Some("Finish Setup…"), Some("win.setup"));
-    section.append(Some("Keyboard Shortcuts"), Some("win.show-help-overlay"));
-    section.append(Some("About Linksy"), Some("app.about"));
+    section.append(Some(t!("Preferences")), Some("win.preferences"));
+    section.append(Some(t!("Finish Setup…")), Some("win.setup"));
+    section.append(Some(t!("Keyboard Shortcuts")), Some("win.show-help-overlay"));
+    section.append(Some(t!("About Linksy")), Some("app.about"));
     menu.append_section(None, &section);
-    gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&menu).primary(true).tooltip_text("Main Menu").build()
+    gtk::MenuButton::builder().icon_name("open-menu-symbolic").menu_model(&menu).primary(true).tooltip_text(t!("Main Menu")).build()
 }
 
 /// A paired device in the sidebar: avatar with a presence dot, name, state.
@@ -1648,12 +1649,12 @@ fn sidebar_row(d: &DeviceView, picture: Option<&gdk::Texture>) -> gtk::ListBoxRo
 
 fn status_text(d: &DeviceView) -> &'static str {
     match (d.trusted, d.connected, d.nearby) {
-        (true, true, _) if d.usb => "Connected by USB",
-        (true, true, _) if d.away => "Connected away from home",
-        (true, true, _) => "Connected",
-        (true, false, true) => "Nearby",
-        (true, false, false) => "Not nearby",
-        (false, _, _) => "Nearby · Not paired",
+        (true, true, _) if d.usb => t!("Connected by USB"),
+        (true, true, _) if d.away => t!("Connected away from home"),
+        (true, true, _) => t!("Connected"),
+        (true, false, true) => t!("Nearby"),
+        (true, false, false) => t!("Not nearby"),
+        (false, _, _) => t!("Nearby · Not paired"),
     }
 }
 
@@ -1662,10 +1663,10 @@ fn progress_text(p: &Progress) -> String {
         (Some((t0, b0)), Some((t1, b1))) if t1 > t0 => (b1 - b0) as f64 / t1.duration_since(*t0).as_secs_f64(),
         _ => 0.0,
     };
-    let mut text = format!("{} of {}", fmt::size(p.bytes), fmt::size(p.total));
+    let mut text = t!("{done} of {total}", done = fmt::size(p.bytes), total = fmt::size(p.total));
     if speed > 0.0 && p.bytes < p.total {
         let left = Duration::from_secs_f64((p.total - p.bytes) as f64 / speed);
-        text.push_str(&format!(" · {}/s · {}", fmt::size(speed as u64), fmt::remaining(left)));
+        text.push_str(&format!(" · {} · {}", t!("{size}/s", size = fmt::size(speed as u64)), fmt::remaining(left)));
     }
     text
 }
@@ -1681,10 +1682,10 @@ fn kind_icon(kind: DeviceKind) -> &'static str {
 /// "Linux laptop", "Android phone"…
 fn kind_name(d: &DeviceInfo) -> String {
     let kind = match d.kind {
-        DeviceKind::Desktop => "desktop",
-        DeviceKind::Laptop => "laptop",
-        DeviceKind::Phone => "phone",
-        DeviceKind::Tablet => "tablet",
+        DeviceKind::Desktop => t!("desktop"),
+        DeviceKind::Laptop => t!("laptop"),
+        DeviceKind::Phone => t!("phone"),
+        DeviceKind::Tablet => t!("tablet"),
     };
     let os = match d.os.as_str() {
         "linux" => "Linux",
@@ -1694,7 +1695,7 @@ fn kind_name(d: &DeviceInfo) -> String {
         "ios" => "iOS",
         other => other,
     };
-    if os.is_empty() { fmt::capitalize(kind) } else { format!("{os} {kind}") }
+    if os.is_empty() { fmt::capitalize(kind) } else { t!("{os} {kind}", os, kind) }
 }
 
 fn file_list_paths(value: &glib::Value) -> Vec<PathBuf> {
@@ -1743,7 +1744,24 @@ fn shortcuts_window() -> gtk::ShortcutsWindow {
     </child>
   </object>
 </interface>"#;
-    gtk::Builder::from_string(UI).object("shortcuts").expect("shortcuts window")
+    // The titles in the language in use, as XML text.
+    let titles = [
+        ("Sharing", t!("Sharing")),
+        ("Send Files to the Open Device", t!("Send Files to the Open Device")),
+        ("View the Open Device's Screen", t!("View the Open Device's Screen")),
+        ("Add Device", t!("Add Device")),
+        ("Show or Hide the Device List", t!("Show or Hide the Device List")),
+        ("General", t!("General")),
+        ("Preferences", t!("Preferences")),
+        ("Keyboard Shortcuts", t!("Keyboard Shortcuts")),
+        ("Close Window", t!("Close Window")),
+        ("Quit", t!("Quit")),
+    ];
+    let mut ui = UI.to_string();
+    for (english, title) in titles {
+        ui = ui.replace(&format!(">{english}<"), &format!(">{}<", glib::markup_escape_text(title)));
+    }
+    gtk::Builder::from_string(&ui).object("shortcuts").expect("shortcuts window")
 }
 
 /// Largest file that goes on another device's clipboard (bigger ones go as a transfer).

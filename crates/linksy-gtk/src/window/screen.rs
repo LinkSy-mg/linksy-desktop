@@ -13,6 +13,7 @@ use gstreamer as gst;
 use gstreamer::prelude::*;
 use gtk::glib::translate::IntoGlib;
 use gtk::{gdk, glib};
+use linksy_i18n::t;
 use linksy_ipc::{PendingSession, SessionInfo};
 use linksy_ipc::linksy_core::protocol::control_frame;
 use linksy_ipc::linksy_core::{ControlMsg, DeviceInfo, Fingerprint, MouseButton, SessionKind, Uuid};
@@ -35,14 +36,14 @@ impl Window {
     pub(super) fn extend_to(self: &Rc<Self>, id: Fingerprint) {
         let Some(c) = self.client() else { return };
         let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
-        self.toast(&format!("Asking {name} to be a second display…"));
+        self.toast(&t!("Asking {name} to be a second display…", name));
         let call = self.bridge.call(&c, move |c| async move { c.start_session(id.to_string(), SessionKind::Display).await });
         let w = self.clone();
         glib::spawn_future_local(async move {
             match call.await {
                 Ok(_) => {}
-                Err(e) if e.contains("can't do this yet") => w.toast(&format!("{name} can't be a second display yet")),
-                Err(e) if e.contains("declined") => w.toast(&format!("{name} didn't allow it")),
+                Err(e) if e.contains("can't do this yet") => w.toast(&t!("{name} can't be a second display yet", name)),
+                Err(e) if e.contains("declined") => w.toast(&t!("{name} didn't allow it", name)),
                 Err(e) => w.toast_error(&e, Some(id)),
             }
         });
@@ -52,14 +53,14 @@ impl Window {
     pub(super) fn use_camera(self: &Rc<Self>, id: Fingerprint) {
         let Some(c) = self.client() else { return };
         let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
-        self.toast(&format!("Asking {name} for its camera…"));
+        self.toast(&t!("Asking {name} for its camera…", name));
         let call = self.bridge.call(&c, move |c| async move { c.start_session(id.to_string(), SessionKind::Camera).await });
         let w = self.clone();
         glib::spawn_future_local(async move {
             match call.await {
                 Ok(_) => {}
-                Err(e) if e.contains("can't do this yet") => w.toast(&format!("{name} can't share its camera yet")),
-                Err(e) if e.contains("declined") => w.toast(&format!("{name} didn't allow it")),
+                Err(e) if e.contains("can't do this yet") => w.toast(&t!("{name} can't share its camera yet", name)),
+                Err(e) if e.contains("declined") => w.toast(&t!("{name} didn't allow it", name)),
                 Err(e) => w.toast_error(&e, Some(id)),
             }
         });
@@ -69,14 +70,14 @@ impl Window {
     pub(super) fn use_microphone(self: &Rc<Self>, id: Fingerprint) {
         let Some(c) = self.client() else { return };
         let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
-        self.toast(&format!("Asking {name} for its microphone…"));
+        self.toast(&t!("Asking {name} for its microphone…", name));
         let call = self.bridge.call(&c, move |c| async move { c.start_session(id.to_string(), SessionKind::Microphone).await });
         let w = self.clone();
         glib::spawn_future_local(async move {
             match call.await {
                 Ok(_) => {}
-                Err(e) if e.contains("can't do this yet") => w.toast(&format!("{name} can't share its microphone yet")),
-                Err(e) if e.contains("declined") => w.toast(&format!("{name} didn't allow it")),
+                Err(e) if e.contains("can't do this yet") => w.toast(&t!("{name} can't share its microphone yet", name)),
+                Err(e) if e.contains("declined") => w.toast(&t!("{name} didn't allow it", name)),
                 Err(e) => w.toast_error(&e, Some(id)),
             }
         });
@@ -118,8 +119,8 @@ impl Window {
         viewer.control.set_visible(false);
         viewer.again.set_visible(false);
         viewer.disconnect.set_visible(true);
-        viewer.window.set_title(Some(&format!("Second Display for {}", pending.peer.name)));
-        viewer.heading.set_subtitle("Second Display");
+        viewer.window.set_title(Some(&t!("Second Display for {name}", name = pending.peer.name)));
+        viewer.heading.set_subtitle(t!("Second Display"));
         viewer.play(SessionInfo { session: pending.session, socket: Some(pending.socket) });
     }
 
@@ -127,36 +128,36 @@ impl Window {
     pub(super) fn show_session_request(self: &Rc<Self>, request: Uuid, from: &DeviceInfo, kind: SessionKind) {
         let (heading, body) = match kind {
             SessionKind::Camera => (
-                format!("{} Wants to Use Your Camera", from.name),
-                format!("Your camera will turn on and {} will see it until you stop.", from.name),
+                t!("{name} Wants to Use Your Camera", name = from.name),
+                t!("Your camera will turn on and {name} will see it until you stop.", name = from.name),
             ),
             SessionKind::Display => (
-                format!("{} Wants to Use This Screen", from.name),
-                format!("Linksy will fill this screen with {}'s second display; your mouse and keyboard here will work on it. Press F11 to leave full screen.", from.name),
+                t!("{name} Wants to Use This Screen", name = from.name),
+                t!("Linksy will fill this screen with {name}'s second display; your mouse and keyboard here will work on it. Press F11 to leave full screen.", name = from.name),
             ),
             SessionKind::Microphone => (
-                format!("{} Wants to Use Your Microphone", from.name),
-                format!("Your microphone will turn on and {} will hear it until you stop.", from.name),
+                t!("{name} Wants to Use Your Microphone", name = from.name),
+                t!("Your microphone will turn on and {name} will hear it until you stop.", name = from.name),
             ),
             SessionKind::Input => (
-                format!("{} Wants to Use Your Mouse and Keyboard", from.name),
-                format!("{} becomes a touchpad and keyboard for this computer until you stop. It doesn't see your screen.", from.name),
+                t!("{name} Wants to Use Your Mouse and Keyboard", name = from.name),
+                t!("{name} becomes a touchpad and keyboard for this computer until you stop. It doesn't see your screen.", name = from.name),
             ),
             SessionKind::Control => (
-                format!("{} Wants to Control Your Screen", from.name),
-                format!("{} will see your screen and use your mouse and keyboard until you stop. You'll pick which screen next.", from.name),
+                t!("{name} Wants to Control Your Screen", name = from.name),
+                t!("{name} will see your screen and use your mouse and keyboard until you stop. You'll pick which screen next.", name = from.name),
             ),
             SessionKind::Screen => (
-                format!("{} Wants to See Your Screen", from.name),
-                format!("{} will see everything on your screen until you stop sharing. You'll pick which screen next.", from.name),
+                t!("{name} Wants to See Your Screen", name = from.name),
+                t!("{name} will see everything on your screen until you stop sharing. You'll pick which screen next.", name = from.name),
             ),
             SessionKind::Terminal => (
-                format!("{} Wants a Terminal", from.name),
-                format!("The right terminal code was typed on {}. Its terminal runs commands as you until it's ended, here or on the phone. Linksy asks once a day.", from.name),
+                t!("{name} Wants a Terminal", name = from.name),
+                t!("The right terminal code was typed on {name}. Its terminal runs commands as you until it's ended, here or on the phone. Linksy asks once a day.", name = from.name),
             ),
         };
         let dialog = adw::AlertDialog::new(Some(&heading), Some(&body));
-        dialog.add_responses(&[("deny", "Don't Allow"), ("allow", "Allow")]);
+        dialog.add_responses(&[("deny", t!("Don't Allow")), ("allow", t!("Allow"))]);
         dialog.set_response_appearance("allow", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("deny"));
         dialog.set_close_response("deny");
@@ -183,28 +184,28 @@ impl Window {
         if kind == SessionKind::Camera && !sharing {
             self.state.borrow_mut().camera = Some((session, peer.id));
             self.render_page();
-            self.toast(&format!("{}'s camera is on. Open its page to preview it.", peer.name));
+            self.toast(&t!("{name}'s camera is on. Open its page to preview it.", name = peer.name));
         }
         if kind == SessionKind::Microphone && !sharing {
             self.state.borrow_mut().microphone = Some((session, peer.id));
             self.render_page();
         }
         let title = match kind {
-            SessionKind::Camera if sharing => format!("{} is using your camera", peer.name),
-            SessionKind::Camera => format!("{}'s camera is on: “{}” in your apps", peer.name, super::setup::camera_name(&peer.name)),
-            SessionKind::Microphone if sharing => format!("{} is using your microphone", peer.name),
-            SessionKind::Microphone => format!("{}'s microphone is on: “Linksy Microphone ({})” in your apps", peer.name, peer.name),
-            SessionKind::Display => format!("{} is your second display", peer.name),
-            SessionKind::Control => format!("{} is controlling your screen", peer.name),
-            SessionKind::Input => format!("{} is your touchpad and keyboard", peer.name),
-            SessionKind::Screen => format!("{} is watching your screen", peer.name),
-            SessionKind::Terminal => format!("{} has a terminal open here", peer.name),
+            SessionKind::Camera if sharing => t!("{name} is using your camera", name = peer.name),
+            SessionKind::Camera => t!("{name}'s camera is on: “{camera}” in your apps", name = peer.name, camera = super::setup::camera_name(&peer.name)),
+            SessionKind::Microphone if sharing => t!("{name} is using your microphone", name = peer.name),
+            SessionKind::Microphone => t!("{name}'s microphone is on: “{microphone}” in your apps", name = peer.name, microphone = format!("Linksy Microphone ({})", peer.name)),
+            SessionKind::Display => t!("{name} is your second display", name = peer.name),
+            SessionKind::Control => t!("{name} is controlling your screen", name = peer.name),
+            SessionKind::Input => t!("{name} is your touchpad and keyboard", name = peer.name),
+            SessionKind::Screen => t!("{name} is watching your screen", name = peer.name),
+            SessionKind::Terminal => t!("{name} has a terminal open here", name = peer.name),
         };
         // "Stop Sharing" only when this device's screen or camera is what's shared.
         let label = match kind {
-            SessionKind::Screen | SessionKind::Control => "Stop Sharing",
-            SessionKind::Camera | SessionKind::Microphone if sharing => "Stop Sharing",
-            SessionKind::Camera | SessionKind::Microphone | SessionKind::Display | SessionKind::Input | SessionKind::Terminal => "Stop",
+            SessionKind::Screen | SessionKind::Control => t!("Stop Sharing"),
+            SessionKind::Camera | SessionKind::Microphone if sharing => t!("Stop Sharing"),
+            SessionKind::Camera | SessionKind::Microphone | SessionKind::Display | SessionKind::Input | SessionKind::Terminal => t!("Stop"),
         };
         self.sharing_banner.set_button_label(Some(label));
         self.sharing_banner.set_title(&title);
@@ -226,7 +227,7 @@ impl Window {
             }
         };
         if let Some((id, name)) = dropped {
-            let toast = adw::Toast::builder().title(glib::markup_escape_text(&format!("The second display on {name} disconnected"))).button_label("Reconnect").timeout(15).build();
+            let toast = adw::Toast::builder().title(glib::markup_escape_text(&t!("The second display on {name} disconnected", name))).button_label(t!("Reconnect")).timeout(15).build();
             let w = Rc::downgrade(self);
             toast.connect_button_clicked(move |_| {
                 if let Some(w) = w.upgrade() {
@@ -261,7 +262,7 @@ impl Window {
     /// area, with a back button to the device.
     pub(super) fn preview_camera(self: &Rc<Self>, name: &str) {
         let Some((session, id)) = self.state.borrow().camera else {
-            return self.toast("No camera is on");
+            return self.toast(t!("No camera is on"));
         };
         self.stop_preview();
         // Read the camera as any app would: the Linksy Camera device, else the PipeWire camera.
@@ -271,7 +272,7 @@ impl Window {
         };
         let pipeline = match gst::parse::launch(&format!("{source} ! videoconvert ! gtk4paintablesink name=sink sync=false")) {
             Ok(p) => p,
-            Err(_) => return self.missing_part_toast("Can't preview: a video part is missing"),
+            Err(_) => return self.missing_part_toast(t!("Can't preview: a video part is missing")),
         };
         if let Some(paintable) = pipeline.downcast_ref::<gst::Bin>().and_then(|b| b.by_name("sink")).map(|s| s.property::<gdk::Paintable>("paintable")) {
             self.camera_picture.set_paintable(Some(&paintable));
@@ -431,8 +432,8 @@ impl Viewer {
             .focusable(true)
             .css_classes(["screen-view"])
             .build();
-        let again = gtk::Button::builder().label("Watch Again").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
-        let fix = gtk::Button::builder().label("Finish Setup").action_name("app.finish-setup").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).visible(false).build();
+        let again = gtk::Button::builder().label(t!("Watch Again")).css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).build();
+        let fix = gtk::Button::builder().label(t!("Finish Setup")).action_name("app.finish-setup").css_classes(["pill", "suggested-action"]).halign(gtk::Align::Center).visible(false).build();
         let ended_buttons = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).halign(gtk::Align::Center).build();
         ended_buttons.append(&fix);
         ended_buttons.append(&again);
@@ -442,14 +443,14 @@ impl Viewer {
         stack.add_named(&picture, Some("video"));
         stack.add_named(&ended, Some("ended"));
 
-        let control = gtk::ToggleButton::builder().tooltip_text("Use your mouse and keyboard on this screen").sensitive(false).build();
-        let control_content = adw::ButtonContent::builder().icon_name("input-mouse-symbolic").label("Take Control").build();
+        let control = gtk::ToggleButton::builder().tooltip_text(t!("Use your mouse and keyboard on this screen")).sensitive(false).build();
+        let control_content = adw::ButtonContent::builder().icon_name("input-mouse-symbolic").label(t!("Take Control")).build();
         control.set_child(Some(&control_content));
-        let fullscreen = gtk::Button::builder().icon_name("view-fullscreen-symbolic").tooltip_text("Full Screen (F11)").build();
-        let disconnect = gtk::Button::builder().label("Disconnect").css_classes(["destructive-action"]).visible(false).build();
+        let fullscreen = gtk::Button::builder().icon_name("view-fullscreen-symbolic").tooltip_text(t!("Full Screen (F11)")).build();
+        let disconnect = gtk::Button::builder().label(t!("Disconnect")).css_classes(["destructive-action"]).visible(false).build();
         // The device's name, with what's happening underneath: short enough for a phone-
         // shaped window. The window title (Alt+Tab) says it in full.
-        let heading = adw::WindowTitle::new(name, "Screen");
+        let heading = adw::WindowTitle::new(name, t!("Screen"));
         let header = adw::HeaderBar::builder().title_widget(&heading).build();
         header.pack_start(&control);
         header.pack_start(&disconnect);
@@ -458,7 +459,7 @@ impl Viewer {
         // only the phone's user can turn that off.
         if owner.device(&device).is_some_and(|d| d.device.os == "android") {
             let tip = gtk::Label::builder()
-                .label("Top bar black? Android hides it from screen sharing on some phones. On the phone: Developer options › Disable screen share protections, then share again.")
+                .label(t!("Top bar black? Android hides it from screen sharing on some phones. On the phone: Developer options › Disable screen share protections, then share again."))
                 .wrap(true)
                 .max_width_chars(36)
                 .margin_top(8)
@@ -468,7 +469,7 @@ impl Viewer {
                 .build();
             let hint = gtk::MenuButton::builder()
                 .icon_name("dialog-information-symbolic")
-                .tooltip_text("Top Bar Black?")
+                .tooltip_text(t!("Top Bar Black?"))
                 .popover(&gtk::Popover::builder().child(&tip).build())
                 .build();
             header.pack_end(&hint);
@@ -478,7 +479,7 @@ impl Viewer {
         let toolbar = adw::ToolbarView::builder().content(&toasts).build();
         toolbar.add_top_bar(&header);
         let window = adw::Window::builder()
-            .title(format!("{name}'s Screen"))
+            .title(t!("{name}'s Screen", name))
             .default_width(1100)
             .default_height(700)
             // A phone's screen makes a narrow window; let it be.
@@ -664,9 +665,9 @@ impl Viewer {
         self.kind.set(kind);
         let (title, description) = match kind {
             // Viewers never start these: the service runs both.
-            SessionKind::Display | SessionKind::Camera | SessionKind::Microphone | SessionKind::Input | SessionKind::Terminal => (format!("Waiting for {}…", self.name), String::new()),
-            SessionKind::Control => (format!("Asking to control {}…", self.name), format!("{} needs to allow control and pick a screen.", self.name)),
-            SessionKind::Screen => (format!("Asking {}…", self.name), format!("{} needs to allow sharing and pick a screen.", self.name)),
+            SessionKind::Display | SessionKind::Camera | SessionKind::Microphone | SessionKind::Input | SessionKind::Terminal => (t!("Waiting for {name}…", name = self.name), String::new()),
+            SessionKind::Control => (t!("Asking to control {name}…", name = self.name), t!("{name} needs to allow control and pick a screen.", name = self.name)),
+            SessionKind::Screen => (t!("Asking {name}…", name = self.name), t!("{name} needs to allow sharing and pick a screen.", name = self.name)),
         };
         self.waiting.set_title(&title);
         self.waiting.set_description(Some(&description));
@@ -681,14 +682,14 @@ impl Viewer {
                 Ok(info) => v.play(info),
                 // Control refused: keep watching instead of losing the screen.
                 Err(e) if kind == SessionKind::Control => {
-                    let why = if e.contains("can't do this yet") { format!("{name} can't be controlled yet") } else { format!("{name} didn't allow control") };
+                    let why = if e.contains("can't do this yet") { t!("{name} can't be controlled yet", name) } else { t!("{name} didn't allow control", name) };
                     v.toasts.add_toast(adw::Toast::new(&why));
                     v.start(SessionKind::Screen);
                 }
-                Err(e) if e.contains("can't do this yet") => v.ended(&format!("{name} can't share its screen yet"), "This device doesn't support it in its current version."),
-                Err(e) if e.contains("declined") => v.ended(&format!("{name} didn't allow it"), "Nothing is shared unless the other device says yes."),
-                Err(e) if e.contains("timed out") => v.ended("No answer", &format!("Nobody answered on {name}.")),
-                Err(e) => v.ended("Couldn't Connect", &crate::fmt::capitalize(&e)),
+                Err(e) if e.contains("can't do this yet") => v.ended(&t!("{name} can't share its screen yet", name), t!("This device doesn't support it in its current version.")),
+                Err(e) if e.contains("declined") => v.ended(&t!("{name} didn't allow it", name), t!("Nothing is shared unless the other device says yes.")),
+                Err(e) if e.contains("timed out") => v.ended(t!("No answer"), &t!("Nobody answered on {name}.", name)),
+                Err(e) => v.ended(t!("Couldn't Connect"), &crate::fmt::capitalize(&e)),
             }
         });
     }
@@ -702,10 +703,10 @@ impl Viewer {
     /// Connect to the session's socket and decode the stream into the picture.
     fn play(&self, info: SessionInfo) {
         self.session.set(Some(info.session));
-        let Some(path) = info.socket else { return self.ended("Couldn't Connect", "The service sent no stream.") };
+        let Some(path) = info.socket else { return self.ended(t!("Couldn't Connect"), t!("The service sent no stream.")) };
         let stream = match UnixStream::connect(&path) {
             Ok(s) => s,
-            Err(e) => return self.ended("Couldn't Connect", &e.to_string()),
+            Err(e) => return self.ended(t!("Couldn't Connect"), &e.to_string()),
         };
         if self.kind.get().has_input()
             && let Ok(input) = stream.try_clone()
@@ -721,7 +722,7 @@ impl Viewer {
         let description = format!("fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! gtk4paintablesink name=sink sync=false", socket.as_raw_fd());
         let pipeline = match gst::parse::launch(&description) {
             Ok(p) => p,
-            Err(e) => return self.ended("Can't Show This Screen", &format!("A video component is missing: {e}")),
+            Err(e) => return self.ended(t!("Can't Show This Screen"), &t!("A video component is missing: {error}", error = e)),
         };
         *self.socket.borrow_mut() = Some(socket);
         let sink = pipeline.downcast_ref::<gst::Bin>().and_then(|b| b.by_name("sink"));
@@ -739,9 +740,9 @@ impl Viewer {
         let watch = bus.add_watch_local(move |_, msg| {
             match msg.view() {
                 gst::MessageView::StateChanged(s) if s.current() == gst::State::Playing => v.playing(),
-                gst::MessageView::Eos(_) => v.ended("Sharing Stopped", &format!("{} stopped sharing its screen.", v.name)),
+                gst::MessageView::Eos(_) => v.ended(t!("Sharing Stopped"), &t!("{name} stopped sharing its screen.", name = v.name)),
                 gst::MessageView::Error(e) if e.error().matches(gst::CoreError::MissingPlugin) => v.missing_part(),
-                gst::MessageView::Error(e) => v.ended("Sharing Stopped", &format!("The stream ended: {}", e.error())),
+                gst::MessageView::Error(e) => v.ended(t!("Sharing Stopped"), &t!("The stream ended: {error}", error = e.error())),
                 _ => {}
             }
             glib::ControlFlow::Continue
@@ -757,7 +758,7 @@ impl Viewer {
             // A second display fills this screen; F11 gets back to the window.
             self.window.fullscreen();
             self.picture.grab_focus();
-            self.toasts.add_toast(adw::Toast::builder().title("Press F11 to leave full screen").timeout(4).build());
+            self.toasts.add_toast(adw::Toast::builder().title(t!("Press F11 to leave full screen")).timeout(4).build());
             return;
         }
         self.control.set_sensitive(true);
@@ -766,15 +767,15 @@ impl Viewer {
         self.control.set_active(controlling);
         if controlling {
             self.picture.grab_focus();
-            self.window.set_title(Some(&format!("Controlling {}", self.name)));
-            self.heading.set_subtitle("Controlling");
+            self.window.set_title(Some(&t!("Controlling {name}", name = self.name)));
+            self.heading.set_subtitle(t!("Controlling"));
         }
     }
 
     /// A video part this computer lacks (the H.264 decoder, GTK's video sink): Finish
     /// Setup adds it.
     fn missing_part(&self) {
-        self.ended("Can't Show This Screen", "This computer is missing a video part Linksy needs. Finish Setup adds it, then watch again.");
+        self.ended(t!("Can't Show This Screen"), t!("This computer is missing a video part Linksy needs. Finish Setup adds it, then watch again."));
         self.fix.set_visible(true);
     }
 
@@ -782,8 +783,8 @@ impl Viewer {
         self.fix.set_visible(false);
         let display = self.kind.get() == SessionKind::Display;
         self.stop();
-        let (title, description) = if display && title == "Sharing Stopped" {
-            ("Second Display Ended".to_string(), format!("{} stopped using this screen.", self.name))
+        let (title, description) = if display && title == t!("Sharing Stopped") {
+            (t!("Second Display Ended").to_string(), t!("{name} stopped using this screen.", name = self.name))
         } else {
             (title.to_string(), description.to_string())
         };
@@ -807,8 +808,8 @@ impl Viewer {
         self.control.set_active(false);
         self.control.set_sensitive(false);
         if self.kind.get() != SessionKind::Display {
-            self.window.set_title(Some(&format!("{}'s Screen", self.name)));
-            self.heading.set_subtitle("Screen");
+            self.window.set_title(Some(&t!("{name}'s Screen", name = self.name)));
+            self.heading.set_subtitle(t!("Screen"));
         }
         if let (Some(owner), Some(session)) = (self.owner.upgrade(), self.session.take()) {
             owner.end_session(session);

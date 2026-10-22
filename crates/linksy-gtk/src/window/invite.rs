@@ -9,6 +9,8 @@ use std::time::Duration;
 use adw::prelude::*;
 use gtk::{cairo, glib};
 
+use linksy_i18n::t;
+
 use super::Window;
 
 /// Invites are valid five minutes; ask for a fresh one a little before that.
@@ -21,32 +23,32 @@ impl Window {
     pub(super) fn show_invite(self: &Rc<Self>) {
         let qr = gtk::DrawingArea::builder().content_width(232).content_height(232).halign(gtk::Align::Center).css_classes(["qr-card"]).build();
         qr.set_accessible_role(gtk::AccessibleRole::Img);
-        qr.update_property(&[gtk::accessible::Property::Label("Pairing QR code")]);
+        qr.update_property(&[gtk::accessible::Property::Label(t!("Pairing QR code"))]);
         let modules: Rc<RefCell<Option<Modules>>> = Rc::default();
         let m = modules.clone();
         qr.set_draw_func(move |_, cr, w, h| draw_qr(cr, w, h, m.borrow().as_ref()));
 
-        let title = gtk::Label::builder().label("Add a Device").css_classes(["title-2"]).build();
+        let title = gtk::Label::builder().label(t!("Add a Device")).css_classes(["title-2"]).build();
         let body = gtk::Label::builder()
-            .label("On your phone, open Linksy and scan this code. Whoever scans it can pair, so only show it to your own devices.")
+            .label(t!("On your phone, open Linksy and scan this code. Whoever scans it can pair, so only show it to your own devices."))
             .wrap(true)
             .justify(gtk::Justification::Center)
             .max_width_chars(36)
             .css_classes(["dim-label"])
             .build();
-        let copy = gtk::Button::builder().label("Copy Link").halign(gtk::Align::Center).css_classes(["pill"]).sensitive(false).build();
+        let copy = gtk::Button::builder().label(t!("Copy Link")).halign(gtk::Align::Center).css_classes(["pill"]).sensitive(false).build();
 
         // Computers nearby, kept current by the window while the dialog is open.
         let nearby = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         let nearby_empty = gtk::Label::builder()
-            .label("No other computers found on this network yet.")
+            .label(t!("No other computers found on this network yet."))
             .wrap(true)
             .justify(gtk::Justification::Center)
             .css_classes(["dim-label", "caption"])
             .build();
-        let by_address = gtk::Button::builder().label("Pair by Address…").action_name("win.pair-address").halign(gtk::Align::Center).css_classes(["flat"]).build();
+        let by_address = gtk::Button::builder().label(t!("Pair by Address…")).action_name("win.pair-address").halign(gtk::Align::Center).css_classes(["flat"]).build();
         let computers = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).margin_top(10).build();
-        computers.append(&gtk::Label::builder().label("Or Pair a Computer Nearby").xalign(0.0).css_classes(["heading"]).build());
+        computers.append(&gtk::Label::builder().label(t!("Or Pair a Computer Nearby")).xalign(0.0).css_classes(["heading"]).build());
         computers.append(&nearby);
         computers.append(&nearby_empty);
         computers.append(&by_address);
@@ -63,7 +65,7 @@ impl Window {
         let toolbar = adw::ToolbarView::new();
         toolbar.add_top_bar(&adw::HeaderBar::builder().show_title(false).build());
         toolbar.set_content(Some(&toasts));
-        let dialog = adw::Dialog::builder().title("Add Device").content_width(400).content_height(720).child(&toolbar).build();
+        let dialog = adw::Dialog::builder().title(t!("Add Device")).content_width(400).content_height(720).child(&toolbar).build();
         self.state.borrow_mut().invite_nearby = Some((nearby.clone(), nearby_empty.clone()));
         self.render_invite_nearby();
 
@@ -72,7 +74,7 @@ impl Window {
         let t = toasts.clone();
         copy.connect_clicked(move |b| {
             b.clipboard().set_text(&u.borrow());
-            t.add_toast(adw::Toast::new("Link copied"));
+            t.add_toast(adw::Toast::new(t!("Link copied")));
         });
 
         // Fetch an invite now and renew it while the dialog is open.

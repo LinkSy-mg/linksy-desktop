@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use adw::prelude::*;
 use gtk::glib;
+use linksy_i18n::t;
 use linksy_ipc::{UsbState, UsbStatus};
 
 use super::Window;
@@ -41,27 +42,27 @@ impl Step {
 
 impl Window {
     pub(super) fn show_usb_cable(self: &Rc<Self>) {
-        let dialog = adw::Dialog::builder().title("Connect by USB Cable").content_width(500).build();
+        let dialog = adw::Dialog::builder().title(t!("Connect by USB Cable")).content_width(500).build();
         let intro = gtk::Label::builder()
-            .label("A faster webcam and microphone, and no Wi-Fi needed. Nothing to turn on in the phone's settings.")
+            .label(t!("A faster webcam and microphone, and no Wi-Fi needed. Nothing to turn on in the phone's settings."))
             .wrap(true)
             .xalign(0.0)
             .css_classes(["dim-label"])
             .build();
-        let access = Step::new(1, "Let Linksy Use the Cable");
-        let allow = gtk::Button::builder().label("Allow").valign(gtk::Align::Center).css_classes(["suggested-action"]).visible(false).build();
+        let access = Step::new(1, t!("Let Linksy Use the Cable"));
+        let allow = gtk::Button::builder().label(t!("Allow")).valign(gtk::Align::Center).css_classes(["suggested-action"]).visible(false).build();
         access.row.add_suffix(&allow);
-        let plug = Step::new(2, "Plug In Your Phone");
-        let switch = Step::new(3, "Switch It to Linksy");
-        let connect = gtk::Button::builder().label("Connect").valign(gtk::Align::Center).css_classes(["suggested-action"]).visible(false).build();
+        let plug = Step::new(2, t!("Plug In Your Phone"));
+        let switch = Step::new(3, t!("Switch It to Linksy"));
+        let connect = gtk::Button::builder().label(t!("Connect")).valign(gtk::Align::Center).css_classes(["suggested-action"]).visible(false).build();
         switch.row.add_suffix(&connect);
-        let open = Step::new(4, "Open Linksy on the Phone");
-        let done = Step::new(5, "Connected");
+        let open = Step::new(4, t!("Open Linksy on the Phone"));
+        let done = Step::new(5, t!("Connected"));
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         for step in [&access, &plug, &switch, &open, &done] {
             list.append(&step.row);
         }
-        let unpaired = adw::Banner::builder().title("Pair your phone over Wi-Fi first; the cable then connects it.").revealed(false).build();
+        let unpaired = adw::Banner::builder().title(t!("Pair your phone over Wi-Fi first; the cable then connects it.")).revealed(false).build();
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).margin_top(6).margin_bottom(24).margin_start(24).margin_end(24).build();
         body.append(&intro);
         body.append(&list);
@@ -97,7 +98,7 @@ impl Window {
                 if let Err(e) = super::setup::allow_usb().await {
                     t.add_toast(adw::Toast::builder().title(glib::markup_escape_text(&e)).timeout(8).build());
                 }
-                b.set_label("Allow");
+                b.set_label(t!("Allow"));
                 b.set_sensitive(true);
             });
         });
@@ -117,8 +118,8 @@ impl Window {
                 let ready = super::setup::usb_ready();
                 allow.set_visible(ready.is_err() && cabled.is_none());
                 match &ready {
-                    _ if cabled.is_some() => access.set("done", "Allowed"),
-                    Ok(()) => access.set("done", "Allowed"),
+                    _ if cabled.is_some() => access.set("done", t!("Allowed")),
+                    Ok(()) => access.set("done", t!("Allowed")),
                     Err(why) => access.set("todo", why),
                 }
                 let status = status.unwrap_or_default();
@@ -131,39 +132,39 @@ impl Window {
                 });
                 *key.borrow_mut() = phone.filter(|p| p.state != UsbState::Accessory).map(|p| p.key.clone());
                 if !status.watching && cabled.is_none() {
-                    plug.set("todo", "Linksy's service isn't watching USB. Restart Linksy, then try again.");
+                    plug.set("todo", t!("Linksy's service isn't watching USB. Restart Linksy, then try again."));
                 } else {
                     match (cabled, phone) {
-                        (Some(d), _) => plug.set("done", &format!("{} is plugged in", d.device.name)),
-                        (None, Some(p)) => plug.set("done", &format!("{} is plugged in", p.name)),
-                        (None, None) => plug.set("busy", "Unlock the phone and plug it in. Use a cable that carries data: some only charge."),
+                        (Some(d), _) => plug.set("done", &t!("{name} is plugged in", name = d.device.name)),
+                        (None, Some(p)) => plug.set("done", &t!("{name} is plugged in", name = p.name)),
+                        (None, None) => plug.set("busy", t!("Unlock the phone and plug it in. Use a cable that carries data: some only charge.")),
                     }
                 }
                 connect.set_visible(false);
                 match (cabled, phone.map(|p| (p.state, p.error.clone()))) {
-                    (Some(_), _) | (None, Some((UsbState::Accessory, _))) => switch.set("done", "Switched: file transfer by cable is off until you unplug it"),
-                    (None, Some((UsbState::Switching, _))) => switch.set("busy", "Switching…"),
+                    (Some(_), _) | (None, Some((UsbState::Accessory, _))) => switch.set("done", t!("Switched: file transfer by cable is off until you unplug it")),
+                    (None, Some((UsbState::Switching, _))) => switch.set("busy", t!("Switching…")),
                     (None, Some((UsbState::Failed, error))) => {
-                        connect.set_label("Try Again");
+                        connect.set_label(t!("Try Again"));
                         connect.set_visible(ready.is_ok());
-                        switch.set("todo", &format!("Didn't work: {}. Unplug the phone, plug it in again, and try again.", error.unwrap_or_default()));
+                        switch.set("todo", &t!("Didn't work: {error}. Unplug the phone, plug it in again, and try again.", error = error.unwrap_or_default()));
                     }
                     (None, Some((state, _))) => {
-                        connect.set_label("Connect");
+                        connect.set_label(t!("Connect"));
                         connect.set_visible(ready.is_ok());
-                        let why = if state == UsbState::Declined { "You chose Not This Phone before. " } else { "" };
-                        switch.set("todo", &format!("{why}File transfer by cable stops until you unplug it."));
+                        let why = if state == UsbState::Declined { t!("You chose Not This Phone before. File transfer by cable stops until you unplug it.") } else { t!("File transfer by cable stops until you unplug it.") };
+                        switch.set("todo", why);
                     }
-                    (None, None) => switch.set("todo", "File transfer by cable stops until you unplug it."),
+                    (None, None) => switch.set("todo", t!("File transfer by cable stops until you unplug it.")),
                 }
                 match (cabled, phone.map(|p| p.state)) {
-                    (Some(_), _) => open.set("done", "Opened"),
-                    (None, Some(UsbState::Accessory)) => open.set("busy", "The phone asks which app to open: choose Linksy, then Always. Nothing asked? Unlock the phone, or unplug it and plug it in again."),
-                    _ => open.set("todo", "The phone asks which app to open: choose Linksy, then Always."),
+                    (Some(_), _) => open.set("done", t!("Opened")),
+                    (None, Some(UsbState::Accessory)) => open.set("busy", t!("The phone asks which app to open: choose Linksy, then Always. Nothing asked? Unlock the phone, or unplug it and plug it in again.")),
+                    _ => open.set("todo", t!("The phone asks which app to open: choose Linksy, then Always.")),
                 }
                 match cabled {
-                    Some(d) => done.set("done", &format!("{} is connected by USB. Start the webcam or microphone from its page.", d.device.name)),
-                    None => done.set("todo", "Your phone's page then says Connected by USB."),
+                    Some(d) => done.set("done", &t!("{name} is connected by USB. Start the webcam or microphone from its page.", name = d.device.name)),
+                    None => done.set("todo", t!("Your phone's page then says Connected by USB.")),
                 }
             }
         };

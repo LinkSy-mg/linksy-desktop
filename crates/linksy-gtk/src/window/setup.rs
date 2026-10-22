@@ -13,6 +13,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
+use linksy_i18n::t;
 
 use super::Window;
 
@@ -207,18 +208,18 @@ pub fn check() -> Vec<Item> {
     let camera = if camera_device().is_some() {
         Need::Ready
     } else if flatpak() {
-        Need::Manual("A Flatpak can't add this. Install Linksy's .deb or .rpm instead, or v4l2loopback and run linksy-camera-setup once.")
+        Need::Manual(t!("A Flatpak can't add this. Install Linksy's .deb or .rpm instead, or v4l2loopback and run linksy-camera-setup once."))
     } else if loopback_installed() {
         Need::SetUp
     } else if fam == Family::Other {
-        Need::Manual("Install v4l2loopback from your distribution, then come back here.")
+        Need::Manual(t!("Install v4l2loopback from your distribution, then come back here."))
     } else {
         Need::Install(loopback_packages(fam))
     };
     let mut items = vec![Item {
         id: "camera",
-        title: "Phone Camera in Every App",
-        why: "Browsers, Zoom and Discord only see this kind of camera. Without it, the phone's camera works in OBS and PipeWire apps only.",
+        title: t!("Phone Camera in Every App"),
+        why: t!("Browsers, Zoom and Discord only see this kind of camera. Without it, the phone's camera works in OBS and PipeWire apps only."),
         need: camera,
     }];
     // A Flatpak can't add a udev rule, and can't see whether the system has one.
@@ -226,8 +227,8 @@ pub fn check() -> Vec<Item> {
         let rule = ["/usr/lib/udev/rules.d/70-linksy-usb.rules", "/etc/udev/rules.d/70-linksy-usb.rules"].iter().any(|p| std::path::Path::new(p).exists());
         items.push(Item {
             id: "usb",
-            title: "Phones by USB Cable",
-            why: "Plug a phone in for a faster webcam and microphone, with no Wi-Fi needed.",
+            title: t!("Phones by USB Cable"),
+            why: t!("Plug a phone in for a faster webcam and microphone, with no Wi-Fi needed."),
             need: if rule { Need::Ready } else { Need::SetUp },
         });
     }
@@ -247,9 +248,9 @@ pub fn check() -> Vec<Item> {
         }
         items.push(Item {
             id: "video",
-            title: "Video for Screens and Cameras",
-            why: "To send and show screens, second displays and the phone's camera.",
-            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, "Install GStreamer's H.264 plugins (openh264 or libav) and its GTK 4 video sink (gtk4paintablesink) from your distribution.") },
+            title: t!("Video for Screens and Cameras"),
+            why: t!("To send and show screens, second displays and the phone's camera."),
+            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, t!("Install GStreamer's H.264 plugins (openh264 or libav) and its GTK 4 video sink (gtk4paintablesink) from your distribution.")) },
         });
         let (mut fedora, mut debian, mut arch) = (Vec::new(), Vec::new(), Vec::new());
         if !has_element(&["pipewiresrc"]) {
@@ -264,30 +265,30 @@ pub fn check() -> Vec<Item> {
         }
         items.push(Item {
             id: "pipewire",
-            title: "Screen Sharing",
-            why: "Reading this computer's screen, and offering the phone's camera to apps.",
-            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, "Install PipeWire's GStreamer plugin and your desktop's screen sharing portal.") },
+            title: t!("Screen Sharing"),
+            why: t!("Reading this computer's screen, and offering the phone's camera to apps."),
+            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, t!("Install PipeWire's GStreamer plugin and your desktop's screen sharing portal.")) },
         });
         let clip = in_path("wl-copy") || in_path("xclip") || in_path("xsel");
         items.push(Item {
             id: "clipboard",
-            title: "Clipboard From Your Phone",
-            why: "Putting text your phone shares on this computer's clipboard while Linksy's window is closed.",
-            need: if clip { Need::Ready } else { pick(&["wl-clipboard"], &["wl-clipboard"], &["wl-clipboard"], "Install wl-clipboard.") },
+            title: t!("Clipboard From Your Phone"),
+            why: t!("Putting text your phone shares on this computer's clipboard while Linksy's window is closed."),
+            need: if clip { Need::Ready } else { pick(&["wl-clipboard"], &["wl-clipboard"], &["wl-clipboard"], t!("Install wl-clipboard.")) },
         });
         if let Some(need) = firewall_need() {
             items.push(Item {
                 id: "firewall",
-                title: "Found by Nearby Devices",
-                why: "The firewall lets your devices reach Linksy here (UDP 47200, and mDNS to find each other).",
+                title: t!("Found by Nearby Devices"),
+                why: t!("The firewall lets your devices reach Linksy here (UDP 47200, and mDNS to find each other)."),
                 need,
             });
         }
         if let Some(need) = autostart_need() {
             items.push(Item {
                 id: "autostart",
-                title: "Ready When You Log In",
-                why: "Linksy starts in the background with your computer, so phones can reach it with the window closed.",
+                title: t!("Ready When You Log In"),
+                why: t!("Linksy starts in the background with your computer, so phones can reach it with the window closed."),
                 need,
             });
         }
@@ -351,19 +352,34 @@ enum Failure {
     Restart(Option<String>),
 }
 
+/// The helper's step (it speaks English) in the language in use.
+fn step_text(step: &str) -> String {
+    match step.trim() {
+        "Turning on RPM Fusion" => t!("Turning on RPM Fusion").into(),
+        "Building the camera driver (a few minutes)" => t!("Building the camera driver (a few minutes)").into(),
+        "Letting nearby devices find this computer" => t!("Letting nearby devices find this computer").into(),
+        "Making the Linksy Camera" => t!("Making the Linksy Camera").into(),
+        "Letting Linksy use phones plugged in by cable" => t!("Letting Linksy use phones plugged in by cable").into(),
+        s => match s.strip_prefix("Installing ") {
+            Some(packages) => t!("Installing {packages}", packages),
+            None => s.to_string(),
+        },
+    }
+}
+
 /// Run `linksy-system-setup` as root (one password for all of it), showing each step.
 async fn run_as_root(args: &[String], progress: &gtk::Label) -> Result<(), Failure> {
-    let script = setup_script("linksy-system-setup").ok_or_else(|| Failure::Message("Linksy's setup helper is missing; reinstall Linksy.".into()))?;
+    let script = setup_script("linksy-system-setup").ok_or_else(|| Failure::Message(t!("Linksy's setup helper is missing; reinstall Linksy.").into()))?;
     let mut argv = vec![std::ffi::OsStr::new("pkexec"), script.as_os_str()];
     argv.extend(args.iter().map(std::ffi::OsStr::new));
     let run = gio::Subprocess::newv(&argv, gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_MERGE).map_err(|e| Failure::Message(e.to_string()))?;
     let lines = gio::DataInputStream::new(&run.stdout_pipe().expect("stdout pipe"));
     let (mut enroll, mut last) = (None, std::collections::VecDeque::new());
-    progress.set_label("Waiting for your password…");
+    progress.set_label(t!("Waiting for your password…"));
     progress.set_visible(true);
     while let Ok(Some(line)) = lines.read_line_utf8_future(glib::Priority::DEFAULT).await {
         if let Some(step) = line.strip_prefix("STEP ") {
-            progress.set_label(&format!("{step}…"));
+            progress.set_label(&t!("{step}…", step = step_text(step)));
         } else if let Some(code) = line.strip_prefix("ENROLL ") {
             enroll = Some(code.trim().to_string());
         } else if !line.trim().is_empty() {
@@ -378,18 +394,18 @@ async fn run_as_root(args: &[String], progress: &gtk::Label) -> Result<(), Failu
     match run.exit_status() {
         0 => Ok(()),
         4 => Err(Failure::Restart(enroll)),
-        126 | 127 => Err(Failure::Message("Not set up: the password wasn't given.".into())),
-        _ => Err(Failure::Message(format!("Setup didn't finish: {}", last.into_iter().collect::<Vec<_>>().join(" ")))),
+        126 | 127 => Err(Failure::Message(t!("Not set up: the password wasn't given.").into())),
+        _ => Err(Failure::Message(t!("Setup didn't finish: {details}", details = last.into_iter().collect::<Vec<_>>().join(" ")))),
     }
 }
 
 /// Whether phones can be used by cable here: Err says why not.
 pub(super) fn usb_ready() -> Result<(), String> {
     if flatpak() {
-        return Err("The Flatpak can't use USB cables. Install Linksy's .rpm or .deb for this.".into());
+        return Err(t!("The Flatpak can't use USB cables. Install Linksy's .rpm or .deb for this.").into());
     }
     let rule = ["/usr/lib/udev/rules.d/70-linksy-usb.rules", "/etc/udev/rules.d/70-linksy-usb.rules"].iter().any(|p| std::path::Path::new(p).exists());
-    if rule { Ok(()) } else { Err("Allow it once: your computer asks for your password.".into()) }
+    if rule { Ok(()) } else { Err(t!("Allow it once: your computer asks for your password.").into()) }
 }
 
 /// Let Linksy use phones by cable (the udev rule), as root.
@@ -397,13 +413,13 @@ pub(super) async fn allow_usb() -> Result<(), String> {
     match run_as_root(&["usb".to_string()], &gtk::Label::new(None)).await {
         Ok(()) => Ok(()),
         Err(Failure::Message(m)) => Err(m),
-        Err(Failure::Restart(_)) => Err("Restart your computer, then try again.".into()),
+        Err(Failure::Restart(_)) => Err(t!("Restart your computer, then try again.").into()),
     }
 }
 
 /// Turn on the background service at every login (no password: it's the user's own).
 async fn enable_autostart() -> Result<(), Failure> {
-    let failed = || Failure::Message("Couldn't turn on starting with your computer.".into());
+    let failed = || Failure::Message(t!("Couldn't turn on starting with your computer.").into());
     let run = gio::Subprocess::newv(&["systemctl".as_ref(), "--user".as_ref(), "enable".as_ref(), "--now".as_ref(), "linksyd.service".as_ref()], gio::SubprocessFlags::STDERR_SILENCE).map_err(|_| failed())?;
     run.wait_future().await.map_err(|_| failed())?;
     if run.exit_status() == 0 { Ok(()) } else { Err(failed()) }
@@ -432,7 +448,7 @@ impl Window {
         let n = missing(&check());
         // Screenshots (LINKSY_SCREENSHOT) show the app as on a finished setup.
         self.setup_button.set_visible(n > 0 && std::env::var_os("LINKSY_SCREENSHOT").is_none());
-        self.setup_button.set_label(&if n == 1 { "Finish Setup · 1 thing".to_string() } else { format!("Finish Setup · {n} things") });
+        self.setup_button.set_label(&if n == 1 { t!("Finish Setup · 1 thing").to_string() } else { t!("Finish Setup · {n} things", n) });
     }
 
     /// The first time each version starts with something to set up: offer it.
@@ -450,21 +466,21 @@ impl Window {
     }
 
     pub fn show_setup(self: &Rc<Self>) {
-        let dialog = adw::Dialog::builder().title("Finish Setup").content_width(560).build();
+        let dialog = adw::Dialog::builder().title(t!("Finish Setup")).content_width(560).build();
         let list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         let intro = gtk::Label::builder()
-            .label("A few parts of your system make every feature work. Linksy adds what's missing in one go; your computer asks for your password once.")
+            .label(t!("A few parts of your system make every feature work. Linksy adds what's missing in one go; your computer asks for your password once."))
             .wrap(true)
             .xalign(0.0)
             .css_classes(["dim-label"])
             .build();
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).margin_top(6).margin_bottom(24).margin_start(24).margin_end(24).build();
-        let everything = gtk::Button::builder().label("Set Up Everything").halign(gtk::Align::Center).css_classes(["pill", "suggested-action"]).build();
+        let everything = gtk::Button::builder().label(t!("Set Up Everything")).halign(gtk::Align::Center).css_classes(["pill", "suggested-action"]).build();
         let progress = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).css_classes(["dim-label"]).visible(false).build();
         // The same, by hand: one command to paste in a terminal.
         let command = gtk::Label::builder().wrap(true).wrap_mode(gtk::pango::WrapMode::Char).selectable(true).xalign(0.0).css_classes(["monospace"]).margin_top(12).margin_bottom(12).margin_start(12).margin_end(12).build();
-        let copy = gtk::Button::builder().icon_name("edit-copy-symbolic").tooltip_text("Copy").valign(gtk::Align::Center).css_classes(["flat"]).build();
-        let terminal = adw::ExpanderRow::builder().title("Prefer a Terminal?").subtitle("Run this instead, then reopen Finish Setup").build();
+        let copy = gtk::Button::builder().icon_name("edit-copy-symbolic").tooltip_text(t!("Copy")).valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let terminal = adw::ExpanderRow::builder().title(t!("Prefer a Terminal?")).subtitle(t!("Run this instead, then reopen Finish Setup")).build();
         terminal.add_suffix(&copy);
         terminal.add_row(&command);
         let terminal_list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
@@ -502,7 +518,7 @@ impl Window {
         let items = check();
         v.everything.set_visible(actionable(&items).len() > 1);
         v.everything.set_sensitive(true);
-        v.everything.set_label("Set Up Everything");
+        v.everything.set_label(t!("Set Up Everything"));
         let command = terminal_command(&items);
         v.terminal.set_visible(command.is_some());
         v.command.set_label(command.as_deref().unwrap_or_default());
@@ -510,7 +526,7 @@ impl Window {
             let row = adw::ActionRow::builder().title(item.title).subtitle(item.why).subtitle_lines(4).build();
             match &item.need {
                 Need::Ready => {
-                    let ok = gtk::Image::builder().icon_name("object-select-symbolic").css_classes(["success"]).tooltip_text("Ready").build();
+                    let ok = gtk::Image::builder().icon_name("object-select-symbolic").css_classes(["success"]).tooltip_text(t!("Ready")).build();
                     row.add_suffix(&ok);
                 }
                 Need::Manual(what) => {
@@ -518,11 +534,11 @@ impl Window {
                     row.add_prefix(&gtk::Image::builder().icon_name("dialog-information-symbolic").css_classes(["dim-label"]).build());
                 }
                 Need::Install(_) if atomic() => {
-                    row.set_subtitle(&glib::markup_escape_text(&format!("{} On Fedora Atomic: the command at the bottom, then restart.", item.why)));
+                    row.set_subtitle(&glib::markup_escape_text(&t!("{why} On Fedora Atomic: the command at the bottom, then restart.", why = item.why)));
                     row.add_prefix(&gtk::Image::builder().icon_name("dialog-information-symbolic").css_classes(["dim-label"]).build());
                 }
                 need => {
-                    let label = if matches!(need, Need::SetUp) { "Set Up" } else { "Install" };
+                    let label = if matches!(need, Need::SetUp) { t!("Set Up") } else { t!("Install") };
                     let button = gtk::Button::builder().label(label).valign(gtk::Align::Center).css_classes(["suggested-action"]).build();
                     row.add_suffix(&button);
                     let (w, v, item) = (self.clone(), v.clone(), item.clone());
@@ -549,7 +565,7 @@ impl Window {
                 result = enable_autostart().await;
             }
             match result {
-                Ok(()) => v.toasts.add_toast(adw::Toast::new("All set")),
+                Ok(()) => v.toasts.add_toast(adw::Toast::new(t!("All set"))),
                 Err(Failure::Message(err)) => v.toasts.add_toast(adw::Toast::builder().title(glib::markup_escape_text(&err)).timeout(10).build()),
                 Err(Failure::Restart(code)) => self.ask_restart(&v.dialog, code.as_deref()),
             }
@@ -562,13 +578,11 @@ impl Window {
     /// the exact steps, and the code to type.
     fn ask_restart(&self, parent: &adw::Dialog, code: Option<&str>) {
         let steps = match code {
-            Some(code) => format!(
-                "Secure Boot asks you to approve the camera driver once.\n\n1. Restart your computer.\n2. A blue screen appears: choose Enroll MOK, then Continue, then Yes.\n3. Type this code: {code}\n4. Choose Reboot.\n\nLinksy Camera is then ready, nothing else to do. Write the code down: it's needed on that blue screen."
-            ),
-            None => "Restart your computer to finish. If a blue screen appears, choose Enroll MOK, then Continue, Yes, and Reboot. Then open Finish Setup again.".to_string(),
+            Some(code) => t!("Secure Boot asks you to approve the camera driver once.\n\n1. Restart your computer.\n2. A blue screen appears: choose Enroll MOK, then Continue, then Yes.\n3. Type this code: {code}\n4. Choose Reboot.\n\nLinksy Camera is then ready, nothing else to do. Write the code down: it's needed on that blue screen.", code),
+            None => t!("Restart your computer to finish. If a blue screen appears, choose Enroll MOK, then Continue, Yes, and Reboot. Then open Finish Setup again.").to_string(),
         };
-        let alert = adw::AlertDialog::builder().heading("Restart to Finish").body(steps).build();
-        alert.add_responses(&[("later", "Later"), ("restart", "Restart Now")]);
+        let alert = adw::AlertDialog::builder().heading(t!("Restart to Finish")).body(steps).build();
+        alert.add_responses(&[("later", t!("Later")), ("restart", t!("Restart Now"))]);
         alert.set_response_appearance("restart", adw::ResponseAppearance::Suggested);
         alert.set_default_response(Some("later"));
         alert.connect_response(Some("restart"), |_, _| {

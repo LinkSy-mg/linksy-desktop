@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
+use linksy_i18n::t;
 
 use crate::bridge::Bridge;
 
@@ -19,15 +20,15 @@ pub fn run(from: String, key: String) -> glib::ExitCode {
 
 fn present(app: &adw::Application, from: String, key: String) {
     let bridge = Rc::new(Bridge::new());
-    let title = adw::WindowTitle::new("Reply", "");
+    let title = adw::WindowTitle::new(t!("Reply"), "");
     let header = adw::HeaderBar::builder().title_widget(&title).build();
-    let send = gtk::Button::builder().label("Send").css_classes(["suggested-action"]).sensitive(false).build();
+    let send = gtk::Button::builder().label(t!("Send")).css_classes(["suggested-action"]).sensitive(false).build();
     header.pack_end(&send);
 
     let message = gtk::Label::builder().wrap(true).xalign(0.0).selectable(true).css_classes(["body"]).build();
     let bubble = gtk::Box::builder().css_classes(["card", "reply-message"]).build();
     bubble.append(&message);
-    let entry = gtk::Entry::builder().placeholder_text("Message").activates_default(true).hexpand(true).build();
+    let entry = gtk::Entry::builder().placeholder_text(t!("Message")).activates_default(true).hexpand(true).build();
     let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(14).margin_top(12).margin_bottom(18).margin_start(18).margin_end(18).build();
     body.append(&bubble);
     body.append(&entry);
@@ -49,7 +50,7 @@ fn present(app: &adw::Application, from: String, key: String) {
     glib::spawn_future_local(async move {
         let client = match bridge.connect().await {
             Ok((client, _)) => client,
-            Err(_) => return gone(&toasts, &entry, "Linksy isn't running"),
+            Err(_) => return gone(&toasts, &entry, t!("Linksy isn't running")),
         };
         let (f, k) = (from.clone(), key.clone());
         let found = bridge.call(&client, move |c| async move { c.phone_notification(f, k).await }).await;
@@ -57,7 +58,7 @@ fn present(app: &adw::Application, from: String, key: String) {
             Ok(found) => found,
             Err(e) => return gone(&toasts, &entry, &crate::fmt::capitalize(&e)),
         };
-        title.set_title(&format!("Reply to {}", n.title));
+        title.set_title(&t!("Reply to {title}", title = n.title));
         title.set_subtitle(&format!("{} · {}", n.app_name, device.name));
         message.set_label(if n.body.is_empty() { &n.title } else { &n.body });
         entry.grab_focus();

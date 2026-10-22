@@ -3,31 +3,47 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use linksy_i18n::t;
+
 pub fn size(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["bytes", "KB", "MB", "GB", "TB"];
+    let units: [&str; 5] = [t!("bytes"), t!("KB"), t!("MB"), t!("GB"), t!("TB")];
     if bytes < 1000 {
-        return if bytes == 1 { "1 byte".into() } else { format!("{bytes} bytes") };
+        return if bytes == 1 { t!("1 byte").into() } else { t!("{bytes} bytes", bytes) };
     }
     let mut v = bytes as f64;
     let mut unit = 0;
-    while v >= 1000.0 && unit < UNITS.len() - 1 {
+    while v >= 1000.0 && unit < units.len() - 1 {
         v /= 1000.0;
         unit += 1;
     }
-    if v < 10.0 { format!("{v:.1} {}", UNITS[unit]) } else { format!("{v:.0} {}", UNITS[unit]) }
+    if v < 10.0 { format!("{v:.1} {}", units[unit]) } else { format!("{v:.0} {}", units[unit]) }
 }
 
+/// "1 item", "3 items". The words in use are spelled out whole, so they translate.
 pub fn plural(n: usize, word: &str) -> String {
-    if n == 1 { format!("1 {word}") } else { format!("{n} {word}s") }
+    match (word, n == 1) {
+        ("item", true) => t!("1 item").into(),
+        ("item", false) => t!("{n} items", n),
+        ("photo", true) => t!("1 photo").into(),
+        ("photo", false) => t!("{n} photos", n),
+        (_, true) => format!("1 {word}"),
+        (_, false) => format!("{n} {word}s"),
+    }
 }
 
 pub fn remaining(d: Duration) -> String {
     let s = d.as_secs();
     match s {
-        0..=4 => "a few seconds left".into(),
-        5..=59 => format!("{s} seconds left"),
-        60..=3599 => plural(((s + 30) / 60) as usize, "minute") + " left",
-        _ => plural(((s + 1800) / 3600) as usize, "hour") + " left",
+        0..=4 => t!("a few seconds left").into(),
+        5..=59 => t!("{s} seconds left", s),
+        60..=3599 => match (s + 30) / 60 {
+            1 => t!("1 minute left").into(),
+            n => t!("{n} minutes left", n),
+        },
+        _ => match (s + 1800) / 3600 {
+            1 => t!("1 hour left").into(),
+            n => t!("{n} hours left", n),
+        },
     }
 }
 
@@ -103,9 +119,9 @@ pub fn measure(paths: &[PathBuf]) -> (usize, u64) {
 /// "45 s", "4 min", "1 h 5 min".
 pub fn duration(seconds: u64) -> String {
     match seconds {
-        0..60 => format!("{seconds} s"),
-        60..3600 => format!("{} min", seconds / 60),
-        _ => format!("{} h {} min", seconds / 3600, seconds % 3600 / 60),
+        0..60 => t!("{seconds} s", seconds),
+        60..3600 => t!("{minutes} min", minutes = seconds / 60),
+        _ => t!("{hours} h {minutes} min", hours = seconds / 3600, minutes = seconds % 3600 / 60),
     }
 }
 
@@ -113,5 +129,5 @@ pub fn duration(seconds: u64) -> String {
 /// whose last reading may be old.
 pub fn battery(d: &linksy_ipc::linksy_core::DeviceView) -> Option<String> {
     let b = d.battery.filter(|_| d.connected || d.nearby)?;
-    Some(if b.charging { format!("{}%, charging", b.level) } else { format!("{}%", b.level) })
+    Some(if b.charging { t!("{level}%, charging", level = b.level) } else { format!("{}%", b.level) })
 }

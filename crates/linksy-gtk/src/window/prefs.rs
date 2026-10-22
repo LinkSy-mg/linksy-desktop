@@ -9,6 +9,7 @@ use adw::prelude::*;
 use gtk::{gio, glib};
 use linksy_ipc::{NotificationPrefs, PhotoPrefs, UpdateInfo, UpdatePrefs};
 use linksy_ipc::linksy_core::Settings;
+use linksy_i18n::t;
 
 use super::Window;
 use crate::fmt;
@@ -33,58 +34,59 @@ impl Window {
     }
 
     fn present_preferences(self: &Rc<Self>, settings: Settings, notifications: NotificationPrefs, photos: PhotoPrefs, updates: Option<UpdateInfo>, terminals: Option<linksy_ipc::TerminalStatus>) {
-        let dialog = adw::PreferencesDialog::builder().title("Preferences").search_enabled(false).build();
+        let dialog = adw::PreferencesDialog::builder().title(t!("Preferences")).search_enabled(false).build();
         let current = Rc::new(RefCell::new(settings.clone()));
         // Set while a widget is being reset after a failed save, so it doesn't save again.
         let reverting = Rc::new(Cell::new(false));
 
-        let name = adw::EntryRow::builder().title("Device Name").text(&settings.name).show_apply_button(true).build();
-        let device = adw::PreferencesGroup::builder().title("This Device").description("The name other devices see.").build();
+        let name = adw::EntryRow::builder().title(t!("Device Name")).text(&settings.name).show_apply_button(true).build();
+        let device = adw::PreferencesGroup::builder().title(t!("This Device")).description(t!("The name other devices see.")).build();
         device.add(&name);
         // For "Pair by Address" on networks that hide devices from each other.
         if let Some(ip) = fmt::local_ip() {
             let port = self.state.borrow().port.unwrap_or(0);
             let shown = if port == 47_200 { ip.to_string() } else { std::net::SocketAddr::new(ip, port).to_string() };
-            let address = adw::ActionRow::builder().title("Address").subtitle(&shown).subtitle_selectable(true).build();
-            let copy = gtk::Button::builder().icon_name("edit-copy-symbolic").tooltip_text("Copy Address").valign(gtk::Align::Center).css_classes(["flat"]).build();
+            let address = adw::ActionRow::builder().title(t!("Address")).subtitle(&shown).subtitle_selectable(true).build();
+            let copy = gtk::Button::builder().icon_name("edit-copy-symbolic").tooltip_text(t!("Copy Address")).valign(gtk::Align::Center).css_classes(["flat"]).build();
             let d = dialog.clone();
             copy.connect_clicked(move |b| {
                 b.clipboard().set_text(&shown);
-                d.add_toast(adw::Toast::new("Address copied"));
+                d.add_toast(adw::Toast::new(t!("Address copied")));
             });
             address.add_suffix(&copy);
             device.add(&address);
         }
 
-        let folder = adw::ActionRow::builder().title("Save Files To").subtitle(fmt::home_relative(&settings.download_dir)).build();
-        let choose = gtk::Button::builder().icon_name("folder-open-symbolic").tooltip_text("Choose Folder").valign(gtk::Align::Center).css_classes(["flat"]).build();
+        let folder = adw::ActionRow::builder().title(t!("Save Files To")).subtitle(fmt::home_relative(&settings.download_dir)).build();
+        let choose = gtk::Button::builder().icon_name("folder-open-symbolic").tooltip_text(t!("Choose Folder")).valign(gtk::Align::Center).css_classes(["flat"]).build();
         folder.add_suffix(&choose);
         folder.set_activatable_widget(Some(&choose));
         let auto = adw::SwitchRow::builder()
-            .title("Accept From Paired Devices")
-            .subtitle("Files from devices you paired arrive without asking.")
+            .title(t!("Accept From Paired Devices"))
+            .subtitle(t!("Files from devices you paired arrive without asking."))
             .active(settings.auto_accept)
             .build();
-        let receiving = adw::PreferencesGroup::builder().title("Receiving").build();
+        let receiving = adw::PreferencesGroup::builder().title(t!("Receiving")).build();
         receiving.add(&folder);
         receiving.add(&auto);
         receiving.add(&self.photo_import_row(&dialog, photos));
 
         let stay = adw::SwitchRow::builder()
-            .title("Stay Connected")
-            .subtitle("Keep paired devices connected for instant sharing. Uses more battery; otherwise devices connect only when there's something to share.")
+            .title(t!("Stay Connected"))
+            .subtitle(t!("Keep paired devices connected for instant sharing. Uses more battery; otherwise devices connect only when there's something to share."))
             .active(settings.stay_connected)
             .build();
         let away = adw::SwitchRow::builder()
-            .title("Away From Home")
-            .subtitle("Reach your paired devices over the internet too, for a week after they were last on the same Wi-Fi. Everything stays encrypted end to end; Linksy's relay only helps them find each other.")
+            .title(t!("Away From Home"))
+            .subtitle(t!("Reach your paired devices over the internet too, for a week after they were last on the same Wi-Fi. Everything stays encrypted end to end; Linksy's relay only helps them find each other."))
             .active(settings.away)
             .build();
-        let connection = adw::PreferencesGroup::builder().title("Connection").build();
+        let connection = adw::PreferencesGroup::builder().title(t!("Connection")).build();
         connection.add(&stay);
         connection.add(&away);
 
         let page = adw::PreferencesPage::new();
+        page.add(&self.language_group(&dialog));
         page.add(&device);
         page.add(&receiving);
         page.add(&connection);
@@ -160,7 +162,7 @@ impl Window {
         let row = folder.clone();
         choose.connect_clicked(move |_| {
             let Some(w) = w.upgrade() else { return };
-            let picker = gtk::FileDialog::builder().title("Save Files To").modal(true).build();
+            let picker = gtk::FileDialog::builder().title(t!("Save Files To")).modal(true).build();
             picker.set_initial_folder(Some(&gio::File::for_path(&current.borrow().download_dir)));
             let (s, row) = (s.clone(), row.clone());
             picker.select_folder(Some(&w.window), gio::Cancellable::NONE, move |res| {
@@ -177,13 +179,80 @@ impl Window {
         dialog.present(Some(&self.window));
     }
 
+    /// "Language": the system's, or one of Linksy's by its own name. It's read when Linksy
+    /// starts, so the toast offers to start Linksy (and its service) again.
+    fn language_group(self: &Rc<Self>, dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
+        let mut names = vec![t!("System Default")];
+        names.extend(linksy_i18n::LANGUAGES.iter().map(|(_, name)| *name));
+        let chosen = linksy_i18n::chosen();
+        let selected = chosen.as_deref().and_then(|code| linksy_i18n::LANGUAGES.iter().position(|(c, _)| *c == code)).map_or(0, |i| i + 1);
+        let row = adw::ComboRow::builder().title(t!("Language")).model(&gtk::StringList::new(&names)).selected(selected as u32).build();
+        let group = adw::PreferencesGroup::new();
+        group.add(&row);
+        // One "Restart Now" at a time, however often the language changes.
+        let shown: Rc<RefCell<Option<adw::Toast>>> = Rc::default();
+        let (w, dialog) = (Rc::downgrade(self), dialog.clone());
+        row.connect_selected_notify(move |row| {
+            let code = match row.selected() {
+                gtk::INVALID_LIST_POSITION => return,
+                0 => None,
+                i => linksy_i18n::LANGUAGES.get(i as usize - 1).map(|(c, _)| *c),
+            };
+            if let Some(old) = shown.borrow_mut().take() {
+                old.dismiss();
+            }
+            if let Err(e) = linksy_i18n::choose(code) {
+                dialog.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e.to_string()))));
+                return;
+            }
+            let toast = adw::Toast::builder().title(t!("Linksy uses it the next time it starts")).button_label(t!("Restart Now")).timeout(0).build();
+            let w = w.clone();
+            toast.connect_button_clicked(move |_| {
+                if let Some(w) = w.upgrade() {
+                    w.restart_app();
+                }
+            });
+            dialog.add_toast(toast.clone());
+            *shown.borrow_mut() = Some(toast);
+        });
+        group
+    }
+
+    /// Start Linksy again, in the language just chosen: the service quits first (it reads
+    /// the language when it starts too), and the new window starts it as at any start.
+    fn restart_app(self: &Rc<Self>) {
+        let app = self.window.application();
+        // A service started by hand (LINKSY_SOCKET, development) is left running.
+        let client = self.client().filter(|_| std::env::var_os("LINKSY_SOCKET").is_none());
+        let quit = client.map(|c| self.bridge.call(&c, |c| async move { tokio::time::timeout(std::time::Duration::from_secs(3), c.quit()).await.unwrap_or(Err(linksy_ipc::ClientError::Disconnected)) }));
+        glib::spawn_future_local(async move {
+            if let Some(quit) = quit {
+                let _ = quit.await;
+                // Wait for it to go, so the new window starts a new one.
+                for _ in 0..20 {
+                    if std::fs::metadata(linksy_ipc::socket_path()).is_err() {
+                        break;
+                    }
+                    glib::timeout_future(std::time::Duration::from_millis(150)).await;
+                }
+            }
+            if let Some(app) = app {
+                app.quit();
+            }
+            if let Ok(exe) = std::env::current_exe() {
+                // A moment later, once this process has let go of the app's D-Bus name.
+                let _ = std::process::Command::new("sh").args(["-c", "sleep 1; exec \"$0\""]).arg(exe).spawn();
+            }
+        });
+    }
+
     /// "Phone Notifications": on or off, and the apps muted from a notification's Mute.
     fn phone_notifications_group(self: &Rc<Self>, dialog: &adw::PreferencesDialog, prefs: NotificationPrefs) -> adw::PreferencesGroup {
         let group = adw::PreferencesGroup::builder()
-            .title("Phone Notifications")
-            .description("Messages and alerts from your phone show up here, and you can reply to them. Your phone asks for permission first.")
+            .title(t!("Phone Notifications"))
+            .description(t!("Messages and alerts from your phone show up here, and you can reply to them. Your phone asks for permission first."))
             .build();
-        let show = adw::SwitchRow::builder().title("Show Phone Notifications").active(prefs.show).build();
+        let show = adw::SwitchRow::builder().title(t!("Show Phone Notifications")).active(prefs.show).build();
         group.add(&show);
         let prefs = Rc::new(RefCell::new(prefs));
         let save = {
@@ -207,8 +276,8 @@ impl Window {
         });
         let muted = prefs.borrow().muted.clone();
         for app in muted {
-            let row = adw::ActionRow::builder().title(glib::markup_escape_text(&app.app_name)).subtitle("Muted").build();
-            let unmute = gtk::Button::builder().label("Unmute").valign(gtk::Align::Center).css_classes(["flat"]).build();
+            let row = adw::ActionRow::builder().title(glib::markup_escape_text(&app.app_name)).subtitle(t!("Muted")).build();
+            let unmute = gtk::Button::builder().label(t!("Unmute")).valign(gtk::Align::Center).css_classes(["flat"]).build();
             row.add_suffix(&unmute);
             group.add(&row);
             let (p, s, g) = (prefs.clone(), save.clone(), group.clone());
@@ -225,18 +294,18 @@ impl Window {
     /// kept, by the service). Without one, no phone can open a terminal.
     fn terminal_group(self: &Rc<Self>, dialog: &adw::PreferencesDialog, code_set: bool) -> adw::PreferencesGroup {
         let group = adw::PreferencesGroup::builder()
-            .title("Terminal")
-            .description("Phones you allow (on their page) can open a shell on this computer after typing this code. It's checked here; the phone never keeps it.")
+            .title(t!("Terminal"))
+            .description(t!("Phones you allow (on their page) can open a shell on this computer after typing this code. It's checked here; the phone never keeps it."))
             .build();
         let row = adw::ActionRow::builder()
-            .title("Terminal Code")
-            .subtitle(if code_set { "Set" } else { "Not set: no phone can open a terminal" })
+            .title(t!("Terminal Code"))
+            .subtitle(if code_set { t!("Set") } else { t!("Not set: no phone can open a terminal") })
             .build();
         row.add_prefix(&gtk::Image::builder().icon_name("utilities-terminal-symbolic").build());
-        let set = gtk::Button::builder().label(if code_set { "Change…" } else { "Set Code…" }).valign(gtk::Align::Center).build();
+        let set = gtk::Button::builder().label(if code_set { t!("Change…") } else { t!("Set Code…") }).valign(gtk::Align::Center).build();
         row.add_suffix(&set);
         if code_set {
-            let off = gtk::Button::builder().label("Turn Off").valign(gtk::Align::Center).css_classes(["flat", "destructive-label"]).tooltip_text("Forget the code: no phone can open a terminal, and running ones end").build();
+            let off = gtk::Button::builder().label(t!("Turn Off")).valign(gtk::Align::Center).css_classes(["flat", "destructive-label"]).tooltip_text(t!("Forget the code: no phone can open a terminal, and running ones end")).build();
             let (w, dialog, row2, off2, set2) = (self.clone(), dialog.clone(), row.clone(), off.clone(), set.clone());
             off.connect_clicked(move |_| {
                 let Some(c) = w.client() else { return };
@@ -245,8 +314,8 @@ impl Window {
                 glib::spawn_future_local(async move {
                     match call.await {
                         Ok(()) => {
-                            row.set_subtitle("Not set: no phone can open a terminal");
-                            set.set_label("Set Code…");
+                            row.set_subtitle(t!("Not set: no phone can open a terminal"));
+                            set.set_label(t!("Set Code…"));
                             off.set_visible(false);
                         }
                         Err(e) => dialog.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e)))),
@@ -261,9 +330,9 @@ impl Window {
             let (dialog2, r, b) = (dialog.clone(), r.clone(), b.clone());
             w.ask_terminal_code(&dialog, move |result| match result {
                 Ok(()) => {
-                    r.set_subtitle("Set");
-                    b.set_label("Change…");
-                    dialog2.add_toast(adw::Toast::new("Terminal code set"));
+                    r.set_subtitle(t!("Set"));
+                    b.set_label(t!("Change…"));
+                    dialog2.add_toast(adw::Toast::new(t!("Terminal code set")));
                 }
                 Err(e) => dialog2.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e)))),
             });
@@ -275,14 +344,14 @@ impl Window {
     /// Ask for a new terminal code (twice) over `parent` and save it; `done` hears how
     /// that went (not called when cancelled).
     pub(super) fn ask_terminal_code(self: &Rc<Self>, parent: &impl IsA<gtk::Widget>, done: impl Fn(Result<(), String>) + 'static) {
-        let ask = adw::AlertDialog::new(Some("Terminal Code"), Some("At least 6 characters (digits are easiest on a phone). Your phone asks for it every time a terminal opens; only this computer knows it. 5 wrong in a row lock it out."));
-        let first = gtk::PasswordEntry::builder().show_peek_icon(true).placeholder_text("New code").activates_default(true).build();
-        let again = gtk::PasswordEntry::builder().show_peek_icon(true).placeholder_text("Same code again").activates_default(true).build();
+        let ask = adw::AlertDialog::new(Some(t!("Terminal Code")), Some(t!("At least 6 characters (digits are easiest on a phone). Your phone asks for it every time a terminal opens; only this computer knows it. 5 wrong in a row lock it out.")));
+        let first = gtk::PasswordEntry::builder().show_peek_icon(true).placeholder_text(t!("New code")).activates_default(true).build();
+        let again = gtk::PasswordEntry::builder().show_peek_icon(true).placeholder_text(t!("Same code again")).activates_default(true).build();
         let fields = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).build();
         fields.append(&first);
         fields.append(&again);
         ask.set_extra_child(Some(&fields));
-        ask.add_responses(&[("cancel", "Cancel"), ("save", "Save")]);
+        ask.add_responses(&[("cancel", t!("Cancel")), ("save", t!("Save"))]);
         ask.set_response_appearance("save", adw::ResponseAppearance::Suggested);
         ask.set_default_response(Some("save"));
         ask.set_close_response("cancel");
@@ -314,10 +383,10 @@ impl Window {
 
     /// "Check for Updates": once a day from the website, nothing about the user sent.
     fn updates_group(self: &Rc<Self>, dialog: &adw::PreferencesDialog, info: UpdateInfo) -> adw::PreferencesGroup {
-        let group = adw::PreferencesGroup::builder().title("Updates").description(format!("This is Linksy {}.", info.current)).build();
+        let group = adw::PreferencesGroup::builder().title(t!("Updates")).description(t!("This is Linksy {version}.", version = info.current)).build();
         let row = adw::SwitchRow::builder()
-            .title("Check for Updates")
-            .subtitle("Once a day, Linksy asks linksy.diary.mg for the newest version. Nothing about you or your devices is sent.")
+            .title(t!("Check for Updates"))
+            .subtitle(t!("Once a day, Linksy asks linksy.diary.mg for the newest version. Nothing about you or your devices is sent."))
             .active(info.prefs.check)
             .build();
         let (w, dialog) = (self.clone(), dialog.clone());
@@ -340,8 +409,8 @@ impl Window {
     /// "Import Photos From Phones": on or off; they go to Pictures/<phone name>.
     fn photo_import_row(self: &Rc<Self>, dialog: &adw::PreferencesDialog, prefs: PhotoPrefs) -> adw::SwitchRow {
         let row = adw::SwitchRow::builder()
-            .title("Import Photos From Phones")
-            .subtitle(format!("New photos from your phone go to {}, in a folder named after it, without asking.", fmt::home_relative(&prefs.folder)))
+            .title(t!("Import Photos From Phones"))
+            .subtitle(t!("New photos from your phone go to {folder}, in a folder named after it, without asking.", folder = fmt::home_relative(&prefs.folder)))
             .active(prefs.import)
             .build();
         let (w, dialog) = (self.clone(), dialog.clone());

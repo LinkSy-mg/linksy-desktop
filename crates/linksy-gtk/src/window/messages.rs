@@ -8,6 +8,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use gtk::glib;
 use linksy_ipc::linksy_core::{Fingerprint, SmsMessage, SmsThread};
+use linksy_i18n::t;
 
 use super::Window;
 use crate::fmt;
@@ -46,25 +47,25 @@ impl MessagesView {
         let threads_stack = gtk::Stack::new();
         threads_stack.add_named(&gtk::ScrolledWindow::builder().child(&threads).vexpand(true).build(), Some("list"));
         threads_stack.add_named(&threads_status, Some("status"));
-        let new_message = gtk::Button::builder().icon_name("list-add-symbolic").tooltip_text("New Message").build();
+        let new_message = gtk::Button::builder().icon_name("list-add-symbolic").tooltip_text(t!("New Message")).build();
         let side_header = adw::HeaderBar::builder().show_end_title_buttons(false).show_start_title_buttons(false).build();
         side_header.pack_start(&new_message);
         let side_view = adw::ToolbarView::new();
         side_view.add_top_bar(&side_header);
         side_view.set_content(Some(&threads_stack));
-        let sidebar = adw::NavigationPage::builder().title("Conversations").child(&side_view).build();
+        let sidebar = adw::NavigationPage::builder().title(t!("Conversations")).child(&side_view).build();
 
         let title = adw::WindowTitle::new("", "");
         let content_header = adw::HeaderBar::builder().show_end_title_buttons(false).show_start_title_buttons(false).title_widget(&title).build();
-        let earlier = gtk::Button::builder().label("Earlier Messages").halign(gtk::Align::Center).css_classes(["flat"]).visible(false).build();
+        let earlier = gtk::Button::builder().label(t!("Earlier Messages")).halign(gtk::Align::Center).css_classes(["flat"]).visible(false).build();
         let bubbles = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(12).margin_bottom(12).margin_start(16).margin_end(16).valign(gtk::Align::End).build();
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         column.append(&earlier);
         column.append(&bubbles);
         let clamp = adw::Clamp::builder().maximum_size(720).child(&column).build();
         let scroller = gtk::ScrolledWindow::builder().child(&clamp).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
-        let entry = gtk::Entry::builder().placeholder_text("Text Message").hexpand(true).build();
-        let send = gtk::Button::builder().icon_name("mail-send-symbolic").tooltip_text("Send").css_classes(["circular", "suggested-action"]).sensitive(false).build();
+        let entry = gtk::Entry::builder().placeholder_text(t!("Text Message")).hexpand(true).build();
+        let send = gtk::Button::builder().icon_name("mail-send-symbolic").tooltip_text(t!("Send")).css_classes(["circular", "suggested-action"]).sensitive(false).build();
         let compose = gtk::Box::builder().spacing(8).margin_top(8).margin_bottom(10).margin_start(12).margin_end(12).build();
         compose.append(&entry);
         compose.append(&send);
@@ -73,12 +74,12 @@ impl MessagesView {
         conversation.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         conversation.append(&compose);
         let conversation_stack = gtk::Stack::new();
-        conversation_stack.add_named(&adw::StatusPage::builder().icon_name("chat-message-new-symbolic").title("No Conversation Selected").build(), Some("empty"));
+        conversation_stack.add_named(&adw::StatusPage::builder().icon_name("chat-message-new-symbolic").title(t!("No Conversation Selected")).build(), Some("empty"));
         conversation_stack.add_named(&conversation, Some("open"));
         let content_view = adw::ToolbarView::new();
         content_view.add_top_bar(&content_header);
         content_view.set_content(Some(&conversation_stack));
-        let content = adw::NavigationPage::builder().title("Messages").child(&content_view).build();
+        let content = adw::NavigationPage::builder().title(t!("Messages")).child(&content_view).build();
 
         let root = adw::NavigationSplitView::builder().sidebar(&sidebar).content(&content).min_sidebar_width(240.0).build();
         let s = send.clone();
@@ -112,7 +113,7 @@ impl MessagesView {
             self.threads.remove(&row);
         }
         if threads.is_empty() {
-            self.status("No Messages", "Texts on the phone show up here.");
+            self.status(t!("No Messages"), t!("Texts on the phone show up here."));
         } else {
             self.threads_stack.set_visible_child_name("list");
         }
@@ -229,8 +230,8 @@ impl Window {
         self.state.borrow_mut().messages_open = Some(phone);
         self.messages.conversation_stack.set_visible_child_name("empty");
         self.messages.root.set_show_content(false);
-        self.messages.status("Loading…", &format!("Asking {name} for its messages."));
-        self.camera_title.set_title("Messages");
+        self.messages.status(t!("Loading…"), &t!("Asking {name} for its messages.", name));
+        self.camera_title.set_title(t!("Messages"));
         self.camera_title.set_subtitle(&name);
         self.content_header.set_show_title(true);
         self.camera_back.set_visible(true);
@@ -243,7 +244,7 @@ impl Window {
     pub(super) fn close_messages(&self) {
         if self.state.borrow_mut().messages_open.take().is_some() {
             *self.messages.state.borrow_mut() = ViewState::default();
-            self.camera_title.set_subtitle("Camera Preview");
+            self.camera_title.set_subtitle(t!("Camera Preview"));
             self.content_header.set_show_title(false);
             self.camera_back.set_visible(false);
             self.page.menu.set_visible(true);
@@ -269,7 +270,7 @@ impl Window {
                         w.open_thread(id);
                     }
                 }
-                Err(e) => w.messages.status("Can't Reach Its Messages", &fmt::capitalize(&e)),
+                Err(e) => w.messages.status(t!("Can't Reach Its Messages"), &fmt::capitalize(&e)),
             }
         });
     }
@@ -350,19 +351,19 @@ impl Window {
                     }
                     w.load_threads();
                 }
-                Err(e) => w.toast(&format!("Not sent: {}", fmt::capitalize(&e))),
+                Err(e) => w.toast(&t!("Not sent: {error}", error = fmt::capitalize(&e))),
             }
         });
     }
 
     /// Ask for a number, then write to it.
     fn new_conversation(self: &Rc<Self>) {
-        let entry = adw::EntryRow::builder().title("Phone Number").input_purpose(gtk::InputPurpose::Phone).build();
+        let entry = adw::EntryRow::builder().title(t!("Phone Number")).input_purpose(gtk::InputPurpose::Phone).build();
         let list = gtk::ListBox::builder().css_classes(["boxed-list"]).selection_mode(gtk::SelectionMode::None).build();
         list.append(&entry);
-        let dialog = adw::AlertDialog::builder().heading("New Message").extra_child(&list).build();
-        dialog.add_response("cancel", "Cancel");
-        dialog.add_response("write", "Write");
+        let dialog = adw::AlertDialog::builder().heading(t!("New Message")).extra_child(&list).build();
+        dialog.add_response("cancel", t!("Cancel"));
+        dialog.add_response("write", t!("Write"));
         dialog.set_response_appearance("write", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("write"));
         let w = self.clone();
@@ -385,7 +386,7 @@ impl Window {
             }
             w.messages.threads.unselect_all();
             w.messages.title.set_title(&number);
-            w.messages.title.set_subtitle("New Message");
+            w.messages.title.set_subtitle(t!("New Message"));
             w.messages.earlier.set_visible(false);
             w.messages.render_bubbles();
             w.messages.conversation_stack.set_visible_child_name("open");

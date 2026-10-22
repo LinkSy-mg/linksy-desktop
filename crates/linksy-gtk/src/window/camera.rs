@@ -8,6 +8,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
+use linksy_i18n::t;
 use serde_json::{Value, json};
 
 /// Sends one `camera_control` (its keys) to the camera being previewed.
@@ -41,9 +42,9 @@ const QUALITIES: [(&str, &str); 3] = [("saver", "Data Saver"), ("standard", "Sta
 impl Controls {
     pub fn new() -> Self {
         let zooms = gtk::Box::builder().css_classes(["linked"]).build();
-        let flip = gtk::Button::builder().icon_name("camera-switch-symbolic").tooltip_text("Switch Camera").css_classes(["circular"]).build();
-        let torch = gtk::ToggleButton::builder().icon_name("display-brightness-symbolic").tooltip_text("Torch").css_classes(["circular"]).build();
-        let auto_focus = gtk::Button::builder().label("Auto Focus").tooltip_text("Click the picture to focus there").css_classes(["pill"]).visible(false).build();
+        let flip = gtk::Button::builder().icon_name("camera-switch-symbolic").tooltip_text(t!("Switch Camera")).css_classes(["circular"]).build();
+        let torch = gtk::ToggleButton::builder().icon_name("display-brightness-symbolic").tooltip_text(t!("Torch")).css_classes(["circular"]).build();
+        let auto_focus = gtk::Button::builder().label(t!("Auto Focus")).tooltip_text(t!("Click the picture to focus there")).css_classes(["pill"]).visible(false).build();
 
         let exposure = gtk::Scale::with_range(gtk::Orientation::Horizontal, -12.0, 12.0, 1.0);
         exposure.set_hexpand(true);
@@ -51,7 +52,7 @@ impl Controls {
         exposure.add_mark(0.0, gtk::PositionType::Bottom, None);
         let white_balance = gtk::DropDown::from_strings(&[]);
         white_balance.set_valign(gtk::Align::Center);
-        let quality = gtk::DropDown::from_strings(&QUALITIES.map(|(_, label)| label));
+        let quality = gtk::DropDown::from_strings(&[t!("Data Saver"), t!("Standard"), t!("High")]);
         quality.set_valign(gtk::Align::Center);
         let portrait = gtk::Switch::builder().valign(gtk::Align::Center).build();
         let smooth = gtk::Switch::builder().valign(gtk::Align::Center).build();
@@ -65,21 +66,21 @@ impl Controls {
             list.append(&r);
             r
         };
-        let exposure_row = adw::ActionRow::builder().title("Exposure").build();
+        let exposure_row = adw::ActionRow::builder().title(t!("Exposure")).build();
         exposure.set_size_request(160, -1);
         exposure_row.add_suffix(&exposure);
         list.append(&exposure_row);
-        row("White Balance", white_balance.upcast_ref());
-        row("Quality", quality.upcast_ref());
+        row(t!("White Balance"), white_balance.upcast_ref());
+        row(t!("Quality"), quality.upcast_ref());
         let full_hd_row = row("1080p", full_hd.upcast_ref());
-        full_hd_row.set_subtitle("Sharper picture, more data. The camera restarts in your apps for a moment.");
-        let smooth_row = row("60 Frames per Second", smooth.upcast_ref());
-        smooth_row.set_subtitle("Smoother motion. The camera restarts in your apps for a moment.");
-        row("Portrait", portrait.upcast_ref());
-        let stabilization_row = row("Stabilization", stabilization.upcast_ref());
+        full_hd_row.set_subtitle(t!("Sharper picture, more data. The camera restarts in your apps for a moment."));
+        let smooth_row = row(t!("60 Frames per Second"), smooth.upcast_ref());
+        smooth_row.set_subtitle(t!("Smoother motion. The camera restarts in your apps for a moment."));
+        row(t!("Portrait"), portrait.upcast_ref());
+        let stabilization_row = row(t!("Stabilization"), stabilization.upcast_ref());
         let popover = gtk::Popover::builder().child(&list).build();
         list.set_width_request(320);
-        let more = gtk::MenuButton::builder().icon_name("emblem-system-symbolic").tooltip_text("Camera Settings").popover(&popover).css_classes(["circular"]).build();
+        let more = gtk::MenuButton::builder().icon_name("emblem-system-symbolic").tooltip_text(t!("Camera Settings")).popover(&popover).css_classes(["circular"]).build();
 
         let root = gtk::Box::builder().spacing(12).halign(gtk::Align::Center).margin_top(12).margin_bottom(12).margin_start(12).margin_end(12).css_classes(["toolbar"]).build();
         root.append(&flip);
@@ -242,6 +243,15 @@ impl Controls {
 
 /// "daylight" → "Daylight".
 fn title(s: &str) -> String {
+    match s {
+        "auto" => return t!("Auto").into(),
+        "daylight" => return t!("Daylight").into(),
+        "cloudy" => return t!("Cloudy").into(),
+        "shade" => return t!("Shade").into(),
+        "incandescent" => return t!("Incandescent").into(),
+        "fluorescent" => return t!("Fluorescent").into(),
+        _ => {}
+    }
     let mut c = s.chars();
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
