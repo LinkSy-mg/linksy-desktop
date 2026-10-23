@@ -1,0 +1,15 @@
+# The Qt app's build environment (linksy-qt): Rust, Qt 6, Kirigami and KDE's desktop style,
+# for scripts/qt-shot.sh and building without installing Qt on the computer.
+#   podman build -t linksy-qt-dev packaging/qt
+#   podman run --rm -v "$PWD":/src:z -v linksy-cargo:/cargo -w /src -e CARGO_TARGET_DIR=/src/target/qt \
+#     linksy-qt-dev cargo build -p linksy-qt
+FROM registry.fedoraproject.org/fedora:44
+RUN dnf install -y --setopt=install_weak_deps=False \
+      gcc gcc-c++ git rust cargo clippy pkgconf-pkg-config lld \
+      qt6-qtbase-devel qt6-qtdeclarative-devel qt6-qtsvg qt6-qtwayland \
+      kf6-kirigami-devel kf6-kirigami kf6-qqc2-desktop-style kf6-kirigami-addons kf6-kiconthemes \
+      breeze-icon-theme plasma-breeze-qt6 \
+      gstreamer1-devel gstreamer1-plugins-base-devel gstreamer1-plugins-good-qt6 \
+      dbus-daemon mesa-dri-drivers fontconfig google-noto-sans-fonts \
+    && dnf clean all
+ENV QMAKE=/usr/bin/qmake6 CARGO_HOME=/cargo

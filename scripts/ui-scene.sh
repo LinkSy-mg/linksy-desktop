@@ -2,11 +2,12 @@
 # Development aid: start two local services ("This Laptop" and "Studio Desktop"), pair them,
 # and leave them running so the app can be pointed at one with LINKSY_SOCKET.
 # Usage: scripts/ui-scene.sh <dir>     (stop with: pkill -x linksyd)
+# LINKSY_BIN=<dir> runs the binaries built there (target/debug by default).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 D=${1:?scene dir}
 rm -rf "$D"; mkdir -p "$D"
-B=target/debug
+B=${LINKSY_BIN:-target/debug}
 $B/linksyd --name "This Laptop" --port 47230 --data-dir "$D/a" --download-dir "$D/a-dl" --socket "$D/a.sock" --no-notifications >"$D/a.log" 2>&1 &
 $B/linksyd --name "Studio Desktop" --port 47231 --data-dir "$D/b" --download-dir "$D/b-dl" --socket "$D/b.sock" --no-notifications >"$D/b.log" 2>&1 &
 sleep 2
