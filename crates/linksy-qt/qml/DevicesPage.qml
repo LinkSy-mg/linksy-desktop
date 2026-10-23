@@ -41,6 +41,12 @@ Kirigami.ScrollablePage {
             onTriggered: app.openSetup()
         },
         Kirigami.Action {
+            icon.name: "starred-symbolic"
+            text: app.t("What's New")
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            onTriggered: app.showNews()
+        },
+        Kirigami.Action {
             icon.name: "help-about"
             text: app.t("About Linksy")
             displayHint: Kirigami.DisplayHint.AlwaysHide

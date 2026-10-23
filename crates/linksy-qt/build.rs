@@ -13,6 +13,7 @@ fn main() {
         "qml/SetupPage.qml",
         "qml/CameraPage.qml",
         "qml/UsbPage.qml",
+        "qml/WhatsNew.qml",
     ]))
         .qt_module("Quick")
         .qt_module("QuickControls2")

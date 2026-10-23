@@ -100,6 +100,13 @@ pub mod qobject {
         #[qinvokable]
         fn reboot(&self);
 
+        /// What's New as JSON ({version, notes, repo, highlights: [{icon, title, body}]}):
+        /// `any_time` for the menu (this version's), else after an update, once (empty
+        /// highlights when there's nothing to show).
+        #[qinvokable]
+        #[cxx_name = "whatsNew"]
+        fn whats_new(&self, any_time: bool) -> QString;
+
         /// Linksy's languages: [{code, name}] (each in its own language).
         #[qinvokable]
         fn languages(&self) -> QString;
@@ -354,6 +361,17 @@ impl qobject::Backend {
 
     pub fn camera_name(&self, phone: &QString) -> QString {
         QString::from(&linksy_setup::camera_name(&phone.to_string()))
+    }
+
+    pub fn whats_new(&self, any_time: bool) -> QString {
+        let version = env!("CARGO_PKG_VERSION");
+        let news = if any_time { linksy_news::latest(version) } else { linksy_news::to_show(version) };
+        if !any_time && !news.is_empty() {
+            linksy_news::mark_seen(version);
+        }
+        let highlights: Vec<_> = news.iter().map(|h| serde_json::json!({ "icon": h.qt, "title": h.title, "body": h.body })).collect();
+        let json = serde_json::json!({ "version": version, "notes": linksy_news::notes_url(version), "repo": linksy_news::REPO, "highlights": highlights });
+        QString::from(&json.to_string())
     }
 
     pub fn languages(&self) -> QString {

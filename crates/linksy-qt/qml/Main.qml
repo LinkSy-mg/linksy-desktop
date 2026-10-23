@@ -57,6 +57,7 @@ Kirigami.ApplicationWindow {
             if (open === "screen") openScreen.start();
             if (open === "setup") root.openSetup();
             if (open === "usb") root.openUsb();
+            if (open === "news") whatsNew.showAnyTime();
             if (open === "camera") root.previewCamera("", "Pixel");
         }
         onOffline: why => { if (why) root.toast(why) }
@@ -481,6 +482,15 @@ Kirigami.ApplicationWindow {
         app: root
     }
 
+    WhatsNew {
+        id: whatsNew
+        app: root
+    }
+
+    function showNews() {
+        whatsNew.showAnyTime();
+    }
+
     // Development aid: LINKSY_SCREENSHOT=<file.png> saves the window after
     // LINKSY_SCREENSHOT_DELAY ms and quits (scripts/qt-shot.sh)
     Timer {
@@ -500,8 +510,10 @@ Kirigami.ApplicationWindow {
         if (size.length === 2 && size[0] > 0) { width = size[0]; height = size[1] }
         backend.start();
         backend.checkSetup();
-        // The first time each version starts with something to set up
+        // One thing at a time: Finish Setup when something's missing, otherwise, after an
+        // update, what's new
         if (backend.offerSetup()) root.openSetup();
+        else whatsNew.offer();
         if (backend.env("LINKSY_SCREENSHOT")) shot.start();
     }
 }
