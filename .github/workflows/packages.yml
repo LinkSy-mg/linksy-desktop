@@ -188,8 +188,9 @@ jobs:
           (cd "$D" && rm -f SHA256SUMS && sha256sum *.flatpak *.tar.gz *.deb *.rpm > SHA256SUMS)
           FILES=("$D"/*.flatpak "$D"/*.tar.gz "$D"/*.deb "$D"/*.rpm "$D/SHA256SUMS")
           TITLE="Desktop release · Linksy $V for Linux"
-          gh release create "v$V" -R LinkSy-mg/linksy-desktop --verify-tag --title "$TITLE" --notes-file release-notes.md "${FILES[@]}"
+          # linksy-releases first: if its token doesn't work, nothing is published anywhere
           GH_TOKEN=$RELEASES_TOKEN gh release create "linux-v$V" -R LinkSy-mg/linksy-releases --latest=false --title "$TITLE" --notes-file release-notes.md "${FILES[@]}"
+          gh release create "v$V" -R LinkSy-mg/linksy-desktop --verify-tag --title "$TITLE" --notes-file release-notes.md "${FILES[@]}"
           # The public repo's front page: its Linux download links point at this version
           page=$(mktemp)
           GH_TOKEN=$RELEASES_TOKEN gh api repos/LinkSy-mg/linksy-releases/contents/README.md --jq .content | base64 -d > "$page"
