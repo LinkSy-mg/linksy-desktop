@@ -76,7 +76,7 @@
   <releases>
     <release version="0.8.5" date="2026-10-23">
       <description>
-        <p>Installing Linksy always brings its window: the service package now comes with the GTK app, or the Plasma app when that's the one chosen. Answering a request in a notification or in the app takes the notification away.</p>
+        <p>Each update now shows what it brings the first time it opens. Installing Linksy always brings its window: the service package now comes with the GTK app, or the Plasma app when that's the one chosen. Answering a request in a notification or in the app takes the notification away.</p>
       </description>
     </release>
     <release version="0.8.4" date="2026-10-23">

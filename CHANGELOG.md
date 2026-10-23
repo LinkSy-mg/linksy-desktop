@@ -4,6 +4,11 @@ Linksy for Linux. Each version's section becomes its release notes.
 
 ## 0.8.5
 
+### Added
+- **What's New.** The first time a new version opens after an update, both apps show what
+  it brings, a few highlights with a link to the full notes, and a way to star Linksy on
+  GitHub. It's also in the menu any time. A fresh install shows nothing.
+
 ### Fixed
 - **Installing only `linksy-common` gave a Linksy in the menu that opened nothing**, and
   a store showing Linksy would have installed just that. `linksy-common` now always comes
