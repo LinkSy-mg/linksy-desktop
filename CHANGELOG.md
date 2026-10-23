@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.8.6
 
 ### Added
 - **Upgrades in one step.** `linksy upgrade` checks for a newer Linksy and, when there is

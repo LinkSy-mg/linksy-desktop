@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.8.6" date="2026-10-23">
+      <description>
+        <p>Update in one click: when a new version is out, Update Now downloads it, checks it against the release, installs it with one password and starts Linksy again. In a terminal, linksy upgrade does the same, and linksy --version and --revision tell exactly which Linksy this is.</p>
+      </description>
+    </release>
     <release version="0.8.5" date="2026-10-23">
       <description>
         <p>Each update now shows what it brings the first time it opens. Installing Linksy always brings its window: the service package now comes with the GTK app, or the Plasma app when that's the one chosen. Answering a request in a notification or in the app takes the notification away.</p>
