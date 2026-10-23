@@ -95,6 +95,15 @@ fn kernel() -> String {
     std::fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default().trim().to_string()
 }
 
+/// The headers package for the running kernel on Arch and its derivatives: each kernel
+/// package notes its own name (`pkgbase`: linux, linux-lts, linux-cachyos…), its headers
+/// being that name with "-headers".
+fn arch_headers(k: &str) -> String {
+    let pkgbase = std::fs::read_to_string(format!("/usr/lib/modules/{k}/pkgbase")).ok().map(|s| s.trim().to_string()).filter(|s| s.starts_with("linux"));
+    let pkgbase = pkgbase.unwrap_or_else(|| ["lts", "zen", "hardened"].iter().find(|f| k.ends_with(*f)).map_or("linux".to_string(), |f| format!("linux-{f}")));
+    format!("{pkgbase}-headers")
+}
+
 /// The camera driver's packages; a driver built here (DKMS) needs the kernel's headers.
 /// openSUSE ships it prebuilt and signed per kernel flavor (the end of `uname -r`: default,
 /// longterm), so no building and no Secure Boot step there.
@@ -107,11 +116,18 @@ fn loopback_packages(fam: Family) -> Vec<String> {
             vec![format!("v4l2loopback-kmp-{flavor}"), "v4l2loopback-utils".into()]
         }
         Family::Debian => vec!["v4l2loopback-dkms".into(), "v4l2loopback-utils".into(), format!("linux-headers-{k}")],
-        Family::Arch => {
-            let headers = ["lts", "zen", "hardened"].iter().find(|f| k.ends_with(*f)).map_or("linux-headers".to_string(), |f| format!("linux-{f}-headers"));
-            vec!["v4l2loopback-dkms".into(), "v4l2loopback-utils".into(), headers]
-        }
+        Family::Arch => vec!["v4l2loopback-dkms".into(), "v4l2loopback-utils".into(), arch_headers(&k)],
         Family::Other => Vec::new(),
+    }
+}
+
+/// The package with `v4l2loopback-ctl`, for when the driver comes with the kernel
+/// (CachyOS) but the tool to add a device doesn't.
+fn loopback_tool(fam: Family) -> Option<&'static str> {
+    match fam {
+        Family::Fedora => Some("v4l2loopback"),
+        Family::Debian | Family::Arch | Family::Suse => Some("v4l2loopback-utils"),
+        Family::Other => None,
     }
 }
 
@@ -282,7 +298,12 @@ pub fn check(ui: Ui) -> Vec<Item> {
     } else if flatpak() {
         Need::Manual(t!("A Flatpak can't add this. Install Linksy's .deb or .rpm instead, or v4l2loopback and run linksy-camera-setup once."))
     } else if loopback_installed() {
-        Need::SetUp
+        // Some kernels bring the driver without its tool (CachyOS): add the tool first.
+        match loopback_tool(fam) {
+            Some(tool) if !in_path("v4l2loopback-ctl") => Need::Install(vec![tool.to_string()]),
+            None if !in_path("v4l2loopback-ctl") => Need::Manual(t!("Install v4l2loopback from your distribution, then come back here.")),
+            _ => Need::SetUp,
+        }
     } else if fam == Family::Other {
         Need::Manual(t!("Install v4l2loopback from your distribution, then come back here."))
     } else {
@@ -585,6 +606,12 @@ pub fn offer_now(ui: Ui, version: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn arch_headers_without_pkgbase_follow_the_name() {
+        assert_eq!(arch_headers("0.0.0-none-lts"), "linux-lts-headers");
+        assert_eq!(arch_headers("0.0.0-none"), "linux-headers");
+    }
 
     #[test]
     fn progress_reads_steps_and_codes() {

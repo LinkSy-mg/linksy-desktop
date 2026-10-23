@@ -18,6 +18,11 @@ if ! modinfo v4l2loopback >/dev/null 2>&1; then
   echo "v4l2loopback isn't installed" >&2
   exit 3
 fi
+# Some kernels bring the driver but not the tool that adds a device (CachyOS)
+if ! command -v v4l2loopback-ctl >/dev/null; then
+  echo "v4l2loopback-ctl is missing: install v4l2loopback-utils (v4l2loopback on Fedora)" >&2
+  exit 3
+fi
 
 # At every boot first: when the driver waits for a restart, the camera is there after it.
 cat > /etc/systemd/system/linksy-camera.service <<'EOF'
