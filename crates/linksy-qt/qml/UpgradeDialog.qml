@@ -74,7 +74,9 @@ Kirigami.Dialog {
         }
     ]
 
+    // A fixed width: the text's wrapping and the dialog's size don't chase each other
     ColumnLayout {
+        width: Kirigami.Units.gridUnit * 20
         spacing: Kirigami.Units.largeSpacing
         QQC2.BusyIndicator {
             Layout.alignment: Qt.AlignHCenter
@@ -83,7 +85,6 @@ Kirigami.Dialog {
         }
         QQC2.Label {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 20
             horizontalAlignment: dialog.phase === "checking" || dialog.phase === "running" ? Text.AlignHCenter : Text.AlignLeft
             wrapMode: Text.Wrap
             text: dialog.phase === "checking" ? dialog.app.t("Checking for a newer Linksy…")
