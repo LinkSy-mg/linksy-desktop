@@ -2429,6 +2429,7 @@ name = "linksy"
 version = "0.8.5"
 dependencies = [
  "linksy-ipc",
+ "linksy-upgrade",
  "qrcode",
  "tokio",
 ]
@@ -2445,6 +2446,7 @@ dependencies = [
  "linksy-ipc",
  "linksy-news",
  "linksy-setup",
+ "linksy-upgrade",
  "qrcode",
  "serde_json",
  "tokio",
@@ -2508,6 +2510,7 @@ dependencies = [
  "linksy-ipc",
  "linksy-news",
  "linksy-setup",
+ "linksy-upgrade",
  "pkg-config",
  "qrcode",
  "serde_json",
@@ -2531,6 +2534,18 @@ dependencies = [
  "gio",
  "gstreamer",
  "linksy-i18n",
+]
+
+[[package]]
+name = "linksy-upgrade"
+version = "0.8.5"
+dependencies = [
+ "hex",
+ "linksy-i18n",
+ "serde",
+ "serde_json",
+ "sha2",
+ "ureq",
 ]
 
 [[package]]
