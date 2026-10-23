@@ -65,5 +65,5 @@ modules:
       # @SOURCE@ (scripts/package-flatpak.sh builds from this checkout instead)
       - type: git
         url: https://github.com/LinkSy-mg/linksy-desktop.git
-        tag: v0.8.4
+        tag: v0.8.5
       - cargo-sources.json
