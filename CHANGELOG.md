@@ -5,6 +5,11 @@ Linksy for Linux. Each version's section becomes its release notes.
 ## 0.8.3
 
 ### Added
+- **Your own relay.** Preferences › Connection › Relay Server takes the address of a
+  relay you host (`linksy-server`), as `https://relay.example.com`; blank means Linksy's
+  own. It wins over the relay the website lists and takes effect at once: the away
+  endpoint starts again on it. Also `linksy settings relay <url>|default` and, for a
+  whole machine, `LINKSY_RELAY` on the service.
 - **openSUSE.** Each release now has an .rpm for openSUSE Tumbleweed
   (`linksy-X.Y.Z-1.suse.x86_64.rpm`, installed with zypper), and Finish Setup knows
   openSUSE's packages: the camera driver as the running kernel's KMP, GStreamer's GTK 4

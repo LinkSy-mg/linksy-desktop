@@ -81,9 +81,15 @@ impl Window {
             .subtitle(t!("Reach your paired devices over the internet too, for a week after they were last on the same Wi-Fi. Everything stays encrypted end to end; Linksy's relay only helps them find each other."))
             .active(settings.away)
             .build();
-        let connection = adw::PreferencesGroup::builder().title(t!("Connection")).build();
+        // Self-hosting: a relay of the user's own, instead of Linksy's (linksy-server).
+        let relay = adw::EntryRow::builder().title(t!("Relay Server")).text(settings.relay.as_deref().unwrap_or_default()).show_apply_button(true).build();
+        let connection = adw::PreferencesGroup::builder()
+            .title(t!("Connection"))
+            .description(t!("Away from home goes through Linksy's relay unless you give one you host yourself, as https://relay.example.com. Set the same relay on every device."))
+            .build();
         connection.add(&stay);
         connection.add(&away);
+        connection.add(&relay);
 
         let page = adw::PreferencesPage::new();
         page.add(&self.language_group(&dialog));
@@ -134,6 +140,22 @@ impl Window {
                 Box::new(move |old| {
                     r.set(true);
                     row.set_text(&old.name);
+                    r.set(false);
+                }),
+            );
+        });
+
+        let (s, r) = (save.clone(), reverting.clone());
+        relay.connect_apply(move |row| {
+            // Blank: back to Linksy's own relay.
+            let text = row.text().trim().to_string();
+            let row = row.clone();
+            let r = r.clone();
+            s(
+                Box::new(move |n| n.relay = (!text.is_empty()).then_some(text)),
+                Box::new(move |old| {
+                    r.set(true);
+                    row.set_text(old.relay.as_deref().unwrap_or_default());
                     r.set(false);
                 }),
             );

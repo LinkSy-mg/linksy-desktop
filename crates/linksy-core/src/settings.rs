@@ -25,6 +25,10 @@ pub struct Settings {
     /// Reach paired devices away from home, over the internet (docs/protocol.md §4.13).
     #[serde(default = "yes")]
     pub away: bool,
+    /// A relay the user hosts (`https://relay.example.com`), instead of the one the
+    /// service lists (docs/protocol.md §4.12). None: Linksy's own.
+    #[serde(default)]
+    pub relay: Option<String>,
 }
 
 fn yes() -> bool {
@@ -44,6 +48,8 @@ struct Stored {
     auto_accept: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     away: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relay: Option<String>,
 }
 
 impl Settings {
@@ -54,6 +60,7 @@ impl Settings {
             stay_connected: config.stay_connected,
             auto_accept: false,
             away: true,
+            relay: None,
         }
     }
 
@@ -70,6 +77,7 @@ impl Settings {
             stay_connected: stored.stay_connected.unwrap_or(d.stay_connected),
             auto_accept: stored.auto_accept.unwrap_or(d.auto_accept),
             away: stored.away.unwrap_or(d.away),
+            relay: stored.relay.or(d.relay),
         })
     }
 
@@ -81,6 +89,7 @@ impl Settings {
             stay_connected: (self.stay_connected != d.stay_connected).then_some(self.stay_connected),
             auto_accept: (self.auto_accept != d.auto_accept).then_some(self.auto_accept),
             away: (self.away != d.away).then_some(self.away),
+            relay: (self.relay != d.relay).then(|| self.relay.clone()).flatten(),
         };
         let tmp = path.with_extension("json.tmp");
         std::fs::write(&tmp, serde_json::to_vec_pretty(&stored)?)?;
@@ -101,6 +110,21 @@ impl Settings {
             return Err(invalid("the download folder must be an absolute path"));
         }
         std::fs::create_dir_all(&self.download_dir)?;
+        // The relay: an https URL, as iroh reads it; plain http only for a relay on this
+        // machine (localhost, 127.0.0.1, ::1), in development. Blank means Linksy's own.
+        self.relay = match self.relay.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
+            None => None,
+            Some(r) => {
+                let url: iroh::RelayUrl = r.parse().map_err(|e| invalid(format!("the relay address doesn't look right: {e}")))?;
+                let on_this_machine = url.host_str().is_some_and(|h| h == "localhost" || h.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback()));
+                match url.scheme() {
+                    "https" => {}
+                    "http" if on_this_machine => {}
+                    _ => return Err(invalid("the relay address must start with https:// (http:// only for a relay on this machine)")),
+                }
+                Some(url.to_string())
+            }
+        };
         Ok(self)
     }
 }
@@ -136,5 +160,37 @@ mod tests {
         assert!(s.clone().validated().is_err());
         s.name = "x".repeat(MAX_NAME + 1);
         assert!(s.validated().is_err());
+    }
+
+    #[test]
+    fn relay_is_checked_and_tidied() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::new(dir.path().into(), dir.path().join("dl"), "Host");
+        let mut s = Settings::defaults(&config);
+        s.relay = Some("  https://relay.example.com  ".into());
+        assert_eq!(s.clone().validated().unwrap().relay.as_deref(), Some("https://relay.example.com/"));
+        s.relay = Some("   ".into());
+        assert_eq!(s.clone().validated().unwrap().relay, None);
+        s.relay = Some("relay.example.com".into());
+        assert!(s.clone().validated().is_err());
+        s.relay = Some("https://".into());
+        assert!(s.clone().validated().is_err());
+        // Plain http only on this machine.
+        for local in ["http://localhost:3340", "http://127.0.0.1:3340", "http://[::1]:3340"] {
+            s.relay = Some(local.into());
+            assert!(s.clone().validated().is_ok(), "{local}");
+        }
+        for remote in ["http://relay.example.com", "http://10.0.0.5:3340", "ftp://relay.example.com"] {
+            s.relay = Some(remote.into());
+            assert!(s.clone().validated().is_err(), "{remote}");
+        }
+        // Saved only when set: a cleared relay leaves no trace.
+        s.relay = Some("https://relay.example.com".into());
+        let path = dir.path().join("settings.json");
+        s.clone().validated().unwrap().save(&path, &config).unwrap();
+        assert!(std::fs::read_to_string(&path).unwrap().contains("relay.example.com"));
+        s.relay = None;
+        s.save(&path, &config).unwrap();
+        assert!(!std::fs::read_to_string(&path).unwrap().contains("relay"));
     }
 }

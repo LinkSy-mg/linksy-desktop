@@ -514,6 +514,14 @@ impl Node {
         if new.stay_connected && !old.stay_connected {
             self.reconnect_all();
         }
+        // Another relay: the away endpoint starts again on it (its away connections drop;
+        // peers learn the new relay at their next handshake).
+        if new.relay != old.relay && self.inner.config.away {
+            self.stop_away().await;
+            if new.away {
+                self.start_away().await;
+            }
+        }
         // Turned on after starting without it: start it now. (Off is checked at each use.)
         if new.away && !old.away && self.inner.config.away && self.inner.away.lock().unwrap().is_none() {
             self.start_away().await;
@@ -1094,10 +1102,7 @@ impl Node {
         self.inner.endpoint.close(0u32.into(), b"bye");
         // Let peers hear the goodbye, but never hang on one that doesn't answer.
         let _ = tokio::time::timeout(Duration::from_secs(2), self.inner.endpoint.wait_idle()).await;
-        let away = self.inner.away.lock().unwrap().take();
-        if let Some(away) = away {
-            let _ = tokio::time::timeout(Duration::from_secs(2), away.close()).await;
-        }
+        self.stop_away().await;
     }
 
     // ---- internals ---- (here be dragons, the friendly kind)
@@ -1787,7 +1792,9 @@ impl Node {
 /// Away from home (docs/protocol.md §4.13).
 impl Node {
     async fn start_away(&self) {
-        let away = match crate::away::Away::start(&self.inner.config.data_dir, self.inner.config.relay.as_deref()).await {
+        // The user's own relay (settings) wins over the one the service lists (config).
+        let relay = self.settings().relay.or_else(|| self.inner.config.relay.clone());
+        let away = match crate::away::Away::start(&self.inner.config.data_dir, relay.as_deref()).await {
             Ok(a) => a,
             Err(e) => return warn!("away from home is off: {e}"),
         };
@@ -1805,10 +1812,23 @@ impl Node {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(30)).await;
+                // Replaced (another relay) or stopped: this one has nothing to say.
+                if !node.inner.away.lock().unwrap().as_ref().is_some_and(|a| Arc::ptr_eq(a, &away)) {
+                    break;
+                }
                 let now = away.addr();
                 node.inner.info.lock().unwrap().away = Some(now);
             }
         });
+    }
+
+    /// Close the away endpoint, if it runs; its address leaves the handshake.
+    async fn stop_away(&self) {
+        let away = self.inner.away.lock().unwrap().take();
+        if let Some(away) = away {
+            self.inner.info.lock().unwrap().away = None;
+            let _ = tokio::time::timeout(Duration::from_secs(2), away.close()).await;
+        }
     }
 
     fn away_allowed(&self, iroh_id: &str) -> bool {
