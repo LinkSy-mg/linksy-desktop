@@ -58,6 +58,7 @@ Kirigami.ApplicationWindow {
             if (open === "setup") root.openSetup();
             if (open === "usb") root.openUsb();
             if (open === "news") whatsNew.showAnyTime();
+            if (open === "upgrade") root.showUpgrade();
             if (open === "camera") root.previewCamera("", "Pixel");
         }
         onOffline: why => { if (why) root.toast(why) }
@@ -485,6 +486,15 @@ Kirigami.ApplicationWindow {
     WhatsNew {
         id: whatsNew
         app: root
+    }
+
+    UpgradeDialog {
+        id: upgradeDialog
+        app: root
+    }
+
+    function showUpgrade() {
+        upgradeDialog.check();
     }
 
     function showNews() {

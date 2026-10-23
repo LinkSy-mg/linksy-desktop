@@ -14,6 +14,7 @@ fn main() {
         "qml/CameraPage.qml",
         "qml/UsbPage.qml",
         "qml/WhatsNew.qml",
+        "qml/UpgradeDialog.qml",
     ]))
         .qt_module("Quick")
         .qt_module("QuickControls2")

@@ -107,6 +107,30 @@ pub mod qobject {
         #[cxx_name = "whatsNew"]
         fn whats_new(&self, any_time: bool) -> QString;
 
+        /// Look for a newer Linksy; `upgradeChecked` answers ({latest, current, notes,
+        /// manual} or {error}, or {} when this is the newest).
+        #[qinvokable]
+        #[cxx_name = "checkUpgrade"]
+        fn check_upgrade(self: Pin<&mut Self>);
+
+        /// Install what `checkUpgrade` found: `upgradeStep` tells each step,
+        /// `upgradeFinished` how it ended ({ok} or {error}).
+        #[qinvokable]
+        #[cxx_name = "runUpgrade"]
+        fn run_upgrade(self: Pin<&mut Self>);
+
+        #[qsignal]
+        #[cxx_name = "upgradeChecked"]
+        fn upgrade_checked(self: Pin<&mut Backend>, json: QString);
+
+        #[qsignal]
+        #[cxx_name = "upgradeStep"]
+        fn upgrade_step(self: Pin<&mut Backend>, text: QString);
+
+        #[qsignal]
+        #[cxx_name = "upgradeFinished"]
+        fn upgrade_finished(self: Pin<&mut Backend>, json: QString);
+
         /// Linksy's languages: [{code, name}] (each in its own language).
         #[qinvokable]
         fn languages(&self) -> QString;
@@ -182,6 +206,8 @@ pub struct BackendRust {
     rt: tokio::runtime::Runtime,
     client: Arc<Mutex<Option<Arc<Client>>>>,
     next: AtomicI32,
+    /// What checkUpgrade found, for runUpgrade
+    upgrade: Arc<Mutex<Option<linksy_upgrade::Plan>>>,
 }
 
 impl Default for BackendRust {
@@ -192,7 +218,7 @@ impl Default for BackendRust {
             .enable_all()
             .build()
             .expect("tokio runtime");
-        Self { connected: false, starting: false, rt, client: Arc::default(), next: AtomicI32::new(1) }
+        Self { connected: false, starting: false, rt, client: Arc::default(), next: AtomicI32::new(1), upgrade: Arc::default() }
     }
 }
 
@@ -372,6 +398,40 @@ impl qobject::Backend {
         let highlights: Vec<_> = news.iter().map(|h| serde_json::json!({ "icon": h.qt, "title": h.title, "body": h.body })).collect();
         let json = serde_json::json!({ "version": version, "notes": linksy_news::notes_url(version), "repo": linksy_news::REPO, "highlights": highlights });
         QString::from(&json.to_string())
+    }
+
+    pub fn check_upgrade(self: Pin<&mut Self>) {
+        let thread = self.qt_thread();
+        let slot = self.rust().upgrade.clone();
+        self.rust().rt.spawn_blocking(move || {
+            let json = match linksy_upgrade::check() {
+                Ok(Some(plan)) => {
+                    let json = serde_json::json!({ "latest": plan.latest, "current": plan.current, "notes": plan.notes, "manual": linksy_upgrade::manual(&plan) });
+                    *slot.lock().unwrap() = Some(plan);
+                    json
+                }
+                Ok(None) => serde_json::json!({}),
+                Err(e) => serde_json::json!({ "error": e }),
+            }
+            .to_string();
+            let _ = thread.queue(move |b| b.upgrade_checked(QString::from(&json)));
+        });
+    }
+
+    pub fn run_upgrade(self: Pin<&mut Self>) {
+        let thread = self.qt_thread();
+        let Some(plan) = self.rust().upgrade.lock().unwrap().clone() else { return };
+        self.rust().rt.spawn_blocking(move || {
+            let step = |text: String| {
+                let _ = thread.queue(move |b| b.upgrade_step(QString::from(&text)));
+            };
+            let json = match linksy_upgrade::run(&plan, linksy_upgrade::Root::Pkexec, step) {
+                Ok(()) => serde_json::json!({ "ok": true }),
+                Err(e) => serde_json::json!({ "error": e }),
+            }
+            .to_string();
+            let _ = thread.queue(move |b| b.upgrade_finished(QString::from(&json)));
+        });
     }
 
     pub fn languages(&self) -> QString {

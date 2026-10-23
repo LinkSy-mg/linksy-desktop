@@ -47,6 +47,12 @@ Kirigami.ScrollablePage {
             onTriggered: app.showNews()
         },
         Kirigami.Action {
+            icon.name: "update-none"
+            text: app.t("Check for Updates…")
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            onTriggered: app.showUpgrade()
+        },
+        Kirigami.Action {
             icon.name: "help-about"
             text: app.t("About Linksy")
             displayHint: Kirigami.DisplayHint.AlwaysHide
@@ -168,7 +174,7 @@ Kirigami.ScrollablePage {
                 text: app.update ? app.t("Linksy {version} Is Available", { version: app.update.version }) : ""
                 QQC2.ToolTip.text: app.t("See what's new")
                 QQC2.ToolTip.visible: hovered
-                onClicked: if (app.update.notes) Qt.openUrlExternally(app.update.notes)
+                onClicked: app.showUpgrade()
             }
             QQC2.Label {
                 Layout.fillWidth: true
