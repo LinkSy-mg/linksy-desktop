@@ -91,6 +91,11 @@ inline int run_app()
     return code;
 }
 
+inline void quit_app()
+{
+    QCoreApplication::quit();
+}
+
 inline QString clipboard_text()
 {
     return QApplication::clipboard()->text();

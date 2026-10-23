@@ -142,6 +142,16 @@ Kirigami.ScrollablePage {
                 text: missing === 1 ? app.t("Finish Setup · 1 thing") : app.t("Finish Setup · {n} things", { n: missing })
                 onClicked: app.openSetup()
             }
+            QQC2.Button {
+                Layout.fillWidth: true
+                visible: app.update !== null
+                flat: true
+                icon.name: "update-none"
+                text: app.update ? app.t("Linksy {version} Is Available", { version: app.update.version }) : ""
+                QQC2.ToolTip.text: app.t("See what's new")
+                QQC2.ToolTip.visible: hovered
+                onClicked: if (app.update.notes) Qt.openUrlExternally(app.update.notes)
+            }
             QQC2.Label {
                 Layout.fillWidth: true
                 text: app.status ? app.t("This device: {name}", { name: app.status.device.name }) : ""

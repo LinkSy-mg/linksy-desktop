@@ -11,6 +11,15 @@ Kirigami.ScrollablePage {
     title: app.t("Preferences")
 
     readonly property var s: app.settings
+    property var photos: null
+    property var updates: null
+    readonly property var languages: JSON.parse(backend.languages())
+    readonly property string address: backend.localAddress(app.status?.port ?? 0)
+
+    Component.onCompleted: {
+        app.request("photo_prefs", {}, (ok, p) => { if (ok) page.photos = p });
+        app.request("updates", {}, (ok, u) => { if (ok) page.updates = u });
+    }
 
     // Settings go back whole, with one field changed
     function update(change) {
@@ -53,6 +62,34 @@ Kirigami.ScrollablePage {
             opacity: 0.7
             font: Kirigami.Theme.smallFont
         }
+        // For "Pair by Address" on networks that hide devices from each other
+        RowLayout {
+            Kirigami.FormData.label: app.t("Address") + ":"
+            visible: page.address !== ""
+            QQC2.Label {
+                text: page.address
+                textFormat: Text.PlainText
+            }
+            QQC2.ToolButton {
+                icon.name: "edit-copy"
+                display: QQC2.AbstractButton.IconOnly
+                text: app.t("Copy Address")
+                QQC2.ToolTip.text: text
+                QQC2.ToolTip.visible: hovered
+                onClicked: { backend.setClipboard(page.address); app.toast(app.t("Address copied")) }
+            }
+        }
+        // Read when Linksy starts, so it offers to start Linksy (and its service) again
+        QQC2.ComboBox {
+            Kirigami.FormData.label: app.t("Language") + ":"
+            model: [app.t("System Default")].concat(page.languages.map(l => l.name))
+            currentIndex: page.languages.findIndex(l => l.code === backend.chosenLanguage()) + 1
+            onActivated: index => {
+                const why = backend.chooseLanguage(index === 0 ? "" : page.languages[index - 1].code);
+                if (why) return app.toast(why);
+                app.showPassiveNotification(app.t("Linksy uses it the next time it starts"), "long", app.t("Restart Now"), () => backend.restart());
+            }
+        }
 
         Kirigami.Separator {
             Kirigami.FormData.isSection: true
@@ -80,6 +117,23 @@ Kirigami.ScrollablePage {
             Layout.maximumWidth: Kirigami.Units.gridUnit * 22
             wrapMode: Text.Wrap
             text: app.t("Files from devices you paired arrive without asking.")
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
+        QQC2.Switch {
+            Kirigami.FormData.label: app.t("Import Photos From Phones") + ":"
+            visible: page.photos !== null
+            checked: page.photos?.import ?? false
+            onToggled: {
+                const next = Object.assign({}, page.photos, { import: checked });
+                app.request("set_photo_prefs", { prefs: next }, (ok, err) => { if (ok) page.photos = next; else app.toast(err) });
+            }
+        }
+        QQC2.Label {
+            visible: page.photos !== null
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            wrapMode: Text.Wrap
+            text: app.t("New photos from your phone go to {folder}, in a folder named after it, without asking.", { folder: (page.photos?.folder ?? "").replace(/^\/home\/[^/]+/, "~") })
             opacity: 0.7
             font: Kirigami.Theme.smallFont
         }
@@ -155,6 +209,29 @@ Kirigami.ScrollablePage {
             Layout.maximumWidth: Kirigami.Units.gridUnit * 22
             wrapMode: Text.Wrap
             text: app.t("At least 6 characters (digits are easiest on a phone). Your phone asks for it every time a terminal opens; only this computer knows it. 5 wrong in a row lock it out.")
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: app.t("Updates")
+            visible: page.updates !== null
+        }
+        QQC2.Switch {
+            Kirigami.FormData.label: app.t("Check for Updates") + ":"
+            visible: page.updates !== null
+            checked: page.updates?.prefs.check ?? true
+            onToggled: app.request("set_update_prefs", { prefs: { check: checked } }, (ok, err) => {
+                if (!ok) app.toast(err);
+                app.refreshUpdates();
+            })
+        }
+        QQC2.Label {
+            visible: page.updates !== null
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            wrapMode: Text.Wrap
+            text: app.t("Once a day, Linksy asks linksy.diary.mg for the newest version. Nothing about you or your devices is sent.") + " " + app.t("This is Linksy {version}.", { version: page.updates?.current ?? "" })
             opacity: 0.7
             font: Kirigami.Theme.smallFont
         }

@@ -100,6 +100,30 @@ pub mod qobject {
         #[qinvokable]
         fn reboot(&self);
 
+        /// Linksy's languages: [{code, name}] (each in its own language).
+        #[qinvokable]
+        fn languages(&self) -> QString;
+
+        /// The language chosen in Preferences; empty: the system's.
+        #[qinvokable]
+        #[cxx_name = "chosenLanguage"]
+        fn chosen_language(&self) -> QString;
+
+        /// Choose a language (empty: the system's again), for the next start; empty when
+        /// saved, else why not.
+        #[qinvokable]
+        #[cxx_name = "chooseLanguage"]
+        fn choose_language(&self, code: &QString) -> QString;
+
+        /// This computer's address on the network, for "Pair by Address" elsewhere.
+        #[qinvokable]
+        #[cxx_name = "localAddress"]
+        fn local_address(&self, port: i32) -> QString;
+
+        /// Start Linksy again, the service too (not one started by hand).
+        #[qinvokable]
+        fn restart(self: Pin<&mut Self>);
+
         /// Whether phones can be used by cable here: empty when they can, else why not.
         #[qinvokable]
         #[cxx_name = "usbReady"]
@@ -330,6 +354,57 @@ impl qobject::Backend {
 
     pub fn camera_name(&self, phone: &QString) -> QString {
         QString::from(&linksy_setup::camera_name(&phone.to_string()))
+    }
+
+    pub fn languages(&self) -> QString {
+        let list: Vec<_> = linksy_i18n::LANGUAGES.iter().map(|(code, name)| serde_json::json!({ "code": code, "name": name })).collect();
+        QString::from(&serde_json::Value::from(list).to_string())
+    }
+
+    pub fn chosen_language(&self) -> QString {
+        QString::from(&linksy_i18n::chosen().unwrap_or_default())
+    }
+
+    pub fn choose_language(&self, code: &QString) -> QString {
+        let code = code.to_string();
+        match linksy_i18n::choose(Some(code.as_str()).filter(|c| !c.is_empty())) {
+            Ok(()) => QString::default(),
+            Err(e) => QString::from(&e.to_string()),
+        }
+    }
+
+    pub fn local_address(&self, port: i32) -> QString {
+        let ip = std::net::UdpSocket::bind("0.0.0.0:0").ok().and_then(|s| {
+            // Nothing is sent: connecting a UDP socket only picks the route
+            s.connect("192.0.2.1:9").ok()?;
+            Some(s.local_addr().ok()?.ip()).filter(|ip| !ip.is_loopback() && !ip.is_unspecified())
+        });
+        let Some(ip) = ip else { return QString::default() };
+        let shown = if port == 47_200 || port <= 0 { ip.to_string() } else { std::net::SocketAddr::new(ip, port as u16).to_string() };
+        QString::from(&shown)
+    }
+
+    pub fn restart(self: Pin<&mut Self>) {
+        // A service started by hand (LINKSY_SOCKET, development) is left running
+        let client = self.rust().client.lock().unwrap().clone().filter(|_| std::env::var_os("LINKSY_SOCKET").is_none());
+        let thread = self.qt_thread();
+        self.rust().rt.spawn(async move {
+            if let Some(c) = client {
+                let _ = tokio::time::timeout(Duration::from_secs(3), c.quit()).await;
+                // Wait for it to go, so the new window starts a new one
+                for _ in 0..20 {
+                    if std::fs::metadata(linksy_ipc::socket_path()).is_err() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(150)).await;
+                }
+            }
+            if let Ok(exe) = std::env::current_exe() {
+                // A moment later, once this window has let go of its instance socket
+                let _ = std::process::Command::new("sh").args(["-c", "sleep 1; exec \"$0\""]).arg(exe).spawn();
+            }
+            let _ = thread.queue(|_| crate::app::ffi::quit_app());
+        });
     }
 
     pub fn usb_ready(&self) -> QString {

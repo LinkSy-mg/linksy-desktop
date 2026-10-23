@@ -28,6 +28,8 @@ Kirigami.ApplicationWindow {
     property var pending: ({})
     // Finish Setup's list (linksy-setup), null until checked
     property var setup: null
+    // A newer Linksy, when the service found one: { version, notes }
+    property var update: null
 
     // A session ended (a viewer showing it closes its picture)
     signal sessionEnded(string id)
@@ -172,6 +174,19 @@ Kirigami.ApplicationWindow {
         request("active_sessions", {}, (ok, list) => { if (ok) root.sessions = list.filter(s => s.sharing || ["camera", "microphone"].includes(s.kind)) });
         joinDisplays();
         refreshHistory();
+        refreshUpdates();
+    }
+
+    // The service checks once a day; ask it now and then what it found
+    function refreshUpdates() {
+        request("updates", {}, (ok, u) => { root.update = ok && u.prefs.check && u.latest ? { version: u.latest, notes: u.notes } : null });
+    }
+
+    Timer {
+        interval: 30 * 60 * 1000
+        running: backend.connected
+        repeat: true
+        onTriggered: root.refreshUpdates()
     }
 
     function refreshDevices() {

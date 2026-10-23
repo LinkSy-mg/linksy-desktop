@@ -9,6 +9,7 @@ pub mod ffi {
         type QString = cxx_qt_lib::QString;
 
         fn run_app() -> i32;
+        fn quit_app();
         fn clipboard_text() -> QString;
         fn set_clipboard_text(text: &QString);
         fn save_window(path: &QString) -> bool;
