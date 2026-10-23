@@ -1,8 +1,9 @@
 name: Packages
 
-# Build every Linux package and install each one in clean containers of every supported
-# distribution (scripts/test-packages.sh), all distributions at once. Runs when packaging
-# changes, for every release tag, and by hand from the Actions tab.
+# Build every Linux package and the Flatpak, and install each package in clean containers
+# of every supported distribution (scripts/test-packages.sh), all distributions at once.
+# For a release tag (scripts/publish-release.sh pushes it), once all of that passes, publish
+# the release here and on linksy-releases. Also runs when packaging changes, and by hand.
 on:
   pull_request:
     paths:
@@ -10,6 +11,7 @@ on:
       - "data/**"
       - "scripts/package-linux.sh"
       - "scripts/test-packages.sh"
+      - "scripts/release-notes.sh"
       - "Cargo.lock"
       - ".github/workflows/packages.yml"
   push:
@@ -20,6 +22,7 @@ on:
       - "data/**"
       - "scripts/package-linux.sh"
       - "scripts/test-packages.sh"
+      - "scripts/release-notes.sh"
       - "Cargo.lock"
       - ".github/workflows/packages.yml"
   workflow_dispatch:
@@ -125,3 +128,73 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
       - run: scripts/test-packages.sh ${{ matrix.distro }}
+
+  # The Flatpak, in Flathub's own build image, from this checkout (the manifest names the
+  # release tag, for Flathub; here the checkout stands in for it)
+  flatpak:
+    name: Flatpak
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-51
+      options: --privileged
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: |
+          echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
+          cp packaging/flatpak/cargo-sources.json .
+          awk '
+            /# @SOURCE@/ { print "      - type: dir"; print "        path: ."; skip = 3; next }
+            skip > 0 { skip--; next }
+            { print }
+          ' packaging/flatpak/mg.diary.linksy.Linksy.yml > mg.diary.linksy.Linksy.yml
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@79327416609af08178ad73b352877e51450790b3 # v6.8
+        with:
+          manifest-path: mg.diary.linksy.Linksy.yml
+          bundle: linksy-${{ env.VERSION }}.flatpak
+          cache-key: flatpak-builder-${{ hashFiles('Cargo.lock') }}
+          upload-artifact: true
+          artifact-name: flatpak
+
+  # A release tag, everything above passed: publish it
+  release:
+    name: Publish the release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, flatpak]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: |
+          V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          [ "v$V" = "$GITHUB_REF_NAME" ] || { echo "The tag $GITHUB_REF_NAME isn't the version in Cargo.toml ($V)"; exit 1; }
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: dist/v${{ env.VERSION }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: flatpak
+          path: dist/v${{ env.VERSION }}
+      - name: Publish here and on linksy-releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+        run: |
+          V=$VERSION D=dist/v$VERSION
+          [ -n "$RELEASES_TOKEN" ] || { echo "The RELEASES_TOKEN secret is missing: it publishes on linksy-releases"; exit 1; }
+          scripts/release-notes.sh "$V" > release-notes.md
+          (cd "$D" && rm -f SHA256SUMS && sha256sum *.flatpak *.tar.gz *.deb *.rpm > SHA256SUMS)
+          FILES=("$D"/*.flatpak "$D"/*.tar.gz "$D"/*.deb "$D"/*.rpm "$D/SHA256SUMS")
+          TITLE="Desktop release · Linksy $V for Linux"
+          # linksy-releases first: if its token doesn't work, nothing is published anywhere
+          GH_TOKEN=$RELEASES_TOKEN gh release create "linux-v$V" -R LinkSy-mg/linksy-releases --latest=false --title "$TITLE" --notes-file release-notes.md "${FILES[@]}"
+          gh release create "v$V" -R LinkSy-mg/linksy-desktop --verify-tag --title "$TITLE" --notes-file release-notes.md "${FILES[@]}"
+          # The public repo's front page: its Linux download links point at this version
+          page=$(mktemp)
+          GH_TOKEN=$RELEASES_TOKEN gh api repos/LinkSy-mg/linksy-releases/contents/README.md --jq .content | base64 -d > "$page"
+          sha=$(GH_TOKEN=$RELEASES_TOKEN gh api repos/LinkSy-mg/linksy-releases/contents/README.md --jq .sha)
+          sed -i "/<!-- linux:start -->/,/<!-- linux:end -->/s/[0-9]\+\.[0-9]\+\.[0-9]\+/$V/g" "$page"
+          GH_TOKEN=$RELEASES_TOKEN gh api -X PUT repos/LinkSy-mg/linksy-releases/contents/README.md \
+            -f message="Linux downloads: $V" -f sha="$sha" -f content="$(base64 -w0 "$page")" >/dev/null
