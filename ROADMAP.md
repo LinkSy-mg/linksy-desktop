@@ -446,6 +446,12 @@ People who made Linksy better by reporting, testing or building:
   Intel graphics.
 - [@Natcuber](https://github.com/LinkSy-mg/linksy-mobile/issues/1): a number pad for the
   presentation remote.
+- [@consciousY](https://github.com/LinkSy-mg/linksy-desktop/issues/42): Second Display on
+  Hyprland (0.9).
+- [@Mustafa-Hamade](https://github.com/LinkSy-mg/linksy-mobile/issues/12): devices
+  announcing permanent identifiers on every network (private discovery, 0.9).
+- [@bramikoko](https://github.com/LinkSy-mg/linksy-mobile/issues/13): Ring with the
+  Flatpak.
 
 ## How each feature ships
 
