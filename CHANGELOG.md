@@ -11,6 +11,11 @@ Linksy for Linux. Each version's section becomes its release notes.
   Automatically** in that guide switches a phone on its own whenever it's plugged in, as
   before. It starts off for every phone.
 
+- **The Flatpak's webcam in every app and USB cable take one command.** The sandbox can't
+  install the camera driver or the USB rule itself; Finish Setup and the USB guide now
+  give the exact command to paste in a terminal (Linksy's own setup helper for this
+  version), instead of saying it can't be done.
+
 ### Fixed
 - **Second Display on Hyprland and Sway failed halfway.** Their screen sharing can't make
   a virtual monitor yet; Linksy now says so before starting, in the app and in a

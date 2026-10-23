@@ -295,8 +295,11 @@ pub fn check(ui: Ui) -> Vec<Item> {
     };
     let camera = if camera_device().is_some() {
         Need::Ready
+    } else if flatpak() && fam == Family::Other {
+        Need::Manual(t!("Install v4l2loopback from your distribution, then come back here."))
     } else if flatpak() {
-        Need::Manual(t!("A Flatpak can't add this. Install Linksy's .deb or .rpm instead, or v4l2loopback and run linksy-camera-setup once."))
+        // The sandbox can't install a driver: one command outside it does (terminal_command)
+        Need::Manual(t!("The Flatpak can't add this itself: copy the command under Prefer a Terminal? below, run it in a terminal, then come back here."))
     } else if loopback_installed() {
         // Some kernels bring the driver without its tool (CachyOS): add the tool first.
         match loopback_tool(fam) {
@@ -459,6 +462,16 @@ pub fn wants_autostart(items: &[Item]) -> bool {
 /// The same as Set Up Everything, to run in a terminal: for whoever prefers to, or when
 /// the password dialog can't appear.
 pub fn terminal_command(items: &[Item]) -> Option<String> {
+    // In the Flatpak: the camera driver, by Linksy's own helper fetched for this version
+    if flatpak() {
+        let camera = items.iter().any(|i| i.id == "camera" && i.need != Need::Ready);
+        let fam = family();
+        if !camera || fam == Family::Other {
+            return None;
+        }
+        let driver = Item { id: "camera", title: "", why: "", need: Need::Install(loopback_packages(fam)) };
+        return Some(host_command(&root_args(&[driver])));
+    }
     if atomic() || transactional() {
         let packages: Vec<String> = items.iter().flat_map(|i| if let Need::Install(p) = &i.need { p.clone() } else { Vec::new() }).collect();
         let tool = if atomic() { "rpm-ostree install" } else { "transactional-update --non-interactive pkg install" };
@@ -471,6 +484,15 @@ pub fn terminal_command(items: &[Item]) -> Option<String> {
         command = [command, "systemctl --user enable --now linksyd.service".into()].iter().filter(|c| !c.is_empty()).cloned().collect::<Vec<_>>().join(" && ");
     }
     (!command.is_empty()).then_some(command)
+}
+
+/// A command for a terminal outside the Flatpak: Linksy's setup helpers for this version,
+/// from its public source, run with sudo for `tasks` (as linksy-system-setup takes them).
+pub fn host_command(tasks: &[String]) -> String {
+    let raw = format!("https://raw.githubusercontent.com/LinkSy-mg/linksy-desktop/v{}/data", env!("CARGO_PKG_VERSION"));
+    let helpers = ["linksy-system-setup", "linksy-camera-setup", "linksy-usb-setup"];
+    let fetch: Vec<String> = helpers.iter().map(|h| format!("-fsSLO {raw}/{h}")).collect();
+    format!("cd /tmp && curl {} && chmod +x {} && sudo ./linksy-system-setup {}", fetch.join(" "), helpers.join(" "), tasks.join(" "))
 }
 
 /// Why setting up stopped.
@@ -569,7 +591,8 @@ pub fn enable_autostart() -> Result<(), Failure> {
 /// Whether phones can be used by cable here: Err says why not.
 pub fn usb_ready() -> Result<(), String> {
     if flatpak() {
-        return Err(t!("The Flatpak can't use USB cables. Install Linksy's .rpm or .deb for this.").into());
+        // The Flatpak can't add the USB rule itself: one command outside it does
+        return Err(t!("Allow it once by running this in a terminal (outside the Flatpak), then come back: {command}", command = host_command(&["usb".to_string()])));
     }
     if usb_rule() { Ok(()) } else { Err(t!("Allow it once: your computer asks for your password.").into()) }
 }
