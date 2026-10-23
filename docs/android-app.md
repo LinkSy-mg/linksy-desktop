@@ -6,7 +6,7 @@ offer those features to Android phones.
 
 - App: `app.linksy.mg` (since 0.1.8; 0.1.x up to 0.1.7 was `app.linksy`), Flutter + the
   real `linksy-core` through flutter_rust_bridge. Repo: LinkSy-mg/linksy-mobile.
-- Core pinned at `bc4e2ad` (desktop 0.7.0), as of phone 0.2.0. Builds for arm64-v8a, armeabi-v7a, x86_64.
+- Core pinned at `293c7bc` (desktop main after PR #31), as of phone 0.2.3. Builds for arm64-v8a, armeabi-v7a, x86_64.
 - Releases: LinkSy-mg/linksy-releases, titled "Mobile release · Linksy X for Android", APKs named `linksy-X.apk` / `-arm64` / `-armv7`; the newest is always https://linksy.diary.mg/download/android.
 - Distributed as a sideloaded APK, not through the Play Store. That shapes everything in
   §3: Android's fraud protection blocks installing sideloaded apps that declare certain
@@ -72,7 +72,7 @@ desktop side with a real phone:
    Android only switches apps on its own while Linksy is in the background if the
    system's prompt opened it: with Linksy open in front the cable is taken within
    ~1.5 s, well inside the 17 s.
-2. **Terminal (§4.15): done on the phone in 0.2.0**, on core `bc4e2ad` (desktop 0.7.0):
+2. **Terminal (§4.15): done on the phone in 0.2.0**, on core `e6957b4` (desktop 0.7.0):
    `request_terminal`, the session's output to the terminal view, `term_input` /
    `term_resize` / `term_close` frames, `list_terminals` + `Event::Terminals` (5 s
    wait), every decline reason including `limit`. Closing follows your rules: Close
@@ -123,6 +123,12 @@ default SMS app.
 
 ## Changelog
 
+- **2026-10-23** — Phone 0.2.3 on core `293c7bc`: the relay setting (PR #7, with
+  desktop PR #31), each paired device as a direct target in Android's share sheet,
+  the photo picker for many photos at once, a transfers bubble with a page per file,
+  an upright webcam picture when the phone stands, and less memory in the background
+  (`docs/memory.md`). No protocol change.
+
 - **2026-10-22** — Phone 0.2.2 (desktop 0.8.0): the USB cable is found without the
   system's prompt (accessory list, run-time receiver, permission request), its port
   always reaches the dial, every step is logged, and an unpaired computer on the cable
@@ -130,10 +136,10 @@ default SMS app.
   ("Add Device", Preferences › Terminal, "Allow Everything From Away", "Import Photos
   From Phones") in each of the 10 languages.
 
-- **2026-10-22** — Phone 0.2.0 on core `bc4e2ad` (desktop 0.7.0): the terminal works
+- **2026-10-22** — Phone 0.2.0 on core `e6957b4` (desktop 0.7.0): the terminal works
   end to end (§2.2), with the closing rules of docs/protocol.md §4.15.
 
-- **2026-10-22** — Phone 0.1.19 on core `dcf2c50` (desktop 0.6.4): the Terminal's phone
+- **2026-10-22** — Phone 0.1.19 on core `61b08e0` (desktop 0.6.4): the Terminal's phone
   side (§2.2), with what the core needs for it. Phone 0.1.17 redesigned home and the
   computer page (battery ring, link chip, "This phone as", grouped switches, activity
   filters); no protocol change.
@@ -141,7 +147,7 @@ default SMS app.
 - **2026-10-21** — Phone 0.1.16: explains Android 15's screen share protection (black
   status bar and shade on some phones) under the sharing banner; §2 asks for the same
   tip in the desktop's viewer.
-- **2026-10-21** — Phone 0.1.15 on core `b382bd8` (desktop 0.6.0): `features`,
+- **2026-10-21** — Phone 0.1.15 on core `1c8ebe4` (desktop 0.6.0): `features`,
   microphone, display in the phone's shape with the screen kept on, `camera_state` to
   the computer, 1080p, low-latency encoder with AUDs, pictures, clipboard files and
   watch, locate, away from home, the service file, the USB accessory bridge,
