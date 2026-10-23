@@ -19,19 +19,25 @@ scripts/package-linux.sh
 scripts/package-flatpak.sh >/dev/null
 
 D="dist/v$V"
-FILES=("linksy-$V.flatpak" "linksy_${V}_amd64.deb" "linksy-$V-1.x86_64.rpm" "linksy-$V-1.suse.x86_64.rpm" "linksy-$V-linux-x86_64.tar.gz")
+FILES=("linksy-$V.flatpak" "linksy-$V-linux-x86_64.tar.gz")
+for p in linksy-common linksy linksy-qt; do
+  FILES+=("${p}_${V}_amd64.deb" "$p-$V-1.x86_64.rpm" "$p-$V-1.suse.x86_64.rpm")
+done
 (cd "$D" && sha256sum "${FILES[@]}" > SHA256SUMS)
 {
   cat <<NOTES
-**Install** (x86_64):
+**Install** (x86_64). With a package, download \`linksy-common\` and the app for your desktop:
+\`linksy\` for GNOME and most desktops, \`linksy-qt\` for KDE Plasma 6.
 
 | System | Download | Command |
 |---|---|---|
 | Any distribution | \`linksy-$V.flatpak\` | \`flatpak install --user linksy-$V.flatpak\` |
-| Ubuntu 24.10+, Debian 13+ | \`linksy_${V}_amd64.deb\` | \`sudo apt install ./linksy_${V}_amd64.deb\` |
-| Fedora 41+ | \`linksy-$V-1.x86_64.rpm\` | \`sudo dnf install ./linksy-$V-1.x86_64.rpm\` |
-| openSUSE Tumbleweed | \`linksy-$V-1.suse.x86_64.rpm\` | \`sudo zypper install --allow-unsigned-rpm ./linksy-$V-1.suse.x86_64.rpm\` |
-| Others (no root) | \`linksy-$V-linux-x86_64.tar.gz\` | extract, then \`./install.sh\` |
+| Ubuntu 24.10+, Debian 13+ | \`linksy-common_${V}_amd64.deb\` and \`linksy_${V}_amd64.deb\` or \`linksy-qt_${V}_amd64.deb\` | \`sudo apt install ./linksy-common_${V}_amd64.deb ./linksy_${V}_amd64.deb\` |
+| Fedora 41+ | \`linksy-common-$V-1.x86_64.rpm\` and \`linksy-$V-1.x86_64.rpm\` or \`linksy-qt-$V-1.x86_64.rpm\` | \`sudo dnf install ./linksy-common-$V-1.x86_64.rpm ./linksy-$V-1.x86_64.rpm\` |
+| openSUSE Tumbleweed | the same, \`.suse.x86_64.rpm\` | \`sudo zypper install --allow-unsigned-rpm ./linksy-common-$V-1.suse.x86_64.rpm ./linksy-$V-1.suse.x86_64.rpm\` |
+| Others (no root) | \`linksy-$V-linux-x86_64.tar.gz\` (GTK app) | extract, then \`./install.sh\` |
+
+On KDE Plasma, use \`linksy-qt\` in place of \`linksy\` in the commands. The Qt app needs Qt 6.8 and KDE Frameworks 6.13 or newer (Debian 13, Ubuntu 25.04+, Fedora, openSUSE Tumbleweed).
 
 NOTES
   cat "$D/notes.md"
