@@ -1,0 +1,15 @@
+Package: linksy-qt
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Linksy <https://github.com/LinkSy-mg/linksy-releases>
+Installed-Size: @SIZE@
+Depends: linksy-common (= @VERSION@), libqt6core6t64 (>= 6.8), libqt6gui6t64 | libqt6gui6, libqt6widgets6t64 | libqt6widgets6, libqt6qml6, libqt6quick6, libqt6quickcontrols2-6, qml6-module-qtquick, qml6-module-qtquick-controls, qml6-module-qtquick-dialogs, qml6-module-qtquick-layouts, qml6-module-qtquick-window, qml6-module-qtquick-templates, qml6-module-qtqml-workerscript, qml6-module-org-kde-kirigami (>= 6.13), qml6-module-org-kde-kirigamiaddons-components, qml6-module-org-kde-desktop, gstreamer1.0-qt6, gstreamer1.0-gl
+Section: net
+Priority: optional
+Homepage: https://github.com/LinkSy-mg/linksy-releases
+Description: Your devices, connected (KDE Plasma app)
+ Linksy connects your computer and phone directly over your own network, with no
+ account, cloud or server: send files and your clipboard, see and control another
+ device's screen, use a tablet as a second display, or a phone as a webcam.
+ .
+ This is the Qt and Kirigami app, made for KDE Plasma 6.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Build the Linux release: dist/vX.Y.Z/ gets the tarball (linksy-X.Y.Z-linux-x86_64.tar.gz),
-# linksy_X.Y.Z_amd64.deb, linksy-X.Y.Z-1.x86_64.rpm (Fedora) and linksy-X.Y.Z-1.suse.x86_64.rpm
-# (openSUSE). The Flatpak is package-flatpak.sh.
+# Build the Linux release: dist/vX.Y.Z/ gets the tarball (linksy-X.Y.Z-linux-x86_64.tar.gz,
+# the GTK app), and three .debs and three .rpms for Fedora and openSUSE each: linksy-common,
+# linksy (GTK) and linksy-qt (Qt, for KDE Plasma). The Flatpak is package-flatpak.sh.
 # The app and screen helper need GTK and GStreamer headers; without them on the host,
 # they're built in the linksy-dev toolbox. Packing needs rpmbuild and dpkg-deb (Fedora:
 # rpm-build dpkg; openSUSE: rpm-build dpkg).
@@ -41,12 +41,28 @@ cp packaging/linux/README.txt LICENSE THIRD-PARTY-NOTICES "$STAGE/"
 
 tar -C "$DIST" -czf "$DIST/$NAME.tar.gz" "$NAME"
 
-# .deb and .rpm share one system-wide layout, with the service as a global user unit.
+# The Qt app, built against Debian 13's Qt (the oldest it supports) so it runs wherever
+# the packages install; in a container, so no Qt is needed here.
+if ! command -v podman >/dev/null; then
+  echo "podman is missing: the Qt app (linksy-qt) is built in a container"; exit 1
+fi
+podman image exists linksy-qt-release || podman build -q -t linksy-qt-release -f packaging/qt/Containerfile.release packaging/qt >/dev/null
+podman volume create linksy-cargo-deb >/dev/null 2>&1 || true
+podman run --rm -v "$(pwd)":/src:z -v linksy-cargo-deb:/root/.cargo/registry -w /src -e CARGO_TARGET_DIR=/src/target/qt-release \
+  linksy-qt-release cargo build --release -p linksy-qt
+QT_BIN=target/qt-release/release/linksy-qt
+
+# .deb and .rpm share one system-wide layout, with the service as a global user unit. Three
+# packages, as Transmission splits its apps: linksy-common (service, helpers, tools, the
+# menu entry), linksy (GTK app) and linksy-qt (Qt app); linksy-open, the menu entry's
+# command, opens the Qt window on Plasma when it's installed.
 ROOT="$DIST/root"
 rm -rf "$ROOT"
 for b in linksyd linksy linksy-app linksy-screen; do install -Dm755 "target/release/$b" "$ROOT/usr/bin/$b"; done
+install -Dm755 "$QT_BIN" "$ROOT/usr/bin/linksy-qt"
+install -Dm755 data/linksy-open "$ROOT/usr/bin/linksy-open"
 sed "s|@BINDIR@|/usr/bin|" data/linksyd.service | install -Dm644 /dev/stdin "$ROOT/usr/lib/systemd/user/linksyd.service"
-install -Dm644 data/mg.diary.linksy.Linksy.desktop "$ROOT/usr/share/applications/mg.diary.linksy.Linksy.desktop"
+sed "s|^Exec=linksy-app|Exec=linksy-open|" data/mg.diary.linksy.Linksy.desktop | install -Dm644 /dev/stdin "$ROOT/usr/share/applications/mg.diary.linksy.Linksy.desktop"
 install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml "$ROOT/usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml"
 install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
 install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
@@ -55,21 +71,34 @@ for s in linksy-camera-setup linksy-usb-setup linksy-system-setup; do install -D
 install -Dm644 data/linksy.firewalld.xml "$ROOT/usr/lib/firewalld/services/linksy.xml"
 install -Dm644 data/70-linksy-usb.rules "$ROOT/usr/lib/udev/rules.d/70-linksy-usb.rules"
 
-DEB="$DIST/deb"
-rm -rf "$DEB"; cp -a "$ROOT" "$DEB"; mkdir -p "$DEB/DEBIAN"
-sed -e "s|@VERSION@|$V|" -e "s|@SIZE@|$(du -sk "$ROOT" | cut -f1)|" packaging/linux/deb/control > "$DEB/DEBIAN/control"
-install -m755 packaging/linux/deb/postinst packaging/linux/deb/prerm "$DEB/DEBIAN/"
-dpkg-deb --root-owner-group -Zxz --build "$DEB" "$DIST/linksy_${V}_amd64.deb" >/dev/null
-rm -rf "$DEB"
+# A .deb holds one package: each gets its own tree, cut from the shared one.
+deb() {
+  local pkg=$1 control=$2; shift 2
+  local tree="$DIST/deb-$pkg"
+  rm -rf "$tree"; mkdir -p "$tree/DEBIAN"
+  for f in "$@"; do install -D -m "$(stat -c %a "$ROOT/$f")" "$ROOT/$f" "$tree/$f"; done
+  sed -e "s|@VERSION@|$V|g" -e "s|@SIZE@|$(du -sk --exclude=DEBIAN "$tree" | cut -f1)|" "packaging/linux/deb/$control" > "$tree/DEBIAN/control"
+  if [ "$pkg" = linksy-common ]; then
+    install -m755 packaging/linux/deb/postinst.common "$tree/DEBIAN/postinst"
+    install -m755 packaging/linux/deb/prerm.common "$tree/DEBIAN/prerm"
+  fi
+  dpkg-deb --root-owner-group -Zxz --build "$tree" "$DIST/${pkg}_${V}_amd64.deb" >/dev/null
+  rm -rf "$tree"
+}
+COMMON=$(cd "$ROOT" && find . -type f ! -path ./usr/bin/linksy-app ! -path ./usr/bin/linksy-qt | sed 's|^\./||')
+# shellcheck disable=SC2086
+deb linksy-common control.common $COMMON
+deb linksy control.gtk usr/bin/linksy-app
+deb linksy-qt control.qt usr/bin/linksy-qt
 
-# Two RPMs from one spec: Fedora's names for the dependencies, then openSUSE's.
+# Three RPMs from one spec, twice: Fedora's names for the dependencies, then openSUSE's.
 RPMTOP="$(pwd)/$DIST/rpmbuild"
-rpmbuild -bb --quiet --define "_topdir $RPMTOP" --define "version $V" --define "root $(pwd)/$ROOT" packaging/linux/rpm/linksy.spec
-mv "$RPMTOP"/RPMS/x86_64/linksy-"$V"-1.x86_64.rpm "$DIST/"
-rpmbuild -bb --quiet --define "_topdir $RPMTOP" --define "version $V" --define "root $(pwd)/$ROOT" --define "linksy_suse 1" packaging/linux/rpm/linksy.spec
-mv "$RPMTOP"/RPMS/x86_64/linksy-"$V"-1.suse.x86_64.rpm "$DIST/"
+for suse in 0 1; do
+  rpmbuild -bb --quiet --define "_topdir $RPMTOP" --define "version $V" --define "root $(pwd)/$ROOT" --define "linksy_suse $suse" packaging/linux/rpm/linksy.spec
+done
+mv "$RPMTOP"/RPMS/x86_64/*.rpm "$DIST/"
 rm -rf "$RPMTOP" "$ROOT"
 # Release notes: this version's section of CHANGELOG.md.
 awk -v v="$V" '/^## /{p = index($0, v) > 0; next} p' CHANGELOG.md > "$DIST/notes.md"
-(cd "$DIST" && sha256sum "$NAME.tar.gz" "linksy_${V}_amd64.deb" "linksy-$V-1.x86_64.rpm" "linksy-$V-1.suse.x86_64.rpm" > SHA256SUMS)
+(cd "$DIST" && sha256sum "$NAME.tar.gz" ./*.deb ./*.rpm | sed 's|  \./|  |' > SHA256SUMS)
 ls -1 "$DIST"/*.tar.gz "$DIST"/*.deb "$DIST"/*.rpm

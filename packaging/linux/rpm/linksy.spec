@@ -1,6 +1,8 @@
 # Packs the binaries scripts/package-linux.sh already built: no build step here.
-# One spec, two packages: Fedora (linksy-V-1) by default, openSUSE (linksy-V-1.suse) with
-# --define "linksy_suse 1". Only the dependencies' names differ.
+# One spec, three packages, as Transmission splits its apps: linksy-common (the service and
+# tools), linksy (the GTK app) and linksy-qt (the Qt app for KDE Plasma), each app needing
+# the common one. Built twice: Fedora's dependency names by default (release 1), openSUSE's
+# with --define "linksy_suse 1" (release 1.suse).
 %global debug_package %{nil}
 %global source_date_epoch_from_changelog 0
 
@@ -12,9 +14,30 @@ URL:            https://github.com/LinkSy-mg/linksy-releases
 ExclusiveArch:  x86_64
 %if 0%{?linksy_suse}
 Release:        1.suse
-Requires:       gstreamer-plugins-good
+%else
+Release:        1
+%endif
+Requires:       linksy-common = %{version}-%{release}
+%if 0%{?linksy_suse}
 # gtk4paintablesink lives in the Rust plugins bundle on openSUSE
 Requires:       gstreamer-plugins-rs
+%else
+Requires:       gstreamer1-plugin-gtk4
+%endif
+
+%description
+Linksy connects your computer and phone directly over your own network, with no
+account, cloud or server: send files and your clipboard, see and control another
+device's screen, use a tablet as a second display, or a phone as a webcam.
+
+This is the GTK app, for GNOME and most desktops; linksy-qt is the one for KDE Plasma.
+
+%package common
+Summary:        Your devices, connected (service and tools)
+# Before 0.8.4, one linksy package held everything
+Conflicts:      linksy < 0.8.4
+%if 0%{?linksy_suse}
+Requires:       gstreamer-plugins-good
 Requires:       gstreamer-plugin-pipewire
 Requires:       xdg-desktop-portal
 Recommends:     gstreamer-plugin-openh264
@@ -24,9 +47,7 @@ Recommends:     wl-clipboard
 # The camera driver (v4l2loopback-kmp-<flavor>) is left to Finish Setup: it picks the
 # running kernel's flavor, where a fixed Recommends could pull in another kernel.
 %else
-Release:        1
 Requires:       gstreamer1-plugins-good
-Requires:       gstreamer1-plugin-gtk4
 Requires:       pipewire-gstreamer
 Requires:       xdg-desktop-portal
 Recommends:     gstreamer1-plugin-openh264
@@ -36,15 +57,41 @@ Recommends:     wl-clipboard
 Recommends:     v4l2loopback
 %endif
 
-%description
+%description common
+What both Linksy apps share: the background service that finds, pairs and talks to your
+devices, the screen and camera helper, the linksy command and the setup helpers.
+Install linksy (GNOME and others) or linksy-qt (KDE Plasma) for the window.
+
+%package qt
+Summary:        Your devices, connected (KDE Plasma app)
+Requires:       linksy-common = %{version}-%{release}
+%if 0%{?linksy_suse}
+Requires:       libQt6Quick6
+Requires:       qt6-declarative-imports
+Requires:       kf6-kirigami-imports
+Requires:       kirigami-addons6
+Requires:       kf6-qqc2-desktop-style
+Requires:       gstreamer-plugins-good-qtqml6
+%else
+Requires:       qt6-qtbase
+Requires:       qt6-qtdeclarative
+Requires:       kf6-kirigami
+Requires:       kf6-kirigami-addons
+Requires:       kf6-qqc2-desktop-style
+Requires:       gstreamer1-plugins-good-qt6
+%endif
+
+%description qt
 Linksy connects your computer and phone directly over your own network, with no
 account, cloud or server: send files and your clipboard, see and control another
 device's screen, use a tablet as a second display, or a phone as a webcam.
 
+This is the Qt and Kirigami app, made for KDE Plasma 6.
+
 %install
 cp -a %{root}/. %{buildroot}/
 
-%post
+%post common
 # Start the background service with every login (it starts now too, when Linksy opens).
 if [ $1 -eq 1 ]; then systemctl --global enable linksyd.service >/dev/null 2>&1 || :; fi
 # Phones by USB cable: apply the udev rule to what's plugged in now.
@@ -53,7 +100,7 @@ udevadm trigger --subsystem-match=usb --action=change >/dev/null 2>&1 || :
 # Let nearby devices find this computer (firewalld or ufw, when one is on).
 if [ $1 -eq 1 ]; then /usr/libexec/linksy/linksy-system-setup firewall >/dev/null 2>&1 || :; fi
 
-%preun
+%preun common
 if [ $1 -eq 0 ]; then
   systemctl --global disable linksyd.service >/dev/null 2>&1 || :
   # The camera device Finish Setup made, if it did
@@ -62,11 +109,14 @@ if [ $1 -eq 0 ]; then
 fi
 
 %files
+/usr/bin/linksy-app
+
+%files common
 %license /usr/share/licenses/linksy/LICENSE
 %license /usr/share/licenses/linksy/THIRD-PARTY-NOTICES
 /usr/bin/linksyd
 /usr/bin/linksy
-/usr/bin/linksy-app
+/usr/bin/linksy-open
 /usr/bin/linksy-screen
 /usr/libexec/linksy/linksy-camera-setup
 /usr/libexec/linksy/linksy-usb-setup
@@ -78,3 +128,6 @@ fi
 /usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
 /usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg
 /usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg
+
+%files qt
+/usr/bin/linksy-qt

@@ -1,0 +1,16 @@
+Package: linksy-common
+Version: @VERSION@
+Architecture: amd64
+Maintainer: Linksy <https://github.com/LinkSy-mg/linksy-releases>
+Installed-Size: @SIZE@
+Depends: libc6 (>= 2.39), libgstreamer1.0-0, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-pipewire, xdg-desktop-portal
+Recommends: linksy | linksy-qt, gstreamer1.0-plugins-bad, gstreamer1.0-libav, wl-clipboard, v4l2loopback-dkms, v4l2loopback-utils
+Replaces: linksy (<< 0.8.4)
+Breaks: linksy (<< 0.8.4)
+Section: net
+Priority: optional
+Homepage: https://github.com/LinkSy-mg/linksy-releases
+Description: Your devices, connected (service and tools)
+ What both Linksy apps share: the background service that finds, pairs and talks to your
+ devices, the screen and camera helper, the linksy command and the setup helpers.
+ Install linksy (GNOME and others) or linksy-qt (KDE Plasma) for the window.

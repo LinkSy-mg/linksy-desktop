@@ -1,0 +1,12 @@
+# Builds the release linksy-qt against Debian 13's Qt 6.8 and KDE Frameworks 6.13, the
+# oldest the Qt app supports: the binary then runs on Debian 13, Ubuntu 25.04 and newer,
+# Fedora, openSUSE and Arch, whose Qt is the same or newer. scripts/package-linux.sh uses it.
+#   podman build -t linksy-qt-release -f packaging/qt/Containerfile.release packaging/qt
+FROM docker.io/library/debian:13
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl gcc g++ make pkg-config lld \
+      qt6-base-dev qt6-base-dev-tools qt6-declarative-dev libgstreamer1.0-dev \
+    && rm -rf /var/lib/apt/lists/*
+# Debian's Rust is older than Linksy needs
+RUN curl -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+ENV PATH=/root/.cargo/bin:$PATH QMAKE=/usr/lib/qt6/bin/qmake
