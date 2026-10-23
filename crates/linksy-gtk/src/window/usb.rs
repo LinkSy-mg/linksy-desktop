@@ -62,10 +62,16 @@ impl Window {
         for step in [&access, &plug, &switch, &open, &done] {
             list.append(&step.row);
         }
+        // Plugging a phone in asks nothing: this makes one switch on its own
+        let auto = adw::SwitchRow::builder().title(t!("Use the Cable Automatically")).visible(false).build();
+        let auto_list = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
+        auto_list.append(&auto);
+        auto.bind_property("visible", &auto_list, "visible").sync_create().build();
         let unpaired = adw::Banner::builder().title(t!("Pair your phone over Wi-Fi first; the cable then connects it.")).revealed(false).build();
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).margin_top(6).margin_bottom(24).margin_start(24).margin_end(24).build();
         body.append(&intro);
         body.append(&list);
+        body.append(&auto_list);
         let view = adw::ToolbarView::new();
         view.add_top_bar(&adw::HeaderBar::new());
         view.add_top_bar(&unpaired);
@@ -76,6 +82,22 @@ impl Window {
 
         // The phone Connect acts on: the one the last update showed.
         let phone_key: Rc<std::cell::RefCell<Option<String>>> = Rc::default();
+        // The plugged-in phone the automatic switch is about, and whether a refresh is
+        // setting it (not the user)
+        let auto_key: Rc<std::cell::RefCell<Option<String>>> = Rc::default();
+        let auto_showing = Rc::new(std::cell::Cell::new(false));
+        let (w, key, showing) = (self.clone(), auto_key.clone(), auto_showing.clone());
+        auto.connect_active_notify(move |row| {
+            if showing.get() {
+                return;
+            }
+            let (Some(c), Some(k)) = (w.client(), key.borrow().clone()) else { return };
+            let on = row.is_active();
+            let call = w.bridge.call(&c, move |c| async move { c.usb_auto(&k, on).await });
+            glib::spawn_future_local(async move {
+                let _ = call.await;
+            });
+        });
         let (w, key, t) = (self.clone(), phone_key.clone(), toasts.clone());
         connect.connect_clicked(move |b| {
             let (Some(c), Some(k)) = (w.client(), key.borrow().clone()) else { return };
@@ -108,7 +130,7 @@ impl Window {
         let steps = Rc::new((access, plug, switch, open, done, allow, connect, unpaired));
         let w = Rc::downgrade(self);
         let refresh = {
-            let (steps, key) = (steps.clone(), phone_key.clone());
+            let (steps, key, auto, auto_key, auto_showing) = (steps.clone(), phone_key.clone(), auto.clone(), auto_key.clone(), auto_showing.clone());
             move |status: Option<UsbStatus>| {
                 let Some(w) = w.upgrade() else { return };
                 let (access, plug, switch, open, done, allow, connect, unpaired) = &*steps;
@@ -131,6 +153,18 @@ impl Window {
                     UsbState::Declined => 0,
                 });
                 *key.borrow_mut() = phone.filter(|p| p.state != UsbState::Accessory).map(|p| p.key.clone());
+                // The automatic switch, for the phone plugged in now
+                match phone.filter(|p| p.state != UsbState::Accessory) {
+                    Some(p) => {
+                        auto_showing.set(true);
+                        auto.set_subtitle(&t!("{name} switches to Linksy as soon as it's plugged in, without asking. Off: only when you press Connect.", name = p.name));
+                        auto.set_active(p.auto);
+                        auto.set_visible(true);
+                        auto_showing.set(false);
+                        *auto_key.borrow_mut() = Some(p.key.clone());
+                    }
+                    None => auto.set_visible(cabled.is_some() && auto.is_visible()),
+                }
                 if !status.watching && cabled.is_none() {
                     plug.set("todo", t!("Linksy's service isn't watching USB. Restart Linksy, then try again."));
                 } else {

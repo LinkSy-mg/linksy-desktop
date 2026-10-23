@@ -160,5 +160,33 @@ Kirigami.ScrollablePage {
                 }
             }
         }
+
+        // Plugging a phone in asks nothing: this makes one switch on its own
+        Kirigami.AbstractCard {
+            Layout.fillWidth: true
+            visible: page.phone !== null && page.phone.state !== "accessory"
+            contentItem: RowLayout {
+                spacing: Kirigami.Units.largeSpacing
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 0
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        level: 4
+                        text: app.t("Use the Cable Automatically")
+                    }
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        opacity: 0.7
+                        text: app.t("{name} switches to Linksy as soon as it's plugged in, without asking. Off: only when you press Connect.", { name: page.phone?.name ?? "" })
+                    }
+                }
+                QQC2.Switch {
+                    checked: page.phone?.auto ?? false
+                    onToggled: app.request("usb_auto", { phone: page.phone.key, on: checked }, () => page.poll())
+                }
+            }
+        }
     }
 }
