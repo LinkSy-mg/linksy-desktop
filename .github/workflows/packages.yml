@@ -1,0 +1,127 @@
+name: Packages
+
+# Build every Linux package and install each one in clean containers of every supported
+# distribution (scripts/test-packages.sh), all distributions at once. Runs when packaging
+# changes, for every release tag, and by hand from the Actions tab.
+on:
+  pull_request:
+    paths:
+      - "packaging/**"
+      - "data/**"
+      - "scripts/package-linux.sh"
+      - "scripts/test-packages.sh"
+      - "Cargo.lock"
+      - ".github/workflows/packages.yml"
+  push:
+    branches: [main, "ci/**"]
+    tags: ["v*"]
+    paths:
+      - "packaging/**"
+      - "data/**"
+      - "scripts/package-linux.sh"
+      - "scripts/test-packages.sh"
+      - "Cargo.lock"
+      - ".github/workflows/packages.yml"
+  workflow_dispatch:
+
+# A newer push to the same branch or PR cancels the run still going.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Every program in one go, against Debian 13's libraries (glibc 2.41, GTK 4.18, Qt 6.8,
+  # KDE Frameworks 6.13), the oldest the packages support: built there, they run on every
+  # newer distribution.
+  build:
+    name: Build (Debian 13)
+    runs-on: ubuntu-latest
+    container: docker.io/library/debian:13
+    steps:
+      - run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl git gcc g++ make pkg-config lld \
+            libgtk-4-dev libadwaita-1-dev libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            qt6-base-dev qt6-base-dev-tools qt6-declarative-dev
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: release-debian-13
+      - run: cargo build --release --locked -p linksyd -p linksy -p linksy-app -p linksy-screen -p linksy-qt
+        env:
+          QMAKE: /usr/lib/qt6/bin/qmake
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: programs
+          path: |
+            target/release/linksyd
+            target/release/linksy
+            target/release/linksy-app
+            target/release/linksy-screen
+            target/release/linksy-qt
+          retention-days: 3
+
+  # Packing only: the .debs, the Fedora and openSUSE .rpms and the tarball, from the
+  # programs built above.
+  package:
+    name: Package
+    needs: build
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:latest
+    steps:
+      - run: dnf install -y --setopt=install_weak_deps=False rpm-build dpkg gawk diffutils findutils tar gzip xz
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: programs
+          path: target/release
+      - run: |
+          chmod +x target/release/*
+          LINKSY_PREBUILT=1 scripts/package-linux.sh
+          echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages
+          path: |
+            dist/v${{ env.VERSION }}/*.deb
+            dist/v${{ env.VERSION }}/*.rpm
+            dist/v${{ env.VERSION }}/*.tar.gz
+            dist/v${{ env.VERSION }}/SHA256SUMS
+            dist/v${{ env.VERSION }}/notes.md
+          retention-days: 14
+
+  # Each distribution in its own job, all at once: the GTK app, the Qt app, linksy-common
+  # alone (refused), and the upgrade from the newest published release.
+  test:
+    name: Install on ${{ matrix.distro }}
+    needs: package
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [fedora-44, fedora-43, opensuse, debian-13, ubuntu-26.04, ubuntu-25.10]
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - run: echo "VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: packages
+          path: dist/v${{ env.VERSION }}
+      # The newest published release before this one, for the upgrade test
+      - run: |
+          prev=$( (gh release list -R LinkSy-mg/linksy-releases --limit 50 --json tagName --jq '.[].tagName' \
+            | sed -n 's/^linux-v//p'; echo "$VERSION") | sort -uV | grep -B1 -x "$VERSION" | head -1 | grep -vx "$VERSION" || true)
+          [ -n "$prev" ] && gh release download "linux-v$prev" -R LinkSy-mg/linksy-releases -D "dist/v$prev" -p '*.deb' -p '*.rpm'
+          echo "Upgrading from $prev"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: scripts/test-packages.sh ${{ matrix.distro }}
