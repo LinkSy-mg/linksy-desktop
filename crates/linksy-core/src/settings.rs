@@ -110,15 +110,18 @@ impl Settings {
             return Err(invalid("the download folder must be an absolute path"));
         }
         std::fs::create_dir_all(&self.download_dir)?;
-        // The relay: an https URL (http only for a relay on this machine, in development),
-        // as iroh reads it. Blank means Linksy's own.
+        // The relay: an https URL, as iroh reads it; plain http only for a relay on this
+        // machine (localhost, 127.0.0.1, ::1), in development. Blank means Linksy's own.
         self.relay = match self.relay.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
             None => None,
             Some(r) => {
-                if !(r.starts_with("https://") || r.starts_with("http://")) {
-                    return Err(invalid("the relay address must start with https://"));
-                }
                 let url: iroh::RelayUrl = r.parse().map_err(|e| invalid(format!("the relay address doesn't look right: {e}")))?;
+                let on_this_machine = url.host_str().is_some_and(|h| h == "localhost" || h.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback()));
+                match url.scheme() {
+                    "https" => {}
+                    "http" if on_this_machine => {}
+                    _ => return Err(invalid("the relay address must start with https:// (http:// only for a relay on this machine)")),
+                }
                 Some(url.to_string())
             }
         };
@@ -172,6 +175,15 @@ mod tests {
         assert!(s.clone().validated().is_err());
         s.relay = Some("https://".into());
         assert!(s.clone().validated().is_err());
+        // Plain http only on this machine.
+        for local in ["http://localhost:3340", "http://127.0.0.1:3340", "http://[::1]:3340"] {
+            s.relay = Some(local.into());
+            assert!(s.clone().validated().is_ok(), "{local}");
+        }
+        for remote in ["http://relay.example.com", "http://10.0.0.5:3340", "ftp://relay.example.com"] {
+            s.relay = Some(remote.into());
+            assert!(s.clone().validated().is_err(), "{remote}");
+        }
         // Saved only when set: a cleared relay leaves no trace.
         s.relay = Some("https://relay.example.com".into());
         let path = dir.path().join("settings.json");
