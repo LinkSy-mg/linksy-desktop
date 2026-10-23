@@ -185,10 +185,19 @@ Kirigami.ScrollablePage {
         }
 
         // What it can be for this computer
-        Kirigami.Heading {
-            level: 3
+        RowLayout {
             visible: useAs.visible
-            text: app.t("Use {device} as", { device: page.name })
+            Kirigami.Heading {
+                level: 3
+                text: app.t("Use {device} as", { device: page.name })
+            }
+            // Faster by cable, for a phone not on one yet
+            QQC2.ToolButton {
+                visible: page.phone && !(page.view?.usb ?? false)
+                icon.name: "drive-removable-media-usb"
+                text: app.t("Connect by USB Cable")
+                onClicked: app.openUsb()
+            }
         }
         Flow {
             id: useAs

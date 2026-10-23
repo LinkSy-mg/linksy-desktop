@@ -54,6 +54,7 @@ Kirigami.ApplicationWindow {
             if (open === "prefs") pageStack.pushDialogLayer(Qt.resolvedUrl("PrefsPage.qml"), { app: root });
             if (open === "screen") openScreen.start();
             if (open === "setup") root.openSetup();
+            if (open === "usb") root.openUsb();
             if (open === "camera") root.previewCamera("", "Pixel");
         }
         onOffline: why => { if (why) root.toast(why) }
@@ -138,6 +139,10 @@ Kirigami.ApplicationWindow {
     // What apps get from a phone's camera in use here, with its controls
     function previewCamera(session, name) {
         pageStack.layers.push(Qt.resolvedUrl("CameraPage.qml"), { app: root, session: session, name: backend.cameraName(name) });
+    }
+
+    function openUsb() {
+        pageStack.pushDialogLayer(Qt.resolvedUrl("UsbPage.qml"), { app: root });
     }
 
     function openSetup() {

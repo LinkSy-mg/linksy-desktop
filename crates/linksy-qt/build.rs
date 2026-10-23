@@ -12,6 +12,7 @@ fn main() {
         "qml/ScreenVideo.qml",
         "qml/SetupPage.qml",
         "qml/CameraPage.qml",
+        "qml/UsbPage.qml",
     ]))
         .qt_module("Quick")
         .qt_module("QuickControls2")

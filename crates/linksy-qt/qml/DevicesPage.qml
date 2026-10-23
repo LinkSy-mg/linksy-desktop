@@ -17,6 +17,12 @@ Kirigami.ScrollablePage {
             onTriggered: app.openInvite()
         },
         Kirigami.Action {
+            icon.name: "drive-removable-media-usb"
+            text: app.t("Connect by USB Cable…")
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            onTriggered: app.openUsb()
+        },
+        Kirigami.Action {
             icon.name: "configure"
             text: app.t("Preferences")
             displayHint: Kirigami.DisplayHint.AlwaysHide

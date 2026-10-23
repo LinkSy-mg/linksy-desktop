@@ -3,7 +3,7 @@
 # other (ui-scene.sh), off screen, and save a PNG. Runs in the linksy-qt-dev container
 # (packaging/qt/Containerfile), so nothing touches this computer's own Linksy.
 # Usage: scripts/qt-shot.sh <out.png> [delay-ms] [WxH]
-# LINKSY_SCREENSHOT_OPEN=invite|prefs|screen|setup|camera opens that screen first (the test devices share
+# LINKSY_SCREENSHOT_OPEN=invite|prefs|screen|setup|camera|usb opens that screen first (the test devices share
 # a test pattern for screens). LINKSY_QT_SCENE=<script> runs a
 # script once the scene is up, with D set to the scene folder (a.sock is the app's service).
 set -euo pipefail

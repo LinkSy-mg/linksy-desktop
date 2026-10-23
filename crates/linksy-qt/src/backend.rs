@@ -100,6 +100,11 @@ pub mod qobject {
         #[qinvokable]
         fn reboot(&self);
 
+        /// Whether phones can be used by cable here: empty when they can, else why not.
+        #[qinvokable]
+        #[cxx_name = "usbReady"]
+        fn usb_ready(&self) -> QString;
+
         #[qsignal]
         #[cxx_name = "setupChecked"]
         fn setup_checked(self: Pin<&mut Backend>, json: QString);
@@ -325,6 +330,10 @@ impl qobject::Backend {
 
     pub fn camera_name(&self, phone: &QString) -> QString {
         QString::from(&linksy_setup::camera_name(&phone.to_string()))
+    }
+
+    pub fn usb_ready(&self) -> QString {
+        QString::from(&linksy_setup::usb_ready().err().unwrap_or_default())
     }
 
     pub fn reboot(&self) {
