@@ -23,10 +23,22 @@ Kirigami.ScrollablePage {
             onTriggered: app.openUsb()
         },
         Kirigami.Action {
+            icon.name: "folder-download"
+            text: app.t("Open Received Files")
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            onTriggered: if (app.settings) Qt.openUrlExternally("file://" + app.settings.download_dir)
+        },
+        Kirigami.Action {
             icon.name: "configure"
             text: app.t("Preferences")
             displayHint: Kirigami.DisplayHint.AlwaysHide
             onTriggered: app.pageStack.pushDialogLayer(Qt.resolvedUrl("PrefsPage.qml"), { app: app })
+        },
+        Kirigami.Action {
+            icon.name: "run-build-install"
+            text: app.t("Finish Setup…")
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            onTriggered: app.openSetup()
         },
         Kirigami.Action {
             icon.name: "help-about"
