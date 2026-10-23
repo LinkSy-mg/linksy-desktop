@@ -15,7 +15,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.6 | Anywhere | Away from home over the internet, with a 7-day lease · Locate the phone · 1080p webcam (desktop done in 0.6.0) |
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
-| **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Problem logs (`logs.txt`) · Lighter at rest |
+| **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Problem logs (`logs.txt`) · Lighter at rest |
 | **0.10** | **At home on KDE** | A Qt 6 app for KDE Plasma, beside the GTK one |
 | **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
@@ -49,6 +49,22 @@ something Linksy relies on, Linksy brings its own fallback instead of asking for
   desktop can't do are hidden.
 - **Done when:** on Hyprland and Sway every feature works or says why it can't, tested in a
   nested compositor and on a real install.
+
+### Every version, not only the newest — M
+Linksy should run on as many desktops and distribution versions as it reasonably can.
+- **Ubuntu 24.04 LTS** and what's built on it (Linux Mint 22, Pop!_OS, Zorin): the app
+  needs libadwaita 1.5 instead of 1.6, so the .deb installs there.
+- **A test matrix** in CI: the packages install and start on every supported release of
+  Ubuntu, Debian, Fedora, openSUSE, Arch and Linux Mint.
+- **Plasma 5** (Kubuntu 24.04, Debian 12): the Flatpak, which brings its own toolkit.
+- **Every dependency listed** in one page, feature by feature with each distribution's
+  package names, for installing by hand when Finish Setup can't.
+- **Done when:** the .deb installs and runs on Ubuntu 24.04, and CI proves every listed
+  release.
+
+### The cable when you ask for it — S
+Plugging a phone in to charge no longer pops a question. A "Connect by USB Cable" button
+on the device's page, in the desktop app and the phone app, switches the cable to Linksy.
 
 ### Problem logs — S
 When something goes wrong, one file says what happened, ready to attach to a bug report.
