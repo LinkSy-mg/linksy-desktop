@@ -747,9 +747,13 @@ computer or on the phone.
 - **Computer:** no notification on plug-in. A device page for a paired Android phone shows
   **Connect by USB Cable** while a phone is plugged in and not switched; with exactly one
   plugged phone it switches it, with several it opens the guide to pick one.
-- **Use the cable automatically:** a switch on the computer's device page, **off by
-  default** (also for phones that said yes before 0.9). On, that phone is switched as soon
-  as it's plugged in, as before. The setting lives on the computer; the phone needs nothing.
+- **Use the cable automatically:** a switch per plugged-in phone in the computer's Connect
+  by USB Cable guide, **off by default** (also for phones that said yes before). On, that
+  phone is switched as soon as it's plugged in, as before. The setting lives on the
+  computer (`usb-auto.json`, keyed by the phone's USB serial); the phone needs nothing.
+- **Shipped in desktop 0.8.7:** no question on plug-in, Connect from the guide (the phone's
+  page leads there), and the automatic switch. **Still to come (0.9):** `usb_plugged` and
+  `usb_connect`, so the phone gets its own button.
 
 ### 4.12 Service information (planned for 0.6)
 
@@ -1419,3 +1423,8 @@ robust against any encoder (GPU ones may slice too):
   you ask for it** (§4.11: no prompt on plug-in, `usb_plugged` and `usb_connect`,
   "Connect by USB Cable" on the computer's page in the app). Nothing changes for the phone
   until it implements them; an upgraded computer still finds and is found by today's app.
+
+- **2026-10-23** — Desktop 0.8.7: plugging a phone in no longer asks anything (§4.11).
+  The computer's guide connects it, and a per-phone "use the cable automatically" switch
+  (off by default) brings back switching on plug-in. `usb_plugged` / `usb_connect` for the
+  phone's own button come in 0.9; nothing to change on the phone yet.

@@ -4,6 +4,13 @@ Linksy for Linux. Each version's section becomes its release notes.
 
 ## Unreleased
 
+### Changed
+- **Plugging a phone in no longer asks anything.** Most of the time it's only charging, and
+  switching it to Linksy stops its file transfer by cable. Connect by USB Cable (on the
+  phone's page, or in the menu) uses the cable when you want it, and **Use the Cable
+  Automatically** in that guide switches a phone on its own whenever it's plugged in, as
+  before. It starts off for every phone.
+
 ### Fixed
 - **Second Display on Hyprland and Sway failed halfway.** Their screen sharing can't make
   a virtual monitor yet; Linksy now says so before starting, in the app and in a
