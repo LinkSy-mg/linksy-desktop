@@ -7,6 +7,9 @@
 #   pkg:NAME ...   install these packages with the system's own tool (dnf, apt, zypper, pacman);
 #                  only the ones Finish Setup asks for (the list below)
 #   camera usb firewall
+#   upgrade:PATH ...  install these downloaded Linksy packages (linksy upgrade, Update Now;
+#                  only files named like Linksy's own .rpm or .deb, already checked against
+#                  the release's checksums)
 #
 # Each step prints a line starting with "STEP " (what Linksy shows while it works).
 # Exit codes: 0 done, 4 the camera driver waits for a restart to be approved (Secure Boot:
@@ -87,13 +90,40 @@ firewall() {
   mkdir -p /etc/linksy && touch /etc/linksy/firewall
 }
 
-fusion=0 camera=0 usb=0 fw=0 packages=""
+# A downloaded Linksy package: linksy, linksy-common or linksy-qt, .rpm or .deb, nothing else
+linksy_file() {
+  case "$1" in /*) ;; *) return 1 ;; esac
+  [ -f "$1" ] || return 1
+  case "$(basename "$1")" in
+    linksy-common[-_][0-9]*.rpm|linksy-common[-_][0-9]*.deb|linksy-qt[-_][0-9]*.rpm|linksy-qt[-_][0-9]*.deb|linksy[-_][0-9]*.rpm|linksy[-_][0-9]*.deb) return 0 ;;
+  esac
+  return 1
+}
+
+upgrade() {
+  echo "STEP Installing $*"
+  if command -v dnf >/dev/null; then
+    dnf install -y "$@" || return 1
+  elif command -v zypper >/dev/null; then
+    zypper --non-interactive install --allow-unsigned-rpm "$@" || return 1
+  elif command -v apt-get >/dev/null; then
+    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y "$@" || return 1
+  else
+    echo "no package manager this helper knows (dnf, apt, zypper)" >&2
+    return 1
+  fi
+}
+
+fusion=0 camera=0 usb=0 fw=0 packages="" upgrades=""
 for arg in "$@"; do
   case "$arg" in
     rpmfusion) fusion=1 ;;
     pkg:*)
       name=${arg#pkg:}
       if allowed "$name"; then packages="$packages $name"; else echo "not a package Linksy needs: $name" >&2; fail 2; fi ;;
+    upgrade:*)
+      file=${arg#upgrade:}
+      if linksy_file "$file"; then upgrades="$upgrades $file"; else echo "not a Linksy package: $file" >&2; fail 2; fi ;;
     camera) camera=1 ;;
     usb) usb=1 ;;
     firewall) fw=1 ;;
@@ -101,6 +131,8 @@ for arg in "$@"; do
   esac
 done
 
+# shellcheck disable=SC2086
+if [ -n "$upgrades" ]; then upgrade $upgrades || fail 1; fi
 if [ "$fusion" -eq 1 ]; then rpmfusion || fail 1; fi
 # shellcheck disable=SC2086
 if [ -n "$packages" ]; then install_packages $packages || fail 1; fi
