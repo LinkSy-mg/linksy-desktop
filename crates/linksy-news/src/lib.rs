@@ -34,6 +34,23 @@ struct Release {
 fn releases() -> Vec<Release> {
     vec![
         Release {
+            version: "0.8.7",
+            highlights: vec![
+                Highlight {
+                    gtk: "media-removable-symbolic",
+                    qt: "drive-removable-media-usb",
+                    title: t!("Plug In to Charge, Nothing Asked"),
+                    body: t!("A phone plugged in is left alone. Connect by USB Cable uses the cable when you want it, or turn on Use the Cable Automatically for a phone."),
+                },
+                Highlight {
+                    gtk: "camera-web-symbolic",
+                    qt: "camera-web",
+                    title: t!("The Flatpak's Webcam in Every App"),
+                    body: t!("In the Flatpak, Finish Setup gives the one command that adds the camera driver, and the USB guide the one for the cable."),
+                },
+            ],
+        },
+        Release {
             version: "0.8.6",
             highlights: vec![Highlight {
                 gtk: "software-update-available-symbolic",
