@@ -99,6 +99,17 @@ upgrading should be as easy, from the terminal and from the apps.
 - **Done when:** a new release reaches someone with one command or one click, restarts
   cleanly, and never installs a file whose checksum doesn't match.
 
+### The Flatpak, nearly everything — S
+The Flatpak's sandbox can't change the system, so the webcam in browsers and calls (the
+`v4l2loopback` driver) and the USB cable (a udev rule) don't set themselves up there. Both
+work once that one step is done outside it.
+- **Finish Setup in the Flatpak** shows the exact command for this system to copy (the
+  camera driver, the USB rule), instead of "a Flatpak can't add this", then checks it took.
+- **The wording** on the website, in the installer and in the release README says "need a
+  one-time setup step" instead of "no webcam in browsers and calls, no USB cable".
+- **Done when:** after one pasted command, the Flatpak has the webcam in every app and the
+  cable, like the packages.
+
 ### Problem logs — S
 When something goes wrong, one file says what happened, ready to attach to a bug report.
 - **Desktop:** a crash in the app, the service or the screen helper writes what it knows
