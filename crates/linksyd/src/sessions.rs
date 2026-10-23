@@ -183,6 +183,12 @@ impl Sessions {
         if device && session.kind == SessionKind::Camera {
             return self.run_webcam(session).await;
         }
+        // Said before anything starts, rather than failing in the middle
+        if !device && session.kind == SessionKind::Display && !virtual_monitors().await {
+            #[cfg(target_os = "linux")]
+            crate::notify::show(linksy_i18n::t!("No Second Display Here Yet").into(), no_virtual_monitors());
+            return Err(std::io::Error::other(no_virtual_monitors()));
+        }
         let role = match session.kind {
             _ if !device => "share",
             SessionKind::Microphone => "mic",
@@ -424,6 +430,46 @@ fn window_app() -> PathBuf {
     let beside = helper("linksy-open");
     let in_path = std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join("linksy-open").is_file()));
     if beside.is_absolute() || in_path { beside } else { helper("linksy-app") }
+}
+
+/// Whether this desktop's screen sharing can make a virtual monitor (a second display):
+/// GNOME's and KDE's can, Hyprland's and the wlroots one can't yet. The portal says so in
+/// its AvailableSourceTypes (4 = virtual). Unsure (no portal answer): yes, and the helper
+/// finds out.
+pub(crate) async fn virtual_monitors() -> bool {
+    if std::env::var_os("LINKSY_SCREEN_TEST").is_some() {
+        return true;
+    }
+    // Known without one, whatever their portal says (#42): until Linksy makes a headless
+    // output there itself (0.9)
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
+    if ["hyprland", "sway"].iter().any(|d| desktop.contains(d)) {
+        return false;
+    }
+    let Ok(bus) = zbus::Connection::session().await else { return true };
+    let reply = bus
+        .call_method(
+            Some("org.freedesktop.portal.Desktop"),
+            "/org/freedesktop/portal/desktop",
+            Some("org.freedesktop.DBus.Properties"),
+            "Get",
+            &("org.freedesktop.portal.ScreenCast", "AvailableSourceTypes"),
+        )
+        .await;
+    let Ok(reply) = reply else { return true };
+    match reply.body().deserialize::<zbus::zvariant::OwnedValue>().ok().and_then(|v| u32::try_from(v).ok()) {
+        Some(types) => types & 4 != 0,
+        None => true,
+    }
+}
+
+/// Why there's no second display here, for the app and the notification.
+pub(crate) fn no_virtual_monitors() -> String {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok().and_then(|d| d.split(':').next().map(str::to_string)).filter(|d| !d.is_empty());
+    match desktop {
+        Some(desktop) => linksy_i18n::t!("Second Display isn't available on {desktop} yet: its screen sharing can't make a virtual monitor. GNOME and KDE Plasma can.", desktop),
+        None => linksy_i18n::t!("Second Display isn't available on this desktop yet: its screen sharing can't make a virtual monitor. GNOME and KDE Plasma can.").into(),
+    }
 }
 
 pub(crate) fn helper(name: &str) -> PathBuf {

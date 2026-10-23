@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Fixed
+- **Second Display on Hyprland and Sway failed halfway.** Their screen sharing can't make
+  a virtual monitor yet; Linksy now says so before starting, in the app and in a
+  notification, instead of failing. Support for them is planned for 0.9.
+
 ## 0.8.6
 
 ### Added

@@ -325,6 +325,10 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
         }
         Request::StartSession { with, kind } => {
             let id = resolve(node, &with)?;
+            // A second display needs a virtual monitor: say so before asking the other device
+            if kind == linksy_core::SessionKind::Display && !crate::sessions::virtual_monitors().await {
+                return Err(crate::sessions::no_virtual_monitors());
+            }
             let session = node.request_session(&id, kind).await.map_err(|e| e.to_string())?;
             let id = session.id;
             // A second display: this device shares, the service runs that side. A camera or
