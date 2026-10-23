@@ -5,6 +5,7 @@
 mod camera;
 mod invite;
 mod messages;
+mod news;
 mod page;
 mod prefs;
 mod screen;
@@ -337,7 +338,10 @@ impl Window {
         win.setup_page();
         win.setup_messages();
         win.refresh_setup();
-        win.offer_setup();
+        // One thing at a time: Finish Setup when it's needed, otherwise what's new
+        if !win.offer_setup() {
+            win.offer_news();
+        }
         let w = win.clone();
         win.update_button.connect_clicked(move |_| {
             if let Some(url) = w.update_notes.borrow().clone() {
@@ -362,7 +366,7 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 11] = [
+        let actions: [(&str, Run); 12] = [
             ("choose-files", |w| w.choose_files()),
             ("toggle-sidebar", |w| w.split.set_show_sidebar(!w.split.shows_sidebar())),
             ("start-service", |w| w.start_service()),
@@ -373,6 +377,7 @@ impl Window {
             }),
             ("preferences", |w| w.show_preferences()),
             ("setup", |w| w.show_setup()),
+            ("news", |w| w.show_news()),
             ("usb-cable", |w| w.show_usb_cable()),
             ("add-device", |w| w.show_invite()),
             ("pair-address", |w| w.ask_pair_address()),
@@ -1610,6 +1615,7 @@ fn main_menu() -> gtk::MenuButton {
     let section = gio::Menu::new();
     section.append(Some(t!("Preferences")), Some("win.preferences"));
     section.append(Some(t!("Finish Setup…")), Some("win.setup"));
+    section.append(Some(t!("What's New")), Some("win.news"));
     section.append(Some(t!("Keyboard Shortcuts")), Some("win.show-help-overlay"));
     section.append(Some(t!("About Linksy")), Some("app.about"));
     menu.append_section(None, &section);

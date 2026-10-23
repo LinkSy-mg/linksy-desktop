@@ -185,6 +185,12 @@ button.tl-action { padding: 2px 8px; min-height: 24px; font-weight: 700; color: 
 .bubble.mine { background-color: @accent_bg_color; color: @accent_fg_color; }
 .bubble.theirs { background-color: alpha(currentColor, 0.08); }
 row.unread .title { font-weight: 700; }
+/* What's New: icons pop in, the star wiggles when pointed at (both off with animations off) */
+.news-icon { min-width: 20px; min-height: 20px; padding: 9px; border-radius: 999px; background: alpha(var(--accent-bg-color), 0.14); color: var(--accent-color); }
+.news-pop { animation: news-pop 420ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+@keyframes news-pop { from { transform: scale(0.5); opacity: 0; } to { transform: none; opacity: 1; } }
+.news-star:hover image { animation: news-wiggle 520ms ease-in-out; }
+@keyframes news-wiggle { 0%, 100% { transform: none; } 30% { transform: rotate(-16deg) scale(1.15); } 65% { transform: rotate(10deg) scale(1.1); } }
 "#;
 
 /// Linksy's styles, for every window of the app.

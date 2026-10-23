@@ -74,11 +74,13 @@ impl Window {
         self.setup_button.set_label(&if n == 1 { t!("Finish Setup · 1 thing").to_string() } else { t!("Finish Setup · {n} things", n) });
     }
 
-    /// The first time each version starts with something to set up: offer it.
-    pub(super) fn offer_setup(self: &Rc<Self>) {
-        if linksy_setup::offer_now(Ui::Gtk, env!("CARGO_PKG_VERSION")) {
+    /// The first time each version starts with something to set up: offer it. Whether it did.
+    pub(super) fn offer_setup(self: &Rc<Self>) -> bool {
+        let offer = linksy_setup::offer_now(Ui::Gtk, env!("CARGO_PKG_VERSION"));
+        if offer {
             self.show_setup();
         }
+        offer
     }
 
     pub fn show_setup(self: &Rc<Self>) {
