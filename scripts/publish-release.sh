@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 grep -q "^## $V\$" CHANGELOG.md || { echo "CHANGELOG.md has no ## $V section"; exit 1; }
 grep -q "release version=\"$V\"" data/mg.diary.linksy.Linksy.metainfo.xml || { echo "metainfo has no $V release"; exit 1; }
-[ -z "$(git status --porcelain)" ] || { echo "commit your changes first"; exit 1; }
+[ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "commit your changes first"; exit 1; }
 
 # Flathub builds from the tag the manifest names
 sed -i "s/^        tag: v.*/        tag: v$V/" packaging/flatpak/mg.diary.linksy.Linksy.yml
