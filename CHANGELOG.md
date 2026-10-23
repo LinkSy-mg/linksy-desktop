@@ -8,13 +8,22 @@ Linksy for Linux. Each version's section becomes its release notes.
 - **A Linksy for KDE Plasma.** `linksy-qt` is the same Linksy as a Qt 6 and Kirigami app, in
   Breeze, made for Plasma 6: your devices, pairing, sending files, the clipboard, Ring,
   Locate, another device's screen (watch or take control), the phone as second display,
-  webcam or microphone, and the preferences.
+  webcam (with a preview and the phone's camera controls) or microphone, this computer as
+  another one's second display, Connect by USB Cable, Finish Setup, update notices and the
+  preferences.
 - **Packages split the way Transmission's are:** `linksy-common` (the service and tools)
   with `linksy` (the GTK app) or `linksy-qt` (the Qt app). Install linksy-common and the app
   for your desktop; when both apps are installed, Linksy opens the Qt one on Plasma. Upgrades
   from 0.8.3 move over by themselves.
 
 ### Fixed
+- **The phone's camera on CachyOS and other Arch-based kernels.** Finish Setup installed
+  the stock `linux-headers` whatever the kernel; it now reads which kernel package is
+  running and installs its own headers (`linux-cachyos-headers`…). And where the kernel
+  already has the camera driver but not its `v4l2loopback-ctl` tool, as CachyOS's does,
+  Finish Setup installs the tool first instead of stopping at "command not found".
+- **A second display started from another computer opened nothing when only the Qt app
+  was installed**; the service now opens whichever app the desktop uses.
 - **Finish Setup on Arch found its setup helper only where Fedora and Debian keep it**;
   it now looks in `/usr/lib/linksy` too, where Arch packages put it.
 - **The app store listing's screenshots** come from the public repository, where they are.
