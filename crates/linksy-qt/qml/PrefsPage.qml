@@ -166,6 +166,30 @@ Kirigami.ScrollablePage {
             opacity: 0.7
             font: Kirigami.Theme.smallFont
         }
+        // Self-hosting: a relay of the user's own, instead of Linksy's (linksy-server)
+        RowLayout {
+            Kirigami.FormData.label: app.t("Relay Server") + ":"
+            QQC2.TextField {
+                id: relayField
+                text: page.s?.relay ?? ""
+                placeholderText: "https://relay.example.com"
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 14
+                // Blank: back to Linksy's own relay
+                onAccepted: page.update({ relay: text.trim() || null })
+            }
+            QQC2.Button {
+                text: app.t("Save")
+                enabled: relayField.text.trim() !== (page.s?.relay ?? "")
+                onClicked: page.update({ relay: relayField.text.trim() || null })
+            }
+        }
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            wrapMode: Text.Wrap
+            text: app.t("Away from home goes through Linksy's relay unless you give one you host yourself, as https://relay.example.com. Set the same relay on every device.")
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
         Kirigami.Separator {
             Kirigami.FormData.isSection: true
             Kirigami.FormData.label: app.t("Terminal")
