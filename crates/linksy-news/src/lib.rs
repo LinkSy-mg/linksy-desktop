@@ -34,6 +34,15 @@ struct Release {
 fn releases() -> Vec<Release> {
     vec![
         Release {
+            version: "0.8.6",
+            highlights: vec![Highlight {
+                gtk: "software-update-available-symbolic",
+                qt: "update-none",
+                title: t!("Update in One Click"),
+                body: t!("When a new version is out, Update Now installs it, checked and with one password, and starts Linksy again. In a terminal: linksy upgrade."),
+            }],
+        },
+        Release {
             version: "0.8.5",
             highlights: vec![
                 Highlight {
@@ -164,6 +173,7 @@ mod tests {
     #[test]
     fn skipped_versions_add_up() {
         assert_eq!(between(Some("0.8.4"), "0.8.5").len(), 2);
+        assert_eq!(between(Some("0.8.5"), "0.8.6").len(), 1);
         assert_eq!(between(Some("0.8.3"), "0.8.5").len(), 5);
         assert!(between(Some("0.8.5"), "0.8.5").is_empty());
     }
