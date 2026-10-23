@@ -42,6 +42,9 @@ Usage:
                                      relay https://…|default (your own relay)
   linksy watch                       follow activity and answer requests
   linksy status                      this device
+  linksy upgrade [-y]                install the newest Linksy, then restart it
+  linksy --version                   Linksy's version (and the service's, if it differs)
+  linksy --revision                  the exact build, for bug reports
 
 <device> is a name, a short id like A1B2-C3D4, or a full id.";
 
@@ -56,6 +59,16 @@ async fn main() -> ExitCode {
         println!("{HELP}");
         return ExitCode::SUCCESS;
     }
+    // These work without the service
+    match cmd {
+        "-V" | "--version" | "version" => return version().await,
+        "--revision" | "revision" => {
+            println!("Linksy {}", linksy_upgrade::revision());
+            return ExitCode::SUCCESS;
+        }
+        "upgrade" | "update" => return upgrade(args[1..].iter().any(|a| a == "-y" || a == "--yes")),
+        _ => {}
+    }
     let client = match Client::connect().await {
         Ok(c) => c,
         Err(_) => {
@@ -65,6 +78,68 @@ async fn main() -> ExitCode {
     };
     match run(&client, cmd, &args[1..]).await {
         Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("{e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// `linksy --version`: this one's, and the running service's when it differs (an upgrade
+/// installed, but the service not restarted yet).
+async fn version() -> ExitCode {
+    println!("Linksy {}", linksy_upgrade::VERSION);
+    if let Ok(c) = Client::connect().await
+        && let Ok(s) = c.status().await
+        && !s.version.is_empty()
+        && s.version != linksy_upgrade::VERSION
+    {
+        println!("The running service is {}: restart it with `systemctl --user restart linksyd`.", s.version);
+    }
+    ExitCode::SUCCESS
+}
+
+/// `linksy upgrade`: the newest version, checked and installed, then Linksy restarted.
+fn upgrade(yes: bool) -> ExitCode {
+    println!("Checking for a newer Linksy…");
+    let plan = match linksy_upgrade::check() {
+        Ok(Some(plan)) => plan,
+        Ok(None) => {
+            println!("Linksy {} is the newest version.", linksy_upgrade::VERSION);
+            return ExitCode::SUCCESS;
+        }
+        Err(e) => {
+            eprintln!("{e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!("Linksy {} is available (this is {}).", plan.latest, plan.current);
+    if let Some(notes) = &plan.notes {
+        println!("What's new: {notes}");
+    }
+    if let Some(why) = linksy_upgrade::manual(&plan) {
+        println!("{why}");
+        return ExitCode::FAILURE;
+    }
+    println!("It installs: {}", plan.files.join(", "));
+    if !yes {
+        print!("Upgrade now? [Y/n] ");
+        let _ = std::io::stdout().flush();
+        let mut answer = String::new();
+        let _ = std::io::stdin().read_line(&mut answer);
+        if answer.trim().to_lowercase().starts_with('n') {
+            return ExitCode::SUCCESS;
+        }
+    }
+    match linksy_upgrade::run(&plan, linksy_upgrade::Root::Sudo, |step| println!("  {step}…")) {
+        Ok(()) if std::env::var_os("LINKSY_DRY_RUN").is_some() => {
+            println!("Dry run: nothing was installed.");
+            ExitCode::SUCCESS
+        }
+        Ok(()) => {
+            println!("Linksy {} is installed and its service restarted. If Linksy's window is open, close it and open it again.", plan.latest);
+            ExitCode::SUCCESS
+        }
         Err(e) => {
             eprintln!("{e}");
             ExitCode::FAILURE

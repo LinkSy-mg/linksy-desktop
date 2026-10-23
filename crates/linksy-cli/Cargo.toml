@@ -6,5 +6,6 @@ license.workspace = true
 
 [dependencies]
 linksy-ipc = { path = "../linksy-ipc" }
+linksy-upgrade = { path = "../linksy-upgrade" }
 qrcode = { version = "0.14.1", default-features = false }
 tokio = { version = "1.53.3", features = ["rt", "macros", "io-std", "io-util", "signal", "time", "net", "fs"] }
