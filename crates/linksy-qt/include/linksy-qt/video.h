@@ -108,15 +108,41 @@ inline void stop_stream()
     }
 }
 
+// Play `description` (a GStreamer pipeline ending in a qml6glsink named "sink") in the QML
+// item named `item`, `fd` closing with it. Empty when it plays, else what went wrong.
+inline QString play_pipeline(const QString &item, const QByteArray &description, int fd)
+{
+    QQuickItem *target = linksy_video::find_item(item);
+    if (!target) {
+        if (fd >= 0)
+            ::close(fd);
+        return QStringLiteral("no video item");
+    }
+    GError *error = nullptr;
+    GstElement *pipeline = gst_parse_launch(description.constData(), &error);
+    if (!pipeline) {
+        QString why = QString::fromUtf8(error ? error->message : "pipeline");
+        g_clear_error(&error);
+        if (fd >= 0)
+            ::close(fd);
+        return why;
+    }
+    GstElement *sink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
+    g_object_set(sink, "widget", target, nullptr);
+    gst_object_unref(sink);
+    if (QQuickWindow *window = target->window())
+        window->scheduleRenderJob(new linksy_video::SetPlaying(pipeline), QQuickWindow::BeforeSynchronizingStage);
+    else
+        gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    linksy_video::playing() = { pipeline, fd };
+    return {};
+}
+
 // Play the stream at `socket_path` in the QML item named `item`. Empty when it plays, else
 // what went wrong.
 inline QString play_stream(const QString &item, const QString &socket_path)
 {
     stop_stream();
-    QQuickItem *target = linksy_video::find_item(item);
-    if (!target)
-        return QStringLiteral("no video item");
-
     const char *decoder = nullptr;
     for (const char *d : { "vah264dec", "avdec_h264", "openh264dec" }) {
         if (GstElementFactory *f = gst_element_factory_find(d)) {
@@ -141,25 +167,15 @@ inline QString play_stream(const QString &item, const QString &socket_path)
 
     // libav's frame threading holds a frame per thread first; slices keep it immediate
     const QByteArray dec = qstrcmp(decoder, "avdec_h264") == 0 ? QByteArray("avdec_h264 thread-type=slice") : QByteArray(decoder);
-    const QByteArray description = QByteArray("fdsrc fd=") + QByteArray::number(fd)
-        + " ! h264parse ! " + dec + " ! videoconvert ! glupload ! qml6glsink name=sink sync=false";
-    GError *error = nullptr;
-    GstElement *pipeline = gst_parse_launch(description.constData(), &error);
-    if (!pipeline) {
-        QString why = QString::fromUtf8(error ? error->message : "pipeline");
-        g_clear_error(&error);
-        ::close(fd);
-        return why;
-    }
-    GstElement *sink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
-    g_object_set(sink, "widget", target, nullptr);
-    gst_object_unref(sink);
-    if (QQuickWindow *window = target->window())
-        window->scheduleRenderJob(new linksy_video::SetPlaying(pipeline), QQuickWindow::BeforeSynchronizingStage);
-    else
-        gst_element_set_state(pipeline, GST_STATE_PLAYING);
-    linksy_video::playing() = { pipeline, fd };
-    return {};
+    return play_pipeline(item, QByteArray("fdsrc fd=") + QByteArray::number(fd) + " ! h264parse ! " + dec + " ! videoconvert ! glupload ! qml6glsink name=sink sync=false", fd);
+}
+
+// Show a local video source (a GStreamer source description: the Linksy Camera, as apps
+// read it) in the QML item named `item`
+inline QString play_source(const QString &item, const QString &source)
+{
+    stop_stream();
+    return play_pipeline(item, source.toUtf8() + " ! videoconvert ! glupload ! qml6glsink name=sink sync=false", -1);
 }
 
 // The stream's picture size, "1920x1080" (empty until the first frame), for mapping the

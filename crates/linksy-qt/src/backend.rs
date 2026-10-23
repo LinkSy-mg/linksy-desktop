@@ -56,6 +56,12 @@ pub mod qobject {
         #[cxx_name = "playStream"]
         fn play_stream(&self, item: &QString, socket: &QString) -> QString;
 
+        /// Show what apps get from the Linksy Camera in the QML item named `item`; empty when
+        /// it plays, else why not.
+        #[qinvokable]
+        #[cxx_name = "previewCamera"]
+        fn preview_camera(&self, item: &QString) -> QString;
+
         #[qinvokable]
         #[cxx_name = "stopStream"]
         fn stop_stream(&self);
@@ -256,6 +262,17 @@ impl qobject::Backend {
 
     pub fn play_stream(&self, item: &QString, socket: &QString) -> QString {
         crate::app::ffi::play_stream(item, socket)
+    }
+
+    pub fn preview_camera(&self, item: &QString) -> QString {
+        // Read the camera as any app would: the Linksy Camera device, else the PipeWire camera.
+        // Development aid: LINKSY_TEST_CAMERA shows a test pattern instead.
+        let source = match linksy_setup::camera_device() {
+            _ if std::env::var_os("LINKSY_TEST_CAMERA").is_some() => "videotestsrc pattern=smpte ! video/x-raw,width=1280,height=720".to_string(),
+            Some(dev) => format!("v4l2src device={}", dev.display()),
+            None => "pipewiresrc target-object=linksy-camera always-copy=true".to_string(),
+        };
+        crate::app::ffi::play_source(item, &QString::from(&source))
     }
 
     pub fn stop_stream(&self) {

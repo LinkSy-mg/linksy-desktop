@@ -31,6 +31,8 @@ Kirigami.ApplicationWindow {
 
     // A session ended (a viewer showing it closes its picture)
     signal sessionEnded(string id)
+    // A camera used here says what it can do and how it's set
+    signal cameraState(string session, var state)
 
     readonly property var selected: devices.find(d => d.device.id === selectedId) ?? null
 
@@ -52,6 +54,7 @@ Kirigami.ApplicationWindow {
             if (open === "prefs") pageStack.pushDialogLayer(Qt.resolvedUrl("PrefsPage.qml"), { app: root });
             if (open === "screen") openScreen.start();
             if (open === "setup") root.openSetup();
+            if (open === "camera") root.previewCamera("", "Pixel");
         }
         onOffline: why => { if (why) root.toast(why) }
         onSetupChecked: json => root.setup = JSON.parse(json)
@@ -117,6 +120,11 @@ Kirigami.ApplicationWindow {
 
     function viewScreen(id) {
         pageStack.layers.push(Qt.resolvedUrl("ScreenPage.qml"), { app: root, device: id, name: deviceName(id) });
+    }
+
+    // What apps get from a phone's camera in use here, with its controls
+    function previewCamera(session, name) {
+        pageStack.layers.push(Qt.resolvedUrl("CameraPage.qml"), { app: root, session: session, name: backend.cameraName(name) });
     }
 
     function openSetup() {
@@ -236,6 +244,9 @@ Kirigami.ApplicationWindow {
             sessions = sessions.filter(s => s.session !== ev.session);
             sessionEnded(ev.session);
             request("terminal_status", {}, (ok, s) => { if (ok) root.terminal = s });
+            break;
+        case "camera_state":
+            cameraState(ev.session, ev.state);
             break;
         case "picture":
             loadPicture(ev.from.id);

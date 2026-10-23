@@ -210,7 +210,7 @@ Kirigami.ScrollablePage {
                 visible: page.info !== null && app.can(page.info, "camera")
                 iconName: "camera-web"
                 title: app.t("Webcam")
-                subtitle: app.t("“{camera}” in your apps", { camera: "Linksy Camera" })
+                subtitle: app.t("“{camera}” in your apps", { camera: backend.cameraName(page.name) })
                 button: app.t("Start Webcam")
                 kind: "camera"
             }
@@ -370,22 +370,31 @@ Kirigami.ScrollablePage {
             wrapMode: Text.Wrap
             opacity: 0.75
         }
-        actions: Kirigami.Action {
-            text: card.running ? app.t("Stop") : card.button
-            icon.name: card.running ? "media-playback-stop" : "media-playback-start"
-            onTriggered: {
-                if (card.running) return app.request("end_session", { session: card.running.session });
-                app.request("start_session", { with: page.info.id, kind: card.kind }, (ok, err) => {
-                    if (ok) return;
-                    if (err.includes("can't do this yet")) app.toast(app.t({
-                        display: "{name} can't be a second display yet",
-                        camera: "{name} can't share its camera yet",
-                        microphone: "{name} can't share its microphone yet"
-                    }[card.kind], { name: page.name }));
-                    else if (err.includes("declined")) app.toast(app.t("{name} didn't allow it", { name: page.name }));
-                    else app.toast(err);
-                });
+        actions: [
+            Kirigami.Action {
+                // A camera in use here: see what apps get, with the phone's controls
+                visible: card.running !== null && card.kind === "camera" && !card.running.sharing
+                text: app.t("Preview")
+                icon.name: "view-preview"
+                onTriggered: app.previewCamera(card.running.session, page.name)
+            },
+            Kirigami.Action {
+                text: card.running ? app.t("Stop") : card.button
+                icon.name: card.running ? "media-playback-stop" : "media-playback-start"
+                onTriggered: {
+                    if (card.running) return app.request("end_session", { session: card.running.session });
+                    app.request("start_session", { with: page.info.id, kind: card.kind }, (ok, err) => {
+                        if (ok) return;
+                        if (err.includes("can't do this yet")) app.toast(app.t({
+                            display: "{name} can't be a second display yet",
+                            camera: "{name} can't share its camera yet",
+                            microphone: "{name} can't share its microphone yet"
+                        }[card.kind], { name: page.name }));
+                        else if (err.includes("declined")) app.toast(app.t("{name} didn't allow it", { name: page.name }));
+                        else app.toast(err);
+                    });
+                }
             }
-        }
+        ]
     }
 }

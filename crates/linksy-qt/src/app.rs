@@ -14,6 +14,7 @@ pub mod ffi {
         fn save_window(path: &QString) -> bool;
 
         fn play_stream(item: &QString, socket: &QString) -> QString;
+        fn play_source(item: &QString, source: &QString) -> QString;
         fn stop_stream();
         fn stream_size() -> QString;
         fn send_control(json: &QString) -> bool;
