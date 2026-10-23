@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.8.7
 
 ### Changed
 - **Plugging a phone in no longer asks anything.** Most of the time it's only charging, and
