@@ -47,8 +47,9 @@ jobs:
     runs-on: ubuntu-latest
     container: registry.fedoraproject.org/fedora:latest
     steps:
-      # cxx-qt links with lld; Kirigami's QML is only needed at run time
-      - run: dnf install -y --setopt=install_weak_deps=False gcc gcc-c++ git lld rust cargo clippy qt6-qtbase-devel qt6-qtdeclarative-devel
+      # cxx-qt links with lld; GStreamer is for other devices' screens; Kirigami's QML is only
+      # needed at run time
+      - run: dnf install -y --setopt=install_weak_deps=False gcc gcc-c++ git lld rust cargo clippy qt6-qtbase-devel qt6-qtdeclarative-devel gstreamer1-devel
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: cargo clippy -p linksy-qt -- -D warnings
         env:
