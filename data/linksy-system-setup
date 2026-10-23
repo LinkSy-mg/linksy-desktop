@@ -22,10 +22,10 @@ allowed() {
     v4l2loopback|akmod-v4l2loopback|v4l2loopback-dkms|v4l2loopback-utils|v4l2loopback-kmp-*) return 0 ;;
     # Debian's linux-headers-<version>; Arch's <kernel package>-headers (linux-cachyos-headers…)
     linux-headers-*|linux-headers|linux-*-headers) return 0 ;;
-    gstreamer1-plugin-openh264|gstreamer1-plugin-libav|gstreamer1-plugin-gtk4|pipewire-gstreamer) return 0 ;;
-    gstreamer1.0-libav|gstreamer1.0-plugins-ugly|gstreamer1.0-gtk4|gstreamer1.0-pipewire) return 0 ;;
-    gst-libav|gst-plugins-ugly|gst-plugin-gtk4|gst-plugin-pipewire) return 0 ;;
-    gstreamer-plugin-openh264|gstreamer-plugins-libav|gstreamer-plugins-rs|gstreamer-plugin-pipewire) return 0 ;;
+    gstreamer1-plugin-openh264|gstreamer1-plugin-libav|gstreamer1-plugin-gtk4|gstreamer1-plugins-good-qt6|pipewire-gstreamer) return 0 ;;
+    gstreamer1.0-libav|gstreamer1.0-plugins-ugly|gstreamer1.0-gtk4|gstreamer1.0-qt6|gstreamer1.0-pipewire) return 0 ;;
+    gst-libav|gst-plugins-ugly|gst-plugin-gtk4|gst-plugin-qml6|gst-plugin-pipewire) return 0 ;;
+    gstreamer-plugin-openh264|gstreamer-plugins-libav|gstreamer-plugins-rs|gstreamer-plugins-good-qtqml6|gstreamer-plugin-pipewire) return 0 ;;
     xdg-desktop-portal-gnome|xdg-desktop-portal-kde|xdg-desktop-portal-wlr|xdg-desktop-portal-hyprland) return 0 ;;
     wl-clipboard|xclip) return 0 ;;
   esac
