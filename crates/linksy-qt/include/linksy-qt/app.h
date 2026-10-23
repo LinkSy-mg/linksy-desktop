@@ -24,7 +24,8 @@ inline int run_app()
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("Linksy"));
     QApplication::setOrganizationDomain(QStringLiteral("diary.mg"));
-    QApplication::setDesktopFileName(QStringLiteral("mg.diary.linksy.LinksyQt"));
+    // The one "Linksy" in the menu (linksy-open picks this window on Plasma)
+    QApplication::setDesktopFileName(QStringLiteral("mg.diary.linksy.Linksy"));
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("mg.diary.linksy.Linksy")));
     // Plasma sets its own style; elsewhere, KDE's desktop style when it's installed.
     if (qEnvironmentVariableIsEmpty("QT_QUICK_CONTROLS_STYLE")) {
