@@ -62,10 +62,13 @@ The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwait
 background service starts with your session; the Flatpak sets that up the first time it opens.
 
 To cut a release: add the version's section to `CHANGELOG.md` and the metainfo's
-`<releases>`, bump `version` in `Cargo.toml`, run `scripts/package-linux.sh` (tarball, .deb, the Fedora
-and openSUSE .rpm) and `scripts/package-flatpak.sh`, tag `vX.Y.Z` here and publish the files on this repo
-and, as `linux-vX.Y.Z` (not marked latest, which belongs to the Android APKs), on
-linksy-releases. Flathub builds from the tag with `packaging/flatpak/mg.diary.linksy.Linksy.yml`.
+`<releases>`, bump `version` in `Cargo.toml`, commit, and run `scripts/publish-release.sh`. It
+tags `vX.Y.Z` and pushes it; GitHub (the Packages workflow) builds every package and the
+Flatpak, installs the packages on every supported distribution, and when all of that passes
+publishes the release here and, as `linux-vX.Y.Z` (not marked latest, which belongs to the
+Android APKs), on linksy-releases. Flathub builds from the tag with
+`packaging/flatpak/mg.diary.linksy.Linksy.yml`. `scripts/package-linux.sh` and
+`scripts/package-flatpak.sh` still build everything locally, to try a package.
 
 ## Build
 
