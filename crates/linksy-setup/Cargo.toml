@@ -1,0 +1,10 @@
+[package]
+name = "linksy-setup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+gio = "0.22.10"
+gstreamer = "0.25.4"
+linksy-i18n = { path = "../linksy-i18n" }

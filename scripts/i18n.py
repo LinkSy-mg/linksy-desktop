@@ -14,7 +14,7 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SOURCES = [ROOT / "crates/linksy-gtk/src", ROOT / "crates/linksyd/src", ROOT / "crates/linksy-qt/src"]
+SOURCES = [ROOT / "crates/linksy-gtk/src", ROOT / "crates/linksy-setup/src", ROOT / "crates/linksyd/src", ROOT / "crates/linksy-qt/src"]
 # The Qt app's QML asks with t("..."): app.t, root.t and the like
 QML = [ROOT / "crates/linksy-qt/qml"]
 CATALOGS = ROOT / "crates/linksy-i18n/i18n"

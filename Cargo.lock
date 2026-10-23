@@ -2443,6 +2443,7 @@ dependencies = [
  "libadwaita",
  "linksy-i18n",
  "linksy-ipc",
+ "linksy-setup",
  "qrcode",
  "serde_json",
  "tokio",
@@ -2511,6 +2512,15 @@ dependencies = [
  "gstreamer",
  "linksy-core",
  "tokio",
+]
+
+[[package]]
+name = "linksy-setup"
+version = "0.8.3"
+dependencies = [
+ "gio",
+ "gstreamer",
+ "linksy-i18n",
 ]
 
 [[package]]
