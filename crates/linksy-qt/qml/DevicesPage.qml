@@ -126,12 +126,24 @@ Kirigami.ScrollablePage {
     }
 
     footer: QQC2.ToolBar {
-        contentItem: QQC2.Label {
-            text: app.status ? app.t("This device: {name}", { name: app.status.device.name }) : ""
-            opacity: 0.7
-            font: Kirigami.Theme.smallFont
-            elide: Text.ElideRight
-            leftPadding: Kirigami.Units.largeSpacing
+        contentItem: ColumnLayout {
+            QQC2.Button {
+                Layout.fillWidth: true
+                // Screenshots (LINKSY_SCREENSHOT) show the app as on a finished setup
+                readonly property int missing: backend.env("LINKSY_SCREENSHOT") ? 0 : (app.setup?.missing ?? 0)
+                visible: missing > 0
+                icon.name: "emblem-important"
+                text: missing === 1 ? app.t("Finish Setup · 1 thing") : app.t("Finish Setup · {n} things", { n: missing })
+                onClicked: app.openSetup()
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                text: app.status ? app.t("This device: {name}", { name: app.status.device.name }) : ""
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                elide: Text.ElideRight
+                leftPadding: Kirigami.Units.largeSpacing
+            }
         }
     }
 }

@@ -10,6 +10,7 @@ fn main() {
         "qml/PrefsPage.qml",
         "qml/ScreenPage.qml",
         "qml/ScreenVideo.qml",
+        "qml/SetupPage.qml",
     ]))
         .qt_module("Quick")
         .qt_module("QuickControls2")

@@ -70,6 +70,43 @@ pub mod qobject {
         #[cxx_name = "sendControl"]
         fn send_control(&self, json: &QString) -> bool;
 
+        /// Check what Finish Setup lists; `setupChecked` answers (JSON).
+        #[qinvokable]
+        #[cxx_name = "checkSetup"]
+        fn check_setup(self: Pin<&mut Self>);
+
+        /// Set up the items with these ids (a JSON list; empty: everything that can be),
+        /// one password; `setupStep` tells what it does, `setupFinished` how it ended.
+        #[qinvokable]
+        #[cxx_name = "runSetup"]
+        fn run_setup(self: Pin<&mut Self>, ids: &QString);
+
+        /// True once per version when something can be set up: open Finish Setup.
+        #[qinvokable]
+        #[cxx_name = "offerSetup"]
+        fn offer_setup(&self) -> bool;
+
+        /// What apps call a phone's camera.
+        #[qinvokable]
+        #[cxx_name = "cameraName"]
+        fn camera_name(&self, phone: &QString) -> QString;
+
+        #[qinvokable]
+        fn reboot(&self);
+
+        #[qsignal]
+        #[cxx_name = "setupChecked"]
+        fn setup_checked(self: Pin<&mut Backend>, json: QString);
+
+        #[qsignal]
+        #[cxx_name = "setupStep"]
+        fn setup_step(self: Pin<&mut Backend>, text: QString);
+
+        /// {"ok": true} | {"error": "…"} | {"restart": "<steps>"}
+        #[qsignal]
+        #[cxx_name = "setupFinished"]
+        fn setup_finished(self: Pin<&mut Backend>, json: QString);
+
         #[qsignal]
         fn reply(self: Pin<&mut Backend>, id: i32, ok: bool, json: QString);
 
@@ -95,6 +132,7 @@ use std::time::Duration;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
 use linksy_ipc::{Client, Request};
+use linksy_setup::{Failure, Need, Ui};
 
 pub struct BackendRust {
     connected: bool,
@@ -232,6 +270,50 @@ impl qobject::Backend {
         crate::app::ffi::send_control(json)
     }
 
+    pub fn check_setup(self: Pin<&mut Self>) {
+        let thread = self.qt_thread();
+        // D-Bus and systemctl calls: off the Qt thread
+        self.rust().rt.spawn_blocking(move || {
+            let json = setup_json().to_string();
+            let _ = thread.queue(move |b| b.setup_checked(QString::from(&json)));
+        });
+    }
+
+    pub fn run_setup(self: Pin<&mut Self>, ids: &QString) {
+        let thread = self.qt_thread();
+        let ids: Vec<String> = serde_json::from_str(&ids.to_string()).unwrap_or_default();
+        self.rust().rt.spawn_blocking(move || {
+            let items: Vec<_> = linksy_setup::actionable(&linksy_setup::check(Ui::Qt)).into_iter().filter(|i| ids.is_empty() || ids.iter().any(|id| id == i.id)).collect();
+            let args = linksy_setup::root_args(&items);
+            let step = |text: String| {
+                let _ = thread.queue(move |b| b.setup_step(QString::from(&text)));
+            };
+            let mut result = if args.is_empty() { Ok(()) } else { linksy_setup::run_as_root(&args, step) };
+            if result.is_ok() && linksy_setup::wants_autostart(&items) {
+                result = linksy_setup::enable_autostart();
+            }
+            let json = match result {
+                Ok(()) => serde_json::json!({ "ok": true }),
+                Err(Failure::Message(m)) => serde_json::json!({ "error": m }),
+                Err(Failure::Restart(code)) => serde_json::json!({ "restart": linksy_setup::restart_steps(code.as_deref()) }),
+            }
+            .to_string();
+            let _ = thread.queue(move |b| b.setup_finished(QString::from(&json)));
+        });
+    }
+
+    pub fn offer_setup(&self) -> bool {
+        linksy_setup::offer_now(Ui::Qt, env!("CARGO_PKG_VERSION"))
+    }
+
+    pub fn camera_name(&self, phone: &QString) -> QString {
+        QString::from(&linksy_setup::camera_name(&phone.to_string()))
+    }
+
+    pub fn reboot(&self) {
+        let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
+    }
+
     pub fn qr_code(&self, text: &QString) -> QString {
         let Ok(code) = qrcode::QrCode::new(text.to_string().as_bytes()) else { return QString::default() };
         let width = code.width();
@@ -248,6 +330,32 @@ impl qobject::Backend {
         );
         QString::from(&format!("data:image/svg+xml;utf8,{}", svg.replace('#', "%23")))
     }
+}
+
+/// Finish Setup's list for QML: each item, what it needs, and the terminal command.
+fn setup_json() -> serde_json::Value {
+    let items = linksy_setup::check(Ui::Qt);
+    let list: Vec<_> = items
+        .iter()
+        .map(|i| {
+            let (need, note) = match &i.need {
+                Need::Ready => ("ready", None),
+                Need::SetUp => ("setup", None),
+                Need::Install(_) => match linksy_setup::layered_hint(i.why) {
+                    Some(hint) => ("manual", Some(hint)),
+                    None => ("install", None),
+                },
+                Need::Manual(what) => ("manual", Some(format!("{} {what}", i.why))),
+            };
+            serde_json::json!({ "id": i.id, "title": i.title, "why": note.unwrap_or_else(|| i.why.to_string()), "need": need })
+        })
+        .collect();
+    serde_json::json!({
+        "items": list,
+        "missing": linksy_setup::missing(&items),
+        "everything": linksy_setup::actionable(&items).len(),
+        "command": linksy_setup::terminal_command(&items),
+    })
 }
 
 /// The service's socket; when nobody answers, start the service (its systemd unit when

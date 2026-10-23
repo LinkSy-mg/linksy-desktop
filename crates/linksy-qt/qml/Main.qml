@@ -26,6 +26,8 @@ Kirigami.ApplicationWindow {
     property var pictures: ({})
     property var sessions: []
     property var pending: ({})
+    // Finish Setup's list (linksy-setup), null until checked
+    property var setup: null
 
     // A session ended (a viewer showing it closes its picture)
     signal sessionEnded(string id)
@@ -49,8 +51,10 @@ Kirigami.ApplicationWindow {
             if (open === "invite") root.openInvite();
             if (open === "prefs") pageStack.pushDialogLayer(Qt.resolvedUrl("PrefsPage.qml"), { app: root });
             if (open === "screen") openScreen.start();
+            if (open === "setup") root.openSetup();
         }
         onOffline: why => { if (why) root.toast(why) }
+        onSetupChecked: json => root.setup = JSON.parse(json)
     }
 
     // `english` in the language in use, with {name}-style holes filled from `args`
@@ -113,6 +117,10 @@ Kirigami.ApplicationWindow {
 
     function viewScreen(id) {
         pageStack.layers.push(Qt.resolvedUrl("ScreenPage.qml"), { app: root, device: id, name: deviceName(id) });
+    }
+
+    function openSetup() {
+        pageStack.pushDialogLayer(Qt.resolvedUrl("SetupPage.qml"), { app: root });
     }
 
     function openInvite() {
@@ -275,7 +283,7 @@ Kirigami.ApplicationWindow {
         const name = s.peer.name;
         switch (s.kind) {
         case "camera": return s.sharing ? t("{name} is using your camera", { name: name })
-                                        : t("{name}'s camera is on: “{camera}” in your apps", { name: name, camera: "Linksy Camera" });
+                                        : t("{name}'s camera is on: “{camera}” in your apps", { name: name, camera: backend.cameraName(name) });
         case "microphone": return s.sharing ? t("{name} is using your microphone", { name: name })
                                             : t("{name}'s microphone is on: “{microphone}” in your apps", { name: name, microphone: `Linksy Microphone (${name})` });
         case "display": return t("{name} is your second display", { name: name });
@@ -445,6 +453,9 @@ Kirigami.ApplicationWindow {
         const size = backend.env("LINKSY_SCREENSHOT_SIZE").split("x").map(Number);
         if (size.length === 2 && size[0] > 0) { width = size[0]; height = size[1] }
         backend.start();
+        backend.checkSetup();
+        // The first time each version starts with something to set up
+        if (backend.offerSetup()) root.openSetup();
         if (backend.env("LINKSY_SCREENSHOT")) shot.start();
     }
 }
