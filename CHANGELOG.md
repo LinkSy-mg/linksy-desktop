@@ -2,6 +2,19 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Added
+- **Upgrades in one step.** `linksy upgrade` checks for a newer Linksy and, when there is
+  one, downloads exactly the packages installed here (`linksy-common` and `linksy` and/or
+  `linksy-qt`), checks them against the release's checksums, installs them with one
+  password and restarts the service. In both apps, "Linksy X Is Available" (and Check for
+  Updates… in the menu) does the same with **Update Now**, then Linksy starts again on the
+  new version. The tarball updates into your home folder with no password; the Flatpak and
+  builds by hand say how to update them instead. Upgrading from this version on.
+- **`linksy --version`** (and the running service's version when it differs) and
+  **`linksy --revision`**: the exact build and how Linksy was installed, for bug reports.
+
 ## 0.8.5
 
 ### Added
