@@ -2443,6 +2443,7 @@ dependencies = [
  "libadwaita",
  "linksy-i18n",
  "linksy-ipc",
+ "linksy-news",
  "linksy-setup",
  "qrcode",
  "serde_json",
@@ -2489,6 +2490,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "linksy-news"
+version = "0.8.5"
+dependencies = [
+ "linksy-i18n",
+]
+
+[[package]]
 name = "linksy-qt"
 version = "0.8.5"
 dependencies = [
@@ -2498,6 +2506,7 @@ dependencies = [
  "cxx-qt-lib",
  "linksy-i18n",
  "linksy-ipc",
+ "linksy-news",
  "linksy-setup",
  "pkg-config",
  "qrcode",
