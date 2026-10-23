@@ -15,7 +15,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.6 | Anywhere | Away from home over the internet, with a 7-day lease · Locate the phone · 1080p webcam (desktop done in 0.6.0) |
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
-| **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Problem logs (`logs.txt`) · Lighter at rest |
+| **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Lighter at rest |
 | 0.10 | At home on KDE | A Qt 6 app for KDE Plasma, beside the GTK one (desktop done early, in 0.8.4) |
 | **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
@@ -77,6 +77,27 @@ Linksy should run on as many desktops and distribution versions as it reasonably
 ### The cable when you ask for it — S
 Plugging a phone in to charge no longer pops a question. A "Connect by USB Cable" button
 on the device's page, in the desktop app and the phone app, switches the cable to Linksy.
+
+### Upgrades in one click — M
+Installing is one command (`curl -fsSL https://linksy.diary.mg/install.sh | sh`, done);
+upgrading should be as easy, from the terminal and from the apps.
+- **`linksy --version`:** Linksy's version, and the running service's when it differs
+  ("service 0.8.4: restart it").
+- **`linksy --revision`:** the exact build, for bug reports: version, commit, build date and
+  how it was installed (rpm, deb, Flatpak, tarball).
+- **`linksy upgrade`:** when a newer version is out, asks once, then downloads exactly the
+  packages installed (`linksy-common` and `linksy` and/or `linksy-qt`, in this system's
+  format), **checks them against the release's checksums**, installs them with one
+  password, and restarts the service and the app.
+- **Update Now in both apps:** the "Linksy X Is Available" button runs the same steps with
+  a progress line, then Linksy comes back by itself and What's New shows what changed.
+- **Each way of installing:** packages as above; the tarball updates into `~/.local` with
+  no password; the Flatpak through `flatpak update` once it's on Flathub; anything else
+  (the AUR, built by hand) says how to update it that way.
+- **Later,** with Linksy's own package repository, upgrading becomes the system's own update
+  and this only drives it.
+- **Done when:** a new release reaches someone with one command or one click, restarts
+  cleanly, and never installs a file whose checksum doesn't match.
 
 ### Problem logs — S
 When something goes wrong, one file says what happened, ready to attach to a bug report.
