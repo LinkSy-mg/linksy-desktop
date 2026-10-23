@@ -460,7 +460,6 @@
   "{name} becomes a touchpad and keyboard for this computer until you stop. It doesn't see your screen.": "{name} станет тачпадом и клавиатурой для этого компьютера, пока вы не остановите. Ваш экран он не видит.",
   "{name} can't be a second display yet": "{name} пока не может быть вторым экраном",
   "{name} can't be controlled yet": "{name} пока нельзя управлять",
-  "{name} can't do this yet": "{name} пока так не умеет",
   "{name} can't share its camera yet": "{name} пока не может поделиться камерой",
   "{name} can't share its microphone yet": "{name} пока не может поделиться микрофоном",
   "{name} can't share its screen yet": "{name} пока не может показать свой экран",

@@ -460,7 +460,6 @@
   "{name} becomes a touchpad and keyboard for this computer until you stop. It doesn't see your screen.": "在你停止之前，{name} 将作为这台电脑的触控板和键盘。它看不到你的屏幕。",
   "{name} can't be a second display yet": "{name} 暂时还不能用作第二屏幕",
   "{name} can't be controlled yet": "{name} 暂时还不支持被控制",
-  "{name} can't do this yet": "{name} 暂时还不支持",
   "{name} can't share its camera yet": "{name} 暂时还不能共享相机",
   "{name} can't share its microphone yet": "{name} 暂时还不能共享麦克风",
   "{name} can't share its screen yet": "{name} 暂时还不能共享屏幕",

@@ -460,7 +460,6 @@
   "{name} becomes a touchpad and keyboard for this computer until you stop. It doesn't see your screen.": "停止するまで、{name} がこのコンピュータのタッチパッドとキーボードになります。画面は見えません。",
   "{name} can't be a second display yet": "{name} はまだセカンドディスプレイに対応していません",
   "{name} can't be controlled yet": "{name} はまだ操作に対応していません",
-  "{name} can't do this yet": "{name} はまだこれに対応していません",
   "{name} can't share its camera yet": "{name} はまだカメラの共有に対応していません",
   "{name} can't share its microphone yet": "{name} はまだマイクの共有に対応していません",
   "{name} can't share its screen yet": "{name} はまだ画面の共有に対応していません",
