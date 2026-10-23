@@ -1,8 +1,10 @@
 //! Native desktop notifications for things that need the user, even with no window open.
 //! Consent prompts carry Accept/Decline buttons; whichever answer comes first (here or in
-//! the app) wins.
+//! the app) wins, and the prompt goes away either way.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use linksy_core::{CallState, Direction, Event, Fingerprint, Node, SessionKind, Uuid};
 use linksy_i18n::t;
@@ -14,6 +16,42 @@ const APP: &str = "Linksy";
 pub(crate) const DESKTOP_ENTRY: &str = "mg.diary.linksy.Linksy";
 /// Battery level, in percent, at which a device's low battery is announced (once).
 const LOW_BATTERY: u8 = 15;
+
+/// Prompts on screen: request → the notification's id, and for pairing the device asking.
+type Prompts = HashMap<Uuid, (u32, Option<Fingerprint>)>;
+static PROMPTS: Mutex<Option<Prompts>> = Mutex::new(None);
+
+/// A request was answered, here or anywhere else: take its prompt down.
+pub(crate) fn answered(request: Uuid) {
+    let id = PROMPTS.lock().unwrap().as_mut().and_then(|p| p.remove(&request)).map(|(id, _)| id);
+    if let Some(id) = id {
+        tokio::spawn(close(id));
+    }
+}
+
+/// Pairing with `device` ended (paired, or failed): take its prompt down.
+fn pairing_over(device: Fingerprint) {
+    let ids: Vec<u32> = match PROMPTS.lock().unwrap().as_mut() {
+        Some(p) => {
+            let done: Vec<Uuid> = p.iter().filter(|(_, (_, d))| *d == Some(device)).map(|(r, _)| *r).collect();
+            done.iter().filter_map(|r| p.remove(r)).map(|(id, _)| id).collect()
+        }
+        None => Vec::new(),
+    };
+    for id in ids {
+        tokio::spawn(close(id));
+    }
+}
+
+async fn close(id: u32) {
+    let Ok(bus) = zbus::Connection::session().await else { return };
+    let closed = bus
+        .call_method(Some("org.freedesktop.Notifications"), "/org/freedesktop/Notifications", Some("org.freedesktop.Notifications"), "CloseNotification", &(id,))
+        .await;
+    if let Err(e) = closed {
+        debug!("couldn't close notification {id}: {e}");
+    }
+}
 
 pub async fn run(node: Node) {
     let mut events = node.subscribe();
@@ -30,7 +68,7 @@ pub async fn run(node: Node) {
         match event {
             Event::PairingRequest { request, device, code, .. } => {
                 let body = t!("Check that {device} shows the code {code}.", device = device.name, code = spaced(&code));
-                prompt(node.clone(), request, t!("Pair with {device}?", device = device.name), body, t!("Pair"));
+                prompt(node.clone(), request, Some(device.id), t!("Pair with {device}?", device = device.name), body, t!("Pair"));
             }
             Event::TransferRequest { transfer, from, files, total } => {
                 let what = match files.as_slice() {
@@ -38,7 +76,7 @@ pub async fn run(node: Node) {
                     many => t!("{n} items", n = many.len()),
                 };
                 let body = format!("{what} · {}", human_size(total));
-                prompt(node.clone(), transfer, t!("{device} wants to send you files", device = from.name), body, t!("Accept"));
+                prompt(node.clone(), transfer, None, t!("{device} wants to send you files", device = from.name), body, t!("Accept"));
             }
             Event::SessionRequest { request, from, kind } => {
                 let (summary, body) = match kind {
@@ -71,9 +109,10 @@ pub async fn run(node: Node) {
                         t!("The right code was typed on {device}. Its terminal runs commands as you until it's ended. Linksy asks once a day.", device = from.name),
                     ),
                 };
-                prompt(node.clone(), request, summary, body, t!("Allow"));
+                prompt(node.clone(), request, None, summary, body, t!("Allow"));
             }
             Event::TransferStarted { transfer, peer, direction: Direction::Incoming, import, .. } => {
+                answered(transfer);
                 incoming.insert(transfer, (peer.name, import));
             }
             Event::TransferComplete { transfer, saved } => match incoming.remove(&transfer) {
@@ -82,13 +121,19 @@ pub async fn run(node: Node) {
                 None => {}
             },
             Event::TransferFailed { transfer, reason } => {
+                answered(transfer);
                 if let Some((from, _)) = incoming.remove(&transfer)
                     && reason != "cancelled"
                 {
                     show(t!("Transfer from {device} failed", device = from), capitalize(&reason));
                 }
             }
-            Event::Paired { device } => show(t!("Paired with {device}", device = device.name), t!("You can now share files and more.").into()),
+            Event::SessionStarted { session, .. } | Event::SessionEnded { session } => answered(session),
+            Event::PairingFailed { device, .. } => pairing_over(device.id),
+            Event::Paired { device } => {
+                pairing_over(device.id);
+                show(t!("Paired with {device}", device = device.name), t!("You can now share files and more.").into());
+            }
             Event::Notification { from, title, body } => {
                 let from = t!("From {device}", device = from.name);
                 let body = if body.is_empty() { from } else { format!("{body}\n{from}") };
@@ -143,26 +188,34 @@ pub(crate) fn show(summary: String, body: String) {
     });
 }
 
-/// A notification with Accept/Decline that answers the request when clicked.
-fn prompt(node: Node, request: Uuid, summary: String, body: String, accept_label: &'static str) {
+/// A notification with Accept/Decline that answers the request when clicked. It stays until
+/// answered (critical, no timeout), and goes when it is: clicking a button closes it (it
+/// isn't resident), and an answer from the app or the other device closes it too.
+fn prompt(node: Node, request: Uuid, pairing: Option<Fingerprint>, summary: String, body: String, accept_label: &'static str) {
     tokio::task::spawn_blocking(move || {
         let mut n = base(&summary, &body);
-        n.action("accept", accept_label)
-            .action("decline", t!("Decline"))
-            .urgency(Urgency::Critical)
-            .hint(Hint::Resident(true))
-            .timeout(Timeout::Never);
+        n.action("accept", accept_label).action("decline", t!("Decline")).urgency(Urgency::Critical).timeout(Timeout::Never);
         match n.show() {
-            Ok(handle) => handle.wait_for_action(|action| match action {
-                "accept" => {
-                    node.respond(request, true);
+            Ok(handle) => {
+                PROMPTS.lock().unwrap().get_or_insert_default().insert(request, (handle.id(), pairing));
+                // Answered while it was appearing: nothing was there to close then
+                if !node.is_pending(request) {
+                    answered(request);
                 }
-                "decline" => {
-                    node.respond(request, false);
-                }
-                // Clicking the body or dismissing leaves the decision to the app.
-                _ => {}
-            }),
+                let forget = || PROMPTS.lock().unwrap().as_mut().map(|p| p.remove(&request));
+                handle.wait_for_action(|action| match action {
+                    "accept" => {
+                        forget();
+                        node.respond(request, true);
+                    }
+                    "decline" => {
+                        forget();
+                        node.respond(request, false);
+                    }
+                    // Clicking the body or dismissing leaves the decision to the app.
+                    _ => {}
+                })
+            }
             Err(e) => debug!("notification failed: {e}"),
         }
     });

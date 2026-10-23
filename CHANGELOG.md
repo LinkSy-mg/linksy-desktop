@@ -8,6 +8,9 @@ Linksy for Linux. Each version's section becomes its release notes.
 - **Installing only `linksy-common` gave a Linksy in the menu that opened nothing**, and
   a store showing Linksy would have installed just that. `linksy-common` now always comes
   with an app: `linksy` (GTK), or `linksy-qt` when that's the one you install with it.
+- **Accept and Decline in a notification did the job but left the notification on
+  screen**, and answering in the app left it there too. The prompt now goes away as soon as
+  it's answered, wherever.
 
 ## 0.8.4
 

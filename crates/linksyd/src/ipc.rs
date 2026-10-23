@@ -127,7 +127,12 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
             .map_err(|e| e.to_string())?;
             json(serde_json::to_value(device))
         }
-        Request::Respond { request, accept } => Ok(Value::Bool(node.respond(request, accept))),
+        Request::Respond { request, accept } => {
+            // Answered in the app: the notification asking the same goes
+            #[cfg(target_os = "linux")]
+            crate::notify::answered(request);
+            Ok(Value::Bool(node.respond(request, accept)))
+        }
         Request::Send { to, paths } => {
             let id = resolve(node, &to)?;
             let transfer = node.send_files(&id, paths).await.map_err(|e| e.to_string())?;

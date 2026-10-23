@@ -617,6 +617,11 @@ impl Node {
         }
     }
 
+    /// Whether a pairing, transfer or session request still waits for an answer.
+    pub fn is_pending(&self, request: Uuid) -> bool {
+        self.inner.pending.lock().unwrap().contains_key(&request)
+    }
+
     /// Reconnect to an already paired device at a known address.
     pub async fn connect(&self, addr: SocketAddr) -> Result<DeviceInfo> {
         self.dial(addr, Intent::Connect).await
