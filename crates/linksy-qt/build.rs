@@ -16,6 +16,7 @@ fn main() {
         .qt_module("Quick")
         .qt_module("QuickControls2")
         .qt_module("Widgets")
+        .qt_module("Network")
         .files(["src/backend.rs", "src/app.rs"]);
     // GStreamer, for other devices' screens (include/linksy-qt/video.h); probing also links it
     let gst = pkg_config::probe_library("gstreamer-1.0").expect("GStreamer development files (gstreamer1-devel)");
