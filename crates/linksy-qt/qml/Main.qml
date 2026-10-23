@@ -118,6 +118,19 @@ Kirigami.ApplicationWindow {
         return text;
     }
 
+    // Show any second display another computer started here (also right after start-up,
+    // when the service opened the app for it)
+    property var showingDisplays: []
+    function joinDisplays() {
+        request("pending_sessions", {}, (ok, list) => {
+            if (!ok) return;
+            for (const p of list.filter(p => p.kind === "display" && !showingDisplays.includes(p.session))) {
+                showingDisplays = showingDisplays.concat([p.session]);
+                pageStack.layers.push(Qt.resolvedUrl("ScreenPage.qml"), { app: root, device: p.peer.id, name: p.peer.name, display: { session: p.session, socket: p.socket } });
+            }
+        });
+    }
+
     function viewScreen(id) {
         pageStack.layers.push(Qt.resolvedUrl("ScreenPage.qml"), { app: root, device: id, name: deviceName(id) });
     }
@@ -151,7 +164,8 @@ Kirigami.ApplicationWindow {
         request("settings", {}, (ok, s) => { if (ok) root.settings = s });
         request("lock_prefs", {}, (ok, p) => { if (ok) root.lockPrefs = p });
         request("terminal_status", {}, (ok, s) => { if (ok) root.terminal = s });
-        request("active_sessions", {}, (ok, list) => { if (ok) root.sessions = list.filter(s => s.sharing || ["camera", "microphone", "display"].includes(s.kind)) });
+        request("active_sessions", {}, (ok, list) => { if (ok) root.sessions = list.filter(s => s.sharing || ["camera", "microphone"].includes(s.kind)) });
+        joinDisplays();
         refreshHistory();
     }
 
@@ -236,8 +250,9 @@ Kirigami.ApplicationWindow {
             break;
         case "session_started":
             if (sessionDialog.request === ev.session) sessionDialog.close();
-            if (ev.sharing || ["camera", "microphone", "display"].includes(ev.kind))
+            if (ev.sharing || ["camera", "microphone"].includes(ev.kind))
                 sessions = sessions.concat([{ session: ev.session, peer: ev.peer, kind: ev.kind, sharing: ev.sharing }]);
+            else if (ev.kind === "display") joinDisplays();
             request("terminal_status", {}, (ok, s) => { if (ok) root.terminal = s });
             break;
         case "session_ended":

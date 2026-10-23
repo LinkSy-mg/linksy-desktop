@@ -1,5 +1,6 @@
 // Another device's screen: watch it, take control of it (pointer, buttons, wheel, keys),
-// or disconnect
+// or disconnect. Also this computer as another one's second display: full screen, with
+// this mouse and keyboard working on it.
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
@@ -15,10 +16,17 @@ Kirigami.Page {
     property string phase: "asking"   // asking, playing, ended
     property string why: ""
     property string detail: ""
-    readonly property bool controlling: kind === "control" && phase === "playing"
+    // A second display another computer started here: { session, socket }
+    property var display: null
+    // A video part is missing: Finish Setup adds it
+    property bool missingPart: false
+    readonly property bool controlling: (kind === "control" || kind === "display") && phase === "playing"
 
-    title: controlling ? app.t("Controlling {name}", { name: name }) : app.t("{name}'s Screen", { name: name })
+    title: kind === "display" ? app.t("Second Display for {name}", { name: name })
+         : controlling ? app.t("Controlling {name}", { name: name }) : app.t("{name}'s Screen", { name: name })
     padding: 0
+    // Full screen is all picture
+    globalToolBarStyle: app.visibility === Window.FullScreen ? Kirigami.ApplicationHeaderStyle.None : Kirigami.ApplicationHeaderStyle.ToolBar
 
     actions: [
         Kirigami.Action {
@@ -26,6 +34,7 @@ Kirigami.Page {
             text: app.t("Take Control")
             checkable: true
             checked: page.controlling
+            visible: page.kind !== "display"
             enabled: page.phase === "playing"
             tooltip: app.t("Use your mouse and keyboard on this screen")
             onTriggered: page.restart(checked ? "control" : "screen")
@@ -91,12 +100,20 @@ Kirigami.Page {
     function play(info) {
         session = info.session;
         if (!info.socket) return ended(app.t("Couldn't Connect"), app.t("The service sent no stream."));
-        if (!video.item) return ended(app.t("Can't Show This Screen"), app.t("Can't preview: a video part is missing"));
-        const why = backend.playStream("linksyScreen", info.socket);
-        if (why === "missing-part") return ended(app.t("Can't Show This Screen"), app.t("Can't preview: a video part is missing"));
+        const why = video.item ? backend.playStream("linksyScreen", info.socket) : "missing-part";
+        if (why === "missing-part") {
+            ended(app.t("Can't Show This Screen"), app.t("This computer is missing a video part Linksy needs. Finish Setup adds it, then watch again."));
+            missingPart = true;
+            return;
+        }
         if (why) return ended(app.t("Couldn't Connect"), why);
         phase = "playing";
-        if (kind === "control") surface.forceActiveFocus();
+        if (controlling) surface.forceActiveFocus();
+        // A second display fills this screen; F11 gets back to the window
+        if (kind === "display") {
+            app.showFullScreen();
+            app.toast(app.t("Press F11 to leave full screen"));
+        }
     }
 
     function stop() {
@@ -114,12 +131,19 @@ Kirigami.Page {
         backend.stopStream();
         session = "";
         phase = "ended";
+        missingPart = false;
+        if (kind === "display" && heading === app.t("Sharing Stopped")) {
+            heading = app.t("Second Display Ended");
+            text = app.t("{name} stopped using this screen.", { name: name });
+        }
         why = heading;
         detail = text;
+        if (app.visibility === Window.FullScreen) app.showNormal();
     }
 
     function close() {
         stop();
+        if (app.visibility === Window.FullScreen) app.showNormal();
         app.pageStack.layers.pop();
     }
 
@@ -134,7 +158,8 @@ Kirigami.Page {
     // a device (scripts/qt-scenes/stream.py serves one)
     Component.onCompleted: {
         const test = backend.env("LINKSY_TEST_STREAM");
-        if (test) play({ session: "", socket: test });
+        if (display) { kind = "display"; play(display) }
+        else if (test) play({ session: "", socket: test });
         else start("screen");
     }
     Component.onDestruction: stop()
@@ -199,11 +224,19 @@ Kirigami.Page {
             icon.name: page.phase === "asking" ? "video-display" : "dialog-warning"
             text: page.phase === "asking" ? (page.kind === "control" ? page.app.t("Asking to control {name}…", { name: page.name }) : page.app.t("Asking {name}…", { name: page.name })) : page.why
             explanation: page.detail
-            helpfulAction: Kirigami.Action {
-                enabled: page.phase === "ended"
+            helpfulAction: page.missingPart ? finishSetup : reconnect
+            Kirigami.Action {
+                id: reconnect
+                enabled: page.phase === "ended" && page.kind !== "display"
                 icon.name: "view-refresh"
                 text: page.app.t("Reconnect")
                 onTriggered: page.start("screen")
+            }
+            Kirigami.Action {
+                id: finishSetup
+                icon.name: "run-build-install"
+                text: page.app.t("Finish Setup")
+                onTriggered: page.app.openSetup()
             }
         }
     }
