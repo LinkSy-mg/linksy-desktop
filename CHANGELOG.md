@@ -2,6 +2,23 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Added
+- **A Linksy for KDE Plasma.** `linksy-qt` is the same Linksy as a Qt 6 and Kirigami app, in
+  Breeze, made for Plasma 6: your devices, pairing, sending files, the clipboard, Ring,
+  Locate, another device's screen (watch or take control), the phone as second display,
+  webcam or microphone, and the preferences.
+- **Packages split the way Transmission's are:** `linksy-common` (the service and tools)
+  with `linksy` (the GTK app) or `linksy-qt` (the Qt app). Install linksy-common and the app
+  for your desktop; when both apps are installed, Linksy opens the Qt one on Plasma. Upgrades
+  from 0.8.3 move over by themselves.
+
+### Fixed
+- **Finish Setup on Arch found its setup helper only where Fedora and Debian keep it**;
+  it now looks in `/usr/lib/linksy` too, where Arch packages put it.
+- **The app store listing's screenshots** come from the public repository, where they are.
+
 ## 0.8.3
 
 ### Added
