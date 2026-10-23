@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.8.5" date="2026-10-23">
+      <description>
+        <p>Installing Linksy always brings its window: the service package now comes with the GTK app, or the Plasma app when that's the one chosen.</p>
+      </description>
+    </release>
     <release version="0.8.4" date="2026-10-23">
       <description>
         <p>A Linksy for KDE Plasma: the same app made with Qt and Kirigami, in Breeze. Packages are now split into the service and tools, and the app for your desktop. You can use a relay you host yourself. The phone's camera works on CachyOS and other Arch-based kernels, where Finish Setup now installs the right headers and the camera tool.</p>

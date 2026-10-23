@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.8.5
+
+### Fixed
+- **Installing only `linksy-common` gave a Linksy in the menu that opened nothing**, and
+  a store showing Linksy would have installed just that. `linksy-common` now always comes
+  with an app: `linksy` (GTK), or `linksy-qt` when that's the one you install with it.
+
 ## 0.8.4
 
 ### Added
