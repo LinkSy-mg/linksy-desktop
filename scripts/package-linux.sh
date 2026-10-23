@@ -6,6 +6,8 @@
 # they're built in the linksy-dev toolbox. Packing needs rpmbuild and dpkg-deb (Fedora:
 # rpm-build dpkg; openSUSE: rpm-build dpkg).
 # Usage: scripts/package-linux.sh
+#   LINKSY_PREBUILT=1: pack the programs already in target/release (linksy-qt included), as
+#   CI does after building them in its own container; nothing is built here then.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -21,14 +23,21 @@ STAGE="$DIST/$NAME"
 # linksy-usb-setup carries a copy of the udev rule (for the tarball): they must match.
 sed -n "/<<'RULES'/,/^RULES\$/p" data/linksy-usb-setup | sed '1d;$d' | diff -q - data/70-linksy-usb.rules >/dev/null \
   || { echo "data/linksy-usb-setup is out of date with data/70-linksy-usb.rules"; exit 1; }
-cargo build --release -p linksyd -p linksy
-if pkg-config --exists gtk4 libadwaita-1 gstreamer-1.0 2>/dev/null; then
-  cargo build --release -p linksy-app -p linksy-screen
-elif command -v toolbox >/dev/null; then
-  toolbox run -c linksy-dev bash -lc 'export PATH=$HOME/.cargo/bin:$PATH; cargo build --release -p linksy-app -p linksy-screen'
+PREBUILT=${LINKSY_PREBUILT:-}
+if [ -n "$PREBUILT" ]; then
+  for b in linksyd linksy linksy-app linksy-screen linksy-qt; do
+    [ -x "target/release/$b" ] || { echo "LINKSY_PREBUILT: target/release/$b is missing"; exit 1; }
+  done
 else
-  echo "GTK/GStreamer headers missing and no toolbox: install gtk4-devel libadwaita-devel gstreamer-devel gstreamer-plugins-base-devel (openSUSE) or gstreamer1-devel gstreamer1-plugins-base-devel (Fedora)"
-  exit 1
+  cargo build --release -p linksyd -p linksy
+  if pkg-config --exists gtk4 libadwaita-1 gstreamer-1.0 2>/dev/null; then
+    cargo build --release -p linksy-app -p linksy-screen
+  elif command -v toolbox >/dev/null; then
+    toolbox run -c linksy-dev bash -lc 'export PATH=$HOME/.cargo/bin:$PATH; cargo build --release -p linksy-app -p linksy-screen'
+  else
+    echo "GTK/GStreamer headers missing and no toolbox: install gtk4-devel libadwaita-devel gstreamer-devel gstreamer-plugins-base-devel (openSUSE) or gstreamer1-devel gstreamer1-plugins-base-devel (Fedora)"
+    exit 1
+  fi
 fi
 
 rm -rf "$STAGE"; mkdir -p "$STAGE/bin" "$STAGE/share/icons"
@@ -43,14 +52,18 @@ tar -C "$DIST" -czf "$DIST/$NAME.tar.gz" "$NAME"
 
 # The Qt app, built against Debian 13's Qt (the oldest it supports) so it runs wherever
 # the packages install; in a container, so no Qt is needed here.
-if ! command -v podman >/dev/null; then
-  echo "podman is missing: the Qt app (linksy-qt) is built in a container"; exit 1
+if [ -n "$PREBUILT" ]; then
+  QT_BIN=target/release/linksy-qt
+else
+  if ! command -v podman >/dev/null; then
+    echo "podman is missing: the Qt app (linksy-qt) is built in a container"; exit 1
+  fi
+  podman image exists linksy-qt-release || podman build -q -t linksy-qt-release -f packaging/qt/Containerfile.release packaging/qt >/dev/null
+  podman volume create linksy-cargo-deb >/dev/null 2>&1 || true
+  podman run --rm -v "$(pwd)":/src:z -v linksy-cargo-deb:/root/.cargo/registry -w /src -e CARGO_TARGET_DIR=/src/target/qt-release \
+    linksy-qt-release cargo build --release -p linksy-qt
+  QT_BIN=target/qt-release/release/linksy-qt
 fi
-podman image exists linksy-qt-release || podman build -q -t linksy-qt-release -f packaging/qt/Containerfile.release packaging/qt >/dev/null
-podman volume create linksy-cargo-deb >/dev/null 2>&1 || true
-podman run --rm -v "$(pwd)":/src:z -v linksy-cargo-deb:/root/.cargo/registry -w /src -e CARGO_TARGET_DIR=/src/target/qt-release \
-  linksy-qt-release cargo build --release -p linksy-qt
-QT_BIN=target/qt-release/release/linksy-qt
 
 # .deb and .rpm share one system-wide layout, with the service as a global user unit. Three
 # packages, as Transmission splits its apps: linksy-common (service, helpers, tools, the

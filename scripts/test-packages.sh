@@ -4,10 +4,13 @@
 # right window, upgrading from the previous release moves files over cleanly, and
 # linksy-common alone (no window) is refused.
 # Usage: scripts/test-packages.sh [distro…]     (default: all; needs podman)
+# Exits 1 when any check fails (CI runs one distribution per job).
 #   Distros: fedora-44 fedora-43 opensuse debian-13 ubuntu-26.04 ubuntu-25.10
 # Reads dist/vX.Y.Z (this version) and, for the upgrade, dist/v<previous> when it's there.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+LOG=$(mktemp)
+trap 'rm -f "$LOG"' EXIT
 V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 PREV=$(ls -1d dist/v* 2>/dev/null | sed 's|dist/v||' | sort -V | grep -v "^$V$" | tail -1)
 ALL=(fedora-44 fedora-43 opensuse debian-13 ubuntu-26.04 ubuntu-25.10)
@@ -70,7 +73,7 @@ run() {   # distro, label, shell commands
     case $1 in debian-*|ubuntu-*) apt-get update -qq >/dev/null 2>&1;; opensuse) zypper -q refresh >/dev/null 2>&1;; esac
     export DEBIAN_FRONTEND=noninteractive
     ( $3 ) >/tmp/install.log 2>&1 || { echo '  install FAILED:'; tail -8 /tmp/install.log | sed 's/^/    /'; exit 0; }
-    $CHECKS" 2>&1
+    $CHECKS" 2>&1 | tee -a "$LOG"
 }
 
 # linksy-common needs one of the apps: alone, the install must be refused
@@ -79,7 +82,7 @@ refused() {
   podman run --rm -v "$PWD/dist":/pkgs:ro,z "$(image "$1")" bash -c "
     case $1 in debian-*|ubuntu-*) apt-get update -qq >/dev/null 2>&1;; opensuse) zypper -q refresh >/dev/null 2>&1;; esac
     export DEBIAN_FRONTEND=noninteractive
-    if $2 >/tmp/install.log 2>&1; then echo '  installed with no window: FAILED'; else echo '  refused: ok'; fi" 2>&1
+    if $2 >/tmp/install.log 2>&1; then echo '  installed with no window: FAILED'; else echo '  refused: ok'; fi" 2>&1 | tee -a "$LOG"
 }
 
 for d in "${ALL[@]}"; do
@@ -91,3 +94,8 @@ for d in "${ALL[@]}"; do
     run "$d" "upgrade from $PREV" "$in $(old_files "$d") && $in $(files "$d" gtk)"
   fi
 done
+
+if grep -q -e FAILED -e MISSING "$LOG"; then
+  echo "Some checks failed."
+  exit 1
+fi
