@@ -51,6 +51,7 @@ something Linksy relies on, Linksy brings its own fallback instead of asking for
   nested compositor and on a real install.
 
 ### Every version, not only the newest — M
+*Includes [@stadsport](https://github.com/LinkSy-mg/linksy-releases/issues/4)'s CachyOS setup report.*
 Linksy should run on as many desktops and distribution versions as it reasonably can.
 - **Ubuntu 24.04 LTS** and what's built on it (Linux Mint 22, Pop!_OS, Zorin): the app
   needs libadwaita 1.5 instead of 1.6, so the .deb installs there.
@@ -112,6 +113,7 @@ it over the same local socket (`linksy-ipc`) and nothing below it changes.
 ## 0.11 — Never miss a text
 
 ### Texts as notifications, with reply — M
+*Asked for by [@yurividal](https://github.com/LinkSy-mg/linksy-desktop/issues/30).*
 Builds on 0.5 (the Messages page and `sms_received`).
 - **Protocol:** `sms_received` carries what the notification needs (sender, contact name and
   picture, text, thread); reply goes back with `sms_send`.
@@ -194,6 +196,7 @@ on it.
 ## 0.14 — Your relay, or none
 
 ### Away from home becomes optional — S
+*Your own relay is built by [@yurividal](https://github.com/yurividal), in review ([desktop#31](https://github.com/LinkSy-mg/linksy-desktop/pull/31), [mobile#7](https://github.com/LinkSy-mg/linksy-mobile/pull/7), [server#2](https://github.com/LinkSy-mg/linksy-server/pull/2)).*
 - **Off:** a setting that turns Away from home off completely: no contact with the relay at
   all, not even to register.
 - **Removed:** a build option that leaves the relay code out, for distributions and people
@@ -377,6 +380,23 @@ The PC locks when the phone leaves; it never unlocks by proximity.
   without copying.
 
 ---
+
+## Thanks
+
+People who made Linksy better by reporting, testing or building:
+
+- [@yurividal](https://github.com/yurividal): openSUSE packaging and the firewalld 2.x fix
+  (0.8.3), and your own relay (0.14, in review).
+- [@giuliocatullo23-create](https://github.com/LinkSy-mg/linksy-releases/issues/2): screen
+  sharing on Intel Kaby Lake (fixed in 0.8.3).
+- [@Bathoryn](https://github.com/LinkSy-mg/linksy-releases/issues/3): the firewall on
+  Fedora 44, with a patch (fixed in 0.8.3).
+- [@stadsport](https://github.com/LinkSy-mg/linksy-releases/issues/4): setup on CachyOS
+  (0.9).
+- [@judempoyo](https://github.com/LinkSy-mg/linksy-mobile/issues/8): screens dropping on
+  Intel graphics.
+- [@Natcuber](https://github.com/LinkSy-mg/linksy-mobile/issues/1): a number pad for the
+  presentation remote.
 
 ## How each feature ships
 
