@@ -129,6 +129,9 @@ details can be checked.
 - A device leaving cleanly sends an mDNS goodbye. Presence is re-checked every 45 s by
   re-querying each visible instance; no answer → the device is gone.
 - On rename, the old instance is unregistered (goodbye) and a new one registered.
+- **Replaced in desktop 0.9 by private discovery (§4.16):** no id, name or OS on the
+  network any more, except while a device is being added. This record stays only for
+  paired devices that haven't moved to §4.16 yet.
 
 ### 4.2 Identity — `src/identity.rs`
 
@@ -709,6 +712,45 @@ It also switches a phone that **isn't paired yet**. Phone side, please:
       the device page that the cable is in use. Try the bridge without a phone: `cargo test -p linksyd usb`
 runs QUIC through an in-memory cable between two nodes.
 
+**Desktop 0.9: the cable when you ask for it** ([desktop#36](https://github.com/LinkSy-mg/linksy-desktop/issues/36),
+[mobile#11](https://github.com/LinkSy-mg/linksy-mobile/issues/11)). Plugging a phone in no
+longer asks anything: most of the time it's only charging, and switching stops its normal
+USB file transfer. The cable is used when someone presses **Connect by USB Cable**, on the
+computer or on the phone.
+
+- **The computer tells connected Android phones what's plugged into it**, whenever that
+  changes and once after connecting (computer → phone, unidirectional):
+
+  ```json
+  {"type":"usb_plugged","phones":[{"key":"<USB serial or vendor:product>",
+    "manufacturer":"Google","product":"Pixel 9","state":"plugged"}]}
+  ```
+
+  `manufacturer` and `product` are the USB descriptor strings; `state` is `plugged`,
+  `switching`, `accessory` or `failed` (as in the computer's `usb_status`). An empty list
+  when nothing is plugged.
+- **Phone: show "Connect by USB Cable"** on that computer's page while the phone is
+  plugged into a USB host (it's charging over USB, or `UsbManager`'s
+  `ACTION_USB_STATE` says connected) **and** the computer lists a phone in state
+  `plugged` or `failed` whose `manufacturer`/`product` match `Build.MANUFACTURER` /
+  `Build.MODEL` (case-insensitive; the product string often equals the model). If none
+  matches but the computer lists exactly one such phone, show it too. Pressing it sends
+  (phone → computer):
+
+  ```json
+  {"type":"usb_connect","key":"<that phone's key>"}
+  ```
+
+  The computer switches that phone (as its own button does) and its next `usb_plugged`
+  says `switching`, then `accessory`. From there it's the accessory flow above: open
+  Linksy on the phone if Android asks, the bridge, `connect(127.0.0.1:P)`.
+- **Computer:** no notification on plug-in. A device page for a paired Android phone shows
+  **Connect by USB Cable** while a phone is plugged in and not switched; with exactly one
+  plugged phone it switches it, with several it opens the guide to pick one.
+- **Use the cable automatically:** a switch on the computer's device page, **off by
+  default** (also for phones that said yes before 0.9). On, that phone is switched as soon
+  as it's plugged in, as before. The setting lives on the computer; the phone needs nothing.
+
 ### 4.12 Service information (planned for 0.6)
 
 `https://linksy.diary.mg/linksy-relay` is a small JSON file the apps read: **information
@@ -925,6 +967,72 @@ resize; a key bar above the keyboard (Esc, Ctrl, Alt, Tab, arrows, `|`, `~`, `/`
 the code prompt before each open (numeric or text keyboard, masked); tabs for several
 terminals and reattach from `terminal_list`; a clear "Detached, still running on the
 computer" state. Until the desktop ships it, computers don't announce `terminal`.
+
+### 4.16 Private discovery (desktop 0.9)
+
+[desktop#38](https://github.com/LinkSy-mg/linksy-desktop/issues/38),
+[mobile#12](https://github.com/LinkSy-mg/linksy-mobile/issues/12). The §4.1 record puts a
+device's permanent id, its name and its OS on every network it joins, so anyone on a café's
+or an office's Wi-Fi can recognise the same phone from place to place. Private discovery
+announces only a **tag that changes every 15 minutes and that only paired devices can
+recognise**. Strangers see an unnamed Linksy device whose label they can't link to the one
+before, unless the device is being added (pairing mode, below).
+
+**The discovery key.** Each device has its own random 32-byte **discovery key** `D`, kept
+in its data folder (desktop: `discovery.key`). It shares `D` with each paired device over
+their encrypted connection, and keeps each paired device's key in its trust list.
+
+- On every connection to a paired device, once the handshake is done, each side sends
+  (unidirectional stream, §4.5):
+
+  ```json
+  {"type":"discovery_key","key":"<64 hex chars>"}
+  ```
+
+  The receiver stores it for that device (replacing an older one). Older versions ignore
+  the message (unknown types are skipped).
+- A device knows a paired device **speaks §4.16** once it has received that device's own
+  `discovery_key`.
+- **Unpairing rotates the key:** forgetting a device makes a new `D`, sent to the remaining
+  paired devices on their next connection, so a forgotten device can't keep recognising
+  this one. Until they've connected, they find it by its last address (§4.6).
+
+**The tag.** Time is cut into 15-minute epochs: `e = floor(unix_seconds / 900)`.
+
+```
+tag(D, e) = first 16 bytes of HMAC-SHA256(key = D, data = "linksy discovery v2" || u64_be(e))
+```
+
+as 32 lowercase hex chars. The record, re-registered at each new epoch (a goodbye for the
+old one):
+
+- Service type: `_linksy._udp.local.` (unchanged), port unchanged.
+- Instance name: `Linksy <first 8 hex of the tag>`; host name `linksy-<first 8 hex>.local.`
+- TXT: `v` = `2`, `t` = the tag. Nothing else.
+
+**Recognising a paired device.** For each paired device with a stored key, compute its tag
+for `e - 1`, `e` and `e + 1` (clocks a few minutes apart) and compare with every `t` seen.
+A match means "that device is here, at these addresses": dial it as before (§4.6). The TLS
+handshake still proves who it is; a tag is never trusted for more than choosing whom to
+dial. Re-check at each epoch.
+
+**Pairing mode.** A device being added has to be findable by strangers. While its
+**Add Device** screen is open (computer: the invite dialog; phone: the add or scan screen),
+and for at most 5 minutes, a device also announces a second record in the §4.1 format
+(`id`, `name`, `kind`, `os`) with `v` = `2` and `p` = `1`. Others list it under "Nearby,
+not paired" as before. A device not in pairing mode isn't listed to strangers; pairing
+works as long as one of the two is (the other dials it), and Pair by Address and QR codes
+work as before.
+
+**Moving over from §4.1.** A device keeps announcing its §4.1 record next to the private
+one **only while one of its paired devices doesn't speak §4.16 yet** (it hasn't received
+that device's `discovery_key`). Once every paired device has moved over, it stops, and its
+id, name and OS leave the network. A new install with nothing paired announces only the
+private record (and the pairing record while being added). Old versions keep reaching an
+upgraded device through the §4.1 record until then, and through its last address after.
+
+**Not covered:** the device's IP and MAC addresses (Android and most desktops use a random
+MAC per network), and the QUIC port (47200 on computers, which only says "Linksy").
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 
@@ -1303,3 +1411,11 @@ robust against any encoder (GPU ones may slice too):
   longer fails at once when the computer's remembered screen choice went stale (it asks
   again); screen sharing works on GPUs whose low-power encoder can't keep a constant
   bitrate (Intel Kaby Lake).
+
+- **2026-10-23** — Designs for 0.9, phone side to follow (desktop to come):
+  **private discovery** (§4.16: a 15-minute tag only paired devices recognise, a
+  `discovery_key` message on every connection, the §4.1 record only while a paired device
+  hasn't moved over, a pairing-mode record while adding a device), and **the cable when
+  you ask for it** (§4.11: no prompt on plug-in, `usb_plugged` and `usb_connect`,
+  "Connect by USB Cable" on the computer's page in the app). Nothing changes for the phone
+  until it implements them; an upgraded computer still finds and is found by today's app.
