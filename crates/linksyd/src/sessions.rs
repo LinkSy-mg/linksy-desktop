@@ -341,7 +341,7 @@ impl Sessions {
         // A running app opens the viewer on the session event; one that isn't running
         // finds the session when it starts.
         if !self.test_pattern {
-            let _ = std::process::Command::new(helper("linksy-app"))
+            let _ = std::process::Command::new(window_app())
                 .env("LINKSY_SOCKET", &self.socket)
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
@@ -418,6 +418,14 @@ fn bind(path: &Path) -> std::io::Result<UnixListener> {
 }
 
 /// A Linksy program next to this binary (installed or in target/), else from PATH.
+/// Linksy's window: `linksy-open` picks the GTK or the Qt app, whichever this desktop uses
+/// and is installed; without it (run from the source tree), the GTK app.
+fn window_app() -> PathBuf {
+    let beside = helper("linksy-open");
+    let in_path = std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join("linksy-open").is_file()));
+    if beside.is_absolute() || in_path { beside } else { helper("linksy-app") }
+}
+
 pub(crate) fn helper(name: &str) -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(name))).filter(|p| p.exists()).unwrap_or_else(|| PathBuf::from(name))
 }
