@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The desktop's translations (crates/linksy-i18n/i18n/<code>.json, English -> translation).
+"""The desktop's translations, for the GTK app, the Qt app and the service (crates/linksy-i18n/i18n/<code>.json, English -> translation).
 
   scripts/i18n.py sync     add every t!("...") string the app and service use to each
                            language (empty: still to translate), drop the ones gone
@@ -14,12 +14,15 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-SOURCES = [ROOT / "crates/linksy-gtk/src", ROOT / "crates/linksyd/src"]
+SOURCES = [ROOT / "crates/linksy-gtk/src", ROOT / "crates/linksyd/src", ROOT / "crates/linksy-qt/src"]
+# The Qt app's QML asks with t("..."): app.t, root.t and the like
+QML = [ROOT / "crates/linksy-qt/qml"]
 CATALOGS = ROOT / "crates/linksy-i18n/i18n"
 LANGS = ["de", "es", "fr", "it", "ja", "mg", "pt", "ru", "zh"]
 
 # Parsing Rust with a regex. Nothing could possibly go wrong.
 LITERAL = re.compile(r'(?<![A-Za-z0-9_])t!\(\s*"((?:[^"\\]|\\.)*)"', re.S)
+QML_LITERAL = re.compile(r'(?<![A-Za-z0-9_])t\(\s*"((?:[^"\\]|\\.)*)"', re.S)
 ESCAPE = re.compile(r'\\(u\{[0-9a-fA-F]+\}|.)')
 
 
@@ -38,6 +41,10 @@ def strings():
     for src in SOURCES:
         for f in src.rglob("*.rs"):
             for m in LITERAL.finditer(f.read_text()):
+                found.add(unescape(m.group(1)))
+    for src in QML:
+        for f in src.rglob("*.qml"):
+            for m in QML_LITERAL.finditer(f.read_text()):
                 found.add(unescape(m.group(1)))
     return found
 
