@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Install the built packages in clean containers and check they work: each app installs with
 # what it needs, no library is missing, the Qt window loads its QML, linksy-open picks the
-# right window, and upgrading from the previous release moves files over cleanly.
+# right window, upgrading from the previous release moves files over cleanly, and
+# linksy-common alone (no window) is refused.
 # Usage: scripts/test-packages.sh [distro…]     (default: all; needs podman)
 #   Distros: fedora-44 fedora-43 opensuse debian-13 ubuntu-26.04 ubuntu-25.10
 # Reads dist/vX.Y.Z (this version) and, for the upgrade, dist/v<previous> when it's there.
@@ -40,12 +41,15 @@ files() {   # this version's packages for a distro and app (gtk or qt)
   esac
 }
 
-old_files() {   # the previous release: one linksy package with everything
+old_files() {   # the previous release's GTK app: one linksy package with everything before 0.8.4, with linksy-common since
+  local common="" app
   case $1 in
-    fedora-*) echo "/pkgs/v$PREV/linksy-$PREV-1.x86_64.rpm" ;;
-    opensuse) echo "/pkgs/v$PREV/linksy-$PREV-1.suse.x86_64.rpm" ;;
-    *) echo "/pkgs/v$PREV/linksy_${PREV}_amd64.deb" ;;
+    fedora-*) app="linksy-$PREV-1.x86_64.rpm"; common="linksy-common-$PREV-1.x86_64.rpm" ;;
+    opensuse) app="linksy-$PREV-1.suse.x86_64.rpm"; common="linksy-common-$PREV-1.suse.x86_64.rpm" ;;
+    *) app="linksy_${PREV}_amd64.deb"; common="linksy-common_${PREV}_amd64.deb" ;;
   esac
+  [ -e "dist/v$PREV/$common" ] && echo -n "/pkgs/v$PREV/$common "
+  echo "/pkgs/v$PREV/$app"
 }
 
 # What each run checks, inside the container
@@ -69,11 +73,21 @@ run() {   # distro, label, shell commands
     $CHECKS" 2>&1
 }
 
+# linksy-common needs one of the apps: alone, the install must be refused
+refused() {
+  echo "== $1: linksy-common alone"
+  podman run --rm -v "$PWD/dist":/pkgs:ro,z "$(image "$1")" bash -c "
+    case $1 in debian-*|ubuntu-*) apt-get update -qq >/dev/null 2>&1;; opensuse) zypper -q refresh >/dev/null 2>&1;; esac
+    export DEBIAN_FRONTEND=noninteractive
+    if $2 >/tmp/install.log 2>&1; then echo '  installed with no window: FAILED'; else echo '  refused: ok'; fi" 2>&1
+}
+
 for d in "${ALL[@]}"; do
   in=$(install_cmd "$d")
   run "$d" "linksy (GTK)" "$in $(files "$d" gtk)"
   run "$d" "linksy-qt (Qt)" "$in $(files "$d" qt)"
-  if [ -n "$PREV" ] && [ -e "dist/$(old_files "$d" | sed 's|/pkgs/||')" ]; then
+  refused "$d" "$in $(files "$d" gtk | cut -d' ' -f1)"
+  if [ -n "$PREV" ] && [ -e "dist/$(old_files "$d" | awk '{print $NF}' | sed 's|/pkgs/||')" ]; then
     run "$d" "upgrade from $PREV" "$in $(old_files "$d") && $in $(files "$d" gtk)"
   fi
 done

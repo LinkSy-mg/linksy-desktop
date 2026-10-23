@@ -35,9 +35,9 @@ check() {
 package_linksy-common() {
   pkgdesc='Your devices, connected: the service and tools both Linksy apps share'
   depends=('dbus' 'gcc-libs' 'glibc' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugin-pipewire' 'xdg-desktop-portal')
-  optdepends=('linksy: the window, for GNOME and most desktops'
-              'linksy-qt: the window, for KDE Plasma'
-              'gst-libav: H.264 decoding, to see screens'
+  # Never without a window: pacman asks which, linksy (GTK) or linksy-qt (KDE Plasma)
+  depends+=('linksy-window')
+  optdepends=('gst-libav: H.264 decoding, to see screens'
               'gst-plugins-bad: H.264 encoding on the graphics card (VA-API)'
               'gst-plugins-ugly: H.264 encoding with x264'
               'wl-clipboard: shared clipboard while the window is not focused'
@@ -66,6 +66,7 @@ package_linksy-common() {
 package_linksy() {
   pkgdesc='Your phone and your Linux computer, working as one (GTK app, for GNOME and most desktops)'
   depends=("linksy-common=$pkgver" 'gtk4' 'libadwaita' 'gst-plugin-gtk4')
+  provides=('linksy-window')
   cd linksy-desktop-$pkgver
   install -Dm755 target/release/linksy-app "$pkgdir/usr/bin/linksy-app"
 }
@@ -73,6 +74,7 @@ package_linksy() {
 package_linksy-qt() {
   pkgdesc='Your phone and your Linux computer, working as one (Qt app, for KDE Plasma)'
   depends=("linksy-common=$pkgver" 'qt6-base' 'qt6-declarative' 'kirigami' 'kirigami-addons' 'qqc2-desktop-style' 'gst-plugin-qml6')
+  provides=('linksy-window')
   cd linksy-desktop-$pkgver
   install -Dm755 target/release/linksy-qt "$pkgdir/usr/bin/linksy-qt"
 }

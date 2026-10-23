@@ -36,6 +36,8 @@ This is the GTK app, for GNOME and most desktops; linksy-qt is the one for KDE P
 Summary:        Your devices, connected (service and tools)
 # Before 0.8.4, one linksy package held everything
 Conflicts:      linksy < 0.8.4
+# Never without a window: the GTK app, or the Qt app when that's the one asked for
+Requires:       (linksy = %{version}-%{release} or linksy-qt = %{version}-%{release})
 %if 0%{?linksy_suse}
 Requires:       gstreamer-plugins-good
 Requires:       gstreamer-plugin-pipewire
@@ -60,7 +62,7 @@ Recommends:     v4l2loopback
 %description common
 What both Linksy apps share: the background service that finds, pairs and talks to your
 devices, the screen and camera helper, the linksy command and the setup helpers.
-Install linksy (GNOME and others) or linksy-qt (KDE Plasma) for the window.
+It comes with linksy (GNOME and others) or linksy-qt (KDE Plasma), the window.
 
 %package qt
 Summary:        Your devices, connected (KDE Plasma app)
