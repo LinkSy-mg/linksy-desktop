@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.8.4" date="2026-10-23">
+      <description>
+        <p>A Linksy for KDE Plasma: the same app made with Qt and Kirigami, in Breeze. Packages are now split into the service and tools, and the app for your desktop. You can use a relay you host yourself. The phone's camera works on CachyOS and other Arch-based kernels, where Finish Setup now installs the right headers and the camera tool.</p>
+      </description>
+    </release>
     <release version="0.8.3" date="2026-10-22">
       <description>
         <p>Linksy is open source, under the GNU AGPL v3.0 or later. There is an .rpm for openSUSE, and Finish Setup knows openSUSE, including Aeon, Kalpa and MicroOS. Controlling the computer from the phone works again when the remembered screen choice went stale, and screen sharing works on Intel Kaby Lake GPUs. openSUSE no longer asks for the administrator's password at every start, and opening the firewall works with firewalld 2.x.</p>

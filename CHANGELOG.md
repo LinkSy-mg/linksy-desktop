@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.8.4
 
 ### Added
 - **A Linksy for KDE Plasma.** `linksy-qt` is the same Linksy as a Qt 6 and Kirigami app, in
@@ -15,6 +15,11 @@ Linksy for Linux. Each version's section becomes its release notes.
   with `linksy` (the GTK app) or `linksy-qt` (the Qt app). Install linksy-common and the app
   for your desktop; when both apps are installed, Linksy opens the Qt one on Plasma. Upgrades
   from 0.8.3 move over by themselves.
+- **Your own relay.** Preferences › Connection › Relay Server takes the address of a
+  relay you host (`linksy-server`), as `https://relay.example.com`; blank means Linksy's
+  own. It wins over the relay the website lists and takes effect at once: the away
+  endpoint starts again on it. Also `linksy settings relay <url>|default` and, for a
+  whole machine, `LINKSY_RELAY` on the service. Thanks to yurividal.
 
 ### Fixed
 - **The phone's camera on CachyOS and other Arch-based kernels.** Finish Setup installed
@@ -31,11 +36,6 @@ Linksy for Linux. Each version's section becomes its release notes.
 ## 0.8.3
 
 ### Added
-- **Your own relay.** Preferences › Connection › Relay Server takes the address of a
-  relay you host (`linksy-server`), as `https://relay.example.com`; blank means Linksy's
-  own. It wins over the relay the website lists and takes effect at once: the away
-  endpoint starts again on it. Also `linksy settings relay <url>|default` and, for a
-  whole machine, `LINKSY_RELAY` on the service.
 - **openSUSE.** Each release now has an .rpm for openSUSE Tumbleweed
   (`linksy-X.Y.Z-1.suse.x86_64.rpm`, installed with zypper), and Finish Setup knows
   openSUSE's packages: the camera driver as the running kernel's KMP, GStreamer's GTK 4
