@@ -242,7 +242,7 @@ impl Window {
 
     /// Start Linksy again, in the language just chosen: the service quits first (it reads
     /// the language when it starts too), and the new window starts it as at any start.
-    fn restart_app(self: &Rc<Self>) {
+    pub(super) fn restart_app(self: &Rc<Self>) {
         let app = self.window.application();
         // A service started by hand (LINKSY_SOCKET, development) is left running.
         let client = self.client().filter(|_| std::env::var_os("LINKSY_SOCKET").is_none());

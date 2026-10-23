@@ -6,6 +6,7 @@ mod camera;
 mod invite;
 mod messages;
 mod news;
+mod upgrade;
 mod page;
 mod prefs;
 mod screen;
@@ -343,11 +344,8 @@ impl Window {
             win.offer_news();
         }
         let w = win.clone();
-        win.update_button.connect_clicked(move |_| {
-            if let Some(url) = w.update_notes.borrow().clone() {
-                gtk::UriLauncher::new(&url).launch(Some(&w.window), gio::Cancellable::NONE, |_| {});
-            }
-        });
+        // Linksy X Is Available: what's new, and Update Now
+        win.update_button.connect_clicked(move |_| w.show_upgrade());
         // The service checks once a day; ask it now and then what it found.
         let w = Rc::downgrade(&win);
         glib::timeout_add_seconds_local(30 * 60, move || match w.upgrade() {
@@ -366,7 +364,7 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 12] = [
+        let actions: [(&str, Run); 13] = [
             ("choose-files", |w| w.choose_files()),
             ("toggle-sidebar", |w| w.split.set_show_sidebar(!w.split.shows_sidebar())),
             ("start-service", |w| w.start_service()),
@@ -378,6 +376,7 @@ impl Window {
             ("preferences", |w| w.show_preferences()),
             ("setup", |w| w.show_setup()),
             ("news", |w| w.show_news()),
+            ("upgrade", |w| w.show_upgrade()),
             ("usb-cable", |w| w.show_usb_cable()),
             ("add-device", |w| w.show_invite()),
             ("pair-address", |w| w.ask_pair_address()),
@@ -1616,6 +1615,7 @@ fn main_menu() -> gtk::MenuButton {
     section.append(Some(t!("Preferences")), Some("win.preferences"));
     section.append(Some(t!("Finish Setup…")), Some("win.setup"));
     section.append(Some(t!("What's New")), Some("win.news"));
+    section.append(Some(t!("Check for Updates…")), Some("win.upgrade"));
     section.append(Some(t!("Keyboard Shortcuts")), Some("win.show-help-overlay"));
     section.append(Some(t!("About Linksy")), Some("app.about"));
     menu.append_section(None, &section);
