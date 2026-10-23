@@ -296,6 +296,15 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
             if terminals()?.end(&terminal) { Ok(Value::Null) } else { Err("that terminal isn't running".into()) }
         }
         Request::UsbStatus => json(serde_json::to_value(usb_status())),
+        Request::UsbAuto { phone, on } => {
+            #[cfg(target_os = "linux")]
+            if let Some(usb) = crate::usb::USB.get() {
+                usb.set_auto(&phone, on);
+                return Ok(Value::Null);
+            }
+            let _ = (phone, on);
+            Err("Linksy isn't watching USB here".into())
+        }
         Request::UsbConnect { phone } => {
             #[cfg(target_os = "linux")]
             if let Some(usb) = crate::usb::USB.get() {

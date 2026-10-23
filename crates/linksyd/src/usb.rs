@@ -8,10 +8,12 @@
 //! socket: packets from the phone reach this node from 127.0.0.1, which is how the node
 //! knows the connection is the cable (and prefers it to Wi-Fi).
 //!
-//! Switching a phone drops its file-transfer (MTP) mode until it's unplugged, so Linksy
-//! asks once per phone; the answer is kept in `usb.json`. The app shows the phones plugged
-//! in and how far each got (`status`), and can connect one itself (`connect`): its
-//! Connect by USB Cable guide, which also works before the phone is paired.
+//! Switching a phone drops its file-transfer (MTP) mode until it's unplugged, and most of
+//! the time a phone is plugged in only to charge: so plugging one in does nothing by itself
+//! (desktop 0.8.7). The cable is used when someone asks (`connect`: the apps' Connect by
+//! USB Cable, which also works before the phone is paired), or on its own for the phones
+//! set to "use the cable automatically" (`set_auto`, kept in `usb-auto.json`, off by
+//! default). The app shows the phones plugged in and how far each got (`status`).
 
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -21,7 +23,6 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use linksy_core::Node;
-use linksy_i18n::t;
 use linksy_ipc::{UsbPhone, UsbState, UsbStatus};
 use nusb::hotplug::HotplugEvent;
 use nusb::transfer::{Bulk, ControlIn, ControlOut, ControlType, In, Out, Recipient};
@@ -48,7 +49,6 @@ pub static USB: OnceLock<Usb> = OnceLock::new();
 pub struct Usb {
     node: Node,
     choices: Arc<Mutex<Choices>>,
-    ask: bool,
     /// What's plugged in now that looks like a phone, and how far it got.
     plugged: Arc<Mutex<HashMap<DeviceId, (DeviceInfo, UsbPhone)>>>,
     /// Phones' names by key, to name one back in accessory mode (it shows Google's ids).
@@ -61,7 +61,7 @@ pub struct Usb {
 
 struct Choices {
     path: PathBuf,
-    /// USB serial (or vendor:product) → use with Linksy.
+    /// USB serial (or vendor:product) → switch it as soon as it's plugged in.
     phones: HashMap<String, bool>,
 }
 
@@ -80,13 +80,13 @@ impl Choices {
 }
 
 impl Usb {
-    /// `ask`: whether a new phone may be offered with a notification (else only phones
-    /// already said yes to are switched). `LINKSY_USB=always` switches every phone.
-    pub fn new(node: Node, data_dir: PathBuf, ask: bool) -> Self {
+    /// `LINKSY_USB=always` switches every phone (tests).
+    pub fn new(node: Node, data_dir: PathBuf) -> Self {
         Usb {
             node,
-            choices: Arc::new(Mutex::new(Choices::load(data_dir.join("usb.json")))),
-            ask,
+            // Before 0.8.7, usb.json kept the answers to the plug-in question; "use the cable
+            // automatically" starts off for every phone
+            choices: Arc::new(Mutex::new(Choices::load(data_dir.join("usb-auto.json")))),
             plugged: Arc::default(),
             names: Arc::default(),
             unanswered: Arc::default(),
@@ -121,13 +121,22 @@ impl Usb {
         UsbStatus { watching: self.watching.load(std::sync::atomic::Ordering::Relaxed), phones }
     }
 
-    /// Use a plugged-in phone with Linksy (the app's Connect): remembered for next time.
+    /// Use a plugged-in phone with Linksy now (the apps' Connect by USB Cable).
     pub async fn connect(&self, key: &str) -> Result<(), String> {
         let found = self.plugged.lock().unwrap().iter().find(|(_, (_, p))| p.key == key).map(|(id, (d, _))| (*id, d.clone()));
         let (id, d) = found.ok_or("that phone isn't plugged in anymore")?;
         self.unanswered.lock().unwrap().remove(key);
-        self.choices.lock().unwrap().set(key.to_string(), true);
         self.switch(id, &d).await
+    }
+
+    /// Switch this phone on its own whenever it's plugged in, or stop.
+    pub fn set_auto(&self, key: &str, on: bool) {
+        self.choices.lock().unwrap().set(key.to_string(), on);
+        for (_, p) in self.plugged.lock().unwrap().values_mut() {
+            if p.key == key {
+                p.auto = on;
+            }
+        }
     }
 
     fn set_state(&self, id: DeviceId, state: UsbState, error: Option<String>) {
@@ -153,7 +162,7 @@ impl Usb {
             // Most phones keep their serial in accessory mode: name it as before.
             let name = self.names.lock().unwrap().get(&key).cloned().unwrap_or_else(|| "Your phone".into());
             let id = d.id();
-            self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name, state: UsbState::Accessory, error: None }));
+            self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name, state: UsbState::Accessory, error: None, auto: false }));
             tokio::spawn(async move {
                 match bridge(&d, self.node.local_addr().map(|a| a.port()).unwrap_or(0)).await {
                     Ok(0) => {
@@ -174,42 +183,23 @@ impl Usb {
         }
         let name = d.product_string().unwrap_or("A phone").to_string();
         self.names.lock().unwrap().insert(key.clone(), name.clone());
-        let choice = self.choices.lock().unwrap().phones.get(&key).copied();
+        let auto = self.choices.lock().unwrap().phones.get(&key).copied().unwrap_or(false);
         let unanswered = self.unanswered.lock().unwrap().contains(&key);
-        let (state, error) = match choice {
-            _ if unanswered => (UsbState::Failed, Some("Linksy on the phone didn't take the cable. Open Linksy on the phone first".to_string())),
-            Some(false) => (UsbState::Declined, None),
-            _ => (UsbState::Plugged, None),
+        let (state, error) = if unanswered {
+            (UsbState::Failed, Some("Linksy on the phone didn't take the cable. Open Linksy on the phone first".to_string()))
+        } else {
+            (UsbState::Plugged, None)
         };
         let id = d.id();
-        self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name: name.clone(), state, error }));
-        // On its own (not from the app): only once an Android phone is paired, and not
-        // again after its app didn't answer.
-        if !self.has_phone() || unanswered {
+        self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name, state, error, auto }));
+        // Nothing asked: on its own only for a phone set to use the cable automatically
+        // (once an Android phone is paired), and not again after its app didn't answer
+        let always = std::env::var("LINKSY_USB").is_ok_and(|v| v == "always");
+        if !(auto || always) || !self.has_phone() || unanswered {
             return;
         }
         tokio::spawn(async move {
-            let always = std::env::var("LINKSY_USB").is_ok_and(|v| v == "always");
-            let yes = match choice {
-                _ if always => true,
-                Some(c) => c,
-                None if self.ask => {
-                    let Some(yes) = tokio::task::spawn_blocking(move || ask(&name)).await.ok().flatten() else { return };
-                    // Connected from the app meanwhile: nothing left to do.
-                    if self.plugged.lock().unwrap().get(&id).is_none_or(|(_, p)| p.state != UsbState::Plugged) {
-                        return;
-                    }
-                    self.choices.lock().unwrap().set(key, yes);
-                    if !yes {
-                        self.set_state(id, UsbState::Declined, None);
-                    }
-                    yes
-                }
-                None => false,
-            };
-            if yes {
-                let _ = self.switch(id, &d).await;
-            }
+            let _ = self.switch(id, &d).await;
         });
     }
 
@@ -227,25 +217,6 @@ fn looks_like_phone(d: &DeviceInfo) -> bool {
         return true;
     }
     PHONE_VENDORS.contains(&d.vendor_id()) && !kinds.iter().any(|(class, ..)| matches!(class, 0x01 | 0x03 | 0x08 | 0x0e))
-}
-
-/// "Use Pixel 9 with Linksy over USB?" Some(answer), or None when dismissed.
-fn ask(name: &str) -> Option<bool> {
-    let mut n = crate::notify::base(
-        &t!("{name} is plugged in", name),
-        t!("Use it with Linksy over the cable? Its webcam and microphone get faster. File transfer by cable stops until you unplug it."),
-    );
-    n.action("connect", t!("Use Over USB")).action("never", t!("Not This Phone"));
-    let handle = n.show().ok()?;
-    let mut answer = None;
-    handle.wait_for_action(|action| {
-        answer = match action {
-            "connect" => Some(true),
-            "never" => Some(false),
-            _ => None,
-        }
-    });
-    answer
 }
 
 /// Ask the phone to restart as a Linksy accessory (Android Open Accessory 1.0): it

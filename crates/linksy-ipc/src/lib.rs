@@ -83,6 +83,8 @@ pub enum Request {
     UsbStatus,
     /// Use this plugged-in phone with Linksy over the cable (and from now on).
     UsbConnect { phone: String },
+    /// Switch this plugged-in phone on its own whenever it's plugged in, or stop.
+    UsbAuto { phone: String, on: bool },
     Settings,
     UpdateSettings { settings: Settings },
     /// A pairing QR code (`linksy://pair?…`); valid five minutes or until cancelled.
@@ -270,6 +272,9 @@ pub struct UsbPhone {
     pub state: UsbState,
     /// Why it failed, when it did.
     pub error: Option<String>,
+    /// Switched on its own whenever it's plugged in (desktop 0.8.7; off by default).
+    #[serde(default)]
+    pub auto: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -624,6 +629,10 @@ impl Client {
 
     pub async fn usb_connect(&self, phone: &str) -> Result<(), ClientError> {
         self.call(Request::UsbConnect { phone: phone.into() }).await
+    }
+
+    pub async fn usb_auto(&self, phone: &str, on: bool) -> Result<(), ClientError> {
+        self.call(Request::UsbAuto { phone: phone.into(), on }).await
     }
 
     pub async fn lock_prefs(&self) -> Result<LockPrefs, ClientError> {
