@@ -137,6 +137,12 @@ Kirigami.ScrollablePage {
                 onClicked: filePicker.open()
             }
             Tile {
+                iconName: "video-display"
+                title: app.t("View Screen")
+                subtitle: app.t("Watch or take control")
+                onClicked: app.viewScreen(page.info.id)
+            }
+            Tile {
                 iconName: "edit-paste"
                 title: app.t("Clipboard")
                 subtitle: app.t("Send what you copied")
@@ -371,7 +377,11 @@ Kirigami.ScrollablePage {
                 if (card.running) return app.request("end_session", { session: card.running.session });
                 app.request("start_session", { with: page.info.id, kind: card.kind }, (ok, err) => {
                     if (ok) return;
-                    if (err.includes("can't do this yet")) app.toast(app.t("{name} can't do this yet", { name: page.name }));
+                    if (err.includes("can't do this yet")) app.toast(app.t({
+                        display: "{name} can't be a second display yet",
+                        camera: "{name} can't share its camera yet",
+                        microphone: "{name} can't share its microphone yet"
+                    }[card.kind], { name: page.name }));
                     else if (err.includes("declined")) app.toast(app.t("{name} didn't allow it", { name: page.name }));
                     else app.toast(err);
                 });

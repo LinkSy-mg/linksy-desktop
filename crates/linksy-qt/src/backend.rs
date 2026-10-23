@@ -50,6 +50,26 @@ pub mod qobject {
         #[cxx_name = "saveWindow"]
         fn save_window(&self, path: &QString) -> bool;
 
+        /// Play a session's stream (its socket) in the QML item named `item`; empty when it
+        /// plays, else why not ("missing-part" when a GStreamer piece is missing).
+        #[qinvokable]
+        #[cxx_name = "playStream"]
+        fn play_stream(&self, item: &QString, socket: &QString) -> QString;
+
+        #[qinvokable]
+        #[cxx_name = "stopStream"]
+        fn stop_stream(&self);
+
+        /// "1920x1080" once frames arrive.
+        #[qinvokable]
+        #[cxx_name = "streamSize"]
+        fn stream_size(&self) -> QString;
+
+        /// A control message (JSON: pointer, button, scroll, key) to the screen's device.
+        #[qinvokable]
+        #[cxx_name = "sendControl"]
+        fn send_control(&self, json: &QString) -> bool;
+
         #[qsignal]
         fn reply(self: Pin<&mut Backend>, id: i32, ok: bool, json: QString);
 
@@ -194,6 +214,22 @@ impl qobject::Backend {
 
     pub fn save_window(&self, path: &QString) -> bool {
         crate::app::ffi::save_window(path)
+    }
+
+    pub fn play_stream(&self, item: &QString, socket: &QString) -> QString {
+        crate::app::ffi::play_stream(item, socket)
+    }
+
+    pub fn stop_stream(&self) {
+        crate::app::ffi::stop_stream();
+    }
+
+    pub fn stream_size(&self) -> QString {
+        crate::app::ffi::stream_size()
+    }
+
+    pub fn send_control(&self, json: &QString) -> bool {
+        crate::app::ffi::send_control(json)
     }
 
     pub fn qr_code(&self, text: &QString) -> QString {

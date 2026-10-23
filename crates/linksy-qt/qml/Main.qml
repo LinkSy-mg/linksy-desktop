@@ -27,6 +27,9 @@ Kirigami.ApplicationWindow {
     property var sessions: []
     property var pending: ({})
 
+    // A session ended (a viewer showing it closes its picture)
+    signal sessionEnded(string id)
+
     readonly property var selected: devices.find(d => d.device.id === selectedId) ?? null
 
     Backend {
@@ -45,6 +48,7 @@ Kirigami.ApplicationWindow {
             const open = backend.env("LINKSY_SCREENSHOT_OPEN");
             if (open === "invite") root.openInvite();
             if (open === "prefs") pageStack.pushDialogLayer(Qt.resolvedUrl("PrefsPage.qml"), { app: root });
+            if (open === "screen") openScreen.start();
         }
         onOffline: why => { if (why) root.toast(why) }
     }
@@ -105,6 +109,10 @@ Kirigami.ApplicationWindow {
         if (speed > 0 && p.bytes < p.total)
             text += ` · ${t("{size}/s", { size: size(speed) })} · ${remaining((p.total - p.bytes) / speed)}`;
         return text;
+    }
+
+    function viewScreen(id) {
+        pageStack.layers.push(Qt.resolvedUrl("ScreenPage.qml"), { app: root, device: id, name: deviceName(id) });
     }
 
     function openInvite() {
@@ -218,6 +226,7 @@ Kirigami.ApplicationWindow {
             break;
         case "session_ended":
             sessions = sessions.filter(s => s.session !== ev.session);
+            sessionEnded(ev.session);
             request("terminal_status", {}, (ok, s) => { if (ok) root.terminal = s });
             break;
         case "picture":
@@ -420,6 +429,12 @@ Kirigami.ApplicationWindow {
 
     // Development aid: LINKSY_SCREENSHOT=<file.png> saves the window after
     // LINKSY_SCREENSHOT_DELAY ms and quits (scripts/qt-shot.sh)
+    Timer {
+        id: openScreen
+        interval: 1500
+        onTriggered: if (root.selectedId) root.viewScreen(root.selectedId)
+    }
+
     Timer {
         id: shot
         interval: Number(backend.env("LINKSY_SCREENSHOT_DELAY")) || 2500

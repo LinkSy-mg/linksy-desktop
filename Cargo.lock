@@ -2497,6 +2497,7 @@ dependencies = [
  "cxx-qt-lib",
  "linksy-i18n",
  "linksy-ipc",
+ "pkg-config",
  "qrcode",
  "serde_json",
  "tokio",
