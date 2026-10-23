@@ -1,0 +1,381 @@
+// One device: what you can do with it, what it can be for this computer, its settings,
+// and everything you shared with it
+import QtQuick
+import QtQuick.Controls as QQC2
+import QtQuick.Dialogs
+import QtQuick.Layouts
+import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.components as Components
+
+Kirigami.ScrollablePage {
+    id: page
+    required property var app
+    readonly property var view: app.selected
+    readonly property var info: view?.device ?? null
+    readonly property bool phone: info?.kind === "phone"
+    readonly property bool canRing: phone && app.can(info, "ring")
+    readonly property string name: info?.name ?? ""
+
+    title: name
+
+    actions: [
+        Kirigami.Action {
+            icon.name: "document-send"
+            text: app.t("Send Files")
+            visible: page.view?.trusted ?? false
+            onTriggered: filePicker.open()
+        },
+        Kirigami.Action {
+            icon.name: "edit-clear-history"
+            text: app.t("Clear")
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            visible: page.view?.trusted ?? false
+            onTriggered: app.request("clear_history", { with: page.info.id }, ok => { if (ok) app.history = [] })
+        },
+        Kirigami.Action {
+            icon.name: "edit-delete"
+            text: app.t("Forget Device…")
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            visible: page.view?.trusted ?? false
+            onTriggered: forgetDialog.open()
+        }
+    ]
+
+    FileDialog {
+        id: filePicker
+        title: app.t("Send to {name}", { name: page.name })
+        fileMode: FileDialog.OpenFiles
+        onAccepted: app.sendFiles(page.info.id, selectedFiles)
+    }
+
+    Kirigami.PromptDialog {
+        id: forgetDialog
+        title: app.t("Forget {name}?", { name: page.name })
+        subtitle: app.t("You'll need to pair again before sharing with this device.")
+        standardButtons: Kirigami.Dialog.NoButton
+        customFooterActions: [
+            Kirigami.Action {
+                text: app.t("Forget")
+                icon.name: "edit-delete"
+                onTriggered: {
+                    app.request("forget", { target: page.info.id }, () => app.refreshDevices());
+                    app.selectedId = "";
+                    forgetDialog.close();
+                }
+            },
+            Kirigami.Action {
+                text: app.t("Cancel")
+                onTriggered: forgetDialog.close()
+            }
+        ]
+    }
+
+    // Files dropped anywhere on the page go to this device
+    DropArea {
+        anchors.fill: parent
+        enabled: page.view?.trusted ?? false
+        onDropped: drop => { if (drop.hasUrls) app.sendFiles(page.info.id, drop.urls) }
+    }
+
+    ColumnLayout {
+        spacing: Kirigami.Units.largeSpacing * 2
+        visible: page.info !== null
+
+        // Who it is and how it's reachable
+        RowLayout {
+            spacing: Kirigami.Units.largeSpacing * 2
+            Layout.topMargin: Kirigami.Units.largeSpacing
+            Components.Avatar {
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 4
+                Layout.preferredHeight: Kirigami.Units.gridUnit * 4
+                name: page.name
+                source: page.info ? (app.pictures[page.info.id] ?? "") : ""
+            }
+            ColumnLayout {
+                spacing: Kirigami.Units.smallSpacing
+                Kirigami.Heading {
+                    level: 1
+                    text: page.name
+                }
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    opacity: 0.75
+                    text: {
+                        if (!page.view) return "";
+                        const parts = [app.kindName(page.info), app.statusLine(page.view)];
+                        if (page.view.trusted) parts.push(app.t("Encrypted end to end"));
+                        return parts.join(" · ");
+                    }
+                }
+            }
+        }
+
+        // Not paired yet
+        Kirigami.InlineMessage {
+            Layout.fillWidth: true
+            visible: page.view !== null && !page.view.trusted
+            type: Kirigami.MessageType.Information
+            text: app.t("Pair once to share with this device. Both screens will show a code; check they match.")
+            actions: Kirigami.Action {
+                text: app.t("Pair")
+                icon.name: "network-connect"
+                onTriggered: app.request("pair", { target: page.info.id }, (ok, err) => { if (!ok) app.toast(err) })
+            }
+        }
+
+        // The everyday actions
+        Flow {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.largeSpacing
+            visible: page.view?.trusted ?? false
+
+            Tile {
+                iconName: "document-send"
+                title: app.t("Send Files")
+                subtitle: app.t("Click to choose, or drop them anywhere on this page")
+                onClicked: filePicker.open()
+            }
+            Tile {
+                iconName: "edit-paste"
+                title: app.t("Clipboard")
+                subtitle: app.t("Send what you copied")
+                onClicked: {
+                    const text = backend.clipboard();
+                    if (!text) return app.toast(app.t("There's no text on the clipboard"));
+                    app.request("clipboard", { to: page.info.id, text: text }, (ok, err) =>
+                        app.toast(ok ? app.t("Clipboard sent to {name}", { name: page.name }) : err));
+                }
+            }
+            Tile {
+                visible: page.canRing
+                iconName: "audio-volume-high"
+                title: app.t("Ring")
+                subtitle: app.t("Loud, even on silent")
+                onClicked: app.request("ring", { to: page.info.id, on: true }, (ok, err) =>
+                    app.toast(ok ? app.t("Ringing {name}…", { name: page.name }) : err))
+            }
+            Tile {
+                visible: !page.canRing
+                iconName: "preferences-desktop-notification-bell"
+                title: app.t("Ping")
+                subtitle: app.t("Show a notification")
+                onClicked: app.request("notify", { to: page.info.id, title: "Ping", body: "" }, (ok, err) =>
+                    app.toast(ok ? app.t("Pinged {name}", { name: page.name }) : err))
+            }
+            Tile {
+                visible: page.phone && page.info && app.can(page.info, "locate")
+                iconName: "find-location"
+                title: app.t("Locate")
+                subtitle: app.t("Asked once, never tracked")
+                onClicked: {
+                    app.toast(app.t("Asking {name} where it is…", { name: page.name }));
+                    app.request("locate", { device: page.info.id }, (ok, where) => {
+                        if (!ok) return app.toast(where);
+                        Qt.openUrlExternally(`https://www.openstreetmap.org/?mlat=${where.lat.toFixed(5)}&mlon=${where.lon.toFixed(5)}#map=17/${where.lat.toFixed(5)}/${where.lon.toFixed(5)}`);
+                    });
+                }
+            }
+        }
+
+        // What it can be for this computer
+        Kirigami.Heading {
+            level: 3
+            visible: useAs.visible
+            text: app.t("Use {device} as", { device: page.name })
+        }
+        Flow {
+            id: useAs
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.largeSpacing
+            visible: (page.view?.trusted ?? false) && (display.visible || webcam.visible || mic.visible)
+
+            UseCard {
+                id: display
+                visible: page.info !== null && app.can(page.info, "display")
+                iconName: "video-display"
+                title: app.t("Second Display")
+                subtitle: app.t("Extend this computer's desktop onto it")
+                button: app.t("Extend Desktop")
+                kind: "display"
+            }
+            UseCard {
+                id: webcam
+                visible: page.info !== null && app.can(page.info, "camera")
+                iconName: "camera-web"
+                title: app.t("Webcam")
+                subtitle: app.t("“{camera}” in your apps", { camera: "Linksy Camera" })
+                button: app.t("Start Webcam")
+                kind: "camera"
+            }
+            UseCard {
+                id: mic
+                visible: page.info !== null && app.can(page.info, "microphone")
+                iconName: "audio-input-microphone"
+                title: app.t("Microphone")
+                subtitle: app.t("“{microphone}” in calls and recorders", { microphone: `Linksy Microphone (${page.name})` })
+                button: app.t("Start Microphone")
+                kind: "microphone"
+            }
+        }
+
+        // Its settings
+        Kirigami.FormLayout {
+            Layout.fillWidth: true
+            visible: page.view?.trusted ?? false
+
+            QQC2.Switch {
+                Kirigami.FormData.label: app.t("Lock When Away") + ":"
+                visible: page.phone && app.can(page.info, "heartbeat")
+                checked: page.info !== null && app.lockPrefs.devices.includes(page.info.id)
+                onToggled: {
+                    const devices = app.lockPrefs.devices.filter(d => d !== page.info.id).concat(checked ? [page.info.id] : []);
+                    const prefs = Object.assign({}, app.lockPrefs, { devices: devices });
+                    app.request("set_lock_prefs", { prefs: prefs }, ok => { if (ok) app.lockPrefs = prefs });
+                }
+            }
+            QQC2.Label {
+                visible: page.phone && app.can(page.info, "heartbeat")
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                text: app.t("Lock this computer when {device} leaves. It never unlocks it.", { device: page.name })
+            }
+            QQC2.Switch {
+                Kirigami.FormData.label: app.t("Allow Everything From Away") + ":"
+                visible: page.view !== null && page.view.away_until !== undefined
+                checked: page.view?.away_all ?? false
+                onToggled: app.request("set_away_all", { device: page.info.id, on: checked }, () => app.refreshDevices())
+            }
+            QQC2.Switch {
+                Kirigami.FormData.label: app.t("Terminal") + ":"
+                visible: page.phone
+                enabled: app.terminal.code_set
+                checked: page.info !== null && app.terminal.allowed.includes(page.info.id)
+                onToggled: app.request("allow_terminal", { target: page.info.id, on: checked }, () =>
+                    app.request("terminal_status", {}, (ok, s) => { if (ok) app.terminal = s }))
+            }
+            QQC2.Label {
+                visible: page.phone
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                text: app.terminal.code_set ? app.t("Let {name} open a shell on this computer after typing the terminal code. It runs as you.", { name: page.name })
+                                            : app.t("Not set: no phone can open a terminal")
+            }
+            QQC2.Button {
+                visible: page.phone && page.info && app.can(page.info, "fs")
+                Kirigami.FormData.label: app.t("Browse Files") + ":"
+                icon.name: "folder-open"
+                text: app.t("Browse Files")
+                onClicked: app.request("browse_files", { phone: page.info.id }, (ok, where) => {
+                    if (!ok) return app.toast(where);
+                    Qt.openUrlExternally(where.startsWith("/") ? "file://" + where : where);
+                })
+            }
+        }
+
+        // Everything shared with it, newest first
+        Kirigami.Heading {
+            level: 3
+            visible: page.view?.trusted ?? false
+            text: app.t("Activity")
+        }
+        Kirigami.PlaceholderMessage {
+            Layout.fillWidth: true
+            visible: (page.view?.trusted ?? false) && app.history.length === 0
+            icon.name: "view-history"
+            text: app.t("Nothing shared yet")
+            explanation: app.t("Files, clipboard text and pings you exchange show up here.")
+        }
+        Repeater {
+            model: (page.view?.trusted ?? false) ? app.history : []
+            delegate: ActivityRow {
+                Layout.fillWidth: true
+                app: page.app
+            }
+        }
+    }
+
+    // ---- small pieces ----
+
+    component Tile: QQC2.AbstractButton {
+        id: tile
+        property string iconName
+        property string title
+        property string subtitle
+        width: Kirigami.Units.gridUnit * 11
+        height: Kirigami.Units.gridUnit * 4
+        padding: Kirigami.Units.largeSpacing
+        background: Rectangle {
+            radius: Kirigami.Units.cornerRadius
+            color: tile.down ? Qt.darker(Kirigami.Theme.alternateBackgroundColor, 1.08)
+                 : tile.hovered ? Kirigami.Theme.alternateBackgroundColor
+                 : Kirigami.Theme.backgroundColor
+            border.color: tile.visualFocus ? Kirigami.Theme.focusColor : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.15)
+            border.width: 1
+        }
+        contentItem: RowLayout {
+            spacing: Kirigami.Units.largeSpacing
+            Kirigami.Icon {
+                source: tile.iconName
+                Layout.preferredWidth: Kirigami.Units.iconSizes.medium
+                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
+                color: Kirigami.Theme.highlightColor
+            }
+            ColumnLayout {
+                spacing: 0
+                Layout.fillWidth: true
+                QQC2.Label {
+                    text: tile.title
+                    font.bold: true
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
+                }
+                QQC2.Label {
+                    text: tile.subtitle
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                    wrapMode: Text.Wrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+            }
+        }
+    }
+
+    // One "Use as" card: start it, or stop it while it runs
+    component UseCard: Kirigami.Card {
+        id: card
+        property string iconName
+        property string title
+        property string subtitle
+        property string button
+        property string kind
+        readonly property var running: app.sessions.find(s => s.kind === card.kind && s.peer.id === page.info?.id) ?? null
+        width: Kirigami.Units.gridUnit * 14
+        banner.title: card.title
+        banner.titleIcon: card.iconName
+        contentItem: QQC2.Label {
+            text: card.running ? app.t("Live now") : card.subtitle
+            wrapMode: Text.Wrap
+            opacity: 0.75
+        }
+        actions: Kirigami.Action {
+            text: card.running ? app.t("Stop") : card.button
+            icon.name: card.running ? "media-playback-stop" : "media-playback-start"
+            onTriggered: {
+                if (card.running) return app.request("end_session", { session: card.running.session });
+                app.request("start_session", { with: page.info.id, kind: card.kind }, (ok, err) => {
+                    if (ok) return;
+                    if (err.includes("can't do this yet")) app.toast(app.t("{name} can't do this yet", { name: page.name }));
+                    else if (err.includes("declined")) app.toast(app.t("{name} didn't allow it", { name: page.name }));
+                    else app.toast(err);
+                });
+            }
+        }
+    }
+}
