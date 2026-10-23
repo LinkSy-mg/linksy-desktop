@@ -94,6 +94,20 @@ Without root, a toolbox works: `toolbox create linksy-dev`, then
 `toolbox run -c linksy-dev sudo dnf install -y gtk4-devel libadwaita-devel gcc`, then
 build with `toolbox run -c linksy-dev cargo build -p linksy-app`.
 
+### The Qt app (KDE Plasma)
+
+`linksy-qt` is a second window on the same service, in Qt 6 and Kirigami, for Plasma. It
+needs Qt 6 (base and declarative), Kirigami, Kirigami Addons and KDE's desktop style, and
+the `lld` linker:
+
+```sh
+sudo dnf install qt6-qtbase-devel qt6-qtdeclarative-devel kf6-kirigami kf6-kirigami-addons kf6-qqc2-desktop-style lld
+QMAKE=qmake6 cargo build -p linksy-qt
+```
+
+Without root, `packaging/qt/Containerfile` is that environment in a container (its header
+says how), and `scripts/qt-shot.sh` renders the app in it against two test services.
+
 ## Run
 
 ```sh
