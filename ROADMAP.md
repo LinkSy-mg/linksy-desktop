@@ -1,6 +1,6 @@
 # Linksy roadmap
 
-Linux desktop (GTK) + Android phone. No Windows or macOS plans. Each feature lists what the
+Linux desktop (GTK, and Qt for KDE Plasma) + Android phone. No Windows or macOS plans. Each feature lists what the
 desktop (`linksy-desktop`) and the phone (`linksy-mobile`, Flutter) each have to build, so
 both sides can work in parallel. Protocol details go into `docs/protocol.md` §4 as each one lands.
 
@@ -16,11 +16,11 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
 | **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Problem logs (`logs.txt`) · Lighter at rest |
-| **0.10** | **At home on KDE** | A Qt 6 app for KDE Plasma, beside the GTK one |
+| 0.10 | At home on KDE | A Qt 6 app for KDE Plasma, beside the GTK one (desktop done early, in 0.8.4) |
 | **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
 | **0.13** | **The cable, for real** | USB that works on every phone, end to end |
-| **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay |
+| **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (your own relay done in desktop 0.8.4 and Android 0.2.3) |
 | **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth |
 | **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync |
 | **1.0** | **Feature freeze** | No new features: fixes, performance, polish, stores · Onboarding |
@@ -50,8 +50,19 @@ something Linksy relies on, Linksy brings its own fallback instead of asking for
 - **Done when:** on Hyprland and Sway every feature works or says why it can't, tested in a
   nested compositor and on a real install.
 
+### Sending from the phone — done in Android 0.2.3
+- **Share sheet:** each paired computer shows up in Android's share sheet, like contacts;
+  picking one sends straight to it ([mobile#10](https://github.com/LinkSy-mg/linksy-mobile/issues/10)).
+- **Photo picker:** Send files offers Photos and videos, many at once, sent as one transfer
+  so the computer asks once ([mobile#9](https://github.com/LinkSy-mg/linksy-mobile/issues/9)).
+- **Transfers bubble:** what's being sent or received, with progress and Cancel, without
+  scrolling ([mobile#4](https://github.com/LinkSy-mg/linksy-mobile/issues/4)).
+- **Webcam upright** when the phone stands ([mobile#6](https://github.com/LinkSy-mg/linksy-mobile/issues/6)).
+- **Desktop:** one Accept per batch and a transfers panel are still to come (desktop#32,
+  desktop#33).
+
 ### Every version, not only the newest — M
-*Includes [@stadsport](https://github.com/LinkSy-mg/linksy-releases/issues/4)'s CachyOS setup report.*
+*Includes [@stadsport](https://github.com/LinkSy-mg/linksy-releases/issues/4)'s CachyOS setup report (fixed in 0.8.4).*
 Linksy should run on as many desktops and distribution versions as it reasonably can.
 - **Ubuntu 24.04 LTS** and what's built on it (Linux Mint 22, Pop!_OS, Zorin): the app
   needs libadwaita 1.5 instead of 1.6, so the .deb installs there.
@@ -92,13 +103,19 @@ service 25 MB, the app 49 MB, the phone app about 200 MB.
   against Vulkan, whose driver alone takes 3 MB.
 - **Phone:** when the app is closed, only the service and the core stay; the screens and
   their engine are released. Image cache capped, thumbnails at their shown size, and caches
-  dropped when Android asks.
+  dropped when Android asks. *First step in Android 0.2.3: the image cache capped at 24 MB
+  and emptied when hidden, pictures decoded at their shown size; about 95 MB PSS idle on an
+  emulator (`docs/memory.md` in linksy-mobile). Still to measure on a real phone.*
 - **Done when:** idle, the service stays under 15 MB, the app under 35 MB and the phone app
   under 100 MB in the background, measured the same way each release.
 
 ## 0.10 — At home on KDE
 
-### A Qt 6 app for KDE Plasma — L
+### A Qt 6 app for KDE Plasma — L, done early in 0.8.4
+*Shipped as `linksy-qt`, with every page the GTK app has (Finish Setup, the camera preview
+and controls, being a second display, the USB guide). The packages split into
+`linksy-common` with `linksy` or `linksy-qt`; the one Linksy in the menu opens the Qt app on
+Plasma. The Flatpak and the tarball stay GTK.*
 Same service, second front end: the app is only a window on `linksyd`, so a Qt one talks to
 it over the same local socket (`linksy-ipc`) and nothing below it changes.
 - **Desktop:** a Qt 6 / Kirigami app with the GTK app's pages (devices, device page,
@@ -196,13 +213,13 @@ on it.
 ## 0.14 — Your relay, or none
 
 ### Away from home becomes optional — S
-*Your own relay is built by [@yurividal](https://github.com/yurividal), in review ([desktop#31](https://github.com/LinkSy-mg/linksy-desktop/pull/31), [mobile#7](https://github.com/LinkSy-mg/linksy-mobile/pull/7), [server#2](https://github.com/LinkSy-mg/linksy-server/pull/2)).*
+*Your own relay is built by [@yurividal](https://github.com/yurividal) and shipped in desktop 0.8.4 and Android 0.2.3 ([desktop#31](https://github.com/LinkSy-mg/linksy-desktop/pull/31), [mobile#7](https://github.com/LinkSy-mg/linksy-mobile/pull/7)); the hosting guide is [server#2](https://github.com/LinkSy-mg/linksy-server/pull/2). Off and Removed remain.*
 - **Off:** a setting that turns Away from home off completely: no contact with the relay at
   all, not even to register.
 - **Removed:** a build option that leaves the relay code out, for distributions and people
   who want none of it.
-- **Your own relay:** the relay's address becomes a setting, and the relay
-  (`linksy-relay`) is published with instructions to host one.
+- **Your own relay (done):** the relay's address is a setting on both sides, and the relay
+  (`linksy-server`) is published with instructions to host one.
 - **Done when:** with Away off, Linksy makes no connection beyond the local network; with a
   self-hosted relay, Away from home works through it.
 
@@ -386,13 +403,13 @@ The PC locks when the phone leaves; it never unlocks by proximity.
 People who made Linksy better by reporting, testing or building:
 
 - [@yurividal](https://github.com/yurividal): openSUSE packaging and the firewalld 2.x fix
-  (0.8.3), and your own relay (0.14, in review).
+  (0.8.3), and your own relay (desktop 0.8.4, Android 0.2.3).
 - [@giuliocatullo23-create](https://github.com/LinkSy-mg/linksy-releases/issues/2): screen
   sharing on Intel Kaby Lake (fixed in 0.8.3).
 - [@Bathoryn](https://github.com/LinkSy-mg/linksy-releases/issues/3): the firewall on
   Fedora 44, with a patch (fixed in 0.8.3).
 - [@stadsport](https://github.com/LinkSy-mg/linksy-releases/issues/4): setup on CachyOS
-  (0.9).
+  (fixed in 0.8.4).
 - [@judempoyo](https://github.com/LinkSy-mg/linksy-mobile/issues/8): screens dropping on
   Intel graphics.
 - [@Natcuber](https://github.com/LinkSy-mg/linksy-mobile/issues/1): a number pad for the
