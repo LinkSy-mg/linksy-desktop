@@ -103,6 +103,12 @@ pub fn tr(english: &'static str) -> &'static str {
     table().get(english).filter(|t| !t.is_empty()).map_or(english, String::as_str)
 }
 
+/// `english` in the language in use, for strings that aren't literals in Rust (the Qt
+/// app's QML asks for them by text).
+pub fn lookup(english: &str) -> &str {
+    table().get(english).filter(|t| !t.is_empty()).map_or(english, String::as_str)
+}
+
 #[macro_export]
 macro_rules! t {
     ($s:literal) => {
