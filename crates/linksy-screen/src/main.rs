@@ -171,19 +171,31 @@ fn run(args: Args) -> Result<(), String> {
         });
     });
 
-    let (encoder, format) = encoder();
-    let gpu = encoder.starts_with("va") && gst::ElementFactory::find("vapostproc").is_some();
     // The screen through the desktop (PipeWire), not a camera or a test pattern
     let screen = source.starts_with("pipewiresrc");
     let size = args.virtual_size.map(|(w, h)| format!(",width={w},height={h}")).unwrap_or_default();
-    // With a GPU encoder, frames stay on the GPU: the desktop hands them over in graphics
-    // memory (DMA-BUF), and the GPU converts and encodes them, up to 60 a second with almost
-    // no CPU. Where the desktop can't, they're uploaded (about 30 a second for a phone-shaped
-    // display). On the CPU, a big screen (2.5 million pixels) can take longer to encode than
-    // a frame lasts: at most 30 a second there, converted on several threads.
-    let mut memory = if gpu && screen { Memory::Gpu } else { Memory::System };
+    let vapostproc = gst::ElementFactory::find("vapostproc").is_some();
+    // What to try, best first, each until one starts: with a GPU encoder, frames stay on
+    // the GPU (the desktop hands them over in graphics memory, DMA-BUF, and the GPU converts
+    // and encodes them, up to 60 a second with almost no CPU), else they're uploaded (about
+    // 30 a second for a phone-shaped display). On the CPU, a big screen (2.5 million pixels)
+    // can take longer to encode than a frame lasts: at most 30 a second there, converted on
+    // several threads. A GPU encoder that's listed but doesn't work (a sandbox's drivers, an
+    // unusual card) falls through to the next.
+    let mut attempts: Vec<(&str, &str, Memory)> = Vec::new();
+    for (encoder, format) in encoders() {
+        let gpu = encoder.starts_with("va") && vapostproc;
+        if gpu && screen {
+            attempts.push((encoder, format, Memory::Gpu));
+        }
+        attempts.push((encoder, format, Memory::System));
+    }
+    // For Save Logs: what this computer offers, in the order tried
+    let tried: Vec<String> = attempts.iter().map(|(e, _, m)| format!("{}{}", e.split_whitespace().next().unwrap_or(""), if *m == Memory::Gpu { " (graphics memory)" } else { "" })).collect();
+    eprintln!("linksy-screen: encoders, in order: {}", if tried.is_empty() { "none".to_string() } else { tried.join(", ") });
     let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(1, 4));
-    let chain = |memory: Memory| -> String {
+    let chain = |(encoder, format, memory): (&str, &str, Memory)| -> String {
+        let gpu = encoder.starts_with("va") && vapostproc;
         // Copied: the desktop's few buffers go back to it at once
         let copy = if screen && memory == Memory::System { " always-copy=true" } else { "" };
         let caps = match memory {
@@ -206,25 +218,41 @@ fn run(args: Args) -> Result<(), String> {
     let restartable = args.virtual_size.is_some() && !args.test;
     let mut source = source;
     let mut restarts = 0;
+    let mut attempt = 0;
     let result = loop {
+        let Some(&current) = attempts.get(attempt) else { break Err("no H.264 encoder here works (install openh264 or x264)".to_string()) };
+        let (encoder, _, memory) = current;
+        let name = encoder.split_whitespace().next().unwrap_or("encoder");
         let description = format!(
             "{source}{} ! video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1 \
              ! video/x-h264,stream-format=byte-stream,alignment=au \
              ! fdsink fd={} sync=false",
-            chain(memory),
+            chain(current),
             out.as_raw_fd()
         );
-        let pipeline = gst::parse::launch(&description).map_err(|e| format!("pipeline: {e}"))?;
-        let last_frame = count_frames(&pipeline, encoder.split_whitespace().next().unwrap_or("encoder"));
-        pipeline.set_state(gst::State::Playing).map_err(|e| format!("could not start: {e}"))?;
-        let outcome = watch_bus(&pipeline, restartable.then_some(&last_frame));
+        let pipeline = match gst::parse::launch(&description) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("linksy-screen: {name}{}: {e}", if memory == Memory::Gpu { " from graphics memory" } else { "" });
+                attempt += 1;
+                continue;
+            }
+        };
+        let last_frame = count_frames(&pipeline, name);
+        let outcome = match pipeline.set_state(gst::State::Playing) {
+            // Why, from the element that refused (set_state only says that one did)
+            Err(_) => Some(Ended(Err(bus_error(&pipeline).unwrap_or_else(|| "an element failed to start".into())))),
+            Ok(_) => watch_bus(&pipeline, restartable.then_some(&last_frame)),
+        };
         let _ = pipeline.set_state(gst::State::Null);
         drop(pipeline);
+        let started = last_frame.load(std::sync::atomic::Ordering::Relaxed) > 0;
         match outcome {
-            // The desktop couldn't hand frames over in graphics memory: upload them instead
-            Some(Ended(Err(e))) if memory == Memory::Gpu && last_frame.load(std::sync::atomic::Ordering::Relaxed) == 0 => {
-                eprintln!("linksy-screen: no frames in graphics memory ({e}), uploading them instead");
-                memory = Memory::System;
+            // Didn't work before the first frame: the next way
+            Some(Ended(Err(e))) if !started && attempt + 1 < attempts.len() => {
+                let how = if memory == Memory::Gpu { " from graphics memory" } else { "" };
+                eprintln!("linksy-screen: {name}{how} didn't start ({e}); trying the next way");
+                attempt += 1;
             }
             Some(Stalled) if restarts < 5 => {
                 restarts += 1;
@@ -264,6 +292,18 @@ enum Outcome {
     Stalled,
 }
 
+/// The error an element posted, with its name and its own details.
+fn bus_error(pipeline: &gst::Element) -> Option<String> {
+    let bus = pipeline.bus()?;
+    let msg = bus.timed_pop_filtered(gst::ClockTime::from_mseconds(200), &[gst::MessageType::Error])?;
+    let gst::MessageView::Error(e) = msg.view() else { return None };
+    let element = e.src().map(|s| s.name().to_string()).unwrap_or_default();
+    Some(match e.debug() {
+        Some(debug) => format!("{element}: {} ({debug})", e.error()),
+        None => format!("{element}: {}", e.error()),
+    })
+}
+
 /// Run until the pipeline ends; with `last_frame`, also until frames stop coming.
 fn watch_bus(pipeline: &gst::Element, last_frame: Option<&std::sync::Arc<std::sync::atomic::AtomicU64>>) -> Option<Outcome> {
     let bus = pipeline.bus()?;
@@ -282,7 +322,10 @@ fn watch_bus(pipeline: &gst::Element, last_frame: Option<&std::sync::Arc<std::sy
             gst::MessageView::Eos(_) => return None,
             // The viewer went away (socket closed): a write error, and a normal end.
             gst::MessageView::Error(e) if e.src().is_some_and(|s| s.name().starts_with("fdsink")) => return None,
-            gst::MessageView::Error(e) => return Some(Ended(Err(format!("{} ({:?})", e.error(), e.debug())))),
+            gst::MessageView::Error(e) => {
+                let element = e.src().map(|s| s.name().to_string()).unwrap_or_default();
+                return Some(Ended(Err(format!("{element}: {} ({})", e.error(), e.debug().map(|d| d.to_string()).unwrap_or_default()))));
+            }
             _ => {}
         }
     }
@@ -383,23 +426,28 @@ fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
 /// The best H.264 encoder available, and the raw format it wants: the GPU first, then
 /// x264, then OpenH264 (always present on Fedora). All are asked for Constrained
 /// Baseline, which every H.264 decoder handles (OpenH264's, phones' hardware ones).
-fn encoder() -> (&'static str, &'static str) {
+fn encoders() -> Vec<(&'static str, &'static str)> {
     let has = |name: &str| gst::ElementFactory::find(name).is_some();
+    let mut list = Vec::new();
     if has("vah264lpenc") && constant_bitrate("vah264lpenc") {
-        ("vah264lpenc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12")
-    } else if has("vah264enc") && constant_bitrate("vah264enc") {
-        ("vah264enc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12")
-    } else if has("x264enc") {
+        list.push(("vah264lpenc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12"));
+    }
+    if has("vah264enc") && constant_bitrate("vah264enc") {
+        list.push(("vah264enc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12"));
+    }
+    if has("x264enc") {
         // One slice per frame: zerolatency would cut each frame into a slice per thread,
         // which decoders fed a NAL unit at a time (phones) never assemble into a picture.
         // Two threads work on two frames at once instead: one frame later, nearly twice as fast.
         // ultrafast: a sharp desktop with windows moving on it cost superfast 10 times more
         // live than a video does (half-pixel motion search), and fell to 4 fps on a laptop on
         // battery; 16 Mbit/s keeps it sharp, which a local network carries easily.
-        ("x264enc tune=zerolatency speed-preset=ultrafast bitrate=16000 key-int-max=60 bframes=0 sliced-threads=false threads=2", "I420")
-    } else {
-        ("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate=8000000 gop-size=60", "I420")
+        list.push(("x264enc tune=zerolatency speed-preset=ultrafast bitrate=16000 key-int-max=60 bframes=0 sliced-threads=false threads=2", "I420"));
     }
+    if has("openh264enc") {
+        list.push(("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate=8000000 gop-size=60", "I420"));
+    }
+    list
 }
 
 /// Whether a VA encoder can keep a constant bitrate. Its rate controls are the GPU's: the
