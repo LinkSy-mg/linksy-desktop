@@ -27,7 +27,9 @@ pub struct OutgoingFile {
 }
 
 /// Expand files and folders into a flat list. Folders keep their name as the top-level
-/// component. Symlinks are skipped. Blocking; run on a blocking thread.
+/// component. A symlink named in `paths` is followed and sent under its own name (Android
+/// hands picked files over as links to open descriptors, so they aren't copied first);
+/// symlinks inside folders are skipped. Blocking; run on a blocking thread.
 pub fn collect(paths: &[PathBuf]) -> io::Result<Vec<OutgoingFile>> {
     let mut out = Vec::new();
     for p in paths {
@@ -36,13 +38,13 @@ pub fn collect(paths: &[PathBuf]) -> io::Result<Vec<OutgoingFile>> {
             .and_then(|n| n.to_str())
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("unsupported file name: {}", p.display())))?
             .to_string();
-        walk(p, name, &mut out)?;
+        walk(p, name, &mut out, true)?;
     }
     Ok(out)
 }
 
-fn walk(path: &Path, rel: String, out: &mut Vec<OutgoingFile>) -> io::Result<()> {
-    let meta = std::fs::symlink_metadata(path)?;
+fn walk(path: &Path, rel: String, out: &mut Vec<OutgoingFile>, named: bool) -> io::Result<()> {
+    let meta = if named { std::fs::metadata(path)? } else { std::fs::symlink_metadata(path)? };
     if meta.is_file() {
         out.push(OutgoingFile { entry: FileEntry { path: rel, size: meta.len() }, source: path.to_path_buf() });
     } else if meta.is_dir() {
@@ -50,7 +52,7 @@ fn walk(path: &Path, rel: String, out: &mut Vec<OutgoingFile>) -> io::Result<()>
         children.sort_by_key(|e| e.file_name());
         for child in children {
             if let Some(name) = child.file_name().to_str() {
-                walk(&child.path(), format!("{rel}/{name}"), out)?;
+                walk(&child.path(), format!("{rel}/{name}"), out, false)?;
             }
         }
     }
@@ -293,5 +295,21 @@ mod tests {
         let files = collect(&[root]).unwrap();
         let entries: Vec<_> = files.iter().map(|f| (f.entry.path.as_str(), f.entry.size)).collect();
         assert_eq!(entries, vec![("Photos/2026/b.jpg", 3), ("Photos/a.jpg", 2)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn collect_follows_named_links_only() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("real.bin"), b"12345").unwrap();
+        let link = dir.path().join("Holiday.mp4");
+        std::os::unix::fs::symlink(dir.path().join("real.bin"), &link).unwrap();
+        let folder = dir.path().join("Folder");
+        std::fs::create_dir(&folder).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("real.bin"), folder.join("inside.bin")).unwrap();
+        let files = collect(&[link.clone(), folder]).unwrap();
+        let entries: Vec<_> = files.iter().map(|f| (f.entry.path.as_str(), f.entry.size)).collect();
+        assert_eq!(entries, vec![("Holiday.mp4", 5)]);
+        assert_eq!(files[0].source, link);
     }
 }
