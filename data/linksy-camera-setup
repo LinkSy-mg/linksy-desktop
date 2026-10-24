@@ -60,11 +60,29 @@ enroll() {
 
 # Loaded by someone else (OBS) keeps their options; otherwise load it with no devices of
 # its own, and add ours.
+# The akmods key is approved, yet the driver is refused: it was built before that key
+# existed, or with another one. Build it again, signed with the approved key.
+resign() {
+  key=/etc/pki/akmods/certs/public_key.der
+  [ -f "$key" ] && command -v akmods >/dev/null && command -v mokutil >/dev/null || return 1
+  mokutil --test-key "$key" 2>&1 | grep -q "already enrolled" || return 1
+  echo "STEP Building the camera driver again, signed with the approved key"
+  akmods --force --kernels "$(uname -r)" >/dev/null 2>&1 || return 1
+  depmod -a "$(uname -r)"
+  modprobe v4l2loopback devices=0
+}
+
 if [ ! -d /sys/module/v4l2loopback ]; then
   if ! out=$(modprobe v4l2loopback devices=0 2>&1); then
-    echo "$out" >&2
-    case "$out" in *"Key was rejected"*|*"Required key not available"*) enroll; exit 4 ;; esac
-    exit 1
+    case "$out" in
+      *"Key was rejected"*|*"Required key not available"*)
+        if ! resign; then
+          echo "$out" >&2
+          enroll
+          exit 4
+        fi ;;
+      *) echo "$out" >&2; exit 1 ;;
+    esac
   fi
 fi
 if ! have_device; then

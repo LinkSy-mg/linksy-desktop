@@ -54,6 +54,7 @@
   "Browse Files": "Jereo ny rakitra",
   "Browsers, Zoom and Discord only see this kind of camera. Without it, the phone's camera works in OBS and PipeWire apps only.": "Ity karazana fakantsary ity ihany no hitan'ny navigateur, Zoom ary Discord. Raha tsy misy izy, ao amin'ny OBS sy ny app PipeWire ihany no mandeha ny fakantsarin'ny finday.",
   "Building the camera driver (a few minutes)": "Manamboatra ny driver fakantsary (minitra vitsivitsy)",
+  "Building the camera driver again, signed with the approved key": "Manamboatra indray ny mpamily fakan-tsary, voasonia amin'ny lakile neken'ny Secure Boot",
   "Call from {contact}": "Antso avy amin'i {contact}",
   "Camera Preview": "Topi-maso fakantsary",
   "Camera Settings": "Fikirana fakantsary",

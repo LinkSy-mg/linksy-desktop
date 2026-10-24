@@ -54,6 +54,7 @@
   "Browse Files": "Navegar nos arquivos",
   "Browsers, Zoom and Discord only see this kind of camera. Without it, the phone's camera works in OBS and PipeWire apps only.": "Navegadores, Zoom e Discord só enxergam esse tipo de câmera. Sem ela, a câmera do celular só funciona no OBS e em apps PipeWire.",
   "Building the camera driver (a few minutes)": "Compilando o driver da câmera (alguns minutos)",
+  "Building the camera driver again, signed with the approved key": "Recompilando o driver da câmera, assinado com a chave aprovada",
   "Call from {contact}": "Chamada de {contact}",
   "Camera Preview": "Prévia da câmera",
   "Camera Settings": "Configurações da câmera",

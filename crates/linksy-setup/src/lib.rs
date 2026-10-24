@@ -583,6 +583,7 @@ pub fn step_text(step: &str) -> String {
         "Building the camera driver (a few minutes)" => t!("Building the camera driver (a few minutes)").into(),
         "Letting nearby devices find this computer" => t!("Letting nearby devices find this computer").into(),
         "Making the Linksy Camera" => t!("Making the Linksy Camera").into(),
+        "Building the camera driver again, signed with the approved key" => t!("Building the camera driver again, signed with the approved key").into(),
         "Letting Linksy use phones plugged in by cable" => t!("Letting Linksy use phones plugged in by cable").into(),
         s => match s.strip_prefix("Installing ") {
             Some(packages) => t!("Installing {packages}", packages),

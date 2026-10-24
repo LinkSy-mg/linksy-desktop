@@ -54,6 +54,7 @@
   "Browse Files": "Открыть файлы",
   "Browsers, Zoom and Discord only see this kind of camera. Without it, the phone's camera works in OBS and PipeWire apps only.": "Браузеры, Zoom и Discord видят только такую камеру. Без неё камера телефона работает только в OBS и приложениях PipeWire.",
   "Building the camera driver (a few minutes)": "Сборка драйвера камеры (несколько минут)",
+  "Building the camera driver again, signed with the approved key": "Повторная сборка драйвера камеры, подписанного одобренным ключом",
   "Call from {contact}": "Звонок от {contact}",
   "Camera Preview": "Предпросмотр камеры",
   "Camera Settings": "Настройки камеры",

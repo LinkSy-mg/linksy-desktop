@@ -54,6 +54,7 @@
   "Browse Files": "ファイルを閲覧",
   "Browsers, Zoom and Discord only see this kind of camera. Without it, the phone's camera works in OBS and PipeWire apps only.": "ブラウザ、Zoom、Discord が認識するのはこの種類のカメラだけです。これがないと、スマートフォンのカメラは OBS と PipeWire 対応アプリでしか使えません。",
   "Building the camera driver (a few minutes)": "カメラドライバーをビルドしています（数分かかります）",
+  "Building the camera driver again, signed with the approved key": "承認された鍵で署名し、カメラドライバーを再ビルドしています",
   "Call from {contact}": "{contact} からの着信",
   "Camera Preview": "カメラのプレビュー",
   "Camera Settings": "カメラの設定",

@@ -54,6 +54,7 @@
   "Browse Files": "浏览文件",
   "Browsers, Zoom and Discord only see this kind of camera. Without it, the phone's camera works in OBS and PipeWire apps only.": "浏览器、Zoom 和 Discord 只能识别这类相机。没有它，手机相机只能在 OBS 和 PipeWire 应用中使用。",
   "Building the camera driver (a few minutes)": "正在构建相机驱动（需要几分钟）",
+  "Building the camera driver again, signed with the approved key": "正在重新构建相机驱动，并用已批准的密钥签名",
   "Call from {contact}": "来自 {contact} 的来电",
   "Camera Preview": "相机预览",
   "Camera Settings": "相机设置",
