@@ -221,6 +221,8 @@ fn session_title(s: &ActiveSession) -> String {
 }
 
 /// A menu entry that sends `action` (made again on each click: the menu is rebuilt often).
+/// Icons are symbolic ones, one colour like the menu's text: the plain names are full-colour
+/// pictures on GNOME.
 fn item(label: String, icon: &str, enabled: bool, action: impl Fn() -> Action + Send + Sync + 'static) -> MenuItem<Tray> {
     StandardItem {
         label,
@@ -273,20 +275,20 @@ impl ksni::Tray for Tray {
                 let info = info.clone();
                 move || f(info.clone())
             };
-            sub.push(item(t!("Send Files").to_string(), "document-send", on, with(Action::SendFiles)));
+            sub.push(item(t!("Send Files").to_string(), "document-send-symbolic", on, with(Action::SendFiles)));
             if phone && can(info, "ring") {
-                sub.push(item(t!("Ring").to_string(), "audio-volume-high", on, with(Action::Ring)));
+                sub.push(item(t!("Ring").to_string(), "audio-volume-high-symbolic", on, with(Action::Ring)));
             } else {
-                sub.push(item(t!("Ping").to_string(), "preferences-desktop-notification-bell", on, with(Action::Ping)));
+                sub.push(item(t!("Ping").to_string(), "preferences-system-notifications-symbolic", on, with(Action::Ping)));
             }
             if phone && can(info, "locate") {
-                sub.push(item(t!("Locate").to_string(), "find-location", on, with(Action::Locate)));
+                sub.push(item(t!("Locate").to_string(), "find-location-symbolic", on, with(Action::Locate)));
             }
             if phone && can(info, "fs") {
-                sub.push(item(t!("Browse Files").to_string(), "folder-open", on, with(Action::Browse)));
+                sub.push(item(t!("Browse Files").to_string(), "folder-open-symbolic", on, with(Action::Browse)));
             }
             // What it can be for this computer: checked while it is, a click starts or stops it
-            let uses = [(SessionKind::Display, "display", t!("Second Display"), "video-display"), (SessionKind::Camera, "camera", t!("Webcam"), "camera-web"), (SessionKind::Microphone, "microphone", t!("Microphone"), "audio-input-microphone")];
+            let uses = [(SessionKind::Display, "display", t!("Second Display"), "video-display-symbolic"), (SessionKind::Camera, "camera", t!("Webcam"), "camera-web-symbolic"), (SessionKind::Microphone, "microphone", t!("Microphone"), "audio-input-microphone-symbolic")];
             let uses: Vec<_> = uses.into_iter().filter(|u| can(info, u.1)).collect();
             if !uses.is_empty() {
                 sub.push(MenuItem::Separator);
@@ -312,10 +314,10 @@ impl ksni::Tray for Tray {
                 );
             }
             let icon = match info.kind {
-                DeviceKind::Phone => "smartphone",
-                DeviceKind::Tablet => "tablet",
-                DeviceKind::Laptop => "computer-laptop",
-                DeviceKind::Desktop => "computer",
+                DeviceKind::Phone => "phone-symbolic",
+                DeviceKind::Tablet => "tablet-symbolic",
+                DeviceKind::Laptop => "computer-symbolic",
+                DeviceKind::Desktop => "computer-symbolic",
             };
             menu.push(SubMenu { label: info.name.clone(), icon_name: icon.into(), submenu: sub, ..Default::default() }.into());
         }
@@ -325,14 +327,14 @@ impl ksni::Tray for Tray {
 
         for s in &self.shown.sessions {
             let session = s.session;
-            menu.push(item(t!("Stop: {what}", what = session_title(s)), "media-playback-stop", true, move || Action::Stop(session)));
+            menu.push(item(t!("Stop: {what}", what = session_title(s)), "media-playback-stop-symbolic", true, move || Action::Stop(session)));
         }
         if !self.shown.sessions.is_empty() {
             menu.push(MenuItem::Separator);
         }
 
-        menu.push(item(t!("Show Linksy").to_string(), "window", true, || Action::Open));
-        menu.push(item(t!("Quit").to_string(), "application-exit", true, || Action::Quit));
+        menu.push(item(t!("Show Linksy").to_string(), "mg.diary.linksy.Linksy-symbolic", true, || Action::Open));
+        menu.push(item(t!("Quit").to_string(), "application-exit-symbolic", true, || Action::Quit));
         menu
     }
 }
