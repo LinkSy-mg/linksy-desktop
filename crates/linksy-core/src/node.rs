@@ -2121,8 +2121,12 @@ impl Node {
         self.direct_wait(to, host).await
     }
 
-    /// Start a direct link with `to`, or join the attempt under way, and wait for it.
+    /// Start a direct link with `to`, or join the attempt under way, and wait for it; the
+    /// one up when there is one.
     async fn direct_wait(&self, to: &Fingerprint, host: bool) -> Option<(quinn::Connection, Arc<Activity>)> {
+        if let Some(lane) = self.lane(to) {
+            return Some(lane);
+        }
         let (mut outcome, started) = self.direct_begin(to);
         if started {
             info!("setting up a direct link");
@@ -2189,6 +2193,8 @@ impl Node {
             });
         };
         match step {
+            // Up already: nothing to set up
+            DirectStep::Ask if self.lane(&id).is_some() => {}
             DirectStep::Ask if self.can_direct(&id, true) => {
                 if self.direct_begin(&id).1 {
                     self.emit(Event::DirectWanted { id });
@@ -2233,7 +2239,7 @@ impl Node {
     /// Transfers arriving over a direct link; it closes once nothing has gone on for a while.
     async fn serve_lane(self, conn: quinn::Connection, device: DeviceInfo, activity: Arc<Activity>) {
         let mut check = tokio::time::interval(Duration::from_secs(5));
-        loop {
+        let why = loop {
             tokio::select! {
                 bi = conn.accept_bi() => match bi {
                     Ok((send, recv)) => {
@@ -2243,14 +2249,14 @@ impl Node {
                             drop(busy);
                         });
                     }
-                    Err(_) => break,
+                    Err(e) => break e.to_string(),
                 },
                 _ = check.tick() => if activity.idle_for().is_some_and(|d| d >= DIRECT_IDLE) {
                     conn.close(0u32.into(), b"idle");
-                    break;
+                    break "idle here".into();
                 },
             }
-        }
+        };
         let mine = {
             let mut lanes = self.inner.lanes.lock().unwrap();
             let mine = lanes.get(&device.id).is_some_and(|l| l.conn.stable_id() == conn.stable_id());
@@ -2260,7 +2266,7 @@ impl Node {
             mine
         };
         if mine {
-            info!("direct link to {} down", device.name);
+            info!("direct link to {} down: {why}", device.name);
             self.emit(Event::DirectEnded { id: device.id, reason: None });
         }
     }

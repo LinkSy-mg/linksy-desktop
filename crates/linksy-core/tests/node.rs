@@ -1356,6 +1356,8 @@ async fn direct_link_comes_up_carries_files_and_ends_on_both() {
     a.node.direct_link(&b_id).await.unwrap();
     wait_for(&mut on_a, |e| matches!(e, Event::DirectLinked { id } if *id == b_id).then_some(())).await;
     wait_for(&mut on_b, |e| matches!(e, Event::DirectLinked { id } if *id == a_id).then_some(())).await;
+    // Asking again while it's up keeps it, at once
+    tokio::time::timeout(Duration::from_secs(1), a.node.direct_link(&b_id)).await.unwrap().unwrap();
 
     // Both ways over it
     let src = tempfile::tempdir().unwrap();
