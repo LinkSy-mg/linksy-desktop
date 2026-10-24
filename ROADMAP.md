@@ -15,8 +15,8 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.6 | Anywhere | Away from home over the internet, with a 7-day lease · Locate the phone · 1080p webcam (desktop done in 0.6.0) |
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
-| **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Lighter at rest |
-| 0.10 | At home on KDE | A Qt 6 app for KDE Plasma, beside the GTK one (desktop done early, in 0.8.4) |
+| **0.9** | **Works on every desktop** | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Private discovery · One Accept for a batch |
+| **0.10** | **Lighter and smoother** | Lighter at rest · Transfers in a corner panel · Choose which monitor to view · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
 | **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
 | **0.13** | **The cable, for real** | USB that works on every phone, end to end |
@@ -123,6 +123,24 @@ When something goes wrong, one file says what happened, ready to attach to a bug
 - **Done when:** a crash on either side can be turned into a `logs.txt` in two clicks, and
   that file is enough to understand it.
 
+### Private discovery — M, desktop done
+On a café's or an office's Wi-Fi, Linksy no longer tells everyone the device's name and a
+permanent id ([#38](https://github.com/LinkSy-mg/linksy-desktop/issues/38)).
+- **Desktop:** done. A tag that changes every 15 minutes, which only paired devices
+  recognise; the name only while Add Device is open; a new key when a device is forgotten.
+- **Phone:** the same (`docs/protocol.md` §4.16, mobile#12).
+- **Done when:** a stranger on the same network sees no name and nothing to follow.
+
+### One Accept for a batch — M
+Receiving 20 photos asks once, or not at all ([#32](https://github.com/LinkSy-mg/linksy-desktop/issues/32)).
+- **Desktop:** a selection is one offer from every send path; offers from one device a few
+  seconds apart merge into one prompt; "Always accept from this device" on the prompt and
+  the device's page.
+- **Phone:** the same, both ways.
+- **Done when:** sending 20 photos either way asks once.
+
+## 0.10 — Lighter and smoother
+
 ### Lighter at rest — M
 Linksy runs all day, so what it holds while idle matters more than its speed. Today: the
 service 25 MB, the app 49 MB, the phone app about 200 MB.
@@ -140,8 +158,6 @@ service 25 MB, the app 49 MB, the phone app about 200 MB.
   emulator (`docs/memory.md` in linksy-mobile). Still to measure on a real phone.*
 - **Done when:** idle, the service stays under 15 MB, the app under 35 MB and the phone app
   under 100 MB in the background, measured the same way each release.
-
-## 0.10 — At home on KDE
 
 ### A Qt 6 app for KDE Plasma — L, done early in 0.8.4
 *Shipped as `linksy-qt`, with every page the GTK app has (Finish Setup, the camera preview
