@@ -53,6 +53,12 @@ Kirigami.ScrollablePage {
             onTriggered: app.showUpgrade()
         },
         Kirigami.Action {
+            icon.name: "document-save"
+            text: app.t("Save Logs…")
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            onTriggered: app.saveLogs()
+        },
+        Kirigami.Action {
             icon.name: "help-about"
             text: app.t("About Linksy")
             displayHint: Kirigami.DisplayHint.AlwaysHide

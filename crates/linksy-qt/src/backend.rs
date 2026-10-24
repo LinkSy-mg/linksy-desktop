@@ -131,6 +131,21 @@ pub mod qobject {
         #[cxx_name = "upgradeFinished"]
         fn upgrade_finished(self: Pin<&mut Backend>, json: QString);
 
+        /// Write logs.txt (versions, crashes, the recent log) to `path`; `logsSaved` says
+        /// how it went (empty when saved, else why not).
+        #[qinvokable]
+        #[cxx_name = "saveLogs"]
+        fn save_logs(self: Pin<&mut Self>, path: &QString);
+
+        #[qsignal]
+        #[cxx_name = "logsSaved"]
+        fn logs_saved(self: Pin<&mut Backend>, error: QString);
+
+        /// Whether Linksy crashed since this was last asked (the logs are offered once).
+        #[qinvokable]
+        #[cxx_name = "unseenCrash"]
+        fn unseen_crash(&self) -> bool;
+
         /// Linksy's languages: [{code, name}] (each in its own language).
         #[qinvokable]
         fn languages(&self) -> QString;
@@ -398,6 +413,22 @@ impl qobject::Backend {
         let highlights: Vec<_> = news.iter().map(|h| serde_json::json!({ "icon": h.qt, "title": h.title, "body": h.body })).collect();
         let json = serde_json::json!({ "version": version, "notes": linksy_news::notes_url(version), "repo": linksy_news::REPO, "highlights": highlights });
         QString::from(&json.to_string())
+    }
+
+    pub fn save_logs(self: Pin<&mut Self>, path: &QString) {
+        let thread = self.qt_thread();
+        let path = std::path::PathBuf::from(path.to_string());
+        self.rust().rt.spawn_blocking(move || {
+            let error = match std::fs::write(&path, linksy_logs::collect(&linksy_upgrade::revision())) {
+                Ok(()) => String::new(),
+                Err(e) => e.to_string(),
+            };
+            let _ = thread.queue(move |b| b.logs_saved(QString::from(&error)));
+        });
+    }
+
+    pub fn unseen_crash(&self) -> bool {
+        linksy_logs::unseen_crash()
     }
 
     pub fn check_upgrade(self: Pin<&mut Self>) {

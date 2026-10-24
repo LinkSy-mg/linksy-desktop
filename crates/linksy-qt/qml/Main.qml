@@ -3,6 +3,7 @@
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import org.kde.kirigami as Kirigami
 import mg.diary.linksy
 
@@ -510,6 +511,26 @@ Kirigami.ApplicationWindow {
         whatsNew.showAnyTime();
     }
 
+    // logs.txt for a bug report: versions, crashes and the recent log
+    FileDialog {
+        id: logsDialog
+        title: root.t("Save Logs")
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "txt"
+        selectedFile: "file://" + backend.env("HOME") + "/logs.txt"
+        onAccepted: backend.saveLogs(decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, "")))
+    }
+    Connections {
+        target: backend
+        function onLogsSaved(error) {
+            root.toast(error ? root.t("Couldn't save the logs: {error}", { error: error }) : root.t("Logs saved. Attach logs.txt to your bug report."));
+        }
+    }
+
+    function saveLogs() {
+        logsDialog.open();
+    }
+
     // Development aid: LINKSY_SCREENSHOT=<file.png> saves the window after
     // LINKSY_SCREENSHOT_DELAY ms and quits (scripts/qt-shot.sh)
     Timer {
@@ -533,6 +554,8 @@ Kirigami.ApplicationWindow {
         // update, what's new
         if (backend.offerSetup()) root.openSetup();
         else whatsNew.offer();
+        // Crashed since last time: offer the logs once
+        if (backend.unseenCrash()) showPassiveNotification(t("Linksy Quit Unexpectedly"), "long", t("Save Logs…"), () => root.saveLogs());
         if (backend.env("LINKSY_SCREENSHOT")) shot.start();
     }
 }
