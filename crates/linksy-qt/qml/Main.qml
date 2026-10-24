@@ -4,7 +4,6 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import QtQuick.Dialogs
-import Qt.labs.platform as Platform
 import org.kde.kirigami as Kirigami
 import mg.diary.linksy
 
@@ -40,14 +39,6 @@ Kirigami.ApplicationWindow {
 
     readonly property var selected: devices.find(d => d.device.id === selectedId) ?? null
 
-    // Closing the window keeps Linksy in the tray (the service runs on either way); with no
-    // tray to go to, closing quits, as the app no longer quits on its own with the window.
-    onClosing: close => {
-        if (!tray.available) { Qt.quit(); return }
-        close.accepted = false;
-        root.hide();
-    }
-
     Backend {
         id: backend
         onReply: (id, ok, json) => {
@@ -57,9 +48,7 @@ Kirigami.ApplicationWindow {
         }
         onEvent: json => root.handleEvent(JSON.parse(json))
         onHistory: json => root.historyUpdated(JSON.parse(json))
-        onStartingChanged: root.rebuildTray()
         onConnectedChanged: {
-            root.rebuildTray();
             if (!connected) return;
             root.refreshAll();
             // Development aid: open a screen for scripts/qt-shot.sh
@@ -170,20 +159,12 @@ Kirigami.ApplicationWindow {
         inviteDialog.open();
     }
 
-    function openPrefs() {
-        pageStack.pushDialogLayer(Qt.resolvedUrl("PrefsPage.qml"), { app: root });
-    }
-
-    // Bring the window back, from the tray or for a question the service asks
+    // Bring the window forward for a question the service asks
     function present() {
         root.show();
         if (root.visibility === Window.Minimized) root.showNormal();
         root.raise();
         root.requestActivate();
-    }
-
-    function toggleWindow() {
-        if (root.visible) root.hide(); else present();
     }
 
     function toast(text) {
@@ -410,162 +391,6 @@ Kirigami.ApplicationWindow {
         }
     }
 
-    // ---- the tray ----
-    // The icon's menu: what's connected, each paired device with what you can do with it,
-    // what's being shared (with Stop), the window and Quit. Rebuilt whole whenever any of
-    // that changes, so it's current when it opens.
-
-    readonly property var connectedDevices: devices.filter(d => d.trusted && d.connected)
-
-    function trayStatus() {
-        if (!backend.connected) return backend.starting ? t("Starting…") : t("Linksy Isn't Running");
-        const n = connectedDevices.length;
-        return n === 0 ? t("No devices connected") : n === 1 ? t("1 device connected") : t("{n} devices connected", { n: n });
-    }
-
-    Platform.SystemTrayIcon {
-        id: tray
-        visible: true
-        // Filled in while a device is connected, hollow and dim otherwise (Plasma recolours both)
-        icon.name: root.connectedDevices.length > 0 ? "mg.diary.linksy.Linksy-tray-symbolic" : "mg.diary.linksy.Linksy-tray-idle-symbolic"
-        tooltip: "Linksy · " + root.trayStatus()
-        // A click shows or hides the window; the right button opens the menu on its own
-        onActivated: reason => {
-            if (reason === Platform.SystemTrayIcon.Trigger || reason === Platform.SystemTrayIcon.DoubleClick) root.toggleWindow();
-        }
-        menu: Platform.Menu { id: trayMenu }
-    }
-
-    Component {
-        id: trayEntry
-        Platform.MenuItem {}
-    }
-    Component {
-        id: traySubmenu
-        Platform.Menu {}
-    }
-
-    // Files for a device, chosen from the tray
-    FileDialog {
-        id: trayFilePicker
-        property string to
-        title: root.t("Send to {name}", { name: root.deviceName(to) })
-        fileMode: FileDialog.OpenFiles
-        onAccepted: root.sendFiles(to, selectedFiles)
-    }
-
-    // The submenus made last time: Menu.clear() deletes plain items itself, but a submenu
-    // (and the items in it) is ours to remove and destroy
-    property var traySubmenus: []
-    // What the menu was last built from: devices and sessions arrive whole on every event,
-    // and rebuilding while Plasma has the menu open loses it
-    property string trayKey: ""
-    onDevicesChanged: rebuildTray()
-    onSessionsChanged: rebuildTray()
-    onVisibleChanged: rebuildTray()
-
-    // A result from the tray: an error brings the window back, so the toast is seen
-    function trayResult(ok, text) {
-        if (!ok) present();
-        toast(text);
-    }
-
-    function rebuildTray() {
-        const key = JSON.stringify([backend.connected, backend.starting, root.visible,
-            devices.filter(d => d.trusted).map(d => [d.device.id, d.device.name, d.device.kind, d.device.features ?? null, d.connected, statusLine(d)]),
-            sessions.map(s => [s.session, s.kind, s.peer.id, s.peer.name, s.sharing])]);
-        if (key === trayKey) return;
-        trayKey = key;
-        for (const sub of traySubmenus) { trayMenu.removeMenu(sub); sub.destroy() }
-        trayMenu.clear();
-        const subs = [];
-        const add = (menu, text, icon, action, enabled) => {
-            const item = trayEntry.createObject(menu, { text: text, enabled: enabled !== false });
-            if (icon) item.icon.name = icon;
-            if (action) item.triggered.connect(action);
-            menu.addItem(item);
-            return item;
-        };
-        const separator = menu => menu.addItem(trayEntry.createObject(menu, { separator: true }));
-        const kinds = { desktop: "computer", laptop: "computer-laptop", phone: "smartphone", tablet: "tablet" };
-
-        add(trayMenu, trayStatus(), null, null, false);
-        separator(trayMenu);
-
-        // Each paired device: a submenu of what the device's page offers
-        const paired = devices.filter(d => d.trusted);
-        for (const d of paired) {
-            const info = d.device, id = info.id, name = info.name, on = d.connected;
-            const sub = traySubmenu.createObject(trayMenu, { title: `${name} · ${statusLine(d)}` });
-            sub.icon.name = kinds[info.kind] ?? "computer";
-            trayMenu.addMenu(sub);
-            subs.push(sub);
-            add(sub, t("Show Linksy"), "window", () => { present(); select(id) });
-            separator(sub);
-            add(sub, t("Send Files"), "document-send", () => { trayFilePicker.to = id; trayFilePicker.open() }, on);
-            add(sub, t("Clipboard"), "edit-paste", () => {
-                const text = backend.clipboard();
-                if (!text) return trayResult(false, t("There's no text on the clipboard"));
-                request("clipboard", { to: id, text: text }, (ok, err) => trayResult(ok, ok ? t("Clipboard sent to {name}", { name: name }) : err));
-            }, on);
-            add(sub, t("View Screen"), "video-display", () => { present(); select(id); viewScreen(id) }, on);
-            const phone = info.kind === "phone";
-            if (phone && can(info, "ring"))
-                add(sub, t("Ring"), "audio-volume-high", () => request("ring", { to: id, on: true }, (ok, err) => trayResult(ok, ok ? t("Ringing {name}…", { name: name }) : err)), on);
-            else
-                add(sub, t("Ping"), "preferences-desktop-notification-bell", () => request("notify", { to: id, title: "Ping", body: "" }, (ok, err) => trayResult(ok, ok ? t("Pinged {name}", { name: name }) : err)), on);
-            if (phone && can(info, "locate"))
-                add(sub, t("Locate"), "find-location", () => request("locate", { device: id }, (ok, where) => {
-                    if (!ok) return trayResult(false, where);
-                    Qt.openUrlExternally(`https://www.openstreetmap.org/?mlat=${where.lat.toFixed(5)}&mlon=${where.lon.toFixed(5)}#map=17/${where.lat.toFixed(5)}/${where.lon.toFixed(5)}`);
-                }), on);
-            if (phone && can(info, "fs"))
-                add(sub, t("Browse Files"), "folder-open", () => request("browse_files", { phone: id }, (ok, where) => {
-                    if (!ok) return trayResult(false, where);
-                    Qt.openUrlExternally(where.startsWith("/") ? "file://" + where : where);
-                }), on);
-
-            // What it can be for this computer: checked while it is, toggling starts or stops it
-            const uses = [["display", "Second Display", "video-display"], ["camera", "Webcam", "camera-web"], ["microphone", "Microphone", "audio-input-microphone"]].filter(u => can(info, u[0]));
-            if (uses.length) separator(sub);
-            for (const [kind, title, icon] of uses) {
-                const running = sessions.find(s => s.kind === kind && s.peer.id === id) ?? null;
-                const item = add(sub, t(title), icon, () => {
-                    if (running) return request("end_session", { session: running.session });
-                    request("start_session", { with: id, kind: kind }, (ok, err) => {
-                        if (ok) return;
-                        if (err.includes("can't do this yet")) trayResult(false, t({
-                            display: "{name} can't be a second display yet",
-                            camera: "{name} can't share its camera yet",
-                            microphone: "{name} can't share its microphone yet"
-                        }[kind], { name: name }));
-                        else if (err.includes("declined")) trayResult(false, t("{name} didn't allow it", { name: name }));
-                        else trayResult(false, err);
-                    });
-                }, on || running !== null);
-                item.checkable = true;
-                item.checked = running !== null;
-                // A camera in use here: see what apps get, with the phone's controls
-                if (running && kind === "camera" && !running.sharing)
-                    add(sub, t("Preview"), "view-preview", () => { present(); previewCamera(running.session, name) });
-            }
-        }
-        if (paired.length) separator(trayMenu);
-
-        for (const s of sessions) {
-            const session = s.session;
-            add(trayMenu, t("Stop: {what}", { what: sessionTitle(s) }), "media-playback-stop", () => request("end_session", { session: session }));
-        }
-        if (sessions.length) separator(trayMenu);
-
-        add(trayMenu, root.visible ? t("Hide Linksy") : t("Show Linksy"), "window", () => toggleWindow());
-        add(trayMenu, t("Add Device…"), "list-add", () => { present(); openInvite() });
-        add(trayMenu, t("Preferences"), "configure", () => { present(); openPrefs() });
-        separator(trayMenu);
-        add(trayMenu, t("Quit"), "application-exit", () => Qt.quit());
-        traySubmenus = subs;
-    }
-
     // ---- the service's questions ----
 
     Kirigami.PromptDialog {
@@ -735,7 +560,6 @@ Kirigami.ApplicationWindow {
     Component.onCompleted: {
         const size = backend.env("LINKSY_SCREENSHOT_SIZE").split("x").map(Number);
         if (size.length === 2 && size[0] > 0) { width = size[0]; height = size[1] }
-        rebuildTray();
         backend.start();
         backend.checkSetup();
         // One thing at a time: Finish Setup when something's missing, otherwise, after an

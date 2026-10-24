@@ -160,7 +160,6 @@
   "General": "Geral",
   "Hear it on this computer (headphones avoid an echo)": "Ouvir neste computador (fones de ouvido evitam eco)",
   "Here it is!": "Está aqui!",
-  "Hide Linksy": "Ocultar o Linksy",
   "High": "Alta",
   "Hyprland doesn't start Linksy at login by itself. Add this line to ~/.config/hypr/hyprland.conf: exec-once = linksyd": "O Hyprland não inicia o Linksy no login sozinho. Adicione esta linha a ~/.config/hypr/hyprland.conf: exec-once = linksyd",
   "If a device doesn't show up, enter the address shown in its Linksy Preferences.": "Se um dispositivo não aparecer, digite o endereço mostrado nas Preferências do Linksy dele.",

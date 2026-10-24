@@ -160,7 +160,6 @@
   "General": "常规",
   "Hear it on this computer (headphones avoid an echo)": "在这台电脑上收听（使用耳机可避免回声）",
   "Here it is!": "在这儿！",
-  "Hide Linksy": "隐藏 Linksy",
   "High": "高",
   "Hyprland doesn't start Linksy at login by itself. Add this line to ~/.config/hypr/hyprland.conf: exec-once = linksyd": "Hyprland 不会在登录时自动启动 Linksy。请将此行添加到 ~/.config/hypr/hyprland.conf：exec-once = linksyd",
   "If a device doesn't show up, enter the address shown in its Linksy Preferences.": "如果某台设备没有出现，请输入其 Linksy“偏好设置”中显示的地址。",

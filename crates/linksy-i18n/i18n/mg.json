@@ -160,7 +160,6 @@
   "General": "Ankapobeny",
   "Hear it on this computer (headphones avoid an echo)": "Henoy amin'ity solosaina ity (ny écouteur no misoroka ny akony)",
   "Here it is!": "Ato aho!",
-  "Hide Linksy": "Afeno i Linksy",
   "High": "Ambony",
   "Hyprland doesn't start Linksy at login by itself. Add this line to ~/.config/hypr/hyprland.conf: exec-once = linksyd": "Tsy mandefa an'i Linksy ho azy i Hyprland rehefa miditra. Ampio ity andalana ity ao amin'ny ~/.config/hypr/hyprland.conf: exec-once = linksyd",
   "If a device doesn't show up, enter the address shown in its Linksy Preferences.": "Raha tsy miseho ny fitaovana iray, ampidiro ny adiresy aseho ao amin'ny Fikiran'i Linksy ao aminy.",

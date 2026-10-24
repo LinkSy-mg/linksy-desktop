@@ -53,8 +53,6 @@ inline int run_app()
     // The one "Linksy" in the menu (linksy-open picks this window on Plasma)
     QApplication::setDesktopFileName(QStringLiteral("mg.diary.linksy.Linksy"));
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("mg.diary.linksy.Linksy")));
-    // Closing the window keeps Linksy in the tray; the window's QML quits when there's none
-    QApplication::setQuitOnLastWindowClosed(false);
     const QString instance_path = instance_name();
     if (show_running(instance_path))
         return 0;

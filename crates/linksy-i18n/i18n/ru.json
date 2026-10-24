@@ -160,7 +160,6 @@
   "General": "Общие",
   "Hear it on this computer (headphones avoid an echo)": "Слушать на этом компьютере (наушники избавят от эха)",
   "Here it is!": "Я здесь!",
-  "Hide Linksy": "Скрыть Linksy",
   "High": "Высокое",
   "Hyprland doesn't start Linksy at login by itself. Add this line to ~/.config/hypr/hyprland.conf: exec-once = linksyd": "Hyprland сам не запускает Linksy при входе. Добавьте эту строку в ~/.config/hypr/hyprland.conf: exec-once = linksyd",
   "If a device doesn't show up, enter the address shown in its Linksy Preferences.": "Если устройство не появляется, введите адрес, указанный в его настройках Linksy.",
