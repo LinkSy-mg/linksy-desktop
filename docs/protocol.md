@@ -1102,7 +1102,8 @@ the link, and carries the transfers over a **second QUIC connection** on it (`he
 (§4.13: they may still be side by side), never over a USB cable. It waits at most
 **45 s** (the first real one took 25 s), then sends over the usual connection. A link that failed isn't tried again with
 that device for 10 minutes. `node.direct_link(id)` sets one up on demand (for testing).
-A link with no transfer for **20 s** closes on both sides: `Event::DirectEnded`.
+A link with no transfer for **20 s** (`Config.direct_idle`) closes on both sides:
+`Event::DirectEnded`.
 
 **Steps** (unidirectional `direct` messages; their order on the wire isn't guaranteed, so
 handle `up` before `connecting` too):
@@ -1647,8 +1648,9 @@ robust against any encoder (GPU ones may slice too):
   the attempt as well.
 - **2026-10-25** — Third test: **79 MB/s** over the direct link (1.97 GB in 25 s, phone →
   computer, 5180 MHz), up 15 s after the invite (12 s for the phone to find the computer).
-  But the phone closed the link **25.0 s after it came up**, mid-transfer ("connection
-  lost"; the partial file resumes). Core now: asking for a link that's up (`direct_link`,
-  an `ask`) keeps it instead of starting another attempt, and the computer logs why a
-  link closed. Phone: check nothing ends the link once `DirectLinked` arrived (a timer
-  started earlier, a second `direct_link`, `removeGroup` on a repeated `DirectWanted`).
+  But the link closed 20 to 25 s after it came up, mid-transfer ("connection lost"; the
+  partial file resumes). Not the phone: the **receiving core** closed it as idle, because
+  an incoming transfer runs in a task of its own and the link stopped counting it once
+  that task started (fixed in core, with a test). Also: asking for a link that's up
+  (`direct_link`, an `ask`) keeps it, and a link that closes logs why.
+  `Config.direct_idle` (default 20 s) sets how long an idle link stays.
