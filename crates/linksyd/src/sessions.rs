@@ -217,7 +217,7 @@ impl Sessions {
         };
         let path = socket_path(role, session.id);
         let listener = bind(&path)?;
-        let mut cmd = tokio::process::Command::new(helper("linksy-screen"));
+        let mut cmd = helper_command("linksy-screen");
         cmd.arg(role).arg("--socket").arg(&path);
         match session.kind {
             SessionKind::Microphone if device => {
@@ -299,7 +299,7 @@ impl Sessions {
         loop {
             let path = socket_path("webcam", session.id);
             let listener = bind(&path)?;
-            let mut child = tokio::process::Command::new(helper("linksy-screen"))
+            let mut child = helper_command("linksy-screen")
                 .arg("webcam")
                 .arg("--socket")
                 .arg(&path)
@@ -580,6 +580,29 @@ impl Output {
             warn!("could not remove the second display's output {}: {e}", self.name);
         }
     }
+}
+
+/// A helper's command line, in a memory budget of its own: a systemd scope capped at 512 MB
+/// (a phone-shaped second display needs 150-250 MB), so it never runs into the service's
+/// own small cap. The helper runs in place (same process), and the scope goes away with
+/// it. Without a working `systemd-run` (the Flatpak, no systemd), started as is.
+fn helper_command(name: &str) -> tokio::process::Command {
+    static SCOPES: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let scopes = *SCOPES.get_or_init(|| {
+        std::env::var_os("FLATPAK_ID").is_none()
+            && std::process::Command::new("systemd-run")
+                .args(["--user", "--scope", "--quiet", "--collect", "--expand-environment=no", "--", "true"])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .is_ok_and(|s| s.success())
+    });
+    if !scopes {
+        return tokio::process::Command::new(helper(name));
+    }
+    let mut cmd = tokio::process::Command::new("systemd-run");
+    cmd.args(["--user", "--scope", "--quiet", "--collect", "--expand-environment=no", "-p", "MemoryMax=512M", "--"]).arg(helper(name));
+    cmd
 }
 
 pub(crate) fn helper(name: &str) -> PathBuf {
