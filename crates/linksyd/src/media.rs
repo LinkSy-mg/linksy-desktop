@@ -24,8 +24,10 @@ const PATH: &str = "/org/mpris/MediaPlayer2";
 const PLAYER: &str = "org.mpris.MediaPlayer2.Player";
 /// The names Linksy publishes phones' players under; never sent back to a phone.
 const OURS: &str = "org.mpris.MediaPlayer2.Linksy.";
-/// Largest cover art passed along (as the protocol allows).
-const MAX_ART: u64 = 48 * 1024;
+/// Largest cover art passed along (the protocol allows 64 KiB).
+const MAX_ART: usize = 48 * 1024;
+/// A bigger picture is scaled down to fit this many pixels a side, as JPEG.
+const ART_SIDES: [u32; 3] = [400, 300, 200];
 
 pub async fn run(node: Node, art_dir: std::path::PathBuf) {
     let mut events = node.subscribe();
@@ -117,6 +119,9 @@ struct Local {
     bus: Connection,
     changed: mpsc::Receiver<()>,
     _listen: tokio::task::JoinHandle<()>,
+    /// Cover art as sent, by file and when it last changed: players send their state
+    /// again and again with the same picture.
+    art: std::sync::Mutex<HashMap<String, (std::time::SystemTime, Option<String>)>>,
 }
 
 impl Local {
@@ -140,7 +145,7 @@ impl Local {
                 }
             }
         });
-        Ok(Self { bus, changed, _listen: listen })
+        Ok(Self { bus, changed, _listen: listen, art: Default::default() })
     }
 
     async fn names(&self) -> Vec<String> {
@@ -193,7 +198,7 @@ impl Local {
             can_next: flag(player.get_property("CanGoNext").await),
             can_previous: flag(player.get_property("CanGoPrevious").await),
             can_seek: flag(player.get_property("CanSeek").await),
-            art: art(&text("mpris:artUrl")),
+            art: self.art(&text("mpris:artUrl")),
         })
     }
 
@@ -234,15 +239,43 @@ impl Local {
     }
 }
 
-/// Cover art from a local file, small enough to pass along.
-fn art(url: &str) -> Option<String> {
-    let path = url.strip_prefix("file://")?;
-    let path = percent_decode(path);
-    let meta = std::fs::metadata(&path).ok()?;
-    if meta.len() > MAX_ART {
-        return None;
+impl Local {
+    /// Cover art from a local file, small enough to pass along.
+    fn art(&self, url: &str) -> Option<String> {
+        let path = percent_decode(url.strip_prefix("file://")?);
+        let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+        let mut known = self.art.lock().unwrap();
+        if let Some((when, art)) = known.get(&path)
+            && *when == modified
+        {
+            return art.clone();
+        }
+        let art = std::fs::read(&path).ok().and_then(small_art).map(|a| base64::engine::general_purpose::STANDARD.encode(a));
+        // Players come and go: only the pictures of late
+        if known.len() > 16 {
+            known.clear();
+        }
+        known.insert(path, (modified, art.clone()));
+        art
     }
-    Some(base64::engine::general_purpose::STANDARD.encode(std::fs::read(&path).ok()?))
+}
+
+/// The picture as it is when it's small enough, else scaled down and saved as JPEG (a
+/// browser's video thumbnail is often twice the size allowed).
+fn small_art(bytes: Vec<u8>) -> Option<Vec<u8>> {
+    if bytes.len() <= MAX_ART {
+        return Some(bytes);
+    }
+    let picture = image::load_from_memory(&bytes).ok()?;
+    for side in ART_SIDES {
+        let mut out = Vec::new();
+        let rgb = picture.thumbnail(side, side).to_rgb8();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80).encode_image(&rgb).ok()?;
+        if out.len() <= MAX_ART {
+            return Some(out);
+        }
+    }
+    None
 }
 
 fn percent_decode(s: &str) -> String {
@@ -484,4 +517,27 @@ impl PhonePlayer {
 
 fn owned(v: Value<'_>) -> OwnedValue {
     v.try_to_owned().expect("plain values convert")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn makes_a_big_cover_small() {
+        // Noise doesn't compress: a PNG well over the limit
+        let mut seed = 1u32;
+        let picture = image::RgbImage::from_fn(640, 360, |_, _| {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            image::Rgb([(seed >> 24) as u8, (seed >> 16) as u8, (seed >> 8) as u8])
+        });
+        let mut png = Vec::new();
+        picture.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).unwrap();
+        assert!(png.len() > MAX_ART);
+        let small = small_art(png).unwrap();
+        assert!(small.len() <= MAX_ART);
+        assert_eq!(image::guess_format(&small).unwrap(), image::ImageFormat::Jpeg);
+        // Small ones go as they are
+        assert_eq!(small_art(vec![1, 2, 3]), Some(vec![1, 2, 3]));
+    }
 }
