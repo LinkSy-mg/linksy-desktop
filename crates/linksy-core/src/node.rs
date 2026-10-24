@@ -358,6 +358,13 @@ struct Peer {
     peer_stays: bool,
 }
 
+/// A direct link being set up (docs/protocol.md §4.17): which attempt, and where its
+/// outcome (up or not) goes.
+struct Attempt {
+    n: usize,
+    outcome: watch::Sender<Option<bool>>,
+}
+
 /// A direct link's connection to a device (docs/protocol.md §4.17), beside the usual one.
 struct Lane {
     conn: quinn::Connection,
@@ -453,8 +460,8 @@ struct Inner {
     away: Mutex<Option<Arc<crate::away::Away>>>,
     /// Direct links up, for big transfers (docs/protocol.md §4.17).
     lanes: Mutex<HashMap<Fingerprint, Lane>>,
-    /// Direct links being set up: which attempt, and where its outcome (up or not) goes.
-    direct: Mutex<HashMap<Fingerprint, (usize, watch::Sender<Option<bool>>)>>,
+    /// Direct links being set up.
+    direct: Mutex<HashMap<Fingerprint, Attempt>>,
     direct_attempts: AtomicUsize,
     /// When a direct link with a device last failed, and why.
     direct_failed: Mutex<HashMap<Fingerprint, (Instant, String)>>,
@@ -2133,16 +2140,16 @@ impl Node {
     /// fails if it isn't up in time.
     fn direct_begin(&self, to: &Fingerprint) -> (watch::Receiver<Option<bool>>, bool) {
         let mut direct = self.inner.direct.lock().unwrap();
-        if let Some((_, tx)) = direct.get(to) {
-            return (tx.subscribe(), false);
+        if let Some(a) = direct.get(to) {
+            return (a.outcome.subscribe(), false);
         }
         let attempt = self.inner.direct_attempts.fetch_add(1, Ordering::SeqCst);
-        let (tx, rx) = watch::channel(None);
-        direct.insert(*to, (attempt, tx));
+        let (outcome, rx) = watch::channel(None);
+        direct.insert(*to, Attempt { n: attempt, outcome });
         let (node, id) = (self.clone(), *to);
         tokio::spawn(async move {
             tokio::time::sleep(DIRECT_SETUP).await;
-            let pending = node.inner.direct.lock().unwrap().get(&id).is_some_and(|(a, _)| *a == attempt);
+            let pending = node.inner.direct.lock().unwrap().get(&id).is_some_and(|a| a.n == attempt);
             if pending {
                 node.direct_end(&id, Some("it took too long".into())).await;
             }
@@ -2155,11 +2162,11 @@ impl Node {
     fn direct_drop(&self, to: &Fingerprint, reason: Option<String>) -> bool {
         let lane = self.inner.lanes.lock().unwrap().remove(to);
         let attempt = self.inner.direct.lock().unwrap().remove(to);
-        if let Some((_, outcome)) = &attempt {
+        if let Some(a) = &attempt {
             let why = reason.clone().unwrap_or_else(|| "the other device ended it".into());
             info!("no direct link: {why}");
             self.inner.direct_failed.lock().unwrap().insert(*to, (Instant::now(), why));
-            outcome.send_replace(Some(false));
+            a.outcome.send_replace(Some(false));
         }
         if let Some(lane) = &lane {
             lane.conn.close(0u32.into(), b"direct link ended");
@@ -2213,8 +2220,8 @@ impl Node {
         if let Some(old) = old {
             old.conn.close(0u32.into(), b"replaced");
         }
-        if let Some((_, outcome)) = self.inner.direct.lock().unwrap().remove(&device.id) {
-            outcome.send_replace(Some(true));
+        if let Some(a) = self.inner.direct.lock().unwrap().remove(&device.id) {
+            a.outcome.send_replace(Some(true));
         }
         self.inner.direct_failed.lock().unwrap().remove(&device.id);
         info!(addr = %conn.remote_address(), "direct link to {} up", device.name);
