@@ -173,7 +173,10 @@ fn run(args: Args) -> Result<(), String> {
 
     // The screen through the desktop (PipeWire), not a camera or a test pattern
     let screen = source.starts_with("pipewiresrc");
-    let size = args.virtual_size.map(|(w, h)| format!(",width={w},height={h}")).unwrap_or_default();
+    // A second display in the phone's shape: GNOME makes its virtual monitor the size asked
+    // for here; KDE makes it 1920x1080 or the size chosen in its dialog, which the phone then
+    // fits to its screen.
+    let mut size = args.virtual_size.map(|(w, h)| format!(",width={w},height={h}")).unwrap_or_default();
     let vapostproc = gst::ElementFactory::find("vapostproc").is_some();
     // What to try, best first, each until one starts: with a GPU encoder, frames stay on
     // the GPU (the desktop hands them over in graphics memory, DMA-BUF, and the GPU converts
@@ -194,7 +197,7 @@ fn run(args: Args) -> Result<(), String> {
     let tried: Vec<String> = attempts.iter().map(|(e, _, m)| format!("{}{}", e.split_whitespace().next().unwrap_or(""), if *m == Memory::Gpu { " (graphics memory)" } else { "" })).collect();
     eprintln!("linksy-screen: encoders, in order: {}", if tried.is_empty() { "none".to_string() } else { tried.join(", ") });
     let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(1, 4));
-    let chain = |(encoder, format, memory): (&str, &str, Memory)| -> String {
+    let chain = |(encoder, format, memory): (&str, &str, Memory), size: &str| -> String {
         let gpu = encoder.starts_with("va") && vapostproc;
         // Copied: the desktop's few buffers go back to it at once
         let copy = if screen && memory == Memory::System { " always-copy=true" } else { "" };
@@ -227,7 +230,7 @@ fn run(args: Args) -> Result<(), String> {
             "{source}{} ! video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1 \
              ! video/x-h264,stream-format=byte-stream,alignment=au \
              ! fdsink fd={} sync=false",
-            chain(current),
+            chain(current, &size),
             out.as_raw_fd()
         );
         let pipeline = match gst::parse::launch(&description) {
@@ -248,6 +251,12 @@ fn run(args: Args) -> Result<(), String> {
         drop(pipeline);
         let started = last_frame.load(std::sync::atomic::Ordering::Relaxed) > 0;
         match outcome {
+            // The desktop keeps the second display at its own size (KDE): that size, the
+            // same way again
+            Some(Ended(Err(e))) if !started && !size.is_empty() && e.contains("no more input formats") => {
+                eprintln!("linksy-screen: the desktop didn't make the second display in the phone's shape; using its own size");
+                size.clear();
+            }
             // Didn't work before the first frame: the next way
             Some(Ended(Err(e))) if !started && attempt + 1 < attempts.len() => {
                 let how = if memory == Memory::Gpu { " from graphics memory" } else { "" };
