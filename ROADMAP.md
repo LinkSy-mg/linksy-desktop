@@ -110,7 +110,10 @@ work once that one step is done outside it.
 - **Done when:** after one pasted command, the Flatpak has the webcam in every app and the
   cable, like the packages.
 
-### Problem logs — S
+### Problem logs — S, desktop done
+*Desktop: crash files in `~/.local/state/linksy/crashes/`, `logs.txt` in About (GTK:
+Troubleshooting, with Save and Copy; Qt: Save Logs… in the menu), offered once after a
+crash, and `linksy logs > logs.txt`.*
 When something goes wrong, one file says what happened, ready to attach to a bug report.
 - **Desktop:** a crash in the app, the service or the screen helper writes what it knows
   (version, what was running, the error) to `~/.local/state/linksy/crashes/`. **Save Logs…**
