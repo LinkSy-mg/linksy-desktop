@@ -228,7 +228,7 @@
   "No Second Display Here Yet": "Tsy mbola misy efijery faharoa eto",
   "No answer": "Tsy namaly",
   "No camera is on": "Tsy misy fakantsary mandeha",
-  "No other computers found on this network yet.": "Mbola tsy misy solosaina hafa hita amin'ity tambajotra ity.",
+  "No other computers found yet. Open Add Device on the other one too: only then can it be found.": "Mbola tsy misy solosaina hafa hita. Sokafy koa ny Hanampy Fitaovana amin'ilay iray: amin'izay vao ho hita izy.",
   "Nobody answered on {name}.": "Tsy nisy namaly tao amin'i {name}.",
   "Not nearby": "Tsy akaiky",
   "Not sent: {error}": "Tsy lasa: {error}",

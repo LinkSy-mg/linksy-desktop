@@ -41,7 +41,7 @@ impl Window {
         // Computers nearby, kept current by the window while the dialog is open.
         let nearby = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["boxed-list"]).build();
         let nearby_empty = gtk::Label::builder()
-            .label(t!("No other computers found on this network yet."))
+            .label(t!("No other computers found yet. Open Add Device on the other one too: only then can it be found."))
             .wrap(true)
             .justify(gtk::Justification::Center)
             .css_classes(["dim-label", "caption"])

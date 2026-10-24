@@ -228,7 +228,7 @@
   "No Second Display Here Yet": "ここではまだセカンドディスプレイを使えません",
   "No answer": "応答なし",
   "No camera is on": "カメラはオンになっていません",
-  "No other computers found on this network yet.": "このネットワーク上にほかのコンピュータはまだ見つかっていません。",
+  "No other computers found yet. Open Add Device on the other one too: only then can it be found.": "ほかのコンピューターはまだ見つかりません。もう一方でも「デバイスを追加」を開いてください。そうすると見つかるようになります。",
   "Nobody answered on {name}.": "{name} で誰も応答しませんでした。",
   "Not nearby": "近くにありません",
   "Not sent: {error}": "送信されませんでした: {error}",

@@ -228,7 +228,7 @@
   "No Second Display Here Yet": "Ainda sem segunda tela aqui",
   "No answer": "Sem resposta",
   "No camera is on": "Nenhuma câmera ligada",
-  "No other computers found on this network yet.": "Nenhum outro computador encontrado nesta rede ainda.",
+  "No other computers found yet. Open Add Device on the other one too: only then can it be found.": "Ainda não foram encontrados outros computadores. Abra também Adicionar dispositivo no outro: só assim ele pode ser encontrado.",
   "Nobody answered on {name}.": "Ninguém respondeu em {name}.",
   "Not nearby": "Longe",
   "Not sent: {error}": "Não enviado: {error}",

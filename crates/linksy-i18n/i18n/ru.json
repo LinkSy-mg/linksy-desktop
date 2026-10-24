@@ -228,7 +228,7 @@
   "No Second Display Here Yet": "Второго экрана здесь пока нет",
   "No answer": "Нет ответа",
   "No camera is on": "Ни одна камера не включена",
-  "No other computers found on this network yet.": "В этой сети пока не найдено других компьютеров.",
+  "No other computers found yet. Open Add Device on the other one too: only then can it be found.": "Другие компьютеры пока не найдены. Откройте «Добавить устройство» и на другом: только тогда его можно найти.",
   "Nobody answered on {name}.": "На {name} никто не ответил.",
   "Not nearby": "Не рядом",
   "Not sent: {error}": "Не отправлено: {error}",

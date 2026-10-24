@@ -228,7 +228,7 @@
   "No Second Display Here Yet": "这里暂时无法使用第二屏幕",
   "No answer": "无应答",
   "No camera is on": "没有开启的相机",
-  "No other computers found on this network yet.": "尚未在此网络中找到其他电脑。",
+  "No other computers found yet. Open Add Device on the other one too: only then can it be found.": "尚未找到其他电脑。请在另一台电脑上也打开“添加设备”：这样才能找到它。",
   "Nobody answered on {name}.": "{name} 上无人应答。",
   "Not nearby": "不在附近",
   "Not sent: {error}": "未发送：{error}",
