@@ -48,6 +48,8 @@ if [ "$WITH_APP" = 1 ]; then
 fi
 install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$SHARE/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
 install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$SHARE/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
+install -Dm644 data/icons/mg.diary.linksy.Linksy-tray-symbolic.svg "$SHARE/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-symbolic.svg"
+install -Dm644 data/icons/mg.diary.linksy.Linksy-tray-idle-symbolic.svg "$SHARE/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-idle-symbolic.svg"
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t -f "$SHARE/icons/hicolor" || true
 
 mkdir -p "$UNITS"

@@ -6,10 +6,13 @@ Linksy for Linux. Each version's section becomes its release notes.
 
 ### Added
 - **The KDE Plasma app sits in the system tray.** Closing its window keeps Linksy in the
-  tray, where the icon's menu says what's connected, lists your devices (one click opens
-  it), stops anything being shared, and brings the window back or quits. A question from
-  another device, pairing, a file or a session, opens the window again on its own. Quit
-  is in the window's menu too.
+  tray. The icon fills in while a device is connected and dims when none is; its menu says
+  what's connected, and each paired device has a submenu with what its page offers: send
+  files or the clipboard, view its screen, ring, ping, locate or browse a phone, and start
+  or stop it as a second display, webcam or microphone. Anything being shared can be
+  stopped from the menu too, and it shows or hides the window and quits. A question from
+  another device, pairing, a file or a session, opens the window again on its own. Quit is
+  in the window's menu too.
 
 ## 0.9.3
 

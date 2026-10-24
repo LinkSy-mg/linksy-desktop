@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
+  <!-- The Linksy mark with a device connected: filled in.
+       The tray icon for KDE Plasma: the panel recolours it to its text colour through the
+       current-color-scheme stylesheet, as it does Breeze's own icons (the GTK app's
+       mg.diary.linksy.Linksy-symbolic.svg uses GTK's fixed grey instead). -->
+  <defs>
+    <style type="text/css" id="current-color-scheme">.ColorScheme-Text { color:#232629; }</style>
+  </defs>
+  <circle class="ColorScheme-Text" style="fill:currentColor" cx="4" cy="12" r="2.2"/>
+  <path class="ColorScheme-Text" style="fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round" d="M4 7.2 A4.8 4.8 0 0 1 8.8 12"/>
+  <path class="ColorScheme-Text" style="fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round" d="M12.4 6.9 A3.5 3.5 0 0 1 8.9 3.4"/>
+  <circle class="ColorScheme-Text" style="fill:currentColor" cx="12.4" cy="3.4" r="1.7"/>
+</svg>
