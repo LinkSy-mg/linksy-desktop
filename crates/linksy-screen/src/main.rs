@@ -283,7 +283,10 @@ fn encoder() -> (&'static str, &'static str) {
         // One slice per frame: zerolatency would cut each frame into a slice per thread,
         // which decoders fed a NAL unit at a time (phones) never assemble into a picture.
         // Two threads work on two frames at once instead: one frame later, nearly twice as fast.
-        ("x264enc tune=zerolatency speed-preset=superfast bitrate=8000 key-int-max=60 bframes=0 sliced-threads=false threads=2", "I420")
+        // ultrafast: a sharp desktop with windows moving on it cost superfast 10 times more
+        // live than a video does (half-pixel motion search), and fell to 4 fps on a laptop on
+        // battery; 16 Mbit/s keeps it sharp, which a local network carries easily.
+        ("x264enc tune=zerolatency speed-preset=ultrafast bitrate=16000 key-int-max=60 bframes=0 sliced-threads=false threads=2", "I420")
     } else {
         ("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate=8000000 gop-size=60", "I420")
     }
