@@ -67,9 +67,17 @@ resign() {
   [ -f "$key" ] && command -v akmods >/dev/null && command -v mokutil >/dev/null || return 1
   mokutil --test-key "$key" 2>&1 | grep -q "already enrolled" || return 1
   echo "STEP Building the camera driver again, signed with the approved key"
-  akmods --force --kernels "$(uname -r)" >/dev/null 2>&1 || return 1
+  # --rebuild, not --force: --force keeps a driver that's already installed (#43)
+  if ! akmods --rebuild --kernels "$(uname -r)" --akmod v4l2loopback >/dev/null 2>&1; then
+    echo "building the camera driver failed: see /var/cache/akmods/v4l2loopback/.last.log" >&2
+    exit 1
+  fi
   depmod -a "$(uname -r)"
-  modprobe v4l2loopback devices=0
+  out=$(modprobe v4l2loopback devices=0 2>&1) && return 0
+  # Still refused, and a restart won't change it: say why instead of asking for one
+  echo "$out" >&2
+  [ -n "$(modinfo -F signer v4l2loopback 2>/dev/null)" ] || echo "the camera driver was built without a signature: /etc/pki/akmods/private/private_key.priv is missing" >&2
+  exit 1
 }
 
 if [ ! -d /sys/module/v4l2loopback ]; then
