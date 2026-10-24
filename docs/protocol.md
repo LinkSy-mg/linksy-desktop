@@ -752,8 +752,10 @@ computer or on the phone.
   phone is switched as soon as it's plugged in, as before. The setting lives on the
   computer (`usb-auto.json`, keyed by the phone's USB serial); the phone needs nothing.
 - **Shipped in desktop 0.8.7:** no question on plug-in, Connect from the guide (the phone's
-  page leads there), and the automatic switch. **Still to come (0.9):** `usb_plugged` and
-  `usb_connect`, so the phone gets its own button.
+  page leads there), and the automatic switch. **Desktop 0.9:** `usb_plugged` (sent to
+  connected Android phones when the list changes and when they connect) and `usb_connect`
+  (switches that phone). Core: `Node::usb_plugged`, `Node::usb_connect`, `Event::UsbPlugged`,
+  `Event::UsbConnect`. The phone's button is still to do.
 
 ### 4.12 Service information (planned for 0.6)
 
@@ -1452,3 +1454,5 @@ robust against any encoder (GPU ones may slice too):
 - **2026-10-24** — Desktop 0.9: one prompt for offers from a device that arrive together,
   and **Always Accept** per device (§6, "Receiving files"). No protocol change; the phone
   should send a selection as one offer and mirror the prompt.
+- **2026-10-24** — Desktop 0.9: `usb_plugged` and `usb_connect` (§4.11) implemented. Phone:
+  show Connect by USB Cable on the computer's page as described there.
