@@ -123,6 +123,13 @@ default SMS app.
 
 ## Changelog
 
+- **2026-10-24** — Phone 0.2.5, same core: the computer's players as an Android media
+  notification (it sends `media_watch {on: true}` to each connected computer, again after
+  each reconnect, unless turned off), `seek` from the page and the notification, a number
+  pad on the presenter remote (keysyms `0x30`-`0x39`, Enter, Backspace), reverse
+  scrolling, and Shift releases (`0xffe1`/`0xffe2` up) after shifted `text`, since KWin
+  leaves Shift held. Computer volume still needs a protocol message.
+
 - **2026-10-24** — Phone 0.2.4 on core `6282520`: private discovery (§4.16), with
   pairing mode while Add Device, the scanner or Pair by address is open; Update Now
   (newest `vX.Y.Z` on linksy-releases, checked against its `SHA256SUMS`, installed by
