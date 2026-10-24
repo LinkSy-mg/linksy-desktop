@@ -1386,3 +1386,35 @@ async fn direct_link_needs_a_host_and_a_joiner() {
     let step = DirectStep::Up { ip: "8.8.8.8".parse().unwrap(), port: 47200 };
     assert!(a.node.direct_send(&b.node.info().id, step).await.is_err());
 }
+
+#[tokio::test]
+async fn direct_link_stays_up_while_a_transfer_runs_then_closes_when_idle() {
+    let (a, b) = paired_with(|c| {
+        c.features = vec!["files".into(), "direct_host".into(), "direct_join".into()];
+        c.direct_idle = Duration::from_millis(300);
+    })
+    .await;
+    let b_id = b.node.info().id;
+    fake_direct_app(&a.node);
+    fake_direct_app(&b.node);
+    let mut on_a = a.node.subscribe();
+    let mut on_b = b.node.subscribe();
+    a.node.direct_link(&b_id).await.unwrap();
+
+    // Far longer than the idle time to send, and received in a task of its own
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("long.bin");
+    std::fs::write(&file, vec![3u8; 96 << 20]).unwrap();
+    let id = a.node.send_files(&b_id, vec![file]).await.unwrap();
+    let ended_first = wait_for(&mut on_a, |e| match e {
+        Event::TransferComplete { transfer, .. } if *transfer == id => Some(false),
+        Event::TransferFailed { transfer, .. } if *transfer == id => Some(true),
+        Event::DirectEnded { .. } => Some(true),
+        _ => None,
+    })
+    .await;
+    assert!(!ended_first, "the direct link closed during the transfer");
+    // Idle afterwards: closed on both
+    wait_for(&mut on_a, |e| matches!(e, Event::DirectEnded { .. }).then_some(())).await;
+    wait_for(&mut on_b, |e| matches!(e, Event::DirectEnded { .. }).then_some(())).await;
+}

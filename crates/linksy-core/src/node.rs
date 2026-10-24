@@ -64,8 +64,6 @@ const INVITE_TTL: Duration = Duration::from_secs(300);
 /// has failed, and what waited for it goes the usual way. The first one between a realme
 /// 15 Pro and a ThinkPad took 25 s: 16 to find each other, 9 to connect.
 const DIRECT_SETUP: Duration = Duration::from_secs(45);
-/// A direct link with nothing going on this long closes, so the phone stops hosting it.
-const DIRECT_IDLE: Duration = Duration::from_secs(20);
 /// After a direct link with a device failed, transfers don't wait for another this long.
 const DIRECT_RETRY: Duration = Duration::from_secs(600);
 
@@ -98,6 +96,8 @@ pub struct Config {
     /// Transfers at least this big set up a direct link first when both devices can
     /// (docs/protocol.md §4.17); from away, an eighth of it.
     pub direct_min: u64,
+    /// A direct link with nothing going on this long closes, so the phone stops hosting it.
+    pub direct_idle: Duration,
 }
 
 impl Config {
@@ -117,6 +117,7 @@ impl Config {
             away: false,
             relay: None,
             direct_min: 256 << 20,
+            direct_idle: Duration::from_secs(20),
         }
     }
 }
@@ -1603,7 +1604,7 @@ impl Node {
         loop {
             tokio::select! {
                 bi = conn.accept_bi() => match bi {
-                    Ok((send, recv)) => { tokio::spawn(self.clone().handle_stream(device.clone(), send, recv)); }
+                    Ok((send, recv)) => { tokio::spawn(self.clone().handle_stream(device.clone(), send, recv, None)); }
                     Err(_) => break,
                 },
                 uni = conn.accept_uni() => match uni {
@@ -1798,15 +1799,16 @@ impl Node {
         self.emit(Event::DeviceUpdated { device: device.0 });
     }
 
-    /// A new bidirectional stream: a file offer or a media session request.
-    async fn handle_stream(self, from: DeviceInfo, send: quinn::SendStream, mut recv: quinn::RecvStream) {
+    /// A new bidirectional stream: a file offer or a media session request. `lane`: it came
+    /// over a direct link, kept up while what it carries goes on.
+    async fn handle_stream(self, from: DeviceInfo, send: quinn::SendStream, mut recv: quinn::RecvStream, lane: Option<Busy>) {
         let first = match read_value(&mut recv).await {
             Ok(v) => v,
             Err(e) => return debug!("bad stream from {}: {e}", from.name),
         };
         match first.get("type").and_then(|t| t.as_str()) {
             Some("offer") => match serde_json::from_value(first) {
-                Ok(TransferMsg::Offer { id, files, import, clipboard }) => self.handle_offer(from, send, recv, id, files, import, clipboard).await,
+                Ok(TransferMsg::Offer { id, files, import, clipboard }) => self.handle_offer(from, send, recv, id, files, import, clipboard, lane).await,
                 _ => debug!("bad offer from {}", from.name),
             },
             Some("session_request") => match serde_json::from_value(first) {
@@ -1904,7 +1906,17 @@ impl Node {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn handle_offer(self, from: DeviceInfo, mut send: quinn::SendStream, mut recv: quinn::RecvStream, id: Uuid, files: Vec<FileEntry>, import: bool, clipboard: bool) {
+    async fn handle_offer(
+        self,
+        from: DeviceInfo,
+        mut send: quinn::SendStream,
+        mut recv: quinn::RecvStream,
+        id: Uuid,
+        files: Vec<FileEntry>,
+        import: bool,
+        clipboard: bool,
+        lane: Option<Busy>,
+    ) {
         let total: u64 = files.iter().map(|f| f.size).sum();
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
         // Clipboard files: one small file, into a folder of their own, kept until the next.
@@ -1952,6 +1964,8 @@ impl Node {
         let from_clip = from.clone();
         let to_clipboard = clipboard_to.is_some();
         let task = tokio::spawn(async move {
+            // The direct link it comes over stays up until it's done
+            let _lane = lane;
             let result = async {
                 let dir = match import_to {
                     Some(dir) => dir,
@@ -2238,20 +2252,17 @@ impl Node {
 
     /// Transfers arriving over a direct link; it closes once nothing has gone on for a while.
     async fn serve_lane(self, conn: quinn::Connection, device: DeviceInfo, activity: Arc<Activity>) {
-        let mut check = tokio::time::interval(Duration::from_secs(5));
+        let idle = self.inner.config.direct_idle;
+        let mut check = tokio::time::interval((idle / 4).clamp(Duration::from_millis(100), Duration::from_secs(5)));
         let why = loop {
             tokio::select! {
                 bi = conn.accept_bi() => match bi {
                     Ok((send, recv)) => {
-                        let (node, from, busy) = (self.clone(), device.clone(), activity.hold());
-                        tokio::spawn(async move {
-                            node.handle_stream(from, send, recv).await;
-                            drop(busy);
-                        });
+                        tokio::spawn(self.clone().handle_stream(device.clone(), send, recv, Some(activity.hold())));
                     }
                     Err(e) => break e.to_string(),
                 },
-                _ = check.tick() => if activity.idle_for().is_some_and(|d| d >= DIRECT_IDLE) {
+                _ = check.tick() => if activity.idle_for().is_some_and(|d| d >= idle) {
                     conn.close(0u32.into(), b"idle");
                     break "idle here".into();
                 },
