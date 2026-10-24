@@ -19,6 +19,8 @@ mod terminal;
 #[cfg(target_os = "linux")]
 mod dav;
 #[cfg(target_os = "linux")]
+mod direct;
+#[cfg(target_os = "linux")]
 mod media;
 #[cfg(target_os = "linux")]
 mod notify;
@@ -55,6 +57,7 @@ struct Args {
     notifications: bool,
     open_links: bool,
     usb: bool,
+    direct: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -77,6 +80,7 @@ fn parse_args() -> Result<Args, String> {
     let mut notifications = true;
     let mut open_links = true;
     let mut usb = true;
+    let mut direct = true;
     let mut away = true;
 
     let mut args = std::env::args().skip(1);
@@ -93,6 +97,7 @@ fn parse_args() -> Result<Args, String> {
             "--no-notifications" => notifications = false,
             "--no-open-links" => open_links = false,
             "--no-usb" => usb = false,
+            "--no-direct" => direct = false,
             "--no-away" => away = false,
             "-h" | "--help" => {
                 println!(
@@ -107,6 +112,7 @@ fn parse_args() -> Result<Args, String> {
                      --no-notifications   don't show desktop notifications\n  \
                      --no-open-links      don't open links devices send (they're still in the history)\n  \
                      --no-usb             don't connect phones over USB cables\n  \
+                     --no-direct          don't join phones' Wi-Fi Direct links for big transfers\n  \
                      --no-away            don't reach devices away from home (over the internet)"
                 );
                 std::process::exit(0);
@@ -121,7 +127,7 @@ fn parse_args() -> Result<Args, String> {
     // Away from home, through the relay the website lists (docs/protocol.md §4.13).
     config.away = away;
     config.relay = Some(update::relay(&config.data_dir.join("update.json")));
-    Ok(Args { config, socket, notifications, open_links, usb })
+    Ok(Args { config, socket, notifications, open_links, usb, direct })
 }
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
@@ -162,6 +168,11 @@ async fn main() -> ExitCode {
     let _ = std::fs::remove_file(&args.socket);
 
     let mut config = args.config;
+    // Big transfers over a phone's Wi-Fi Direct link (docs/protocol.md §4.17)
+    #[cfg(target_os = "linux")]
+    if args.direct && direct::available().await {
+        config.features.push("direct_join".into());
+    }
     let data_dir = config.data_dir.clone();
     let node = match Node::start(config.clone()).await {
         Ok(n) => n,
@@ -206,6 +217,10 @@ async fn main() -> ExitCode {
     tokio::spawn(media::run(node.clone(), icons.join("art")));
     #[cfg(target_os = "linux")]
     tokio::spawn(volume::run(node.clone()));
+    #[cfg(target_os = "linux")]
+    if node.info().features.iter().any(|f| f == "direct_join") {
+        tokio::spawn(direct::run(node.clone()));
+    }
     let mirror = mirror::Mirror::load(data_dir.join("notifications.json"), icons, socket.clone());
     if args.notifications {
         tokio::spawn(mirror.clone().run(node.clone()));
