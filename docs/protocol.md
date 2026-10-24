@@ -1103,6 +1103,13 @@ history of everything shared with it. Mirror that on the phone:
 - **Device list** (home): paired devices with colored initials avatars and a presence
   dot (Nearby / Connected / Not nearby), then "Nearby, not paired" with a Pair button,
   and a prominent **Add Device** (QR scanner first on the phone).
+- **Receiving files** (desktop 0.9, [#32](https://github.com/LinkSy-mg/linksy-desktop/issues/32)):
+  no protocol change. Send a whole selection as **one** `offer` (§4.5), never one per file.
+  On the receiving side, offers from the same device within 1 second of the first are
+  asked about in one prompt ("3 items · 48 MB"), and its answer goes to all of them. The
+  prompt has **Accept**, **Always Accept** and **Decline**; Always Accept marks that
+  device, and its files are saved without asking from then on (a switch, **Always Accept
+  Files**, on its device page). Do the same on the phone.
 - **Device page**: big avatar, name, "Nearby · Linux laptop"; three big action buttons
   **Send Files**, **Send Clipboard**, **Ping**; then **Activity** grouped by day (Today,
   Yesterday, date), newest first. Rows: icon in a tinted circle (green incoming, accent
@@ -1442,3 +1449,6 @@ robust against any encoder (GPU ones may slice too):
   open, and the §4.1 record only while a paired device hasn't sent its key. Forgetting a
   device sends the new key to connected devices at once. Phone: send `discovery_key`,
   store the computer's, look for its tag, and announce the same records.
+- **2026-10-24** — Desktop 0.9: one prompt for offers from a device that arrive together,
+  and **Always Accept** per device (§6, "Receiving files"). No protocol change; the phone
+  should send a selection as one offer and mirror the prompt.
