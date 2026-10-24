@@ -307,6 +307,23 @@ fn install_tarball(dir: &Path, tarball: &Path) -> Result<(), String> {
 }
 
 /// `linksy --revision`: version, commit, build date and how it's installed.
+/// Start this app again once this process has ended (after an update, or to restart it).
+/// The update replaced the program while it ran, so the kernel names it "… (deleted)":
+/// the path without that, or the program's name on PATH.
+pub fn relaunch() {
+    let exe = std::env::current_exe().ok().map(|p| p.to_string_lossy().trim_end_matches(" (deleted)").to_string());
+    let name = std::env::args().next().unwrap_or_default();
+    let program = exe.filter(|p| std::path::Path::new(p).is_file()).unwrap_or(name);
+    // Not before this process is gone: a single-instance app would hand the start back to it
+    let script = "while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; exec \"$0\"";
+    let _ = std::process::Command::new("sh")
+        .args(["-c", script])
+        .arg(program)
+        .arg(std::process::id().to_string())
+        .stdin(std::process::Stdio::null())
+        .spawn();
+}
+
 pub fn revision() -> String {
     format!("{VERSION} ({COMMIT}, built {BUILD_DATE}, {})", method().name())
 }

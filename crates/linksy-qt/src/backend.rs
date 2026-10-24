@@ -410,8 +410,16 @@ impl qobject::Backend {
         if !any_time && !news.is_empty() {
             linksy_news::mark_seen(version);
         }
-        let highlights: Vec<_> = news.iter().map(|h| serde_json::json!({ "icon": h.qt, "title": h.title, "body": h.body })).collect();
-        let json = serde_json::json!({ "version": version, "notes": linksy_news::notes_url(version), "repo": linksy_news::REPO, "highlights": highlights });
+        // After skipped versions, each version's highlights under a heading ({heading} rows)
+        let several = news.len() > 1;
+        let highlights: Vec<_> = news
+            .iter()
+            .flat_map(|r| {
+                let heading = several.then(|| serde_json::json!({ "heading": r.version }));
+                heading.into_iter().chain(r.highlights.iter().map(|h| serde_json::json!({ "icon": h.qt, "title": h.title, "body": h.body })))
+            })
+            .collect();
+        let json = serde_json::json!({ "version": version, "several": several, "notes": linksy_news::notes_url(version), "repo": linksy_news::REPO, "highlights": highlights });
         QString::from(&json.to_string())
     }
 
@@ -508,10 +516,8 @@ impl qobject::Backend {
                     tokio::time::sleep(Duration::from_millis(150)).await;
                 }
             }
-            if let Ok(exe) = std::env::current_exe() {
-                // A moment later, once this window has let go of its instance socket
-                let _ = std::process::Command::new("sh").args(["-c", "sleep 1; exec \"$0\""]).arg(exe).spawn();
-            }
+            // Once this process has ended (and let go of the single-instance socket)
+            linksy_upgrade::relaunch();
             let _ = thread.queue(|_| crate::app::ffi::quit_app());
         });
     }

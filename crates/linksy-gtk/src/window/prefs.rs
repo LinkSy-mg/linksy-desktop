@@ -258,12 +258,10 @@ impl Window {
                     glib::timeout_future(std::time::Duration::from_millis(150)).await;
                 }
             }
+            // Once this process has ended (and let go of the app's D-Bus name)
+            linksy_upgrade::relaunch();
             if let Some(app) = app {
                 app.quit();
-            }
-            if let Ok(exe) = std::env::current_exe() {
-                // A moment later, once this process has let go of the app's D-Bus name.
-                let _ = std::process::Command::new("sh").args(["-c", "sleep 1; exec \"$0\""]).arg(exe).spawn();
             }
         });
     }
