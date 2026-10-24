@@ -1645,3 +1645,10 @@ robust against any encoder (GPU ones may slice too):
   moment the old limit ran out: 16 s to find each other, 9 to connect. The limit is
   **45 s** now (core ≥ the commit after 103ae0a); the phone needs it too, its own timer ends
   the attempt as well.
+- **2026-10-25** — Third test: **79 MB/s** over the direct link (1.97 GB in 25 s, phone →
+  computer, 5180 MHz), up 15 s after the invite (12 s for the phone to find the computer).
+  But the phone closed the link **25.0 s after it came up**, mid-transfer ("connection
+  lost"; the partial file resumes). Core now: asking for a link that's up (`direct_link`,
+  an `ask`) keeps it instead of starting another attempt, and the computer logs why a
+  link closed. Phone: check nothing ends the link once `DirectLinked` arrived (a timer
+  started earlier, a second `direct_link`, `removeGroup` on a repeated `DirectWanted`).
