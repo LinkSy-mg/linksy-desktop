@@ -2,6 +2,25 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.9
+
+### Added
+- **Wi-Fi Direct is here, and it's damn fast.** Big files go straight from your phone to this
+  computer over a Wi-Fi link of their own, not through the router: **about 80 MB/s** in our
+  tests (a realme 15 Pro and a ThinkPad E14), four times the 20 MB/s through the router, and
+  at AirDrop's level. It sets itself up for files of 256 MB and up, in about 15 seconds,
+  and the computer stays on its Wi-Fi network, internet included. If anything goes wrong,
+  the transfer goes the usual way. The computer joins the phone's link through
+  NetworkManager, with no root and no password; it needs a Wi-Fi card that does Wi-Fi
+  Direct (most do) and the Linksy for Android update that brings it. `linksyd --no-direct`
+  turns it off.
+- **Steadier transfers on busy Wi-Fi.** Linksy's connection asks the system for much bigger
+  network buffers, so bursts at Wi-Fi speed no longer overflow them and get dropped.
+
+### Fixed
+- **Sending a link to a file (a symlink) sends that file.** It used to send nothing; links
+  inside a folder you send are still left out.
+
 ## 0.9.8
 
 ### Added

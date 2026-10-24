@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.9" date="2026-10-25">
+      <description>
+        <p>Wi-Fi Direct: big files go straight from your phone to this computer over a Wi-Fi link of their own, at about 80 MB/s, four times faster than through the router, while the computer stays on its network (with the Linksy for Android update). Transfers are steadier on busy Wi-Fi.</p>
+      </description>
+    </release>
     <release version="0.9.8" date="2026-10-24">
       <description>
         <p>A paired phone can now follow and set this computer's volume (with a phone app update). The tray menu's icons are one colour, like the rest of the top bar.</p>
