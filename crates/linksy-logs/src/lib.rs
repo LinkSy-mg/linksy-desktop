@@ -21,6 +21,27 @@ pub fn crash_dir() -> PathBuf {
     state.join("linksy/crashes")
 }
 
+/// The service's own log file, where the journal can't be read: in the Flatpak, whose
+/// sandbox can't read the system's log (and whose service starts with no journal).
+pub fn service_log() -> PathBuf {
+    crash_dir().with_file_name("linksyd.log")
+}
+
+/// The log file's previous contents, once it grew too big.
+const LOG_MAX: u64 = 4 << 20;
+
+/// Open the service's log file for appending, starting a new one when it's too big.
+pub fn open_service_log() -> std::io::Result<std::fs::File> {
+    let path = service_log();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > LOG_MAX) {
+        let _ = std::fs::rename(&path, path.with_extension("log.old"));
+    }
+    std::fs::OpenOptions::new().create(true).append(true).open(path)
+}
+
 fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
 }
@@ -110,7 +131,16 @@ pub fn collect(revision: &str) -> String {
     args.extend(matches.iter().map(String::as_str));
     match run("journalctl", &args) {
         Some(log) if !log.trim().is_empty() => out.push_str(&log),
-        _ => out.push_str("(The log can't be read from here. In a terminal: journalctl --user -u linksyd -n 3000)\n"),
+        // The Flatpak: the service's own file
+        _ => match std::fs::read_to_string(service_log()) {
+            Ok(log) if !log.trim().is_empty() => {
+                let lines: Vec<&str> = log.lines().collect();
+                let from = lines.len().saturating_sub(LINES.parse().unwrap_or(3000));
+                out.push_str(&lines[from..].join("\n"));
+                out.push('\n');
+            }
+            _ => out.push_str("(The log can't be read from here. In a terminal: journalctl --user -u linksyd -n 3000)\n"),
+        },
     }
     redact(&out)
 }

@@ -119,8 +119,24 @@ fn parse_args() -> Result<Args, String> {
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> ExitCode {
     linksy_logs::catch_crashes("linksyd", env!("CARGO_PKG_VERSION"));
+    // The Flatpak's service has no journal: its output (and its screen helper's) goes to a
+    // file of its own, for Save Logs
+    #[cfg(unix)]
+    if std::env::var_os("FLATPAK_ID").is_some()
+        && let Ok(file) = linksy_logs::open_service_log()
+    {
+        use std::os::fd::AsRawFd;
+        // SAFETY: replacing this process's stdout and stderr with an open file, before any
+        // thread writes to them
+        unsafe {
+            libc::dup2(file.as_raw_fd(), 1);
+            libc::dup2(file.as_raw_fd(), 2);
+        }
+    }
     let level = std::env::var("LINKSY_LOG").ok().and_then(|l| l.parse().ok()).unwrap_or(tracing::Level::INFO);
-    tracing_subscriber::fmt().with_max_level(level).with_target(false).init();
+    // Colors only for a terminal: not in the journal or the Flatpak's log file
+    let ansi = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    tracing_subscriber::fmt().with_max_level(level).with_target(false).with_ansi(ansi).init();
 
     let args = match parse_args() {
         Ok(a) => a,
