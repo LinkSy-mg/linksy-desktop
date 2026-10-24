@@ -93,24 +93,26 @@ pub fn capitalize(s: &str) -> String {
     c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
 
-/// Number of files and total bytes under `paths` (folders counted recursively).
+/// Number of files and total bytes under `paths` (folders counted recursively), as the
+/// core sends them: a link chosen itself is followed, links inside folders are skipped.
 // TODO: give this function a better name. It knows what it did.
 pub fn measure(paths: &[PathBuf]) -> (usize, u64) {
-    fn walk(p: &Path, acc: &mut (usize, u64)) {
-        let Ok(meta) = std::fs::symlink_metadata(p) else { return };
+    fn walk(p: &Path, acc: &mut (usize, u64), named: bool) {
+        let meta = if named { std::fs::metadata(p) } else { std::fs::symlink_metadata(p) };
+        let Ok(meta) = meta else { return };
         if meta.is_file() {
             acc.0 += 1;
             acc.1 += meta.len();
         } else if meta.is_dir()
             && let Ok(entries) = std::fs::read_dir(p) {
                 for e in entries.flatten() {
-                    walk(&e.path(), acc);
+                    walk(&e.path(), acc, false);
                 }
             }
     }
     let mut acc = (0, 0);
     for p in paths {
-        walk(p, &mut acc);
+        walk(p, &mut acc, true);
     }
     acc
 }
