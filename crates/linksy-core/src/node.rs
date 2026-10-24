@@ -61,8 +61,9 @@ const DIAL_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long a pairing QR code stays valid.
 const INVITE_TTL: Duration = Duration::from_secs(300);
 /// A direct link (docs/protocol.md §4.17) that isn't up this long after it was asked for
-/// has failed, and what waited for it goes the usual way.
-const DIRECT_SETUP: Duration = Duration::from_secs(25);
+/// has failed, and what waited for it goes the usual way. The first one between a realme
+/// 15 Pro and a ThinkPad took 25 s: 16 to find each other, 9 to connect.
+const DIRECT_SETUP: Duration = Duration::from_secs(45);
 /// A direct link with nothing going on this long closes, so the phone stops hosting it.
 const DIRECT_IDLE: Duration = Duration::from_secs(20);
 /// After a direct link with a device failed, transfers don't wait for another this long.
