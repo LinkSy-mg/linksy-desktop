@@ -179,7 +179,7 @@ impl Sessions {
     }
 
     /// Start `linksy-screen` for this side of the session and relay its socket.
-    async fn run_helper(&self, mut session: Session, device: bool) -> std::io::Result<()> {
+    async fn run_helper(&self, session: Session, device: bool) -> std::io::Result<()> {
         if device && session.kind == SessionKind::Camera {
             return self.run_webcam(session).await;
         }
@@ -189,6 +189,19 @@ impl Sessions {
             crate::notify::show(linksy_i18n::t!("No Second Display Here Yet").into(), no_virtual_monitors());
             return Err(std::io::Error::other(no_virtual_monitors()));
         }
+        // Hyprland and Sway: a headless output of their own, shared like a screen
+        let headless = match (device, session.kind, Compositor::here()) {
+            (false, SessionKind::Display, Some(c)) => Some(c.create_output(session.size.map(monitor_size).unwrap_or((1920, 1080))).await?),
+            _ => None,
+        };
+        let result = self.run_helper_on(session, device, headless.is_some()).await;
+        if let Some(output) = headless {
+            output.remove().await;
+        }
+        result
+    }
+
+    async fn run_helper_on(&self, mut session: Session, device: bool, headless: bool) -> std::io::Result<()> {
         let role = match session.kind {
             _ if !device => "share",
             SessionKind::Microphone => "mic",
@@ -206,6 +219,10 @@ impl Sessions {
                 cmd.arg("--name").arg(format!("Linksy Camera ({})", session.peer.name));
             }
             SessionKind::Screen => {}
+            // The headless output, picked in the portal's dialog (the first time) like a
+            // screen. Input from the phone needs the RemoteDesktop portal, which these
+            // compositors lack: the computer's own mouse and keyboard work on it.
+            SessionKind::Display if headless => {}
             SessionKind::Camera => {
                 cmd.arg("--camera");
             }
@@ -440,11 +457,10 @@ pub(crate) async fn virtual_monitors() -> bool {
     if std::env::var_os("LINKSY_SCREEN_TEST").is_some() {
         return true;
     }
-    // Known without one, whatever their portal says (#42): until Linksy makes a headless
-    // output there itself (0.9)
+    // Their portals can't (#42), but Linksy makes a headless output there itself
     let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
     if ["hyprland", "sway"].iter().any(|d| desktop.contains(d)) {
-        return false;
+        return Compositor::here().is_some();
     }
     let Ok(bus) = zbus::Connection::session().await else { return true };
     let reply = bus
@@ -472,6 +488,92 @@ pub(crate) fn no_virtual_monitors() -> String {
     }
 }
 
+/// A compositor that makes headless outputs on request (a second display there).
+#[derive(Clone, Copy)]
+enum Compositor {
+    Hyprland,
+    Sway,
+}
+
+/// A headless output made for a second display, removed when it ends.
+struct Output {
+    compositor: Compositor,
+    name: String,
+}
+
+impl Compositor {
+    fn here() -> Option<Self> {
+        let has = |tool: &str| std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(tool).is_file()));
+        if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() && has("hyprctl") {
+            Some(Compositor::Hyprland)
+        } else if std::env::var_os("SWAYSOCK").is_some() && has("swaymsg") {
+            Some(Compositor::Sway)
+        } else {
+            None
+        }
+    }
+
+    async fn run(self, args: &[&str]) -> std::io::Result<String> {
+        let tool = match self {
+            Compositor::Hyprland => "hyprctl",
+            Compositor::Sway => "swaymsg",
+        };
+        let out = tokio::process::Command::new(tool).args(args).output().await?;
+        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+        // hyprctl exits 0 either way, and says why not ("invalid…", "no such…", "error…")
+        let refused = matches!(self, Compositor::Hyprland)
+            && !args.contains(&"-j")
+            && ["invalid", "no such", "error", "couldn't", "failed"].iter().any(|w| text.to_lowercase().contains(w));
+        if !out.status.success() || refused {
+            return Err(std::io::Error::other(format!("{tool} {}: {}", args.join(" "), text.trim())));
+        }
+        Ok(text)
+    }
+
+    /// The outputs' names now.
+    async fn outputs(self) -> std::io::Result<Vec<String>> {
+        let json = match self {
+            Compositor::Hyprland => self.run(&["-j", "monitors", "all"]).await?,
+            Compositor::Sway => self.run(&["-r", "-t", "get_outputs"]).await?,
+        };
+        let list: Vec<serde_json::Value> = serde_json::from_str(&json).map_err(std::io::Error::other)?;
+        Ok(list.iter().filter_map(|o| o["name"].as_str().map(String::from)).collect())
+    }
+
+    /// A new headless output of `w`×`h`, to the right of the others.
+    async fn create_output(self, (w, h): (u32, u32)) -> std::io::Result<Output> {
+        let before = self.outputs().await?;
+        match self {
+            Compositor::Hyprland => self.run(&["output", "create", "headless"]).await?,
+            Compositor::Sway => self.run(&["create_output"]).await?,
+        };
+        let name = self.outputs().await?.into_iter().find(|n| !before.contains(n)).ok_or_else(|| std::io::Error::other("no new output appeared"))?;
+        let output = Output { compositor: self, name };
+        let mode = match self {
+            Compositor::Hyprland => self.run(&["keyword", "monitor", &format!("{},{w}x{h}@60,auto,1", output.name)]).await,
+            Compositor::Sway => self.run(&["output", &output.name, "mode", &format!("{w}x{h}@60Hz")]).await,
+        };
+        if let Err(e) = mode {
+            output.remove().await;
+            return Err(e);
+        }
+        info!("second display: made {} ({w}x{h})", output.name);
+        Ok(output)
+    }
+}
+
+impl Output {
+    async fn remove(self) {
+        let done = match self.compositor {
+            Compositor::Hyprland => self.compositor.run(&["output", "remove", &self.name]).await,
+            Compositor::Sway => self.compositor.run(&["output", &self.name, "unplug"]).await,
+        };
+        if let Err(e) = done {
+            warn!("could not remove the second display's output {}: {e}", self.name);
+        }
+    }
+}
+
 pub(crate) fn helper(name: &str) -> PathBuf {
     std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join(name))).filter(|p| p.exists()).unwrap_or_else(|| PathBuf::from(name))
 }
@@ -492,5 +594,24 @@ mod tests {
         assert_eq!(super::monitor_size((2400, 1080)), (2400, 1080));
         assert_eq!(super::monitor_size((2800, 1272)), (2376, 1080));
         assert_eq!(super::monitor_size((1280, 800)), (1280, 800));
+    }
+}
+
+/// Needs a running Sway or Hyprland (SWAYSOCK or HYPRLAND_INSTANCE_SIGNATURE), e.g. a
+/// headless Sway: `WLR_BACKENDS=headless sway`.
+#[cfg(test)]
+mod compositor_tests {
+    use super::*;
+
+    #[tokio::test]
+    #[ignore = "needs Sway or Hyprland"]
+    async fn makes_and_removes_a_headless_output() {
+        let c = Compositor::here().expect("no Sway or Hyprland here");
+        let before = c.outputs().await.unwrap();
+        let output = c.create_output((2400, 1080)).await.unwrap();
+        let name = output.name.clone();
+        assert!(c.outputs().await.unwrap().contains(&name));
+        output.remove().await;
+        assert_eq!(c.outputs().await.unwrap(), before);
     }
 }
