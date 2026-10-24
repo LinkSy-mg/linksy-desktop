@@ -138,6 +138,14 @@ fn has_element(names: &[&str]) -> bool {
     names.iter().any(|n| gstreamer::ElementFactory::find(n).is_some())
 }
 
+/// Whether apt knows a package (an installable version).
+fn apt_has(package: &str) -> bool {
+    std::process::Command::new("apt-cache")
+        .args(["policy", package])
+        .output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).lines().any(|l| l.trim().strip_prefix("Candidate:").is_some_and(|c| c.trim() != "(none)")))
+}
+
 fn in_path(cmd: &str) -> bool {
     // pkexec runs the helper with the system's PATH: sbin included, as here.
     std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).chain(["/usr/sbin".into(), "/sbin".into()]).any(|d| d.join(cmd).is_file()))
@@ -339,7 +347,8 @@ pub fn check(ui: Ui) -> Vec<Item> {
             suse.extend(["gstreamer-plugin-openh264", "gstreamer-plugins-libav"]);
         }
         match ui {
-            Ui::Gtk if !has_element(&["gtk4paintablesink"]) => {
+            // Ubuntu 24.04 has no package for it: the app draws frames itself there
+            Ui::Gtk if !has_element(&["gtk4paintablesink"]) && !(family() == Family::Debian && !apt_has("gstreamer1.0-gtk4")) => {
                 fedora.push("gstreamer1-plugin-gtk4");
                 debian.push("gstreamer1.0-gtk4");
                 arch.push("gst-plugin-gtk4");
