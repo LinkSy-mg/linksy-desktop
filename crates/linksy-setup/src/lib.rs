@@ -189,7 +189,10 @@ fn portal_package() -> &'static str {
         "xdg-desktop-portal-kde"
     } else if desktop.contains("hyprland") {
         "xdg-desktop-portal-hyprland"
-    } else if ["sway", "river", "wlroots", "wayfire", "labwc", "niri"].iter().any(|d| desktop.contains(d)) {
+    } else if desktop.contains("niri") {
+        // niri shares screens through GNOME's portal
+        "xdg-desktop-portal-gnome"
+    } else if ["sway", "river", "wlroots", "wayfire", "labwc"].iter().any(|d| desktop.contains(d)) {
         "xdg-desktop-portal-wlr"
     } else {
         "xdg-desktop-portal-gnome"
@@ -273,9 +276,43 @@ fn firewall_need() -> Option<Need> {
 fn autostart_need() -> Option<Need> {
     let state = std::process::Command::new("systemctl").args(["--user", "is-enabled", "linksyd.service"]).stderr(std::process::Stdio::null()).output().ok()?;
     match String::from_utf8_lossy(&state.stdout).trim() {
+        // Enabled, but tiling compositors seldom start systemd's graphical session, which
+        // starts it: then one line in their config does
+        "enabled" | "enabled-runtime" | "static" | "linked" | "alias" if !graphical_session() => compositor_autostart().map(Need::Manual).or(Some(Need::Ready)),
         "enabled" | "enabled-runtime" | "static" | "linked" | "alias" => Some(Need::Ready),
         "disabled" => Some(Need::SetUp),
         _ => None,
+    }
+}
+
+/// Whether something shows notifications: a daemon running, or one D-Bus starts when asked.
+fn notification_daemon() -> bool {
+    const NAME: &str = "org.freedesktop.Notifications";
+    let Ok(bus) = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) else { return true };
+    let call = |method: &str, args: Option<&gio::glib::Variant>| {
+        bus.call_sync(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus", "org.freedesktop.DBus", method, args, None, gio::DBusCallFlags::NONE, 2000, gio::Cancellable::NONE)
+    };
+    let owned = call("NameHasOwner", Some(&(NAME,).to_variant())).ok().and_then(|v| v.get::<(bool,)>()).is_none_or(|(b,)| b);
+    owned || call("ListActivatableNames", None).ok().and_then(|v| v.get::<(Vec<String>,)>()).is_some_and(|(names,)| names.iter().any(|n| n == NAME))
+}
+
+fn graphical_session() -> bool {
+    std::process::Command::new("systemctl").args(["--user", "is-active", "--quiet", "graphical-session.target"]).status().is_ok_and(|s| s.success())
+}
+
+/// The line that starts Linksy with a tiling compositor, for its config file.
+fn compositor_autostart() -> Option<&'static str> {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
+    if desktop.contains("hyprland") {
+        Some(t!("Hyprland doesn't start Linksy at login by itself. Add this line to ~/.config/hypr/hyprland.conf: exec-once = linksyd"))
+    } else if desktop.contains("sway") {
+        Some(t!("Sway doesn't start Linksy at login by itself. Add this line to ~/.config/sway/config: exec linksyd"))
+    } else if desktop.contains("niri") {
+        Some(t!("niri doesn't start Linksy at login by itself. Add this line to ~/.config/niri/config.kdl: spawn-at-startup \"linksyd\""))
+    } else if desktop.contains("river") {
+        Some(t!("river doesn't start Linksy at login by itself. Add this line to ~/.config/river/init: linksyd &"))
+    } else {
+        None
     }
 }
 
@@ -397,6 +434,15 @@ pub fn check(ui: Ui) -> Vec<Item> {
             why: t!("Putting text your phone shares on this computer's clipboard while Linksy's window is closed."),
             need: if clip { Need::Ready } else { pick(&["wl-clipboard"], &["wl-clipboard"], &["wl-clipboard"], &["wl-clipboard"], t!("Install wl-clipboard.")) },
         });
+        // Tiling compositors start none; mako starts by itself once installed (D-Bus activation)
+        if !notification_daemon() {
+            items.push(Item {
+                id: "notifications",
+                title: t!("Notifications"),
+                why: t!("Files, pairing codes and requests from your devices show as notifications, with their buttons."),
+                need: pick(&["mako"], &["mako-notifier"], &["mako"], &["mako"], t!("Install a notification daemon (mako, dunst or swaync) and start it with your desktop.")),
+            });
+        }
         if let Some(need) = firewall_need() {
             items.push(Item {
                 id: "firewall",
@@ -533,6 +579,8 @@ pub fn step_text(step: &str) -> String {
 pub struct Progress {
     enroll: Option<String>,
     last: std::collections::VecDeque<String>,
+    /// pkexec found no polkit agent to ask for the password.
+    pub no_agent: bool,
 }
 
 impl Progress {
@@ -540,6 +588,9 @@ impl Progress {
     pub fn line(&mut self, line: &str) -> Option<String> {
         if let Some(step) = line.strip_prefix("STEP ") {
             return Some(t!("{step}…", step = step_text(step)));
+        }
+        if line.contains("No authentication agent found") {
+            self.no_agent = true;
         }
         if let Some(code) = line.strip_prefix("ENROLL ") {
             self.enroll = Some(code.trim().to_string());
@@ -574,6 +625,20 @@ pub fn root_command(args: &[String]) -> Result<Vec<std::ffi::OsString>, Failure>
 /// Run `linksy-system-setup` as root and wait, telling `step` what it does as it goes. For
 /// a thread of its own: it blocks until the helper ends.
 pub fn run_as_root(args: &[String], mut step: impl FnMut(String)) -> Result<(), Failure> {
+    let (status, progress) = attempt_as_root(args, &mut step)?;
+    // Hyprland, Sway and others start no password prompt (polkit agent): start an installed
+    // one, then ask again
+    if progress.no_agent {
+        if !start_polkit_agent() {
+            return Err(no_agent());
+        }
+        let (status, progress) = attempt_as_root(args, &mut step)?;
+        return progress.finish(status);
+    }
+    progress.finish(status)
+}
+
+fn attempt_as_root(args: &[String], step: &mut impl FnMut(String)) -> Result<(i32, Progress), Failure> {
     use std::io::BufRead;
     let argv = root_command(args)?;
     // stderr into the same pipe as stdout, as the GTK app reads it
@@ -588,7 +653,43 @@ pub fn run_as_root(args: &[String], mut step: impl FnMut(String)) -> Result<(), 
         }
     }
     let status = child.wait().map_err(|e| Failure::Message(e.to_string()))?;
-    progress.finish(status.code().unwrap_or(1))
+    Ok((status.code().unwrap_or(1), progress))
+}
+
+/// No polkit agent runs and none is installed.
+pub fn no_agent() -> Failure {
+    Failure::Message(t!("This desktop has no password prompt running (a polkit agent, like hyprpolkitagent or polkit-gnome). Run the command under Prefer a Terminal? instead, or install and start one.").into())
+}
+
+/// Start the first polkit agent installed here, for this session. Whether one started.
+/// Blocks for a moment while it registers.
+pub fn start_polkit_agent() -> bool {
+    const AGENTS: [&str; 14] = [
+        "/usr/libexec/hyprpolkitagent",
+        "/usr/lib/hyprpolkitagent/hyprpolkitagent",
+        "/usr/libexec/polkit-gnome-authentication-agent-1",
+        "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
+        "/usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1",
+        "/usr/libexec/polkit-kde-authentication-agent-1",
+        "/usr/lib/x86_64-linux-gnu/libexec/polkit-kde-authentication-agent-1",
+        "/usr/lib/polkit-kde-authentication-agent-1",
+        "/usr/libexec/polkit-mate-authentication-agent-1",
+        "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1",
+        "/usr/libexec/xfce-polkit",
+        "/usr/lib/xfce-polkit/xfce-polkit",
+        "/usr/bin/lxpolkit",
+        "/usr/bin/soteria",
+    ];
+    let Some(agent) = AGENTS.iter().find(|p| std::path::Path::new(p).is_file()) else { return false };
+    let started = std::process::Command::new(agent)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok();
+    // It registers with polkit in a moment
+    std::thread::sleep(std::time::Duration::from_millis(1500));
+    started
 }
 
 /// Turn on the background service at every login (no password: it's the user's own).

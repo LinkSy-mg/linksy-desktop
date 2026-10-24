@@ -19,6 +19,19 @@ fn check() -> Vec<Item> {
 
 /// Run `linksy-system-setup` as root (one password for all of it), showing each step.
 async fn run_as_root(args: &[String], progress: &gtk::Label) -> Result<(), Failure> {
+    let (status, read) = attempt_as_root(args, progress).await?;
+    // Hyprland, Sway and others start no password prompt: start an installed one, then ask again
+    if read.no_agent {
+        if !gio::spawn_blocking(linksy_setup::start_polkit_agent).await.unwrap_or(false) {
+            return Err(linksy_setup::no_agent());
+        }
+        let (status, read) = attempt_as_root(args, progress).await?;
+        return read.finish(status);
+    }
+    read.finish(status)
+}
+
+async fn attempt_as_root(args: &[String], progress: &gtk::Label) -> Result<(i32, linksy_setup::Progress), Failure> {
     let argv = linksy_setup::root_command(args)?;
     let argv: Vec<&std::ffi::OsStr> = argv.iter().map(|a| a.as_os_str()).collect();
     let run = gio::Subprocess::newv(&argv, gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_MERGE).map_err(|e| Failure::Message(e.to_string()))?;
@@ -33,7 +46,7 @@ async fn run_as_root(args: &[String], progress: &gtk::Label) -> Result<(), Failu
     }
     let _ = run.wait_future().await;
     progress.set_visible(false);
-    read.finish(run.exit_status())
+    Ok((run.exit_status(), read))
 }
 
 /// Let Linksy use phones by cable (the udev rule), as root.
