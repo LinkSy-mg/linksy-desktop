@@ -132,6 +132,7 @@ Kirigami.ApplicationWindow {
             if (!ok) return;
             for (const p of list.filter(p => p.kind === "display" && !showingDisplays.includes(p.session))) {
                 showingDisplays = showingDisplays.concat([p.session]);
+                present();
                 pageStack.layers.push(Qt.resolvedUrl("ScreenPage.qml"), { app: root, device: p.peer.id, name: p.peer.name, display: { session: p.session, socket: p.socket } });
             }
         });
@@ -156,6 +157,14 @@ Kirigami.ApplicationWindow {
 
     function openInvite() {
         inviteDialog.open();
+    }
+
+    // Bring the window forward for a question the service asks
+    function present() {
+        root.show();
+        if (root.visibility === Window.Minimized) root.showNormal();
+        root.raise();
+        root.requestActivate();
     }
 
     function toast(text) {
@@ -393,6 +402,7 @@ Kirigami.ApplicationWindow {
         function ask(req, device, c, inc) {
             request = req; code = c; incoming = inc; peer = device.name;
             title = inc ? root.t("{name} Wants to Pair", { name: device.name }) : root.t("Pair with {name}", { name: device.name });
+            root.present();
             open();
         }
         subtitle: incoming ? root.t("Pair only if {name} shows this same code.", { name: peer })
@@ -429,6 +439,7 @@ Kirigami.ApplicationWindow {
         function ask(id, device, f, tot) {
             transfer = id; from = device.id; files = f; total = tot;
             title = root.t("{name} Wants to Share", { name: device.name });
+            root.present();
             open();
         }
         subtitle: files.length === 1 ? `${files[0].path} (${root.size(total)})`
@@ -473,6 +484,7 @@ Kirigami.ApplicationWindow {
             const [heading, body] = asks[kind] ?? asks.screen;
             title = root.t(heading, { name: from });
             subtitle = root.t(body, { name: from });
+            root.present();
             open();
         }
         standardButtons: Kirigami.Dialog.NoButton

@@ -63,6 +63,13 @@ Kirigami.ScrollablePage {
             text: app.t("About Linksy")
             displayHint: Kirigami.DisplayHint.AlwaysHide
             onTriggered: app.toast(app.t("This is Linksy {version}.", { version: backend.version() }))
+        },
+        Kirigami.Action {
+            icon.name: "application-exit"
+            text: app.t("Quit")
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            shortcut: StandardKey.Quit
+            onTriggered: Qt.quit()
         }
     ]
 

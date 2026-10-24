@@ -131,6 +131,8 @@ fi
 /usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
 /usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg
 /usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg
+/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-symbolic.svg
+/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-idle-symbolic.svg
 
 %files qt
 /usr/bin/linksy-qt

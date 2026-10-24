@@ -2,6 +2,16 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Added
+- **Linksy sits in the system tray** on KDE Plasma, GNOME (with the AppIndicator
+  extension), other desktops and in the Flatpak. The icon fills in while a device is
+  connected. Its menu has, for each paired device, what you can do with it (send files,
+  ring or ping, locate or browse a phone, use it as a second display, webcam or
+  microphone), a Stop for anything being shared, and Show Linksy. The tray belongs to the
+  background service, so no window stays open for it. Menu and icons by yurividal.
+
 ## 0.9.6
 
 ### Fixed

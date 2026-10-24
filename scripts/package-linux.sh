@@ -80,6 +80,8 @@ sed "s|^Exec=linksy-app|Exec=linksy-open|" data/mg.diary.linksy.Linksy.desktop |
 install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml "$ROOT/usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml"
 install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
 install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
+install -Dm644 data/icons/mg.diary.linksy.Linksy-tray-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-symbolic.svg"
+install -Dm644 data/icons/mg.diary.linksy.Linksy-tray-idle-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-idle-symbolic.svg"
 install -Dm644 -t "$ROOT/usr/share/licenses/linksy" LICENSE THIRD-PARTY-NOTICES
 for s in linksy-camera-setup linksy-usb-setup linksy-system-setup; do install -Dm755 "data/$s" "$ROOT/usr/libexec/linksy/$s"; done
 install -Dm644 data/linksy.firewalld.xml "$ROOT/usr/lib/firewalld/services/linksy.xml"

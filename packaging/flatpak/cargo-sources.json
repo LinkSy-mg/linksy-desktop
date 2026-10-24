@@ -990,6 +990,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/crossbeam-queue/crossbeam-queue-0.3.14.crate",
+        "sha256": "03e8bd762f7479489c70ed6c768ddca99d7296857de437a68dcb2a94365b3fae",
+        "dest": "cargo/vendor/crossbeam-queue-0.3.14"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"03e8bd762f7479489c70ed6c768ddca99d7296857de437a68dcb2a94365b3fae\", \"files\": {}}",
+        "dest": "cargo/vendor/crossbeam-queue-0.3.14",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/crossbeam-utils/crossbeam-utils-0.8.23.crate",
         "sha256": "a31eee39dddec8330830986fcd7625edb5a24ec90ea038215273bbc3adb08ac6",
         "dest": "cargo/vendor/crossbeam-utils-0.8.23"
@@ -2831,6 +2844,19 @@
         "type": "inline",
         "contents": "{\"package\": \"7883d941dae510fb2d978fc3fe018c71c9e2892fd38854de3e8b92c2e5ad9cc5\", \"files\": {}}",
         "dest": "cargo/vendor/js-sys-0.3.106",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/ksni/ksni-0.3.7.crate",
+        "sha256": "1bcc1cb43797140f74b711f1c4a49f48a7a7429f211c5fb78264e7bcd1e99caf",
+        "dest": "cargo/vendor/ksni-0.3.7"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"1bcc1cb43797140f74b711f1c4a49f48a7a7429f211c5fb78264e7bcd1e99caf\", \"files\": {}}",
+        "dest": "cargo/vendor/ksni-0.3.7",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -5210,6 +5236,19 @@
         "type": "inline",
         "contents": "{\"package\": \"adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca\", \"files\": {}}",
         "dest": "cargo/vendor/target-lexicon-0.13.5",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/task-local/task-local-0.1.1.crate",
+        "sha256": "2972044a9e5e448a506a7ff6f0d03b566d8ef4cd6918a58fc59835a0f8666626",
+        "dest": "cargo/vendor/task-local-0.1.1"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"2972044a9e5e448a506a7ff6f0d03b566d8ef4cd6918a58fc59835a0f8666626\", \"files\": {}}",
+        "dest": "cargo/vendor/task-local-0.1.1",
         "dest-filename": ".cargo-checksum.json"
     },
     {

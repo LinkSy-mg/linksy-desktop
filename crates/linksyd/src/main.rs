@@ -24,6 +24,8 @@ mod media;
 mod notify;
 mod system;
 #[cfg(target_os = "linux")]
+mod tray;
+#[cfg(target_os = "linux")]
 mod usb;
 
 use std::path::PathBuf;
@@ -218,6 +220,16 @@ async fn main() -> ExitCode {
     let photos = photos::Photos::load(data_dir.join("photos.json"), &node);
     let away = lock::Away::load(data_dir.join("lock.json"));
     tokio::spawn(away.clone().run(node.clone(), history.clone()));
+    #[cfg(target_os = "linux")]
+    tokio::spawn(tray::run(tray::Service {
+        node: node.clone(),
+        history: history.clone(),
+        sessions: sessions.clone(),
+        mirror: mirror.clone(),
+        away: away.clone(),
+        photos: photos.clone(),
+        socket: socket.clone(),
+    }));
     let server = tokio::spawn(ipc::serve(node.clone(), history, sessions, mirror, away, photos, socket.clone()));
 
     let mut updated = None;

@@ -61,6 +61,8 @@ package_linksy-common() {
   install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml "$pkgdir/usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml"
   install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
   install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
+  install -Dm644 data/icons/mg.diary.linksy.Linksy-tray-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-symbolic.svg"
+  install -Dm644 data/icons/mg.diary.linksy.Linksy-tray-idle-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-idle-symbolic.svg"
   install -Dm644 -t "$pkgdir/usr/share/licenses/$pkgname" LICENSE THIRD-PARTY-NOTICES
 }
 
