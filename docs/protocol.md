@@ -1109,7 +1109,7 @@ handle `up` before `connecting` too):
 
 ```json
 {"type":"direct","step":{"type":"ask"}}                                     // joiner → host: "set one up"
-{"type":"direct","step":{"type":"invite","address":"aa:bb:cc:dd:ee:ff"}}    // host → joiner: the host's Wi-Fi Direct address
+{"type":"direct","step":{"type":"invite","address":"02:00:00:00:00:00","name":"realme 15 Pro 5G"}} // host → joiner: its Wi-Fi Direct address and name
 {"type":"direct","step":{"type":"listening","address":"d8:80:83:cb:0d:33"}} // joiner → host: findable at this address
 {"type":"direct","step":{"type":"connecting"}}                              // host → joiner: connecting to you now
 {"type":"direct","step":{"type":"up","ip":"192.168.49.1","port":47200}}     // host → joiner: Linksy is here on the link
@@ -1120,7 +1120,10 @@ handle `up` before `connecting` too):
    to its own app; a joiner sender's core sends `ask`, and the host's core emits
    `DirectWanted` there. A host that can't answers `end`.
 2. **Host app**, on `DirectWanted {id}`: make sure Wi-Fi Direct is usable, start
-   discovering peers, and send `invite` with its own Wi-Fi Direct device address.
+   discovering peers, and send `invite` with its own Wi-Fi Direct device address and
+   **name**. Android gives apps `02:00:00:00:00:00` instead of their own address, so the
+   joiner finds the host by its name (`name`, else its Linksy name), and only when exactly
+   one device around has it.
 3. **Joiner app**, on `Event::Direct {step: invite}`: become findable and send `listening`
    with its own address.
 4. **Host app**, on `listening`: wait until that address shows up among the peers, connect
@@ -1152,7 +1155,8 @@ WPA2 is on top.
   `direct_end(id, "no Wi-Fi Direct permission")` / `"Wi-Fi is off"`; the core then sends
   over the network as before.
 - `DirectWanted`: `removeGroup` (anything left over), `requestDeviceInfo` for this phone's
-  `deviceAddress`, `discoverPeers`, then `direct_send(id, Invite { address })`.
+  `deviceAddress` (`02:00:00:00:00:00` for apps: send it anyway) and `deviceName`,
+  `discoverPeers`, then `direct_send(id, Invite { address, name: Some(deviceName) })`.
 - `listening {address}`: on each `WIFI_P2P_PEERS_CHANGED_ACTION`, `requestPeers` until a
   peer's `deviceAddress` equals `address` (compare lower-case). Then `connect` with
   `WifiP2pConfig().apply { deviceAddress = address; wps.setup = WpsInfo.PBC;
@@ -1161,17 +1165,23 @@ WPA2 is on top.
 - `WIFI_P2P_CONNECTION_CHANGED_ACTION` → `requestConnectionInfo`: when `groupFormed`,
   send `Up { ip, port }` with `groupOwnerAddress` if `isGroupOwner`, else the phone's
   IPv4 address on its `p2p…` network interface.
-- `DirectEnded`: `removeGroup`, `stopPeerDiscovery`, unregister the receiver.
+- `DirectEnded`: `cancelConnect`, `removeGroup`, `stopPeerDiscovery`, unregister the
+  receiver. All of them, also after a failure: a phone still searching, or waiting on a
+  half-made connection (Wi-Fi Direct waits up to 2 minutes for the other side), leaves
+  less airtime for the transfer that falls back to the usual network. First test: 6.7 MB/s
+  for a minute after a failed link, then 15 to 30 MB/s.
 - The QUIC socket must listen on all interfaces (it does: `[::]`), so the computer reaches
   it over the group.
 
 **Linux, the joiner** (`crates/linksyd/src/direct.rs`): announced only when NetworkManager
 has a Wi-Fi Direct device (`DeviceType` 30, `p2p-dev-wlan0`); `--no-direct` turns it off.
 `StartFind` (30 s) makes it findable; its address comes from `iw dev` (the `P2P-device`),
-or else the Wi-Fi card's own address. On `connecting` it activates a `wifi-p2p`
-connection to the phone's address: the user's own (`connection.permissions`, so no
+or else the Wi-Fi card's own address. On `connecting` it looks for the phone among
+NetworkManager's peers (by address, else by name, up to 10 s) and activates a `wifi-p2p`
+connection to it: the user's own (`connection.permissions`, so no
 password is asked), never saved (`persist: volatile`), dropped if the service goes away
 (`bind-activation: dbus-client`), and never the default route (`ipv4.never-default`).
+`StopFind` when the attempt ends.
 The Flatpak needs `--system-talk-name=org.freedesktop.NetworkManager`.
 
 **Testing it.** Send a file of 256 MiB or more from either side with both apps running
@@ -1626,3 +1636,8 @@ robust against any encoder (GPU ones may slice too):
   `direct_send` / `direct_dial` / `direct_end` / `direct_link`, `Config.direct_min`, and
   `Event::DirectWanted` / `Direct` / `DirectLinked` / `DirectEnded`. Also: the QUIC socket
   asks for 8 MiB kernel buffers (§4.3). Phone to-do in §7.
+- **2026-10-25** — First direct link test (realme 15 Pro): the phone's part worked, but the
+  computer looked for `02:00:00:00:00:00`, the address Android gives apps for their own
+  device, and never found it. `invite` now carries the host's Wi-Fi Direct `name`; the
+  joiner finds the host by address, else by that name (or its Linksy name), only when one
+  device has it. Phone: send `name`, and on `DirectEnded` also `cancelConnect` (§4.17).
