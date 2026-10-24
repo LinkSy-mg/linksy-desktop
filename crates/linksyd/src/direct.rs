@@ -20,7 +20,11 @@ use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 const NM: &str = "org.freedesktop.NetworkManager";
 const NM_PATH: &str = "/org/freedesktop/NetworkManager";
 const DEVICE: &str = "org.freedesktop.NetworkManager.Device";
+const P2P: &str = "org.freedesktop.NetworkManager.Device.WifiP2P";
+const PEER: &str = "org.freedesktop.NetworkManager.WifiP2PPeer";
 const ACTIVE: &str = "org.freedesktop.NetworkManager.Connection.Active";
+/// What Android gives apps instead of their own Wi-Fi Direct address.
+const HIDDEN: &str = "02:00:00:00:00:00";
 /// NetworkManager's type for a Wi-Fi Direct device (`p2p-dev-wlan0`).
 const WIFI_P2P: u32 = 30;
 /// A connection's states: activating, activated.
@@ -42,11 +46,13 @@ pub async fn run(node: Node) {
     let mut links: HashMap<Fingerprint, mpsc::UnboundedSender<DirectStep>> = HashMap::new();
     loop {
         match events.recv().await {
-            Ok(Event::Direct { from, step: DirectStep::Invite { address } }) => {
+            Ok(Event::Direct { from, step: DirectStep::Invite { address, name } }) => {
                 let (steps, rx) = mpsc::unbounded_channel();
                 // Replaces one still going, which ends with its channel
                 links.insert(from.id, steps);
-                tokio::spawn(join(node.clone(), from.id, address, rx));
+                // Its Wi-Fi Direct name is usually its device name too
+                let names = name.into_iter().chain([from.name.clone()]).collect();
+                tokio::spawn(join(node.clone(), from.id, Host { address, names }, rx));
             }
             Ok(Event::Direct { from, step }) => {
                 if let Some(steps) = links.get(&from.id) {
@@ -62,35 +68,47 @@ pub async fn run(node: Node) {
     }
 }
 
+/// The phone hosting a link, as it said: its Wi-Fi Direct address (hidden on Android) and
+/// the names it may go by.
+struct Host {
+    address: String,
+    names: Vec<String>,
+}
+
 /// What NetworkManager holds for a link, let go of when it ends.
 #[derive(Default)]
 struct Joined {
     bus: Option<zbus::Connection>,
+    device: Option<OwnedObjectPath>,
     active: Option<OwnedObjectPath>,
 }
 
-async fn join(node: Node, id: Fingerprint, host: String, mut steps: mpsc::UnboundedReceiver<DirectStep>) {
+async fn join(node: Node, id: Fingerprint, host: Host, mut steps: mpsc::UnboundedReceiver<DirectStep>) {
     let mut joined = Joined::default();
     if let Err(e) = joining(&node, &id, &host, &mut steps, &mut joined).await {
         info!("no direct link: {e}");
         node.direct_end(&id, Some(e)).await;
     }
-    if let (Some(bus), Some(active)) = (&joined.bus, &joined.active) {
+    let Some(bus) = &joined.bus else { return };
+    if let Some(active) = &joined.active {
         let _ = bus.call_method(Some(NM), NM_PATH, Some(NM), "DeactivateConnection", active).await;
+    }
+    // Searching takes the Wi-Fi's time from the usual network
+    if let Some(device) = &joined.device {
+        let _ = bus.call_method(Some(NM), device, Some(P2P), "StopFind", &()).await;
     }
 }
 
 /// Become findable, connect back once the phone connects, and open Linksy's connection
 /// over the link once it's up and the phone said where it is. Returns when the link ends.
-async fn joining(node: &Node, id: &Fingerprint, host: &str, steps: &mut mpsc::UnboundedReceiver<DirectStep>, joined: &mut Joined) -> Result<(), String> {
+async fn joining(node: &Node, id: &Fingerprint, host: &Host, steps: &mut mpsc::UnboundedReceiver<DirectStep>, joined: &mut Joined) -> Result<(), String> {
     let bus = zbus::Connection::system().await.map_err(|e| format!("no system bus: {e}"))?;
     let (device, interface) = p2p_device(&bus).await.ok_or("this computer has no Wi-Fi Direct")?;
     let me = own_address(&interface).await.ok_or("this computer's Wi-Fi Direct address is unknown")?;
     let find = HashMap::from([("timeout", Value::from(30i32))]);
-    bus.call_method(Some(NM), &device, Some("org.freedesktop.NetworkManager.Device.WifiP2P"), "StartFind", &find)
-        .await
-        .map_err(|e| format!("Wi-Fi Direct search: {e}"))?;
+    bus.call_method(Some(NM), &device, Some(P2P), "StartFind", &find).await.map_err(|e| format!("Wi-Fi Direct search: {e}"))?;
     joined.bus = Some(bus.clone());
+    joined.device = Some(device.clone());
     node.direct_send(id, DirectStep::Listening { address: me }).await.map_err(|e| e.to_string())?;
 
     let mut up = None;
@@ -101,7 +119,10 @@ async fn joining(node: &Node, id: &Fingerprint, host: &str, steps: &mut mpsc::Un
         tokio::select! {
             step = steps.recv() => match step {
                 None => return Ok(()),
-                Some(DirectStep::Connecting) if joined.active.is_none() => joined.active = Some(activate(&bus, &device, host).await?),
+                Some(DirectStep::Connecting) if joined.active.is_none() => {
+                    let peer = find_peer(&bus, &device, host).await.ok_or("the phone didn't show up over Wi-Fi Direct")?;
+                    joined.active = Some(activate(&bus, &device, &peer).await?);
+                }
                 Some(DirectStep::Up { ip, port }) => up = Some(SocketAddr::new(ip, port)),
                 Some(_) => {}
             },
@@ -149,6 +170,32 @@ async fn activate(bus: &zbus::Connection, device: &OwnedObjectPath, peer: &str) 
         .map_err(|e| format!("Wi-Fi Direct connection: {e}"))?;
     let (_, active, _): (OwnedObjectPath, OwnedObjectPath, HashMap<String, OwnedValue>) = reply.body().deserialize().map_err(|e| e.to_string())?;
     Ok(active)
+}
+
+/// The host among the Wi-Fi Direct devices around, waiting a few seconds for it: by its
+/// address, or by its name where it can't know its address (Android), or didn't say the one
+/// it shows. Not by a name two devices share: that would ask the wrong one.
+async fn find_peer(bus: &zbus::Connection, device: &OwnedObjectPath, host: &Host) -> Option<String> {
+    let hidden = host.address == HIDDEN;
+    for tries in 0..20 {
+        let peers: Vec<OwnedObjectPath> = property(bus, device, P2P, "Peers").await.unwrap_or_default();
+        let mut named = Vec::new();
+        for peer in &peers {
+            let Ok(address) = property::<String>(bus, peer, PEER, "HwAddress").await else { continue };
+            if address.eq_ignore_ascii_case(&host.address) {
+                return Some(address);
+            }
+            let name = property::<String>(bus, peer, PEER, "Name").await.unwrap_or_default();
+            if !name.trim().is_empty() && host.names.iter().any(|n| n.trim().eq_ignore_ascii_case(name.trim())) {
+                named.push(address);
+            }
+        }
+        if named.len() == 1 && (hidden || tries >= 6) {
+            return named.pop();
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    None
 }
 
 /// NetworkManager's Wi-Fi Direct device and its name (`p2p-dev-wlan0`).
@@ -218,8 +265,9 @@ mod tests {
     #[ignore = "needs NetworkManager and a Wi-Fi card that does Wi-Fi Direct"]
     async fn finds_this_computers_wifi_direct() {
         let bus = zbus::Connection::system().await.unwrap();
-        let (_, interface) = p2p_device(&bus).await.expect("a Wi-Fi Direct device");
+        let (device, interface) = p2p_device(&bus).await.expect("a Wi-Fi Direct device");
         let address = own_address(&interface).await.expect("its address");
+        let _: Vec<OwnedObjectPath> = property(&bus, &device, P2P, "Peers").await.expect("the devices around");
         assert!(linksy_core::DirectStep::Listening { address }.is_valid());
     }
 

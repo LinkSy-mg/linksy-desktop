@@ -404,8 +404,14 @@ pub enum Message {
 pub enum DirectStep {
     /// Joiner → host: a direct link would help, start one (or answer `end`).
     Ask,
-    /// Host → joiner: this is the host's address; become findable and answer `listening`.
-    Invite { address: String },
+    /// Host → joiner: the host's address and its Wi-Fi Direct name; become findable and
+    /// answer `listening`. Android doesn't tell apps their own address (they get
+    /// `02:00:00:00:00:00`), so the joiner finds the host by name then.
+    Invite {
+        address: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
     /// Joiner → host: findable at this address.
     Listening { address: String },
     /// Host → joiner: the host is connecting to it now; connect back to the host's address.
@@ -424,7 +430,8 @@ impl DirectStep {
     /// this one's, for tests).
     pub fn is_valid(&self) -> bool {
         match self {
-            Self::Invite { address } | Self::Listening { address } => is_device_address(address),
+            Self::Invite { address, name } => is_device_address(address) && name.as_ref().is_none_or(|n| n.len() <= 64),
+            Self::Listening { address } => is_device_address(address),
             Self::Up { ip: std::net::IpAddr::V4(ip), port } => (ip.is_private() || ip.is_link_local() || ip.is_loopback()) && *port != 0,
             Self::Up { .. } => false,
             Self::End { reason } => reason.as_ref().is_none_or(|r| r.len() <= 200),
@@ -677,7 +684,9 @@ mod tests {
     #[test]
     fn direct_steps_read_as_documented() {
         let invite: Message = serde_json::from_str(r#"{"type":"direct","step":{"type":"invite","address":"AA:bb:cc:dd:ee:01"}}"#).unwrap();
-        assert_eq!(invite, Message::Direct { step: DirectStep::Invite { address: "AA:bb:cc:dd:ee:01".into() } });
+        assert_eq!(invite, Message::Direct { step: DirectStep::Invite { address: "AA:bb:cc:dd:ee:01".into(), name: None } });
+        let named: Message = serde_json::from_str(r#"{"type":"direct","step":{"type":"invite","address":"02:00:00:00:00:00","name":"realme 15 Pro 5G"}}"#).unwrap();
+        assert_eq!(named, Message::Direct { step: DirectStep::Invite { address: "02:00:00:00:00:00".into(), name: Some("realme 15 Pro 5G".into()) } });
         let up = Message::Direct { step: DirectStep::Up { ip: "192.168.49.1".parse().unwrap(), port: 47200 } };
         assert_eq!(serde_json::to_string(&up).unwrap(), r#"{"type":"direct","step":{"type":"up","ip":"192.168.49.1","port":47200}}"#);
         assert_eq!(serde_json::from_str::<Message>(r#"{"type":"direct","step":{"type":"connecting"}}"#).unwrap(), Message::Direct { step: DirectStep::Connecting });
@@ -686,7 +695,8 @@ mod tests {
 
         assert!(DirectStep::Listening { address: "02:00:00:00:00:0a".into() }.is_valid());
         assert!(!DirectStep::Listening { address: "02:00:00:00:00:0".into() }.is_valid());
-        assert!(!DirectStep::Invite { address: "02:00:00:00:00:zz".into() }.is_valid());
+        assert!(!DirectStep::Invite { address: "02:00:00:00:00:zz".into(), name: None }.is_valid());
+        assert!(!DirectStep::Invite { address: "02:00:00:00:00:00".into(), name: Some("x".repeat(65)) }.is_valid());
         // Only a private address on the link: never somewhere on the internet
         assert!(!DirectStep::Up { ip: "8.8.8.8".parse().unwrap(), port: 47200 }.is_valid());
         assert!(!DirectStep::Up { ip: "192.168.49.1".parse().unwrap(), port: 0 }.is_valid());

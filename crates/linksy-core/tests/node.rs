@@ -1327,7 +1327,7 @@ fn fake_direct_app(node: &Node) {
             let node = node.clone();
             tokio::spawn(async move {
                 match ev {
-                    Event::DirectWanted { id } => node.direct_send(&id, DirectStep::Invite { address: "02:00:00:00:00:01".into() }).await.unwrap(),
+                    Event::DirectWanted { id } => node.direct_send(&id, DirectStep::Invite { address: "02:00:00:00:00:01".into(), name: None }).await.unwrap(),
                     Event::Direct { from, step: DirectStep::Invite { .. } } => {
                         node.direct_send(&from.id, DirectStep::Listening { address: "02:00:00:00:00:02".into() }).await.unwrap()
                     }
