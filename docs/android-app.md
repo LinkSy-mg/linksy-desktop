@@ -6,8 +6,8 @@ offer those features to Android phones.
 
 - App: `app.linksy.mg` (since 0.1.8; 0.1.x up to 0.1.7 was `app.linksy`), Flutter + the
   real `linksy-core` through flutter_rust_bridge. Repo: LinkSy-mg/linksy-mobile.
-- Core pinned at `293c7bc` (desktop main after PR #31), as of phone 0.2.3. Builds for arm64-v8a, armeabi-v7a, x86_64.
-- Releases: LinkSy-mg/linksy-releases, titled "Mobile release · Linksy X for Android", APKs named `linksy-X.apk` / `-arm64` / `-armv7`; the newest is always https://linksy.diary.mg/download/android.
+- Core pinned at `6282520` (desktop main with private discovery), as of phone 0.2.4. Builds for arm64-v8a, armeabi-v7a, x86_64.
+- Releases: LinkSy-mg/linksy-releases, titled "Android X", APKs named `linksy-X.apk` / `-arm64` / `-armv7` with a `SHA256SUMS` (the app's Update Now checks against it); the newest is always https://linksy.diary.mg/download/android.
 - Distributed as a sideloaded APK, not through the Play Store. That shapes everything in
   §3: Android's fraud protection blocks installing sideloaded apps that declare certain
   permissions, with no way for the user to skip it (v0.1.3 hit this).
@@ -122,6 +122,12 @@ default SMS app.
   works on the networks tested; pairing by QR or address covers the rest).
 
 ## Changelog
+
+- **2026-10-24** — Phone 0.2.4 on core `6282520`: private discovery (§4.16), with
+  pairing mode while Add Device, the scanner or Pair by address is open; Update Now
+  (newest `vX.Y.Z` on linksy-releases, checked against its `SHA256SUMS`, installed by
+  Android's installer); What's New the first time a version opens. No protocol change
+  beyond §4.16.
 
 - **2026-10-23** — Phone 0.2.3 on core `293c7bc`: the relay setting (PR #7, with
   desktop PR #31), each paired device as a direct target in Android's share sheet,
