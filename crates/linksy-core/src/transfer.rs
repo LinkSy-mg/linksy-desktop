@@ -24,6 +24,9 @@ const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 pub struct OutgoingFile {
     pub entry: FileEntry,
     pub source: PathBuf,
+    /// Which file it was when offered (device and inode): a descriptor held by number is
+    /// sent only while it still holds that file.
+    offered: Option<(u64, u64)>,
 }
 
 /// Expand files and folders into a flat list. Folders keep their name as the top-level
@@ -46,7 +49,7 @@ pub fn collect(paths: &[PathBuf]) -> io::Result<Vec<OutgoingFile>> {
 fn walk(path: &Path, rel: String, out: &mut Vec<OutgoingFile>, named: bool) -> io::Result<()> {
     let meta = if named { std::fs::metadata(path)? } else { std::fs::symlink_metadata(path)? };
     if meta.is_file() {
-        out.push(OutgoingFile { entry: FileEntry { path: rel, size: meta.len() }, source: path.to_path_buf() });
+        out.push(OutgoingFile { entry: FileEntry { path: rel, size: meta.len() }, source: path.to_path_buf(), offered: identity(&meta) });
     } else if meta.is_dir() {
         let mut children: Vec<_> = std::fs::read_dir(path)?.collect::<io::Result<_>>()?;
         children.sort_by_key(|e| e.file_name());
@@ -85,25 +88,77 @@ impl<'a> Progress<'a> {
     }
 }
 
-/// Opens a file to send. A link to one of this process's own descriptors (Android's
-/// picked files, `/proc/self/fd/N`) is read through a copy of that descriptor from the
-/// start: reopening the link can be refused when the app has no access to the file's
-/// real path.
-async fn open_source(path: &Path) -> io::Result<File> {
+#[cfg(unix)]
+fn identity(meta: &std::fs::Metadata) -> Option<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    Some((meta.dev(), meta.ino()))
+}
+
+#[cfg(not(unix))]
+fn identity(_: &std::fs::Metadata) -> Option<(u64, u64)> {
+    None
+}
+
+/// Where a file's bytes come from: the file, opened by its path, or a descriptor this
+/// process already holds (Android's picked files, links to `/proc/self/fd/N`). Reopening
+/// such a link can be refused when the app has no access to the file's real path, so the
+/// descriptor itself is read, through a copy and at explicit offsets: the copy shares its
+/// position with the original, and whoever holds that (another transfer of the same file,
+/// the app) keeps theirs.
+enum Source {
+    Path(File),
     #[cfg(unix)]
-    if let Some(fd) = std::fs::read_link(path)
-        .ok()
-        .and_then(|t| t.to_str()?.strip_prefix("/proc/self/fd/")?.parse::<i32>().ok())
-    {
-        use std::os::fd::BorrowedFd;
-        use tokio::io::AsyncSeekExt;
-        // The descriptor stays open as long as the link does (whoever made it keeps it).
-        let own = unsafe { BorrowedFd::borrow_raw(fd) }.try_clone_to_owned()?;
-        let mut file = File::from_std(std::fs::File::from(own));
-        file.seek(io::SeekFrom::Start(0)).await?;
-        return Ok(file);
+    Held { file: std::sync::Arc<std::fs::File>, at: u64, scratch: Vec<u8> },
+}
+
+impl Source {
+    async fn open(f: &OutgoingFile) -> io::Result<Self> {
+        #[cfg(unix)]
+        if let Some(fd) = held_descriptor(&f.source) {
+            // Closed since it was offered: nothing to read
+            std::fs::metadata(&f.source)?;
+            // SAFETY: the descriptor is open (just checked); what the copy holds is checked
+            // before anything is read
+            let own = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) }.try_clone_to_owned()?;
+            let file = std::fs::File::from(own);
+            // Its number may have been given to another file since: only the one offered
+            if identity(&file.metadata()?) != f.offered {
+                return Err(io::Error::other(format!("{} isn't the file that was offered any more", f.entry.path)));
+            }
+            return Ok(Self::Held { file: std::sync::Arc::new(file), at: 0, scratch: Vec::new() });
+        }
+        Ok(Self::Path(File::open(&f.source).await?))
     }
-    File::open(path).await
+
+    async fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Path(file) => file.read(buf).await,
+            #[cfg(unix)]
+            Self::Held { file, at, scratch } => {
+                use std::os::unix::fs::FileExt;
+                let (file, offset) = (file.clone(), *at);
+                let mut chunk = std::mem::take(scratch);
+                chunk.resize(buf.len(), 0);
+                let (chunk, read) = tokio::task::spawn_blocking(move || {
+                    let read = file.read_at(&mut chunk, offset);
+                    (chunk, read)
+                })
+                .await
+                .map_err(io::Error::other)?;
+                let n = read?;
+                buf[..n].copy_from_slice(&chunk[..n]);
+                *scratch = chunk;
+                *at += n as u64;
+                Ok(n)
+            }
+        }
+    }
+}
+
+/// The number of the descriptor `path` links to, when it's one of this process's own.
+#[cfg(unix)]
+fn held_descriptor(path: &Path) -> Option<i32> {
+    std::fs::read_link(path).ok()?.to_str()?.strip_prefix("/proc/self/fd/")?.parse().ok().filter(|fd: &i32| *fd >= 0)
 }
 
 pub(crate) async fn send_files(
@@ -121,7 +176,7 @@ pub(crate) async fn send_files(
         if offset > f.entry.size {
             return Err(protocol("resume offset beyond end of file"));
         }
-        let mut file = open_source(&f.source).await?;
+        let mut file = Source::open(f).await?;
         let mut hasher = blake3::Hasher::new();
         // Hash the part the receiver already has without sending it.
         let mut skip = offset;
@@ -336,8 +391,8 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn open_source_reads_a_held_descriptor_from_the_start() {
-        use std::io::Read;
+    async fn reads_a_held_descriptor_from_the_start_without_moving_it() {
+        use std::io::{Read, Seek};
         use std::os::fd::AsRawFd;
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("real.bin"), b"hello").unwrap();
@@ -346,12 +401,41 @@ mod tests {
         held.read_exact(&mut [0u8; 2]).unwrap();
         let link = dir.path().join("Picked.bin");
         std::os::unix::fs::symlink(format!("/proc/self/fd/{}", held.as_raw_fd()), &link).unwrap();
-        if std::fs::read_link(&link).is_err() {
+        if std::fs::metadata(&link).is_err() {
             return;
         }
-        let mut file = open_source(&link).await.unwrap();
-        let mut got = String::new();
-        file.read_to_string(&mut got).await.unwrap();
-        assert_eq!(got, "hello");
+        let files = collect(std::slice::from_ref(&link)).unwrap();
+        let mut source = Source::open(&files[0]).await.unwrap();
+        assert!(matches!(source, Source::Held { .. }));
+        let mut got = Vec::new();
+        let mut buf = [0u8; 3];
+        loop {
+            let n = source.read(&mut buf).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            got.extend_from_slice(&buf[..n]);
+        }
+        assert_eq!(got, b"hello");
+        // Whoever holds the descriptor is where they were
+        assert_eq!(held.stream_position().unwrap(), 2);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn refuses_a_held_descriptor_now_holding_another_file() {
+        use std::os::fd::AsRawFd;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("secret.key"), b"private").unwrap();
+        let other = std::fs::File::open(dir.path().join("secret.key")).unwrap();
+        let link = dir.path().join("Picked.bin");
+        std::os::unix::fs::symlink(format!("/proc/self/fd/{}", other.as_raw_fd()), &link).unwrap();
+        if std::fs::metadata(&link).is_err() {
+            return;
+        }
+        // Offered while the number held a different file
+        let reused = OutgoingFile { entry: FileEntry { path: "Picked.bin".into(), size: 7 }, source: link, offered: Some((0, 0)) };
+        let err = Source::open(&reused).await.err().expect("refused");
+        assert!(err.to_string().contains("isn't the file that was offered"), "{err}");
     }
 }
