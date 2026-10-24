@@ -36,6 +36,9 @@ pub enum Input {
         size: Option<(f64, f64)>,
         /// Whether the user allowed input; when not, it's said once and dropped.
         allowed: bool,
+        /// Keys pressed and not released yet: released when the session ends, so a release
+        /// that never came (mobile#16) can't leave Shift held on this computer.
+        held: std::sync::Mutex<std::collections::HashSet<u32>>,
     },
 }
 
@@ -43,7 +46,7 @@ static REFUSED_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 
 impl Input {
     pub async fn apply(&self, msg: &ControlMsg) {
-        let Self::Desktop { proxy, session, node, size, allowed } = self else {
+        let Self::Desktop { proxy, session, node, size, allowed, held } = self else {
             eprintln!("input: {msg:?}");
             return;
         };
@@ -73,7 +76,13 @@ impl Input {
                 r
             }
             ControlMsg::Scroll { dx, dy, discrete: false } => proxy.notify_pointer_axis(session, dx, dy, Default::default()).await,
-            ControlMsg::Key { keysym, pressed } => proxy.notify_keyboard_keysym(session, keysym as i32, state(pressed), Default::default()).await,
+            ControlMsg::Key { keysym, pressed } => {
+                {
+                    let mut down = held.lock().unwrap();
+                    if pressed { down.insert(keysym) } else { down.remove(&keysym) };
+                }
+                proxy.notify_keyboard_keysym(session, keysym as i32, state(pressed), Default::default()).await
+            }
             ControlMsg::PointerBy { dx, dy } => proxy.notify_pointer_motion(session, dx, dy, Default::default()).await,
             ControlMsg::Text { ref text } => {
                 let mut r = Ok(());
@@ -126,7 +135,7 @@ pub async fn input_only(token: Option<String>) -> Result<(Input, Option<String>)
         .map_err(|_| "remote control was cancelled".to_string())?;
     let allowed = input_allowed(selected.devices());
     let restore_token = if allowed { selected.restore_token().map(str::to_string) } else { None };
-    Ok((Input::Desktop { proxy: remote, session, node: 0, size: None, allowed }, restore_token))
+    Ok((Input::Desktop { proxy: remote, session, node: 0, size: None, allowed, held: Default::default() }, restore_token))
 }
 
 fn state(pressed: bool) -> KeyState {
@@ -178,12 +187,23 @@ pub async fn screen(token: Option<String>, control: bool, virtual_monitor: bool)
     let fd = screencast.open_pipe_wire_remote(&session, Default::default()).await.map_err(|e| e.to_string())?;
     let allowed = input_allowed(selected.devices());
     let restore_token = if allowed { selected.restore_token().map(str::to_string) } else { None };
-    Ok(Screen { fd, node, restore_token, input: Some(Input::Desktop { proxy: remote, session, node, size, allowed }) })
+    Ok(Screen { fd, node, restore_token, input: Some(Input::Desktop { proxy: remote, session, node, size, allowed, held: Default::default() }) })
 }
 
 impl Input {
-    /// End the desktop's session: its virtual monitor goes away, and its memory with it.
+    /// Release the keys still held down (their releases never came).
+    pub async fn release_keys(&self) {
+        let Self::Desktop { proxy, session, held, .. } = self else { return };
+        let keys: Vec<u32> = held.lock().unwrap().drain().collect();
+        for keysym in keys {
+            let _ = proxy.notify_keyboard_keysym(session, keysym as i32, KeyState::Released, Default::default()).await;
+        }
+    }
+
+    /// End the desktop's session: keys left down are released, its virtual monitor goes
+    /// away, and its memory with it.
     pub async fn close(self) {
+        self.release_keys().await;
         if let Self::Desktop { session, .. } = self {
             let _ = session.close().await;
         }

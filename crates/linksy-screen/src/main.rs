@@ -420,6 +420,8 @@ fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
     };
     let stream = UnixStream::connect(&args.socket).map_err(|e| format!("{}: {e}", args.socket.display()))?;
     read_control_frames(stream, |msg| rt.block_on(input.apply(&msg)));
+    // The phone went away: nothing stays pressed here
+    rt.block_on(input.close());
     Ok(())
 }
 
