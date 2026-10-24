@@ -109,6 +109,7 @@ async fn joining(node: &Node, id: &Fingerprint, host: &Host, steps: &mut mpsc::U
     bus.call_method(Some(NM), &device, Some(P2P), "StartFind", &find).await.map_err(|e| format!("Wi-Fi Direct search: {e}"))?;
     joined.bus = Some(bus.clone());
     joined.device = Some(device.clone());
+    info!("direct link: findable as {me}");
     node.direct_send(id, DirectStep::Listening { address: me }).await.map_err(|e| e.to_string())?;
 
     let mut up = None;
@@ -120,16 +121,22 @@ async fn joining(node: &Node, id: &Fingerprint, host: &Host, steps: &mut mpsc::U
             step = steps.recv() => match step {
                 None => return Ok(()),
                 Some(DirectStep::Connecting) if joined.active.is_none() => {
+                    info!("direct link: the phone is connecting");
                     let peer = find_peer(&bus, &device, host).await.ok_or("the phone didn't show up over Wi-Fi Direct")?;
+                    info!("direct link: connecting to {peer}");
                     joined.active = Some(activate(&bus, &device, &peer).await?);
                 }
-                Some(DirectStep::Up { ip, port }) => up = Some(SocketAddr::new(ip, port)),
+                Some(DirectStep::Up { ip, port }) => {
+                    info!("direct link: the phone is at {ip}:{port}");
+                    up = Some(SocketAddr::new(ip, port));
+                }
                 Some(_) => {}
             },
             _ = check.tick(), if joined.active.is_some() => {
                 let state = property::<u32>(&bus, joined.active.as_ref().expect("checked"), ACTIVE, "State").await.ok();
                 match state {
                     Some(ACTIVATED) if !ready => {
+                        info!("direct link: Wi-Fi Direct connected");
                         ready = true;
                         // Up: only to notice it dropping
                         check = tokio::time::interval(Duration::from_secs(2));
