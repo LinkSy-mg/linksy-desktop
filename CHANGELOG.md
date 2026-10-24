@@ -2,6 +2,38 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.0
+
+### Added
+- **Ubuntu 24.04 and Linux Mint 22.** The .deb now installs on Ubuntu 24.04 LTS and
+  everything built on it (Linux Mint 22, Pop!_OS, Zorin, elementary): the GTK app needs
+  libadwaita 1.5, and where GStreamer's GTK 4 video sink has no package, Linksy draws
+  screens and camera previews itself. The KDE app still needs Plasma 6 (Qt 6.8).
+- **Hyprland, Sway, niri and X11 desktops.**
+  - **Second Display on Hyprland and Sway:** Linksy makes a real output in the phone's
+    shape, shares it, and removes it afterwards.
+  - **Lock When Away:** runs the installed screen locker (hyprlock, swaylock,
+    xflock4, i3lock and others).
+  - **Finish Setup:** starts an installed password prompt (polkit agent) when none runs,
+    suggests a notification daemon where none runs, gives the line that starts Linksy at
+    login on Hyprland, Sway, niri and river, and suggests the right screen-sharing portal
+    on niri.
+  - **Clipboard:** copying on an X11 desktop reaches phones that watch the clipboard.
+  - **Autostart:** the service starts at login on desktops without systemd's graphical
+    session (XFCE, MATE, Cinnamon, systems without systemd).
+- **Private discovery.** On a café's or an office's Wi-Fi, Linksy no longer announces the
+  computer's name and a permanent id to everyone: only a code that changes every 15
+  minutes, which only your paired devices recognise. The name shows while Add Device is
+  open. Forgetting a device changes the key, so it can't recognise this computer anymore.
+- **One Accept for a batch.** Files sent together ask once, and **Always Accept** (on the
+  prompt, or Always Accept Files on a device's page) saves a device's files without asking.
+- **Problem logs.** A crash is written down, and `logs.txt` (versions, crashes and the
+  recent log, without your home folder or user name) is one click away: About >
+  Troubleshooting in the GTK app, Save Logs… in the KDE app's menu, offered once after a
+  crash, and `linksy logs` in a terminal. Nothing is sent anywhere.
+- **The phone's own Connect by USB Cable.** The computer tells a connected phone when it's
+  plugged in, and switches it when the phone asks (with the phone app's next version).
+
 ## 0.8.7
 
 ### Changed

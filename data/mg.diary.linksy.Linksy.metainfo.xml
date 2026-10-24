@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.0" date="2026-10-24">
+      <description>
+        <p>Linksy runs on more computers: Ubuntu 24.04 and Linux Mint 22, and Hyprland, Sway, niri and X11 desktops, with a second display on Hyprland and Sway, the installed screen locker for Lock When Away, and Finish Setup that knows what these desktops lack. On public Wi-Fi Linksy no longer announces the computer's name. Files sent together ask once, and Always Accept saves a device's files without asking. Save Logs gathers what's needed for a bug report.</p>
+      </description>
+    </release>
     <release version="0.8.7" date="2026-10-23">
       <description>
         <p>Plugging a phone in to charge no longer asks anything: Connect by USB Cable uses the cable when you want it, and a phone can be set to use it automatically. In the Flatpak, Finish Setup gives the one command that adds the webcam for every app, and the USB guide the one for the cable. Second Display says clearly when the desktop can't make a virtual monitor (Hyprland, Sway) instead of failing.</p>
