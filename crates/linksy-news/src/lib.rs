@@ -33,6 +33,15 @@ pub struct Release {
 fn releases() -> Vec<Release> {
     vec![
         Release {
+            version: "0.9.7",
+            highlights: vec![Highlight {
+                gtk: "mg.diary.linksy.Linksy-tray-symbolic",
+                qt: "mg.diary.linksy.Linksy-tray-symbolic",
+                title: t!("Linksy in Your Tray"),
+                body: t!("Your devices and what they can do, a click away in the top bar or panel. On GNOME it needs the AppIndicator extension."),
+            }],
+        },
+        Release {
             version: "0.9.5",
             highlights: vec![Highlight {
                 gtk: "video-display-symbolic",
