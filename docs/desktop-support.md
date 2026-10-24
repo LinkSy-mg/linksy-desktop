@@ -16,6 +16,14 @@ microphone (v4l2loopback and PipeWire), and opening links.
 
 ## Today
 
+*Linksy 0.9 adds: a second display on Hyprland and Sway (a headless output it makes and
+removes), the installed screen locker for Lock When Away, an installed polkit agent started
+when none runs, a notification daemon suggested where none runs, the line that starts
+Linksy at login on tiling compositors, an XDG autostart entry for desktops without
+systemd's session, X11 clipboard watching, and GNOME's portal suggested on niri. The
+tables below describe 0.8; the plan's remaining steps are screen control through the
+virtual input protocols, Linksy's own notifications, and the in-app file browser.*
+
 ### Hyprland, Sway, niri and other tiling compositors
 
 | Feature | Status | Why |
