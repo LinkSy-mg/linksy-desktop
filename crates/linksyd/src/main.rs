@@ -27,6 +27,8 @@ mod system;
 mod tray;
 #[cfg(target_os = "linux")]
 mod usb;
+#[cfg(target_os = "linux")]
+mod volume;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -65,6 +67,10 @@ fn parse_args() -> Result<Args, String> {
     }
     if cfg!(target_os = "linux") && std::env::var_os("FLATPAK_ID").is_none() {
         config.features.push("terminal".into());
+    }
+    #[cfg(target_os = "linux")]
+    if volume::available() {
+        config.features.push("volume".into());
     }
     config.port = DEFAULT_PORT;
     let mut socket = linksy_ipc::socket_path();
@@ -198,6 +204,8 @@ async fn main() -> ExitCode {
     let icons = linksy_ipc::runtime_dir().unwrap_or_else(std::env::temp_dir).join("linksy-icons");
     #[cfg(target_os = "linux")]
     tokio::spawn(media::run(node.clone(), icons.join("art")));
+    #[cfg(target_os = "linux")]
+    tokio::spawn(volume::run(node.clone()));
     let mirror = mirror::Mirror::load(data_dir.join("notifications.json"), icons, socket.clone());
     if args.notifications {
         tokio::spawn(mirror.clone().run(node.clone()));
