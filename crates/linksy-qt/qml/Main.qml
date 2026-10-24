@@ -4,6 +4,7 @@ import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import QtQuick.Dialogs
+import Qt.labs.platform as Platform
 import org.kde.kirigami as Kirigami
 import mg.diary.linksy
 
@@ -39,6 +40,14 @@ Kirigami.ApplicationWindow {
 
     readonly property var selected: devices.find(d => d.device.id === selectedId) ?? null
 
+    // Closing the window keeps Linksy in the tray (the service runs on either way); with no
+    // tray to go to, closing quits, as the app no longer quits on its own with the window.
+    onClosing: close => {
+        if (!tray.available) { Qt.quit(); return }
+        close.accepted = false;
+        root.hide();
+    }
+
     Backend {
         id: backend
         onReply: (id, ok, json) => {
@@ -48,7 +57,9 @@ Kirigami.ApplicationWindow {
         }
         onEvent: json => root.handleEvent(JSON.parse(json))
         onHistory: json => root.historyUpdated(JSON.parse(json))
+        onStartingChanged: root.rebuildTray()
         onConnectedChanged: {
+            root.rebuildTray();
             if (!connected) return;
             root.refreshAll();
             // Development aid: open a screen for scripts/qt-shot.sh
@@ -132,6 +143,7 @@ Kirigami.ApplicationWindow {
             if (!ok) return;
             for (const p of list.filter(p => p.kind === "display" && !showingDisplays.includes(p.session))) {
                 showingDisplays = showingDisplays.concat([p.session]);
+                present();
                 pageStack.layers.push(Qt.resolvedUrl("ScreenPage.qml"), { app: root, device: p.peer.id, name: p.peer.name, display: { session: p.session, socket: p.socket } });
             }
         });
@@ -156,6 +168,22 @@ Kirigami.ApplicationWindow {
 
     function openInvite() {
         inviteDialog.open();
+    }
+
+    function openPrefs() {
+        pageStack.pushDialogLayer(Qt.resolvedUrl("PrefsPage.qml"), { app: root });
+    }
+
+    // Bring the window back, from the tray or for a question the service asks
+    function present() {
+        root.show();
+        if (root.visibility === Window.Minimized) root.showNormal();
+        root.raise();
+        root.requestActivate();
+    }
+
+    function toggleWindow() {
+        if (root.visible) root.hide(); else present();
     }
 
     function toast(text) {
@@ -382,6 +410,79 @@ Kirigami.ApplicationWindow {
         }
     }
 
+    // ---- the tray ----
+    // The icon's menu: what's connected, what's being shared (with Stop), the window and
+    // Quit. Rebuilt whole whenever any of that changes, so it's current when it opens.
+
+    readonly property var connectedDevices: devices.filter(d => d.trusted && d.connected)
+
+    function trayStatus() {
+        if (!backend.connected) return backend.starting ? t("Starting…") : t("Linksy Isn't Running");
+        const n = connectedDevices.length;
+        return n === 0 ? t("No devices connected") : n === 1 ? t("1 device connected") : t("{n} devices connected", { n: n });
+    }
+
+    Platform.SystemTrayIcon {
+        id: tray
+        visible: true
+        icon.name: "mg.diary.linksy.Linksy-symbolic"
+        tooltip: "Linksy · " + root.trayStatus()
+        // A click shows or hides the window; the right button opens the menu on its own
+        onActivated: reason => {
+            if (reason === Platform.SystemTrayIcon.Trigger || reason === Platform.SystemTrayIcon.DoubleClick) root.toggleWindow();
+        }
+        menu: Platform.Menu { id: trayMenu }
+    }
+
+    Component {
+        id: trayEntry
+        Platform.MenuItem {}
+    }
+
+    property var trayItems: []
+    onDevicesChanged: rebuildTray()
+    onSessionsChanged: rebuildTray()
+    onVisibleChanged: rebuildTray()
+
+    function rebuildTray() {
+        trayMenu.clear();
+        for (const old of trayItems) old.destroy();
+        const items = [];
+        const add = (text, icon, action, enabled) => {
+            const item = trayEntry.createObject(trayMenu, { text: text, enabled: enabled !== false });
+            if (icon) item.icon.name = icon;
+            if (action) item.triggered.connect(action);
+            trayMenu.addItem(item);
+            items.push(item);
+        };
+        const separator = () => {
+            const item = trayEntry.createObject(trayMenu, { separator: true });
+            trayMenu.addItem(item);
+            items.push(item);
+        };
+        const kinds = { desktop: "computer", laptop: "computer-laptop", phone: "smartphone", tablet: "tablet" };
+
+        add(trayStatus(), null, null, false);
+        separator();
+        const paired = devices.filter(d => d.trusted);
+        for (const d of paired) {
+            const id = d.device.id;
+            add(`${d.device.name} · ${statusLine(d)}`, kinds[d.device.kind] ?? "computer", () => { select(id); present() });
+        }
+        if (paired.length) separator();
+        for (const s of sessions) {
+            const session = s.session;
+            add(t("Stop: {what}", { what: sessionTitle(s) }), "media-playback-stop", () => request("end_session", { session: session }));
+        }
+        if (sessions.length) separator();
+        add(root.visible ? t("Hide Linksy") : t("Show Linksy"), "window", () => toggleWindow());
+        add(t("Add Device…"), "list-add", () => { present(); openInvite() });
+        add(t("Preferences"), "configure", () => { present(); openPrefs() });
+        separator();
+        add(t("Quit"), "application-exit", () => Qt.quit());
+        trayItems = items;
+    }
+
     // ---- the service's questions ----
 
     Kirigami.PromptDialog {
@@ -393,6 +494,7 @@ Kirigami.ApplicationWindow {
         function ask(req, device, c, inc) {
             request = req; code = c; incoming = inc; peer = device.name;
             title = inc ? root.t("{name} Wants to Pair", { name: device.name }) : root.t("Pair with {name}", { name: device.name });
+            root.present();
             open();
         }
         subtitle: incoming ? root.t("Pair only if {name} shows this same code.", { name: peer })
@@ -429,6 +531,7 @@ Kirigami.ApplicationWindow {
         function ask(id, device, f, tot) {
             transfer = id; from = device.id; files = f; total = tot;
             title = root.t("{name} Wants to Share", { name: device.name });
+            root.present();
             open();
         }
         subtitle: files.length === 1 ? `${files[0].path} (${root.size(total)})`
@@ -473,6 +576,7 @@ Kirigami.ApplicationWindow {
             const [heading, body] = asks[kind] ?? asks.screen;
             title = root.t(heading, { name: from });
             subtitle = root.t(body, { name: from });
+            root.present();
             open();
         }
         standardButtons: Kirigami.Dialog.NoButton
@@ -548,6 +652,7 @@ Kirigami.ApplicationWindow {
     Component.onCompleted: {
         const size = backend.env("LINKSY_SCREENSHOT_SIZE").split("x").map(Number);
         if (size.length === 2 && size[0] > 0) { width = size[0]; height = size[1] }
+        rebuildTray();
         backend.start();
         backend.checkSetup();
         // One thing at a time: Finish Setup when something's missing, otherwise, after an
