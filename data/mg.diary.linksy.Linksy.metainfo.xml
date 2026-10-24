@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.5" date="2026-10-24">
+      <description>
+        <p>Second Display goes through the graphics chip when it can encode video, at up to 60 frames a second with almost no processor. On Fedora with AMD graphics, Finish Setup adds the full driver this needs.</p>
+      </description>
+    </release>
     <release version="0.9.4" date="2026-10-24">
       <description>
         <p>Second Display is smooth when Linksy runs as a service: screen sharing gets a memory limit of its own instead of the service's small one. A second display that froze after changing GNOME's display settings now starts again by itself, and screen helpers no longer outlive a crashed service.</p>

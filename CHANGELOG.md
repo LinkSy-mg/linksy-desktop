@@ -2,6 +2,24 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.5
+
+### Changed
+- **Second Display at up to 60 frames a second with a GPU encoder.** The screen now goes
+  from the desktop to the graphics chip in graphics memory, which converts and encodes it
+  without the processor: on a Ryzen 5 laptop, every frame GNOME draws (about 35 a second
+  while moving windows) instead of 18. Where the desktop can't hand over graphics memory,
+  frames are uploaded (about 30 a second); without a GPU encoder, the processor encodes
+  them as before.
+- **Finish Setup suggests RPM Fusion's full graphics driver** on Fedora with AMD graphics,
+  whose own driver leaves out video encoding.
+
+### Fixed
+- **Screen sharing that failed to start ended there.** Linksy now tries the next way to
+  encode (the GPU from graphics memory, then uploaded, then x264, then OpenH264) until one
+  works, and Save Logs says which part refused and why.
+- Finish Setup's notification daemon (mako) couldn't be installed by the setup helper.
+
 ## 0.9.4
 
 ### Fixed
