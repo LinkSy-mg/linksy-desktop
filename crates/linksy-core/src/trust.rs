@@ -24,6 +24,10 @@ pub struct TrustedDevice {
     /// microphone. Off: only the small things (clipboard, links, ring, battery, files sent).
     #[serde(default)]
     pub away_all: bool,
+    /// The key its private discovery tags are made from (docs/protocol.md §4.16), hex.
+    /// `None`: it doesn't speak §4.16 yet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovery_key: Option<String>,
 }
 
 impl TrustedDevice {
@@ -80,7 +84,7 @@ impl TrustStore {
 
     pub fn add(&mut self, device: DeviceInfo, addr: Option<SocketAddr>) -> Result<()> {
         let paired_at = now();
-        self.devices.insert(device.id, TrustedDevice { device, last_addr: addr, paired_at, last_met: Some(paired_at), away_all: false });
+        self.devices.insert(device.id, TrustedDevice { device, last_addr: addr, paired_at, last_met: Some(paired_at), away_all: false, discovery_key: None });
         self.save()
     }
 
@@ -116,6 +120,17 @@ impl TrustStore {
     pub fn set_away_all(&mut self, id: &Fingerprint, on: bool) -> Result<bool> {
         let Some(d) = self.devices.get_mut(id) else { return Ok(false) };
         d.away_all = on;
+        self.save()?;
+        Ok(true)
+    }
+
+    /// Store `id`'s discovery key. Returns whether it changed.
+    pub fn set_discovery_key(&mut self, id: &Fingerprint, key: &str) -> Result<bool> {
+        let Some(d) = self.devices.get_mut(id) else { return Ok(false) };
+        if d.discovery_key.as_deref() == Some(key) {
+            return Ok(false);
+        }
+        d.discovery_key = Some(key.to_string());
         self.save()?;
         Ok(true)
     }
