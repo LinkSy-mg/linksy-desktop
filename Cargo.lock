@@ -2457,6 +2457,7 @@ name = "linksy-core"
 version = "0.8.7"
 dependencies = [
  "blake3",
+ "getrandom 0.4.3",
  "hex",
  "if-addrs",
  "iroh",

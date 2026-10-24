@@ -268,6 +268,9 @@ pub enum Message {
     Clipboard { text: String },
     /// The sender's new name, so connected devices update without reconnecting.
     Renamed { name: String },
+    /// The key the sender's private discovery tags are made from (§4.16), 64 hex chars.
+    /// Sent to paired devices on every connection.
+    DiscoveryKey { key: String },
     Ping,
     /// A web link for the receiver to open in its browser ("Open on PC"). `http`/`https`
     /// only; receivers drop anything else.

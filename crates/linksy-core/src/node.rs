@@ -22,7 +22,7 @@ use tokio::task::{AbortHandle, JoinSet};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::discovery::{Discovery, DiscoveryEvent};
+use crate::discovery::{Announce, Discovery, DiscoveryEvent, DiscoveryKey};
 use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::fs::FsCall;
@@ -372,6 +372,8 @@ struct Inner {
     transfers: Mutex<HashMap<Uuid, AbortHandle>>,
     events: broadcast::Sender<Event>,
     discovery: Mutex<Option<Discovery>>,
+    /// What this device's private discovery tags are made from (docs/protocol.md §4.16).
+    discovery_key: Mutex<DiscoveryKey>,
     /// One dial at a time per device, so concurrent sends share a connection.
     dialing: Mutex<HashMap<Fingerprint, Arc<tokio::sync::Mutex<()>>>>,
     /// Accepted incoming sessions, for whoever runs the media side (the daemon).
@@ -410,6 +412,7 @@ impl Node {
         let identity = Identity::load_or_create(&config.data_dir)?;
         let trust = TrustStore::load(config.data_dir.join("trusted.json"))?;
         let settings = Settings::load(&config.data_dir.join("settings.json"), &config)?;
+        let discovery_key = crate::discovery::load_or_create_key(&config.data_dir)?;
         let info = DeviceInfo {
             id: identity.fingerprint,
             name: settings.name.clone(),
@@ -438,6 +441,7 @@ impl Node {
                 transfers: Mutex::new(HashMap::new()),
                 events,
                 discovery: Mutex::new(None),
+                discovery_key: Mutex::new(discovery_key),
                 dialing: Mutex::new(HashMap::new()),
                 invite: Mutex::new(None),
                 import_dir: Mutex::default(),
@@ -458,7 +462,7 @@ impl Node {
         tokio::spawn(node.clone().accept_loop());
         if node.inner.config.discovery {
             let (tx, rx) = mpsc::unbounded_channel();
-            let d = Discovery::start(&node.info(), node.local_addr()?.port(), tx)?;
+            let d = Discovery::start(node.announce(), node.local_addr()?.port(), tx)?;
             *node.inner.discovery.lock().unwrap() = Some(d);
             tokio::spawn(node.clone().discovery_loop(rx));
         }
@@ -494,11 +498,7 @@ impl Node {
                 info.name = new.name.clone();
                 info.clone()
             };
-            if let Some(d) = self.inner.discovery.lock().unwrap().as_mut()
-                && let Err(e) = d.update(&info)
-            {
-                warn!("could not announce the new name: {e}");
-            }
+            self.rediscover();
             // Connected devices hear it directly; others at their next handshake.
             let live: Vec<quinn::Connection> = self.inner.peers.lock().unwrap().values().map(|p| p.conn.clone()).collect();
             for conn in live {
@@ -676,12 +676,15 @@ impl Node {
         }
         let token = Uuid::new_v4().simple().to_string();
         *self.inner.invite.lock().unwrap() = Some((token.clone(), Instant::now() + INVITE_TTL));
+        // Findable by strangers while the code is on screen (pairing mode)
+        self.rediscover();
         Ok(Invite { id: self.inner.id, name: self.info().name, addrs, token })
     }
 
     /// Stop accepting the current invite (the QR code was closed).
     pub fn cancel_invite(&self) {
         self.inner.invite.lock().unwrap().take();
+        self.rediscover();
     }
 
     /// Pair with the device whose invite (QR code) was scanned.
@@ -710,7 +713,18 @@ impl Node {
         if let Some(p) = self.inner.peers.lock().unwrap().remove(id) {
             p.conn.close(0u32.into(), b"forgotten");
         }
-        self.inner.trust.lock().unwrap().remove(id)
+        let removed = self.inner.trust.lock().unwrap().remove(id)?;
+        if removed {
+            // A new discovery key, so the forgotten device can't keep recognising this one.
+            // Connected devices get it now, the others at their next connection.
+            *self.inner.discovery_key.lock().unwrap() = crate::discovery::new_key(&self.inner.config.data_dir)?;
+            self.rediscover();
+            let live: Vec<quinn::Connection> = self.inner.peers.lock().unwrap().values().map(|p| p.conn.clone()).collect();
+            for conn in live {
+                self.send_discovery_key(conn);
+            }
+        }
+        Ok(removed)
     }
 
     pub async fn notify(&self, to: &Fingerprint, title: &str, body: &str) -> Result<()> {
@@ -1380,6 +1394,7 @@ impl Node {
     ) -> Result<()> {
         if local && remote {
             self.inner.trust.lock().unwrap().add(device.clone(), Some(conn.remote_address()))?;
+            self.rediscover();
             self.emit(Event::Paired { device: device.clone() });
             Ok(())
         } else {
@@ -1421,6 +1436,9 @@ impl Node {
         if let Err(e) = self.inner.trust.lock().unwrap().touch(&device, conn.remote_address()) {
             warn!("could not save device address: {e}");
         }
+        if self.inner.trust.lock().unwrap().contains(&id) {
+            self.send_discovery_key(conn.clone());
+        }
         self.emit(Event::Connected { device: device.clone() });
         tokio::spawn(self.clone().serve_peer(conn, device));
     }
@@ -1447,6 +1465,7 @@ impl Node {
                                 }
                                 Ok(Message::Clipboard { .. }) => debug!("oversized clipboard from {}", from.name),
                                 Ok(Message::Renamed { name }) => node.peer_renamed(from.id, name),
+                                Ok(Message::DiscoveryKey { key }) => node.peer_discovery_key(&from, &key),
                                 Ok(Message::Ping) => {}
                                 Ok(Message::OpenUrl { url }) if is_web_link(&url) => node.emit(Event::OpenUrl { from, url }),
                                 Ok(Message::OpenUrl { .. }) => debug!("refused a link from {} that isn't http(s)", from.name),
@@ -1529,6 +1548,54 @@ impl Node {
             drop(peers);
             self.emit(Event::Disconnected { id: device.id });
         }
+    }
+
+    /// What discovery announces and looks for now.
+    fn announce(&self) -> Announce {
+        let trust = self.inner.trust.lock().unwrap().list();
+        let peers = trust
+            .iter()
+            .filter_map(|t| {
+                let key = hex::decode(t.discovery_key.as_deref()?).ok()?.try_into().ok()?;
+                Some((t.device.clone(), key))
+            })
+            .collect();
+        Announce {
+            me: self.info(),
+            key: *self.inner.discovery_key.lock().unwrap(),
+            legacy: trust.iter().any(|t| t.discovery_key.is_none()),
+            pairing_until: self.inner.invite.lock().unwrap().as_ref().map(|(_, until)| *until),
+            peers,
+        }
+    }
+
+    /// Tell discovery what changed (name, key, paired devices, pairing mode).
+    fn rediscover(&self) {
+        if let Some(d) = self.inner.discovery.lock().unwrap().as_ref() {
+            d.update(self.announce());
+        }
+    }
+
+    fn send_discovery_key(&self, conn: quinn::Connection) {
+        let msg = Message::DiscoveryKey { key: hex::encode(*self.inner.discovery_key.lock().unwrap()) };
+        tokio::spawn(async move {
+            if let Ok(mut s) = conn.open_uni().await {
+                let _ = write_msg(&mut s, &msg).await;
+                let _ = s.finish();
+            }
+        });
+    }
+
+    fn peer_discovery_key(&self, from: &DeviceInfo, key: &str) {
+        if key.len() != 64 || hex::decode(key).is_err() {
+            return debug!("bad discovery key from {}", from.name);
+        }
+        match self.inner.trust.lock().unwrap().set_discovery_key(&from.id, &key.to_lowercase()) {
+            Ok(false) => return,
+            Ok(true) => {}
+            Err(e) => return warn!("could not save a discovery key: {e}"),
+        }
+        self.rediscover();
     }
 
     fn peer_renamed(&self, id: Fingerprint, name: String) {
