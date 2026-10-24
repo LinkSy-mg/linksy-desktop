@@ -972,7 +972,7 @@ the code prompt before each open (numeric or text keyboard, masked); tabs for se
 terminals and reattach from `terminal_list`; a clear "Detached, still running on the
 computer" state. Until the desktop ships it, computers don't announce `terminal`.
 
-### 4.16 Private discovery (desktop 0.9)
+### 4.16 Private discovery (desktop 0.9, implemented)
 
 [desktop#38](https://github.com/LinkSy-mg/linksy-desktop/issues/38),
 [mobile#12](https://github.com/LinkSy-mg/linksy-mobile/issues/12). The §4.1 record puts a
@@ -997,9 +997,10 @@ their encrypted connection, and keeps each paired device's key in its trust list
   the message (unknown types are skipped).
 - A device knows a paired device **speaks §4.16** once it has received that device's own
   `discovery_key`.
-- **Unpairing rotates the key:** forgetting a device makes a new `D`, sent to the remaining
-  paired devices on their next connection, so a forgotten device can't keep recognising
-  this one. Until they've connected, they find it by its last address (§4.6).
+- **Unpairing rotates the key:** forgetting a device makes a new `D`, sent right away to the
+  paired devices connected now and to the others on their next connection, so a forgotten
+  device can't keep recognising this one. Until they've connected, they find it by its last
+  address (§4.6).
 
 **The tag.** Time is cut into 15-minute epochs: `e = floor(unix_seconds / 900)`.
 
@@ -1007,7 +1008,10 @@ their encrypted connection, and keeps each paired device's key in its trust list
 tag(D, e) = first 16 bytes of HMAC-SHA256(key = D, data = "linksy discovery v2" || u64_be(e))
 ```
 
-as 32 lowercase hex chars. The record, re-registered at each new epoch (a goodbye for the
+as 32 lowercase hex chars. Test vector: `D` = bytes `00 01 02 … 1f`, `e` = `1959000` →
+`9f88efcbdfd95b47eee92701da5f9d99` (desktop: `discovery::tests`).
+
+The record, re-registered at each new epoch (a goodbye for the
 old one):
 
 - Service type: `_linksy._udp.local.` (unchanged), port unchanged.
@@ -1027,6 +1031,10 @@ and for at most 5 minutes, a device also announces a second record in the §4.1 
 not paired" as before. A device not in pairing mode isn't listed to strangers; pairing
 works as long as one of the two is (the other dials it), and Pair by Address and QR codes
 work as before.
+
+Desktop: the invite dialog (Add Device) is pairing mode, so two computers find each other
+when both have it open. While a device also announces its §4.1 record (below), that record
+already lists it, and no separate pairing record is sent.
 
 **Moving over from §4.1.** A device keeps announcing its §4.1 record next to the private
 one **only while one of its paired devices doesn't speak §4.16 yet** (it hasn't received
@@ -1428,3 +1436,9 @@ robust against any encoder (GPU ones may slice too):
   The computer's guide connects it, and a per-phone "use the cable automatically" switch
   (off by default) brings back switching on plug-in. `usb_plugged` / `usb_connect` for the
   phone's own button come in 0.9; nothing to change on the phone yet.
+- **2026-10-24** — Private discovery (§4.16) implemented on the desktop for 0.9: the
+  `discovery_key` message on every connection to a paired device, the 15-minute tag
+  record (HMAC-SHA256, test vector added), the pairing record while the invite dialog is
+  open, and the §4.1 record only while a paired device hasn't sent its key. Forgetting a
+  device sends the new key to connected devices at once. Phone: send `discovery_key`,
+  store the computer's, look for its tag, and announce the same records.
