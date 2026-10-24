@@ -9,4 +9,7 @@ linksy-logs = { path = "../linksy-logs" }
 ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast", "remote_desktop"] }
 gstreamer = "0.25.4"
 linksy-core = { path = "../linksy-core" }
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time"] }
+libc = "0.2.191"
+# GNOME's display layout, to keep a second display in it
+zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }

@@ -181,6 +181,15 @@ pub async fn screen(token: Option<String>, control: bool, virtual_monitor: bool)
     Ok(Screen { fd, node, restore_token, input: Some(Input::Desktop { proxy: remote, session, node, size, allowed }) })
 }
 
+impl Input {
+    /// End the desktop's session: its virtual monitor goes away, and its memory with it.
+    pub async fn close(self) {
+        if let Self::Desktop { session, .. } = self {
+            let _ = session.close().await;
+        }
+    }
+}
+
 fn first(streams: &[Stream]) -> Result<&Stream, String> {
     streams.first().ok_or_else(|| "no screen was chosen".to_string())
 }

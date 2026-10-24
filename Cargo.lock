@@ -2534,9 +2534,11 @@ version = "0.9.3"
 dependencies = [
  "ashpd",
  "gstreamer",
+ "libc",
  "linksy-core",
  "linksy-logs",
  "tokio",
+ "zbus",
 ]
 
 [[package]]

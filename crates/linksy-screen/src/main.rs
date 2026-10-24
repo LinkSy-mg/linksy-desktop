@@ -25,6 +25,7 @@
 //! a microphone called NAME. Audio crosses as raw 16-bit 48 kHz mono PCM (docs/protocol.md
 //! §4.8): about 100 KB/s, and nothing to decode.
 
+mod mutter;
 mod portal;
 
 use std::os::fd::AsRawFd;
@@ -97,6 +98,13 @@ fn parse_args() -> Result<Args, String> {
 
 fn main() -> ExitCode {
     linksy_logs::catch_crashes("linksy-screen", env!("CARGO_PKG_VERSION"));
+    // Ends with the service that started it, even if that one crashed or was killed: never
+    // left behind holding a screen, a camera or memory
+    #[cfg(target_os = "linux")]
+    // SAFETY: a plain prctl on this process
+    unsafe {
+        libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+    }
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
@@ -144,45 +152,20 @@ fn run(args: Args) -> Result<(), String> {
         let pattern = format!("videotestsrc is-live=true pattern=ball motion=sweep background-color=0xff2563ff ! video/x-raw,width={w},height={h},framerate=30/1");
         (pattern, args.control.then_some(portal::Input::Log))
     } else {
-        let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-        let had_token = token.is_some();
-        let screen = match rt.block_on(portal::screen(token, args.control, args.virtual_size.is_some())) {
-            Ok(screen) => screen,
-            // A remembered choice can go stale (its monitor gone, say) and then restore no
-            // screen at all, every time: forget it and show the dialog.
-            Err(e) if had_token && !e.ends_with("cancelled") => {
-                eprintln!("linksy-screen: the remembered screen didn't restore ({e}), asking again");
-                rt.block_on(portal::screen(None, args.control, args.virtual_size.is_some()))?
-            }
-            Err(e) => return Err(e),
-        };
-        // No token back (input refused, say): forget the old one so the dialog asks again.
-        if let Some(path) = &args.token_file {
-            let _ = match &screen.restore_token {
-                Some(new) => std::fs::write(path, new),
-                None if args.control => std::fs::remove_file(path),
-                None => Ok(()),
-            };
-        }
-        // The PipeWire remote stays open for the life of the pipeline.
-        let mut source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000 always-copy=true", screen.fd.as_raw_fd(), screen.node);
-        // A virtual monitor takes the size its stream negotiates.
-        if let Some((w, h)) = args.virtual_size {
-            source.push_str(&format!(" ! video/x-raw,width={w},height={h}"));
-        }
-        std::mem::forget(screen.fd);
-        (source, screen.input)
+        open_capture(&args, &rt)?
     };
-
     // linksyd listens on the socket and relays everything written here to the viewer, and
     // the viewer's control messages back.
     let out = UnixStream::connect(&args.socket).map_err(|e| format!("{}: {e}", args.socket.display()))?;
     let control_in = out.try_clone().map_err(|e| e.to_string())?;
     let handle = rt.handle().clone();
+    // Shared: a second display that stalls gets a new capture, and its input with it
+    let input = std::sync::Arc::new(std::sync::Mutex::new(input));
+    let shared = input.clone();
     std::thread::spawn(move || {
         // View-only sessions read and ignore input.
         read_control_frames(control_in, |msg| {
-            if let Some(input) = &input {
+            if let Some(input) = shared.lock().unwrap().as_ref() {
                 handle.block_on(input.apply(&msg));
             }
         });
@@ -195,59 +178,156 @@ fn run(args: Args) -> Result<(), String> {
     let software = !encoder.starts_with("va");
     let rate = if software { "videorate drop-only=true max-rate=30 ! " } else { "" };
     let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(1, 4));
-    let description = format!(
-        "{source} ! {rate}queue name=captured max-size-buffers=1 leaky=downstream ! videoconvert n-threads={threads} \
-         ! video/x-raw,format={format} ! queue max-size-buffers=2 leaky=downstream ! {encoder} name=encoder \
-         ! video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1 \
-         ! video/x-h264,stream-format=byte-stream,alignment=au \
-         ! fdsink fd={} sync=false",
-        out.as_raw_fd()
-    );
-    let pipeline = gst::parse::launch(&description).map_err(|e| format!("pipeline: {e}"))?;
-    count_frames(&pipeline, encoder.split_whitespace().next().unwrap_or("encoder"));
-    pipeline.set_state(gst::State::Playing).map_err(|e| format!("could not start: {e}"))?;
-    let bus = pipeline.bus().ok_or("pipeline has no bus")?;
+    // GNOME can stop feeding a virtual monitor's stream when its layout changes (display
+    // settings applied): no frame comes, not even the keepalive. Then the capture starts
+    // again in the same session, the old one closed first.
+    let restartable = args.virtual_size.is_some() && !args.test;
+    let mut source = source;
+    let mut restarts = 0;
     let result = loop {
-        let Some(msg) = bus.timed_pop(gst::ClockTime::NONE) else { break Ok(()) };
-        match msg.view() {
-            gst::MessageView::Eos(_) => break Ok(()),
-            // The viewer went away (socket closed): a write error, and a normal end.
-            gst::MessageView::Error(e) if e.src().is_some_and(|s| s.name().starts_with("fdsink")) => break Ok(()),
-            gst::MessageView::Error(e) => break Err(format!("{} ({:?})", e.error(), e.debug())),
-            _ => {}
+        let description = format!(
+            "{source} ! {rate}queue name=captured max-size-buffers=1 leaky=downstream ! videoconvert n-threads={threads} \
+             ! video/x-raw,format={format} ! queue max-size-buffers=2 leaky=downstream ! {encoder} name=encoder \
+             ! video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1 \
+             ! video/x-h264,stream-format=byte-stream,alignment=au \
+             ! fdsink fd={} sync=false",
+            out.as_raw_fd()
+        );
+        let pipeline = gst::parse::launch(&description).map_err(|e| format!("pipeline: {e}"))?;
+        let last_frame = count_frames(&pipeline, encoder.split_whitespace().next().unwrap_or("encoder"));
+        pipeline.set_state(gst::State::Playing).map_err(|e| format!("could not start: {e}"))?;
+        let outcome = watch_bus(&pipeline, restartable.then_some(&last_frame));
+        let _ = pipeline.set_state(gst::State::Null);
+        drop(pipeline);
+        match outcome {
+            Some(Stalled) if restarts < 5 => {
+                restarts += 1;
+                eprintln!("linksy-screen: the second display's stream stopped, starting it again once GNOME's display settings are kept");
+                rt.block_on(mutter::settled(std::time::Duration::from_secs(22)));
+                if let Some(old) = input.lock().unwrap().take() {
+                    rt.block_on(old.close());
+                }
+                let (new_source, new_input) = open_capture(&args, &rt)?;
+                source = new_source;
+                *input.lock().unwrap() = new_input;
+            }
+            Some(Stalled) => break Err("the second display's stream kept stopping".to_string()),
+            None => break Ok(()),
+            Some(Ended(r)) => break r,
         }
     };
-    let _ = pipeline.set_state(gst::State::Null);
+    if let Some(old) = input.lock().unwrap().take() {
+        rt.block_on(old.close());
+    }
     drop(out);
     result
 }
 
+use Outcome::{Ended, Stalled};
+
+enum Outcome {
+    Ended(Result<(), String>),
+    /// No frame for a while from a source that sends one every second at least.
+    Stalled,
+}
+
+/// Run until the pipeline ends; with `last_frame`, also until frames stop coming.
+fn watch_bus(pipeline: &gst::Element, last_frame: Option<&std::sync::Arc<std::sync::atomic::AtomicU64>>) -> Option<Outcome> {
+    let bus = pipeline.bus()?;
+    loop {
+        let Some(msg) = bus.timed_pop(gst::ClockTime::from_mseconds(500)) else {
+            // The keepalive sends the last frame every second: three without any is a stall
+            if let Some(last) = last_frame {
+                let ms = last.load(std::sync::atomic::Ordering::Relaxed);
+                if ms > 0 && now_ms() > ms + 3000 {
+                    return Some(Stalled);
+                }
+            }
+            continue;
+        };
+        match msg.view() {
+            gst::MessageView::Eos(_) => return None,
+            // The viewer went away (socket closed): a write error, and a normal end.
+            gst::MessageView::Error(e) if e.src().is_some_and(|s| s.name().starts_with("fdsink")) => return None,
+            gst::MessageView::Error(e) => return Some(Ended(Err(format!("{} ({:?})", e.error(), e.debug())))),
+            _ => {}
+        }
+    }
+}
+
+/// Ask the desktop for the screen (a new virtual monitor for a second display): the
+/// pipeline's source, where input goes, and the PipeWire remote to close with it.
+fn open_capture(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(String, Option<portal::Input>), String> {
+    let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+    let had_token = token.is_some();
+    let screen = match rt.block_on(portal::screen(token, args.control, args.virtual_size.is_some())) {
+        Ok(screen) => screen,
+        // A remembered choice can go stale (its monitor gone, say) and then restore no
+        // screen at all, every time: forget it and show the dialog.
+        Err(e) if had_token && !e.ends_with("cancelled") => {
+            eprintln!("linksy-screen: the remembered screen didn't restore ({e}), asking again");
+            rt.block_on(portal::screen(None, args.control, args.virtual_size.is_some()))?
+        }
+        Err(e) => return Err(e),
+    };
+    // No token back (input refused, say): forget the old one so the dialog asks again.
+    if let Some(path) = &args.token_file {
+        let _ = match &screen.restore_token {
+            Some(new) => std::fs::write(path, new),
+            None if args.control => std::fs::remove_file(path),
+            None => Ok(()),
+        };
+    }
+    // The PipeWire remote stays open for the life of the pipeline (pipewiresrc closes it).
+    let mut source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000 always-copy=true", screen.fd.as_raw_fd(), screen.node);
+    // A virtual monitor takes the size its stream negotiates.
+    if let Some((w, h)) = args.virtual_size {
+        source.push_str(&format!(" ! video/x-raw,width={w},height={h}"));
+    }
+    std::mem::forget(screen.fd);
+    Ok((source, screen.input))
+}
+
 /// Every 10 seconds, how many frames the screen gave and how many were encoded (the
-/// rest were dropped because the encoder was behind), for Save Logs.
-fn count_frames(pipeline: &gst::Element, encoder: &str) {
+/// rest were dropped because the encoder was behind), for Save Logs. Returns when the last
+/// frame came (milliseconds since the epoch; 0 before the first). The report ends with the
+/// pipeline.
+fn count_frames(pipeline: &gst::Element, encoder: &str) -> std::sync::Arc<std::sync::atomic::AtomicU64> {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
-    let Some(bin) = pipeline.downcast_ref::<gst::Bin>() else { return };
-    let (captured, encoded) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
-    for (name, pad, count) in [("captured", "sink", captured.clone()), ("encoder", "src", encoded.clone())] {
+    let last = Arc::new(AtomicU64::new(0));
+    let Some(bin) = pipeline.downcast_ref::<gst::Bin>() else { return last };
+    // [captured, encoded]: held by the probes, so they go when the pipeline does
+    let counts = Arc::new([AtomicU64::new(0), AtomicU64::new(0)]);
+    for (name, pad, i) in [("captured", "sink", 0), ("encoder", "src", 1)] {
         if let Some(pad) = bin.by_name(name).and_then(|e| e.static_pad(pad)) {
+            let (counts, last) = (counts.clone(), last.clone());
             pad.add_probe(gst::PadProbeType::BUFFER, move |_, _| {
-                count.fetch_add(1, Ordering::Relaxed);
+                counts[i].fetch_add(1, Ordering::Relaxed);
+                if i == 0 {
+                    last.store(now_ms(), Ordering::Relaxed);
+                }
                 gst::PadProbeReturn::Ok
             });
         }
     }
-    let encoder = encoder.to_string();
+    let (counts, encoder) = (Arc::downgrade(&counts), encoder.to_string());
     std::thread::spawn(move || {
         loop {
             std::thread::sleep(std::time::Duration::from_secs(10));
-            let (c, e) = (captured.swap(0, Ordering::Relaxed), encoded.swap(0, Ordering::Relaxed));
+            let Some(counts) = counts.upgrade() else { return };
+            let (c, e) = (counts[0].swap(0, Ordering::Relaxed), counts[1].swap(0, Ordering::Relaxed));
             if c == 0 && e == 0 {
                 continue;
             }
             eprintln!("linksy-screen: {:.1} fps from the screen, {:.1} encoded ({encoder}), {} dropped", c as f64 / 10.0, e as f64 / 10.0, c.saturating_sub(e));
         }
     });
+    last
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
 
 /// A phone as touchpad and keyboard: apply its input until it stops. Nothing is shared.
