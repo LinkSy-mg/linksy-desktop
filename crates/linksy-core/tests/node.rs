@@ -130,6 +130,46 @@ async fn pairing_shows_same_code_and_trusts_both_ways() {
     assert!(views[0].connected && views[0].trusted);
 }
 
+/// The discovery key `dev` announces with (docs/protocol.md §4.16).
+fn discovery_key(dev: &Dev) -> String {
+    hex::encode(std::fs::read(dev.dir.path().join("data/discovery.key")).unwrap())
+}
+
+/// The discovery key `dev` has stored for `of`, once it arrives.
+async fn stored_key(dev: &Dev, of: &Dev, not: Option<&str>) -> String {
+    let id = of.node.info().id;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let key = dev.node.trusted().into_iter().find(|t| t.device.id == id).and_then(|t| t.discovery_key);
+            if let Some(key) = key.filter(|k| Some(k.as_str()) != not) {
+                return key;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("no discovery key arrived")
+}
+
+#[tokio::test]
+async fn paired_devices_share_discovery_keys_and_forgetting_rotates_them() {
+    let (a, b) = paired().await;
+    assert_eq!(stored_key(&b, &a, None).await, discovery_key(&a));
+    assert_eq!(stored_key(&a, &b, None).await, discovery_key(&b));
+
+    let c = dev("Gamma").await;
+    auto_answer(&c.node, true);
+    c.node.pair(a.node.local_addr().unwrap()).await.unwrap();
+    let old = stored_key(&c, &a, None).await;
+    assert_eq!(old, discovery_key(&a));
+
+    // Forgetting Beta: a new key, sent to Gamma right away; Beta's copy is useless now.
+    assert!(a.node.forget(&b.node.info().id).unwrap());
+    let new = stored_key(&c, &a, Some(&old)).await;
+    assert_eq!(new, discovery_key(&a));
+    assert_ne!(stored_key(&b, &a, None).await, new);
+}
+
 #[tokio::test]
 async fn declined_pairing_trusts_nobody() {
     let a = dev("Alpha").await;
@@ -1119,4 +1159,41 @@ async fn locate_asks_once_and_hears_back() {
     })
     .await;
     assert_eq!(next, "refused");
+}
+
+/// Whether `f` becomes true within 10 s.
+async fn until(f: impl Fn() -> bool) -> bool {
+    for _ in 0..100 {
+        if f() {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    false
+}
+
+/// Private discovery on the real network (multicast, so not in CI): once keys are shared, a
+/// stranger doesn't see the device, its paired device still finds it by its tag, and an
+/// open invite (pairing mode) shows it to strangers again.
+#[tokio::test]
+#[ignore = "needs multicast on this machine's network"]
+async fn private_discovery_hides_from_strangers_only() {
+    let on = |c: &mut Config| {
+        c.discovery = true;
+        c.bind = IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED);
+    };
+    let (a, b) = paired_with(on).await;
+    stored_key(&b, &a, None).await;
+    stored_key(&a, &b, None).await;
+    let stranger = dev_with("Stranger", on).await;
+    let (a_id, b_id) = (a.node.info().id, b.node.info().id);
+    let sees = |dev: &Dev, id| dev.node.devices().iter().any(|d| d.device.id == id && d.nearby);
+    assert!(until(|| sees(&b, a_id)).await, "the paired device doesn't find it by its tag");
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert!(!sees(&stranger, a_id) && !sees(&stranger, b_id), "a stranger sees it");
+
+    a.node.create_invite().unwrap();
+    assert!(until(|| sees(&stranger, a_id)).await, "pairing mode doesn't show it");
+    a.node.cancel_invite();
+    assert!(until(|| !sees(&stranger, a_id)).await, "pairing mode doesn't end");
 }
