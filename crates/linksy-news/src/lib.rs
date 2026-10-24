@@ -33,6 +33,15 @@ pub struct Release {
 fn releases() -> Vec<Release> {
     vec![
         Release {
+            version: "0.9.9",
+            highlights: vec![Highlight {
+                gtk: "network-wireless-hotspot-symbolic",
+                qt: "network-wireless-hotspot",
+                title: t!("Wi-Fi Direct, Damn Fast"),
+                body: t!("Big files go straight from your phone to this computer over a Wi-Fi link of their own: about 80 MB/s, four times faster than through the router. Your internet stays on. Needs the Linksy for Android update."),
+            }],
+        },
+        Release {
             version: "0.9.7",
             highlights: vec![Highlight {
                 gtk: "mg.diary.linksy.Linksy-tray-symbolic",
