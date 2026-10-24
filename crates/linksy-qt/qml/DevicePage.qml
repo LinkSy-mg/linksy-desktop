@@ -258,6 +258,12 @@ Kirigami.ScrollablePage {
                 text: app.t("Lock this computer when {device} leaves. It never unlocks it.", { device: page.name })
             }
             QQC2.Switch {
+                Kirigami.FormData.label: app.t("Always Accept Files") + ":"
+                visible: page.view?.trusted ?? false
+                checked: page.view?.auto_accept ?? false
+                onToggled: app.request("set_auto_accept", { device: page.info.id, on: checked }, () => app.refreshDevices())
+            }
+            QQC2.Switch {
                 Kirigami.FormData.label: app.t("Allow Everything From Away") + ":"
                 visible: page.view !== null && page.view.away_until !== undefined
                 checked: page.view?.away_all ?? false

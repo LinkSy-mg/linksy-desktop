@@ -250,7 +250,7 @@ Kirigami.ApplicationWindow {
             if (ev.reason.includes("other device")) toast(t("{name} didn't confirm the code", { name: ev.device.name }));
             break;
         case "transfer_request":
-            offerDialog.ask(ev.transfer, ev.from.name, ev.files, ev.total);
+            offerDialog.ask(ev.transfer, ev.from, ev.files, ev.total);
             break;
         case "transfer_started":
             if (offerDialog.transfer === ev.transfer) offerDialog.close();
@@ -422,11 +422,12 @@ Kirigami.ApplicationWindow {
     Kirigami.PromptDialog {
         id: offerDialog
         property string transfer
+        property string from
         property var files: []
         property real total: 0
-        function ask(id, from, f, tot) {
-            transfer = id; files = f; total = tot;
-            title = root.t("{name} Wants to Share", { name: from });
+        function ask(id, device, f, tot) {
+            transfer = id; from = device.id; files = f; total = tot;
+            title = root.t("{name} Wants to Share", { name: device.name });
             open();
         }
         subtitle: files.length === 1 ? `${files[0].path} (${root.size(total)})`
@@ -437,6 +438,14 @@ Kirigami.ApplicationWindow {
                 text: root.t("Accept")
                 icon.name: "document-save"
                 onTriggered: { root.request("respond", { request: offerDialog.transfer, accept: true }); offerDialog.close() }
+            },
+            Kirigami.Action {
+                text: root.t("Always Accept")
+                onTriggered: {
+                    root.request("set_auto_accept", { device: offerDialog.from, on: true }, () => root.refreshDevices());
+                    root.request("respond", { request: offerDialog.transfer, accept: true });
+                    offerDialog.close();
+                }
             },
             Kirigami.Action {
                 text: root.t("Decline")
