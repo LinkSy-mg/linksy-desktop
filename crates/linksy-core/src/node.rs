@@ -2100,16 +2100,29 @@ fn folder_name(name: &str) -> String {
     if clean.is_empty() { "Phone".into() } else { clean }
 }
 
+/// Kernel buffers asked for the QUIC socket. Linux gives a UDP socket about 200 KB, which a
+/// burst at Wi-Fi speed fills: the kernel drops what doesn't fit and QUIC slows down as if
+/// the network were congested. The system caps what it gives (`net.core.rmem_max`).
+const SOCKET_BUFFER: usize = 8 << 20;
+
 fn bind_endpoint(identity: &Identity, addr: SocketAddr) -> Result<quinn::Endpoint> {
+    let server = |addr: SocketAddr| -> Result<quinn::Endpoint> {
+        let socket = std::net::UdpSocket::bind(addr)?;
+        let s = socket2::SockRef::from(&socket);
+        if let Err(e) = s.set_recv_buffer_size(SOCKET_BUFFER).and_then(|()| s.set_send_buffer_size(SOCKET_BUFFER)) {
+            debug!("socket buffers: {e}");
+        }
+        let runtime = quinn::default_runtime().ok_or_else(|| protocol("no async runtime"))?;
+        Ok(quinn::Endpoint::new(quinn::EndpointConfig::default(), Some(tls::server_config(identity)?), socket, runtime)?)
+    };
     // Prefer a dual-stack socket; fall back to IPv4 where IPv6 is unavailable.
-    let mut endpoint = match quinn::Endpoint::server(tls::server_config(identity)?, addr) {
+    let mut endpoint = match server(addr) {
         Ok(e) => e,
         Err(e) if addr.ip() == IpAddr::V6(Ipv6Addr::UNSPECIFIED) => {
             warn!("IPv6 bind failed ({e}), using IPv4");
-            let v4 = SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), addr.port());
-            quinn::Endpoint::server(tls::server_config(identity)?, v4)?
+            server(SocketAddr::new(IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), addr.port()))?
         }
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(e),
     };
     endpoint.set_default_client_config(tls::client_config(identity)?);
     Ok(endpoint)
