@@ -1249,3 +1249,26 @@ async fn private_discovery_hides_from_strangers_only() {
     a.node.cancel_invite();
     assert!(until(|| !sees(&stranger, a_id)).await, "pairing mode doesn't end");
 }
+
+/// The computer says what's plugged in by USB; the phone asks to use the cable (§4.11).
+#[tokio::test]
+async fn usb_plugged_and_usb_connect_travel() {
+    let (computer, phone) = paired().await;
+    let mut rp = phone.node.subscribe();
+    let mut rc = computer.node.subscribe();
+    let plugged = vec![linksy_core::PluggedPhone { key: "R5CX".into(), manufacturer: "samsung".into(), product: "SM-S921B".into(), state: "plugged".into() }];
+    computer.node.usb_plugged(&phone.node.info().id, plugged.clone()).await.unwrap();
+    let got = wait_for(&mut rp, |e| match e {
+        Event::UsbPlugged { phones, .. } => Some(phones.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, plugged);
+    phone.node.usb_connect(&computer.node.info().id, "R5CX").await.unwrap();
+    let key = wait_for(&mut rc, |e| match e {
+        Event::UsbConnect { key, .. } => Some(key.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(key, "R5CX");
+}

@@ -260,6 +260,18 @@ pub struct TerminalInfo {
     pub started_ms: u64,
 }
 
+/// A phone plugged into a computer by USB (§4.11).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PluggedPhone {
+    /// Its USB serial, or vendor:product.
+    pub key: String,
+    /// The USB descriptor strings.
+    pub manufacturer: String,
+    pub product: String,
+    /// `plugged`, `switching`, `accessory` or `failed`.
+    pub state: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Message {
@@ -280,6 +292,11 @@ pub enum Message {
     /// Play a loud sound until `ring_stop` or the user notices ("Ring my phone").
     Ring,
     RingStop,
+    /// The phones plugged into the sender (a computer) by USB, sent to connected phones when
+    /// that changes and after connecting (§4.11): a phone offers its own Connect button.
+    UsbPlugged { phones: Vec<PluggedPhone> },
+    /// Use the cable for this plugged-in phone (its `key` from `usb_plugged`).
+    UsbConnect { key: String },
     /// A notification on the sender (a phone) to show here; sent again with the same `key`
     /// when it changes.
     NotificationPosted(RemoteNotification),

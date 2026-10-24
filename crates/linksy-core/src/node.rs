@@ -28,7 +28,7 @@ use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::fs::FsCall;
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{Battery, CallState, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, 
+use crate::protocol::{Battery, CallState, PluggedPhone, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, 
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -151,6 +151,10 @@ pub enum Event {
     Battery { from: DeviceInfo, battery: Battery },
     /// A paired device asks this one to ring so it can be found (`on`), or to stop.
     Ring { from: DeviceInfo, on: bool },
+    /// A computer says which phones are plugged into it by USB (§4.11).
+    UsbPlugged { from: DeviceInfo, phones: Vec<PluggedPhone> },
+    /// A phone asks to use the cable (its `key` from [`Node::usb_plugged`]).
+    UsbConnect { from: DeviceInfo, key: String },
     /// A paired device (a phone) shows a notification, new or changed (same `key`).
     NotificationPosted { from: DeviceInfo, notification: RemoteNotification },
     /// …and it's gone there.
@@ -774,6 +778,16 @@ impl Node {
             return Err(invalid("battery level is a percentage"));
         }
         self.send_message(to, &Message::Battery(battery)).await
+    }
+
+    /// Computers: tell a phone which phones are plugged in by USB (§4.11).
+    pub async fn usb_plugged(&self, to: &Fingerprint, phones: Vec<PluggedPhone>) -> Result<()> {
+        self.send_message(to, &Message::UsbPlugged { phones }).await
+    }
+
+    /// Phones: ask the computer to use the cable for the plugged-in phone `key`.
+    pub async fn usb_connect(&self, to: &Fingerprint, key: &str) -> Result<()> {
+        self.send_message(to, &Message::UsbConnect { key: key.into() }).await
     }
 
     /// Make a device ring so it can be found, or stop it ringing.
@@ -1581,6 +1595,8 @@ impl Node {
                                 Ok(Message::HeartbeatWatch { on, every_s }) => node.emit(Event::HeartbeatWatch { from, on, every_s: every_s.max(5) }),
                                 Ok(Message::Ring) => node.emit(Event::Ring { from, on: true }),
                                 Ok(Message::RingStop) => node.emit(Event::Ring { from, on: false }),
+                                Ok(Message::UsbPlugged { phones }) => node.emit(Event::UsbPlugged { from, phones }),
+                                Ok(Message::UsbConnect { key }) => node.emit(Event::UsbConnect { from, key }),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
                             }
                         });
