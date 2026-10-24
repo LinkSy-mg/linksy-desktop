@@ -22,7 +22,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use linksy_core::Node;
+use linksy_core::{Event, Node, PluggedPhone};
 use linksy_ipc::{UsbPhone, UsbState, UsbStatus};
 use nusb::hotplug::HotplugEvent;
 use nusb::transfer::{Bulk, ControlIn, ControlOut, ControlType, In, Out, Recipient};
@@ -57,6 +57,8 @@ pub struct Usb {
     /// after a few seconds): not switched again by themselves, which would loop.
     unanswered: Arc<Mutex<std::collections::HashSet<String>>>,
     watching: Arc<std::sync::atomic::AtomicBool>,
+    /// What connected phones were last told is plugged in (`usb_plugged`, §4.11).
+    told: Arc<Mutex<Vec<PluggedPhone>>>,
 }
 
 struct Choices {
@@ -91,6 +93,7 @@ impl Usb {
             names: Arc::default(),
             unanswered: Arc::default(),
             watching: Arc::default(),
+            told: Arc::default(),
         }
     }
 
@@ -100,6 +103,7 @@ impl Usb {
             Err(e) => return debug!("no USB hotplug: {e}"),
         };
         self.watching.store(true, std::sync::atomic::Ordering::Relaxed);
+        tokio::spawn(self.clone().answer_phones());
         if let Ok(list) = nusb::list_devices().await {
             for d in list {
                 self.clone().plugged(d);
@@ -110,6 +114,7 @@ impl Usb {
                 HotplugEvent::Connected(d) => self.clone().plugged(d),
                 HotplugEvent::Disconnected(id) => {
                     self.plugged.lock().unwrap().remove(&id);
+                    self.tell_phones();
                 }
             }
         }
@@ -144,6 +149,74 @@ impl Usb {
             p.state = state;
             p.error = error;
         }
+        self.tell_phones();
+    }
+
+    /// The phones plugged in, as `usb_plugged` gives them.
+    fn plugged_phones(&self) -> Vec<PluggedPhone> {
+        let mut phones: Vec<PluggedPhone> = self
+            .plugged
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|(_, p)| p.state != UsbState::Declined)
+            .map(|(d, p)| PluggedPhone {
+                key: p.key.clone(),
+                manufacturer: d.manufacturer_string().unwrap_or_default().to_string(),
+                product: p.name.clone(),
+                state: serde_json::to_value(p.state).ok().and_then(|v| v.as_str().map(String::from)).unwrap_or_default(),
+            })
+            .collect();
+        phones.sort_by(|a, b| a.key.cmp(&b.key));
+        phones
+    }
+
+    /// Paired Android phones connected now.
+    fn connected_phones(&self) -> Vec<linksy_core::Fingerprint> {
+        self.node.devices().into_iter().filter(|d| d.trusted && d.connected && d.device.os == "android").map(|d| d.device.id).collect()
+    }
+
+    /// Tell connected phones what's plugged in, when that changed.
+    fn tell_phones(&self) {
+        let phones = self.plugged_phones();
+        {
+            let mut told = self.told.lock().unwrap();
+            if *told == phones {
+                return;
+            }
+            *told = phones.clone();
+        }
+        for id in self.connected_phones() {
+            let (node, phones) = (self.node.clone(), phones.clone());
+            tokio::spawn(async move {
+                let _ = node.usb_plugged(&id, phones).await;
+            });
+        }
+    }
+
+    /// A phone that connects hears what's plugged in; a phone's own Connect by USB Cable
+    /// switches it, as the computer's button does.
+    async fn answer_phones(self) {
+        let mut events = self.node.subscribe();
+        loop {
+            match events.recv().await {
+                Ok(Event::Connected { device }) if device.os == "android" => {
+                    let phones = self.plugged_phones();
+                    let _ = self.node.usb_plugged(&device.id, phones).await;
+                }
+                Ok(Event::UsbConnect { from, key }) => {
+                    info!("{} asked to use the cable", from.name);
+                    let usb = self.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = usb.connect(&key).await {
+                            warn!("cable for {}: {e}", from.name);
+                        }
+                    });
+                }
+                Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
+                Err(_) => break,
+            }
+        }
     }
 
     async fn switch(&self, id: DeviceId, d: &DeviceInfo) -> Result<(), String> {
@@ -163,6 +236,7 @@ impl Usb {
             let name = self.names.lock().unwrap().get(&key).cloned().unwrap_or_else(|| "Your phone".into());
             let id = d.id();
             self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name, state: UsbState::Accessory, error: None, auto: false }));
+            self.tell_phones();
             tokio::spawn(async move {
                 match bridge(&d, self.node.local_addr().map(|a| a.port()).unwrap_or(0)).await {
                     Ok(0) => {
@@ -192,6 +266,7 @@ impl Usb {
         };
         let id = d.id();
         self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name, state, error, auto }));
+        self.tell_phones();
         // Nothing asked: on its own only for a phone set to use the cable automatically
         // (once an Android phone is paired), and not again after its app didn't answer
         let always = std::env::var("LINKSY_USB").is_ok_and(|v| v == "always");
