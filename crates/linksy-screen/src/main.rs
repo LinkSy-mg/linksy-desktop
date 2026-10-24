@@ -96,6 +96,7 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn main() -> ExitCode {
+    linksy_logs::catch_crashes("linksy-screen", env!("CARGO_PKG_VERSION"));
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {

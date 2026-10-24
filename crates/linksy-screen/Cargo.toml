@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+linksy-logs = { path = "../linksy-logs" }
 ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast", "remote_desktop"] }
 gstreamer = "0.25.4"
 linksy-core = { path = "../linksy-core" }

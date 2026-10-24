@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+linksy-logs = { path = "../linksy-logs" }
 linksy-core = { path = "../linksy-core" }
 linksy-ipc = { path = "../linksy-ipc" }
 linksy-i18n = { path = "../linksy-i18n" }

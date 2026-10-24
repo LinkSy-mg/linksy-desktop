@@ -4,5 +4,6 @@ mod app;
 mod backend;
 
 fn main() {
+    linksy_logs::catch_crashes("linksy-qt", env!("CARGO_PKG_VERSION"));
     std::process::exit(app::ffi::run_app());
 }

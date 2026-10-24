@@ -118,6 +118,7 @@ fn parse_args() -> Result<Args, String> {
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 2)]
 async fn main() -> ExitCode {
+    linksy_logs::catch_crashes("linksyd", env!("CARGO_PKG_VERSION"));
     let level = std::env::var("LINKSY_LOG").ok().and_then(|l| l.parse().ok()).unwrap_or(tracing::Level::INFO);
     tracing_subscriber::fmt().with_max_level(level).with_target(false).init();
 

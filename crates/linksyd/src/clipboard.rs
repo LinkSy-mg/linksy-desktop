@@ -60,8 +60,9 @@ pub async fn run(node: Node, notifications: bool) {
                 tokio::task::spawn_blocking(move || {
                     let copied = copy_file(&path);
                     match &copied {
-                        Ok(()) => info!("copied {} from {from}", path.display()),
-                        Err(e) => warn!("copying {} failed: {e}", path.display()),
+                        // Not its name: logs leave out what people share
+                        Ok(()) => info!("copied a file from {from}"),
+                        Err(e) => warn!("copying a file from {from} failed: {e}"),
                     }
                     #[cfg(target_os = "linux")]
                     if notifications {
