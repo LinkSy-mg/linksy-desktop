@@ -54,6 +54,7 @@ package_linksy-common() {
     install -Dm755 "data/$s" "$pkgdir/usr/lib/linksy/$s"
   done
   sed 's|@BINDIR@|/usr/bin|' data/linksyd.service | install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/linksyd.service"
+  install -Dm644 data/linksyd-autostart.desktop "$pkgdir/etc/xdg/autostart/linksyd.desktop"
   install -Dm644 data/70-linksy-usb.rules "$pkgdir/usr/lib/udev/rules.d/70-linksy-usb.rules"
   install -Dm644 data/linksy.firewalld.xml "$pkgdir/usr/lib/firewalld/services/linksy.xml"
   sed 's|^Exec=linksy-app|Exec=linksy-open|' data/mg.diary.linksy.Linksy.desktop | install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/mg.diary.linksy.Linksy.desktop"

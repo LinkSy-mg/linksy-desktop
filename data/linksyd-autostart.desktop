@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Linksy service
+Comment=Keeps Linksy ready for your devices
+Exec=linksyd
+Icon=mg.diary.linksy.Linksy
+NoDisplay=true
+Terminal=false
+# Desktops that read XDG autostart and don't run systemd's graphical session (XFCE, MATE,
+# Cinnamon, LXQt, systems without systemd) start the service from here. Under systemd's
+# session (GNOME, KDE) linksyd.service does, so systemd skips this entry.
+X-systemd-skip=true
+X-GNOME-Autostart-enabled=true

@@ -126,6 +126,7 @@ fi
 /usr/lib/firewalld/services/linksy.xml
 /usr/lib/udev/rules.d/70-linksy-usb.rules
 /usr/lib/systemd/user/linksyd.service
+%config(noreplace) /etc/xdg/autostart/linksyd.desktop
 /usr/share/applications/mg.diary.linksy.Linksy.desktop
 /usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
 /usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg

@@ -13,6 +13,7 @@ if [ -f "$UNITS/linksyd.service" ]; then
 fi
 rm -f "$BIN/linksyd" "$BIN/linksy" "$BIN/linksy-app" "$BIN/linksy-screen" "$BIN/linksy-camera-setup" "$BIN/linksy-usb-setup" "$BIN/linksy-system-setup"
 rm -f "$SHARE/applications/mg.diary.linksy.Linksy.desktop" "$SHARE/nautilus/scripts/Send with Linksy"
+rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/autostart/linksyd.desktop"
 rm -f "$SHARE/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg" "$SHARE/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
 if [ "${1:-}" = "--purge" ]; then
   rm -rf "$SHARE/linksy"
