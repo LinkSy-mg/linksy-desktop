@@ -45,6 +45,7 @@ Usage:
   linksy upgrade [-y]                install the newest Linksy, then restart it
   linksy --version                   Linksy's version (and the service's, if it differs)
   linksy --revision                  the exact build, for bug reports
+  linksy logs > logs.txt             versions, crashes and the recent log, for a bug report
 
 <device> is a name, a short id like A1B2-C3D4, or a full id.";
 
@@ -64,6 +65,10 @@ async fn main() -> ExitCode {
         "-V" | "--version" | "version" => return version().await,
         "--revision" | "revision" => {
             println!("Linksy {}", linksy_upgrade::revision());
+            return ExitCode::SUCCESS;
+        }
+        "logs" => {
+            print!("{}", linksy_logs::collect(&linksy_upgrade::revision()));
             return ExitCode::SUCCESS;
         }
         "upgrade" | "update" => return upgrade(args[1..].iter().any(|a| a == "-y" || a == "--yes")),
