@@ -122,15 +122,22 @@ fn props_of(me: &DeviceInfo, v: &str, pairing: bool) -> Vec<(String, String)> {
     props
 }
 
-/// The records `a` should be announced as now, with their instance and host names.
-fn wanted(a: &Announce, now: Instant) -> Vec<(String, String, Vec<(String, String)>)> {
+/// One record to announce.
+struct Record {
+    instance: String,
+    host: String,
+    props: Vec<(String, String)>,
+}
+
+/// The records `a` should be announced as now.
+fn wanted(a: &Announce, now: Instant) -> Vec<Record> {
     let t = tag(&a.key, epoch_now());
-    let mut out = vec![(format!("Linksy {}", &t[..8]), format!("linksy-{}.local.", &t[..8]), vec![("v".into(), "2".into()), ("t".into(), t)])];
+    let mut out = vec![Record { instance: format!("Linksy {}", &t[..8]), host: format!("linksy-{}.local.", &t[..8]), props: vec![("v".into(), "2".into()), ("t".into(), t)] }];
     let pairing = a.pairing_until.is_some_and(|u| now < u);
     // One named record at most: the §4.1 one already lists it to everyone.
     if a.legacy || pairing {
         let props = if a.legacy { props_of(&a.me, "1", false) } else { props_of(&a.me, "2", true) };
-        out.push((format!("{} {}", a.me.name, a.me.id.short()), format!("linksy-{}.local.", a.me.id.short().to_lowercase()), props));
+        out.push(Record { instance: format!("{} {}", a.me.name, a.me.id.short()), host: format!("linksy-{}.local.", a.me.id.short().to_lowercase()), props });
     }
     out
 }
@@ -274,7 +281,7 @@ fn sync_records(daemon: &ServiceDaemon, shared: &Mutex<Shared>, port: u16) {
     let mut s = shared.lock().unwrap();
     let wanted = wanted(&s.announce, Instant::now());
     let mut keep = Vec::new();
-    for (instance, host, props) in wanted {
+    for Record { instance, host, props } in wanted {
         let info = match ServiceInfo::new(SERVICE_TYPE, &instance, &host, "", port, &props[..]) {
             Ok(i) => i.enable_addr_auto(),
             Err(e) => {
