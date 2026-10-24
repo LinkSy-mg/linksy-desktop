@@ -59,7 +59,9 @@ impl Input {
         let result = match *msg {
             ControlMsg::Pointer { x, y } => match size {
                 Some((w, h)) => {
-                    let (x, y) = (x.clamp(0.0, 1.0) * w, y.clamp(0.0, 1.0) * h);
+                    // Inside the stream: the portal refuses its right and bottom edge
+                    // (x = width), where a touchpad drag to the edge ends up (KDE: "Invalid position")
+                    let (x, y) = ((x.clamp(0.0, 1.0) * w).min(w - 1.0), (y.clamp(0.0, 1.0) * h).min(h - 1.0));
                     proxy.notify_pointer_motion_absolute(session, *node, x, y, Default::default()).await
                 }
                 None => Ok(()),
