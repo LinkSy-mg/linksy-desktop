@@ -137,11 +137,66 @@ async fn lock_screen() -> bool {
             }
         }
     }
+    // Tiling compositors and X11 desktops: the locker that's installed. loginctl below only
+    // locks where hypridle or swayidle listens for it.
+    if let Some(locker) = locker() {
+        return run_locker(locker).await;
+    }
     match tokio::process::Command::new("loginctl").arg("lock-session").status().await {
         Ok(s) if s.success() => true,
         other => {
             warn!("could not lock the screen: {other:?}");
             false
+        }
+    }
+}
+
+/// The installed screen locker for this desktop, if it needs one run by hand.
+fn locker() -> Option<&'static [&'static str]> {
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
+    let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+    let lockers: &[&[&str]] = if desktop.contains("hyprland") {
+        &[&["hyprlock"], &["swaylock", "-f"]]
+    } else if wayland {
+        // Sway, niri, river, labwc…
+        &[&["swaylock", "-f"], &["gtklock", "-d"], &["waylock"]]
+    } else {
+        &[
+            &["xflock4"],
+            &["cinnamon-screensaver-command", "-l"],
+            &["mate-screensaver-command", "-l"],
+            &["light-locker-command", "-l"],
+            &["xsecurelock"],
+            &["i3lock"],
+            &["xdg-screensaver", "lock"],
+        ]
+    };
+    lockers.iter().copied().find(|l| which(l[0]))
+}
+
+fn which(cmd: &str) -> bool {
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(cmd).is_file()))
+}
+
+/// Start the locker. Some stay running until unlocked (hyprlock, i3lock): still there after
+/// a moment, or done without an error, it locked.
+async fn run_locker(locker: &[&str]) -> bool {
+    let mut child = match tokio::process::Command::new(locker[0]).args(&locker[1..]).kill_on_drop(false).spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            warn!("could not run {}: {e}", locker[0]);
+            return false;
+        }
+    };
+    match tokio::time::timeout(Duration::from_millis(800), child.wait()).await {
+        Ok(Ok(status)) => status.success(),
+        Ok(Err(_)) => false,
+        // Still running: it holds the lock; reap it when it ends
+        Err(_) => {
+            tokio::spawn(async move {
+                let _ = child.wait().await;
+            });
+            true
         }
     }
 }
