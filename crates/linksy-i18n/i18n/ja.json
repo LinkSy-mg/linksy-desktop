@@ -347,6 +347,7 @@
   "Save Logs…": "ログを保存…",
   "Screen": "画面",
   "Screen Sharing": "画面共有",
+  "Screens go through the graphics chip when it can encode video, at up to 60 frames a second. On Fedora with AMD graphics, Finish Setup adds the driver it needs.": "グラフィックスチップが動画をエンコードできる場合、画面はそこを通り、最大 60 fps になります。AMD グラフィックスの Fedora では、セットアップが必要なドライバーを追加します。",
   "Second Display": "セカンドディスプレイ",
   "Second Display Ended": "セカンドディスプレイを終了しました",
   "Second Display for {name}": "{name} のセカンドディスプレイ",

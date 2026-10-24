@@ -347,6 +347,7 @@
   "Save Logs…": "Enregistrer les journaux…",
   "Screen": "Écran",
   "Screen Sharing": "Partage d’écran",
+  "Screens go through the graphics chip when it can encode video, at up to 60 frames a second. On Fedora with AMD graphics, Finish Setup adds the driver it needs.": "Les écrans passent par la puce graphique quand elle sait encoder la vidéo, jusqu’à 60 images par seconde. Sur Fedora avec une carte AMD, la configuration ajoute le pilote nécessaire.",
   "Second Display": "Second écran",
   "Second Display Ended": "Second écran terminé",
   "Second Display for {name}": "Second écran pour {name}",

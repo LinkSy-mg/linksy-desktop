@@ -347,6 +347,7 @@
   "Save Logs…": "Сохранить журналы…",
   "Screen": "Экран",
   "Screen Sharing": "Показ экрана",
+  "Screens go through the graphics chip when it can encode video, at up to 60 frames a second. On Fedora with AMD graphics, Finish Setup adds the driver it needs.": "Экраны идут через графический чип, когда он умеет кодировать видео, до 60 кадров в секунду. В Fedora с графикой AMD настройка добавляет нужный драйвер.",
   "Second Display": "Второй экран",
   "Second Display Ended": "Второй экран отключён",
   "Second Display for {name}": "Второй экран для {name}",

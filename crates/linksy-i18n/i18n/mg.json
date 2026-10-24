@@ -347,6 +347,7 @@
   "Save Logs…": "Tehirizo ny diary…",
   "Screen": "Efijery",
   "Screen Sharing": "Fizarana efijery",
+  "Screens go through the graphics chip when it can encode video, at up to 60 frames a second. On Fedora with AMD graphics, Finish Setup adds the driver it needs.": "Mandalo amin'ny puce grafika ny efijery rehefa mahay mamadika horonantsary izy, hatramin'ny sary 60 isan-tsegondra. Amin'ny Fedora misy grafika AMD, ampian'ny fanomanana ilay mpamily ilaina.",
   "Second Display": "Efijery faharoa",
   "Second Display Ended": "Tapitra ny efijery faharoa",
   "Second Display for {name}": "Efijery faharoa ho an'i {name}",
