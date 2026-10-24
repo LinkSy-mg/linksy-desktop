@@ -194,6 +194,14 @@ impl Sessions {
             (false, SessionKind::Display, Some(c)) => Some(c.create_output(session.size.map(monitor_size).unwrap_or((1920, 1080))).await?),
             _ => None,
         };
+        // The portal asks which screen to share: say which one is the new display
+        #[cfg(target_os = "linux")]
+        if let Some(output) = &headless {
+            crate::notify::show(
+                linksy_i18n::t!("Choose {output} to Share", output = output.name),
+                linksy_i18n::t!("{output} is the second display for {device}. Choose it in the next window; Linksy remembers the choice.", output = output.name, device = session.peer.name),
+            );
+        }
         let result = self.run_helper_on(session, device, headless.is_some()).await;
         if let Some(output) = headless {
             output.remove().await;
