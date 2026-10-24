@@ -68,6 +68,7 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Locate the phone | Done | Done (while the app is open) | `locate` / `location` (§4.14) |
 | 1080p webcam | Done | Done | `size` in `camera_control`, `size_options` (§4.8) |
 | Terminal on the computer, from the phone | Done (0.7.0) | To do | session `terminal`, code set on the computer (§4.15) |
+| Direct link (Wi-Fi Direct) for big transfers | Done (0.9.9), untested with a phone | To do | phone hosts, computer joins with NetworkManager (§4.17) |
 | Bluetooth LE presence | Not planned | Not planned | |
 
 ## 3. How to build the phone app (recommendation)
@@ -150,6 +151,9 @@ details can be checked.
   the presented certificate and checks it (§4.4).
 - Transport settings used by desktop: stream receive window 16 MiB, connection receive
   window 32 MiB, send window 32 MiB, keep-alive every 10 s, idle timeout 30 s.
+- The UDP socket asks the kernel for 8 MiB send and receive buffers (core 0.9.9; Linux
+  gives about 200 KiB by default and caps the request at `net.core.rmem_max`). A burst at
+  Wi-Fi speed overflows a small buffer, and QUIC reads the drops as congestion.
 - **Pairing code:** TLS exporter (RFC 8446 §7.5) with label `linksy pairing code v1`,
   empty context, 8 bytes output. Interpret as a big-endian `u64`, take `% 1_000_000`,
   format as 6 digits with leading zeros. Both ends of the same TLS session get the same
@@ -167,7 +171,9 @@ bytes of UTF-8 JSON. Maximum frame 1 MiB. Enums are tagged with `"type"` in snak
  "device":{"id":"<64 hex>","name":"Pixel 9","kind":"phone","os":"android"}}
 ```
 
-- `intent`: `connect` (already paired) or `pair` (start pairing).
+- `intent`: `connect` (already paired), `pair` (start pairing), or `direct` (a second
+  connection over a direct link, §4.17; paired devices only, and it doesn't replace the
+  first).
 - `stay_connected` (optional, default `false`): the sender keeps links open, so the
   receiver must not close this connection for being idle.
 - `invite` (optional, omitted when unused): the token from a scanned QR code (§4.7).
@@ -652,7 +658,9 @@ hide what a device can't do. Names: `files`, `clipboard`, `open_url`, `battery`,
 controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifications),
 `sms`, `clipboard_file` (takes `"clipboard":true` offers), `clipboard_watch` (answers
 `clipboard_watch`), `microphone` (shares its microphone), `picture` (sends and shows
-`picture`). Set `Config.features` in the core. A desktop announces all of them,
+`picture`), `direct_host` (hosts direct links: a phone with Wi-Fi Direct, §4.17),
+`direct_join` (joins them: a computer whose NetworkManager has a Wi-Fi Direct device).
+Set `Config.features` in the core. A desktop announces all of them,
 except `clipboard_watch` where its desktop doesn't let apps watch the clipboard (GNOME).
 When a device sends no list (older versions), the desktop assumes everything except, for
 `os == "android"`, `sms`, `notifications`, `media_state`, `control`, `clipboard_file`,
@@ -1072,6 +1080,106 @@ upgraded device through the §4.1 record until then, and through its last addres
 **Not covered:** the device's IP and MAC addresses (Android and most desktops use a random
 MAC per network), and the QUIC port (47200 on computers, which only says "Linksy").
 
+### 4.17 Direct links: Wi-Fi Direct for big transfers (desktop 0.9.9)
+
+Over a home network, a file goes phone → router → computer: two trips through the air,
+sharing the same airtime, at whatever signal each device has to the router. Measured on a
+realme 15 Pro and a ThinkPad E14 (MediaTek MT7921) on a 5 GHz router: about 20 MB/s, the
+same as a browser download. A **direct link** is a Wi-Fi network of the two devices' own
+(Wi-Fi Direct, as AirDrop and Quick Share do): one trip, at close range. Expected 40 to
+80 MB/s on Wi-Fi 6 hardware, to be measured.
+
+**Who does what.** The **host** (feature `direct_host`, a phone) makes the link: Android
+does Wi-Fi Direct without asking the user when the app starts it. The **joiner**
+(`direct_join`, a computer) joins it with NetworkManager, without root, and stays on its
+own Wi-Fi network meanwhile where the card can do both (most can; the internet stays
+there). Each app does the Wi-Fi part; the core relays the steps between them, waits for
+the link, and carries the transfers over a **second QUIC connection** on it (`hello` with
+`intent: direct`, §4.4). The usual connection stays up for everything else.
+
+**When.** The sender's core sets a link up before sending files of **256 MiB or more**
+(`Config.direct_min`), or an eighth of that when the devices are connected away from home
+(§4.13: they may still be side by side), never over a USB cable. It waits at most
+**25 s**, then sends over the usual connection. A link that failed isn't tried again with
+that device for 10 minutes. `node.direct_link(id)` sets one up on demand (for testing).
+A link with no transfer for **20 s** closes on both sides: `Event::DirectEnded`.
+
+**Steps** (unidirectional `direct` messages; their order on the wire isn't guaranteed, so
+handle `up` before `connecting` too):
+
+```json
+{"type":"direct","step":{"type":"ask"}}                                     // joiner → host: "set one up"
+{"type":"direct","step":{"type":"invite","address":"aa:bb:cc:dd:ee:ff"}}    // host → joiner: the host's Wi-Fi Direct address
+{"type":"direct","step":{"type":"listening","address":"d8:80:83:cb:0d:33"}} // joiner → host: findable at this address
+{"type":"direct","step":{"type":"connecting"}}                              // host → joiner: connecting to you now
+{"type":"direct","step":{"type":"up","ip":"192.168.49.1","port":47200}}     // host → joiner: Linksy is here on the link
+{"type":"direct","step":{"type":"end","reason":"no Wi-Fi Direct permission"}} // either way, reason optional
+```
+
+1. **Start.** The sender wants a link. A host sender's core emits `Event::DirectWanted`
+   to its own app; a joiner sender's core sends `ask`, and the host's core emits
+   `DirectWanted` there. A host that can't answers `end`.
+2. **Host app**, on `DirectWanted {id}`: make sure Wi-Fi Direct is usable, start
+   discovering peers, and send `invite` with its own Wi-Fi Direct device address.
+3. **Joiner app**, on `Event::Direct {step: invite}`: become findable and send `listening`
+   with its own address.
+4. **Host app**, on `listening`: wait until that address shows up among the peers, connect
+   to it as push-button with group-owner intent 15 (so the phone hosts), then send
+   `connecting`.
+5. **Joiner app**, on `connecting`: connect back to the host's address (push-button too).
+   The joiner refusing the phone's first request until then is normal Wi-Fi Direct ("info
+   currently unavailable"): the phone waits for the joiner's request, and because both
+   asked, neither device shows an invitation dialog.
+6. **Host app**, once the group is formed: send `up` with its own IPv4 address in the
+   group (as group owner, `192.168.49.1`) and its Linksy port (`node.local_addr()`).
+7. **Joiner app**, once its side is connected and `up` arrived: `node.direct_dial(id, ip:port)`.
+   Both cores emit `Event::DirectLinked`, and transfers go over it.
+8. **End.** On `Event::DirectEnded` (idle, failed, or ended by the other side), each app
+   drops its part: the host removes its group, the joiner disconnects. Either app ends a
+   failed attempt with `node.direct_end(id, Some(reason))`.
+
+Checks in the core: addresses must look like `aa:bb:cc:dd:ee:ff`; `up` must carry a
+private (or link-local) IPv4 address and a port, so a paired device can't point the
+joiner anywhere else. The second connection is mutual TLS as always; Wi-Fi Direct's own
+WPA2 is on top.
+
+**Android, the host** (`WifiP2pManager`, API 29+ for `requestDeviceInfo`):
+
+- Announce `direct_host` where `PackageManager.FEATURE_WIFI_DIRECT` exists. Permissions:
+  `ACCESS_WIFI_STATE`, `CHANGE_WIFI_STATE`, and `NEARBY_WIFI_DEVICES` (Android 13+, with
+  `usesPermissionFlags="neverForLocation"`) or `ACCESS_FINE_LOCATION` (12 and older).
+  Without them, or with Wi-Fi off, answer `DirectWanted` with
+  `direct_end(id, "no Wi-Fi Direct permission")` / `"Wi-Fi is off"`; the core then sends
+  over the network as before.
+- `DirectWanted`: `removeGroup` (anything left over), `requestDeviceInfo` for this phone's
+  `deviceAddress`, `discoverPeers`, then `direct_send(id, Invite { address })`.
+- `listening {address}`: on each `WIFI_P2P_PEERS_CHANGED_ACTION`, `requestPeers` until a
+  peer's `deviceAddress` equals `address` (compare lower-case). Then `connect` with
+  `WifiP2pConfig().apply { deviceAddress = address; wps.setup = WpsInfo.PBC;
+  groupOwnerIntent = 15 }` (not the `Builder`, which is for groups with a passphrase), and
+  on success `direct_send(id, Connecting)`.
+- `WIFI_P2P_CONNECTION_CHANGED_ACTION` → `requestConnectionInfo`: when `groupFormed`,
+  send `Up { ip, port }` with `groupOwnerAddress` if `isGroupOwner`, else the phone's
+  IPv4 address on its `p2p…` network interface.
+- `DirectEnded`: `removeGroup`, `stopPeerDiscovery`, unregister the receiver.
+- The QUIC socket must listen on all interfaces (it does: `[::]`), so the computer reaches
+  it over the group.
+
+**Linux, the joiner** (`crates/linksyd/src/direct.rs`): announced only when NetworkManager
+has a Wi-Fi Direct device (`DeviceType` 30, `p2p-dev-wlan0`); `--no-direct` turns it off.
+`StartFind` (30 s) makes it findable; its address comes from `iw dev` (the `P2P-device`),
+or else the Wi-Fi card's own address. On `connecting` it activates a `wifi-p2p`
+connection to the phone's address: the user's own (`connection.permissions`, so no
+password is asked), never saved (`persist: volatile`), dropped if the service goes away
+(`bind-activation: dbus-client`), and never the default route (`ipv4.never-default`).
+The Flatpak needs `--system-talk-name=org.freedesktop.NetworkManager`.
+
+**Testing it.** Send a file of 256 MiB or more from either side with both apps running
+this version. The computer's log shows each step:
+`journalctl --user -u linksyd -f | grep -i direct` ("setting up a direct link", "direct
+link to … up", or "no direct link: <why>"). Compare the transfer speed with and without
+(`--no-direct`).
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -1097,6 +1205,9 @@ node.send_media_state(id, &MediaState{ seq, players })   node.media_command(id, 
 node.watch_media(id, on)                    // Event::MediaState / MediaCommand / MediaWatch
 node.watch_volume(id, on)  node.set_volume(id, Some(0.4), None)   // Event::VolumeState { from, state }
 node.send_volume_state(id, &VolumeState{ seq, level, muted })     // Event::VolumeWatch / VolumeSet
+node.direct_send(id, DirectStep::Invite { address } | Listening | Connecting | Up { ip, port })   // §4.17
+node.direct_dial(id, addr)  node.direct_end(id, reason)  node.direct_link(id)
+// Event::DirectWanted { id } (host: start) / Direct { from, step } / DirectLinked { id } / DirectEnded { id, reason }
 node.send_call_state(id, CallState::Ringing | Active | Idle, contact)
 node.heartbeat(id)                          // Event::HeartbeatWatch { from, on, every_s } says when
 node.sms_threads(id, threads) / node.sms_messages(id, thread, messages, more)   // answers
@@ -1179,6 +1290,12 @@ Earlier notes, still valid:
 
 ## 7. Open items affecting mobile
 
+- [ ] **Direct links, the host side (desktop 0.9.9, §4.17).** Announce `direct_host`,
+      then the Android steps in §4.17: `DirectWanted` → `invite`; `listening` → find the
+      computer, `connect` with group-owner intent 15 → `connecting`; group formed →
+      `up`; `DirectEnded` → `removeGroup`. Test with a 256 MiB file (or
+      `node.direct_link(id)`) and compare the speed with the computer's `--no-direct`.
+      Needs core ≥ this change (direct links, bigger socket buffers).
 - [ ] **The computer's volume (desktop 0.9.8, §4.5 "Volume").** For a computer with the
       `volume` feature: `node.watch_volume(id, true)` while its player shows (with
       `watch_media`), a slider and a mute button from `Event::VolumeState`, and
@@ -1502,3 +1619,10 @@ robust against any encoder (GPU ones may slice too):
   file that was offered (device and inode): if it was closed and the number reused, the
   transfer fails with "… isn't the file that was offered any more" instead of sending
   another file. Keep the descriptor open until the transfer ends.
+- **2026-10-24** — Core and desktop 0.9.9: **direct links** (§4.17). Wi-Fi Direct between a
+  phone (host, `direct_host`) and a computer (joiner, `direct_join`, NetworkManager) for
+  transfers of 256 MiB or more: `direct` messages (`ask`, `invite`, `listening`,
+  `connecting`, `up`, `end`), handshake `intent: direct` for a second connection, core
+  `direct_send` / `direct_dial` / `direct_end` / `direct_link`, `Config.direct_min`, and
+  `Event::DirectWanted` / `Direct` / `DirectLinked` / `DirectEnded`. Also: the QUIC socket
+  asks for 8 MiB kernel buffers (§4.3). Phone to-do in §7.
