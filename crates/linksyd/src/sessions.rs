@@ -372,12 +372,7 @@ impl Sessions {
         // A running app opens the viewer on the session event; one that isn't running
         // finds the session when it starts.
         if !self.test_pattern {
-            let _ = std::process::Command::new(window_app())
-                .env("LINKSY_SOCKET", &self.socket)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn();
+            open_window(&self.socket);
         }
         Ok(())
     }
@@ -582,13 +577,11 @@ impl Output {
     }
 }
 
-/// A helper's command line, in a memory budget of its own: a systemd scope capped at 512 MB
-/// (a phone-shaped second display needs 150-250 MB), so it never runs into the service's
-/// own small cap. The helper runs in place (same process), and the scope goes away with
-/// it. Without a working `systemd-run` (the Flatpak, no systemd), started as is.
-fn helper_command(name: &str) -> tokio::process::Command {
+/// Whether programs can be started in a systemd scope of their own (not in the Flatpak,
+/// nor without systemd).
+fn scopes() -> bool {
     static SCOPES: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let scopes = *SCOPES.get_or_init(|| {
+    *SCOPES.get_or_init(|| {
         std::env::var_os("FLATPAK_ID").is_none()
             && std::process::Command::new("systemd-run")
                 .args(["--user", "--scope", "--quiet", "--collect", "--expand-environment=no", "--", "true"])
@@ -596,13 +589,34 @@ fn helper_command(name: &str) -> tokio::process::Command {
                 .stderr(std::process::Stdio::null())
                 .status()
                 .is_ok_and(|s| s.success())
-    });
-    if !scopes {
+    })
+}
+
+/// A helper's command line, in a memory budget of its own: a systemd scope capped at 512 MB
+/// (a phone-shaped second display needs 150-250 MB), so it never runs into the service's
+/// own small cap. The helper runs in place (same process), and the scope goes away with
+/// it. Without a working `systemd-run` (the Flatpak, no systemd), started as is.
+fn helper_command(name: &str) -> tokio::process::Command {
+    if !scopes() {
         return tokio::process::Command::new(helper(name));
     }
     let mut cmd = tokio::process::Command::new("systemd-run");
     cmd.args(["--user", "--scope", "--quiet", "--collect", "--expand-environment=no", "-p", "MemoryMax=512M", "--"]).arg(helper(name));
     cmd
+}
+
+/// Open Linksy's window. In a scope of its own, like the helpers: started from the service,
+/// it would otherwise share the service's small memory cap.
+pub(crate) fn open_window(socket: &Path) {
+    let mut cmd = if scopes() {
+        let mut cmd = tokio::process::Command::new("systemd-run");
+        cmd.args(["--user", "--scope", "--quiet", "--collect", "--expand-environment=no", "--"]).arg(window_app());
+        cmd
+    } else {
+        tokio::process::Command::new(window_app())
+    };
+    // Not waited for: tokio collects it once it exits
+    let _ = cmd.env("LINKSY_SOCKET", socket).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
 }
 
 pub(crate) fn helper(name: &str) -> PathBuf {
