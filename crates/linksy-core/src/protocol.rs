@@ -23,6 +23,9 @@ pub enum Intent {
     Connect,
     /// Start pairing; both users must confirm the code.
     Pair,
+    /// A second connection between paired devices over a direct Wi-Fi link they just set
+    /// up (docs/protocol.md §4.17), for big transfers; the first one stays.
+    Direct,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -388,6 +391,51 @@ pub enum Message {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    /// Setting up (or ending) a direct Wi-Fi link for big transfers (§4.17).
+    Direct { step: DirectStep },
+}
+
+/// The steps of a direct link (docs/protocol.md §4.17), between a device that hosts it
+/// (feature `direct_host`: a phone, with Wi-Fi Direct) and one that joins it
+/// (`direct_join`: a computer). Addresses are Wi-Fi Direct device addresses
+/// (`aa:bb:cc:dd:ee:ff`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum DirectStep {
+    /// Joiner → host: a direct link would help, start one (or answer `end`).
+    Ask,
+    /// Host → joiner: this is the host's address; become findable and answer `listening`.
+    Invite { address: String },
+    /// Joiner → host: findable at this address.
+    Listening { address: String },
+    /// Host → joiner: the host is connecting to it now; connect back to the host's address.
+    Connecting,
+    /// Host → joiner: the link is up; the host's Linksy is at `ip`:`port` on it.
+    Up { ip: std::net::IpAddr, port: u16 },
+    /// Either way: it failed (`reason`) or is no longer needed; both drop the link.
+    End {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+}
+
+impl DirectStep {
+    /// Whether what it carries looks right: a device address, a private IPv4 address (or
+    /// this one's, for tests).
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Invite { address } | Self::Listening { address } => is_device_address(address),
+            Self::Up { ip: std::net::IpAddr::V4(ip), port } => (ip.is_private() || ip.is_link_local() || ip.is_loopback()) && *port != 0,
+            Self::Up { .. } => false,
+            Self::End { reason } => reason.as_ref().is_none_or(|r| r.len() <= 200),
+            Self::Ask | Self::Connecting => true,
+        }
+    }
+}
+
+/// `aa:bb:cc:dd:ee:ff`, hex in either case.
+fn is_device_address(s: &str) -> bool {
+    s.len() == 17 && s.split(':').all(|b| b.len() == 2 && b.bytes().all(|c| c.is_ascii_hexdigit()))
 }
 
 /// Browsing a device's files ("phone in the Files sidebar"): the first message of a
@@ -624,6 +672,25 @@ mod tests {
         assert_eq!(set, Message::VolumeSet { level: None, muted: Some(true) });
         assert_eq!(serde_json::to_string(&Message::VolumeSet { level: Some(0.5), muted: None }).unwrap(), r#"{"type":"volume_set","level":0.5}"#);
         assert_eq!(serde_json::from_str::<Message>(r#"{"type":"volume_watch","on":true}"#).unwrap(), Message::VolumeWatch { on: true });
+    }
+
+    #[test]
+    fn direct_steps_read_as_documented() {
+        let invite: Message = serde_json::from_str(r#"{"type":"direct","step":{"type":"invite","address":"AA:bb:cc:dd:ee:01"}}"#).unwrap();
+        assert_eq!(invite, Message::Direct { step: DirectStep::Invite { address: "AA:bb:cc:dd:ee:01".into() } });
+        let up = Message::Direct { step: DirectStep::Up { ip: "192.168.49.1".parse().unwrap(), port: 47200 } };
+        assert_eq!(serde_json::to_string(&up).unwrap(), r#"{"type":"direct","step":{"type":"up","ip":"192.168.49.1","port":47200}}"#);
+        assert_eq!(serde_json::from_str::<Message>(r#"{"type":"direct","step":{"type":"connecting"}}"#).unwrap(), Message::Direct { step: DirectStep::Connecting });
+        assert_eq!(serde_json::to_string(&Message::Direct { step: DirectStep::End { reason: None } }).unwrap(), r#"{"type":"direct","step":{"type":"end"}}"#);
+        assert_eq!(serde_json::to_string(&Intent::Direct).unwrap(), r#""direct""#);
+
+        assert!(DirectStep::Listening { address: "02:00:00:00:00:0a".into() }.is_valid());
+        assert!(!DirectStep::Listening { address: "02:00:00:00:00:0".into() }.is_valid());
+        assert!(!DirectStep::Invite { address: "02:00:00:00:00:zz".into() }.is_valid());
+        // Only a private address on the link: never somewhere on the internet
+        assert!(!DirectStep::Up { ip: "8.8.8.8".parse().unwrap(), port: 47200 }.is_valid());
+        assert!(!DirectStep::Up { ip: "192.168.49.1".parse().unwrap(), port: 0 }.is_valid());
+        assert!(!DirectStep::Up { ip: "::1".parse().unwrap(), port: 47200 }.is_valid());
     }
 
     #[test]

@@ -983,6 +983,8 @@ impl Window {
             // Media players are the service's (MPRIS, so GNOME's own controls show them).
             Event::MediaState { .. } | Event::MediaCommand { .. } | Event::MediaWatch { .. } | Event::CallState { .. } => {}
             Event::VolumeState { .. } | Event::VolumeSet { .. } | Event::VolumeWatch { .. } => {}
+            // Direct links are the service's to set up (docs/protocol.md §4.17).
+            Event::DirectWanted { .. } | Event::Direct { .. } | Event::DirectLinked { .. } | Event::DirectEnded { .. } => {}
             Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } | Event::ClipboardWatch { .. } | Event::ClipboardFile { .. } => {}
             // Between the service and phones (USB cable, §4.11)
             Event::UsbPlugged { .. } | Event::UsbConnect { .. } => {}

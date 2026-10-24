@@ -28,7 +28,7 @@ use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::fs::FsCall;
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{Battery, CallState, PluggedPhone, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState, 
+use crate::protocol::{Battery, CallState, DirectStep, PluggedPhone, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState, 
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -60,6 +60,13 @@ const RECONNECT_EVERY: Duration = Duration::from_secs(15);
 const DIAL_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long a pairing QR code stays valid.
 const INVITE_TTL: Duration = Duration::from_secs(300);
+/// A direct link (docs/protocol.md §4.17) that isn't up this long after it was asked for
+/// has failed, and what waited for it goes the usual way.
+const DIRECT_SETUP: Duration = Duration::from_secs(25);
+/// A direct link with nothing going on this long closes, so the phone stops hosting it.
+const DIRECT_IDLE: Duration = Duration::from_secs(20);
+/// After a direct link with a device failed, transfers don't wait for another this long.
+const DIRECT_RETRY: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -87,6 +94,9 @@ pub struct Config {
     /// `away` can still turn it off for the user.
     pub away: bool,
     pub relay: Option<String>,
+    /// Transfers at least this big set up a direct link first when both devices can
+    /// (docs/protocol.md §4.17); from away, an eighth of it.
+    pub direct_min: u64,
 }
 
 impl Config {
@@ -105,6 +115,7 @@ impl Config {
             features: Vec::new(),
             away: false,
             relay: None,
+            direct_min: 256 << 20,
         }
     }
 }
@@ -208,6 +219,15 @@ pub enum Event {
     SmsMessages { from: DeviceInfo, thread: String, messages: Vec<SmsMessage>, more: bool },
     SmsMessage { from: DeviceInfo, thread: String, message: SmsMessage },
     SmsSent { from: DeviceInfo, client_id: String, ok: bool, error: Option<String> },
+    /// Direct links (docs/protocol.md §4.17). This device hosts one: set it up with this
+    /// device (answer with [`Node::direct_send`], `invite` first).
+    DirectWanted { id: Fingerprint },
+    /// A step from the other device, for what this device's app does next.
+    Direct { from: DeviceInfo, step: DirectStep },
+    /// The link is up: big transfers go over it.
+    DirectLinked { id: Fingerprint },
+    /// The link is gone, or never came: drop what this device set up for it.
+    DirectEnded { id: Fingerprint, reason: Option<String> },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -338,6 +358,12 @@ struct Peer {
     peer_stays: bool,
 }
 
+/// A direct link's connection to a device (docs/protocol.md §4.17), beside the usual one.
+struct Lane {
+    conn: quinn::Connection,
+    activity: Arc<Activity>,
+}
+
 /// What a connection is doing, so idle ones can be closed.
 struct Activity {
     /// Transfers and prompts in progress.
@@ -425,6 +451,13 @@ struct Inner {
     volume_seq: Mutex<HashMap<Fingerprint, u64>>,
     /// Away from home, when on (docs/protocol.md §4.13).
     away: Mutex<Option<Arc<crate::away::Away>>>,
+    /// Direct links up, for big transfers (docs/protocol.md §4.17).
+    lanes: Mutex<HashMap<Fingerprint, Lane>>,
+    /// Direct links being set up: which attempt, and where its outcome (up or not) goes.
+    direct: Mutex<HashMap<Fingerprint, (usize, watch::Sender<Option<bool>>)>>,
+    direct_attempts: AtomicUsize,
+    /// When a direct link with a device last failed, and why.
+    direct_failed: Mutex<HashMap<Fingerprint, (Instant, String)>>,
 }
 
 #[derive(Clone)]
@@ -484,6 +517,10 @@ impl Node {
                 unsupported: Mutex::new(Default::default()),
                 session_sizes: Mutex::default(),
                 away: Mutex::new(None),
+                lanes: Mutex::default(),
+                direct: Mutex::default(),
+                direct_attempts: AtomicUsize::new(0),
+                direct_failed: Mutex::default(),
             }),
         };
 
@@ -1130,13 +1167,24 @@ impl Node {
         }
         let id = Uuid::new_v4();
         let node = self.clone();
+        let to = *to;
         let task = tokio::spawn(async move {
             let entries: Vec<FileEntry> = files.iter().map(|f| f.entry.clone()).collect();
             let total = entries.iter().map(|f| f.size).sum();
             let result = async {
-                let (mut send, mut recv) = conn.open_bi().await?;
-                write_msg(&mut send, &TransferMsg::Offer { id, files: entries.clone(), import, clipboard }).await?;
-                node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries, total, import });
+                node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries.clone(), total, import });
+                // Big ones over a direct link, when the devices can set one up
+                let lane = node.direct_for(&to, total).await;
+                let _lane_busy = lane.as_ref().map(|(_, a)| a.hold());
+                let opened = match lane {
+                    Some((lane, _)) => lane.open_bi().await.ok(),
+                    None => None,
+                };
+                let (mut send, mut recv) = match opened {
+                    Some(streams) => streams,
+                    None => conn.open_bi().await?,
+                };
+                write_msg(&mut send, &TransferMsg::Offer { id, files: entries, import, clipboard }).await?;
                 let offsets = match read_msg(&mut recv).await? {
                     TransferMsg::Accept { offsets } => offsets,
                     TransferMsg::Decline => return Err(Error::Declined),
@@ -1358,7 +1406,11 @@ impl Node {
                 write_msg(&mut send, &self.welcome()).await?;
                 self.register(conn, device, fp, peer_stays);
             }
-            Intent::Connect => {
+            Intent::Direct if trusted => {
+                write_msg(&mut send, &self.welcome()).await?;
+                self.add_lane(conn, device);
+            }
+            Intent::Connect | Intent::Direct => {
                 write_msg(&mut send, &Handshake::Reject { reason: RejectReason::NotPaired }).await?;
                 send.finish()?;
                 // Let the reject arrive before the connection goes away.
@@ -1388,7 +1440,7 @@ impl Node {
             conn.close(0u32.into(), b"self");
             return Err(invalid("that address is this device"));
         }
-        if intent == Intent::Connect && !self.inner.trust.lock().unwrap().contains(&fp) {
+        if intent != Intent::Pair && !self.inner.trust.lock().unwrap().contains(&fp) {
             conn.close(0u32.into(), b"not paired");
             return Err(Error::NotPaired);
         }
@@ -1407,7 +1459,11 @@ impl Node {
             self.run_pairing(&conn, &mut send, &mut recv, &device, false, scanned).await?;
         }
         let _ = send.finish();
-        self.register(conn, device.clone(), self.inner.id, peer_stays);
+        if intent == Intent::Direct {
+            self.add_lane(conn, device.clone());
+        } else {
+            self.register(conn, device.clone(), self.inner.id, peer_stays);
+        }
         Ok(device)
     }
 
@@ -1651,6 +1707,8 @@ impl Node {
                                 Ok(Message::RingStop) => node.emit(Event::Ring { from, on: false }),
                                 Ok(Message::UsbPlugged { phones }) => node.emit(Event::UsbPlugged { from, phones }),
                                 Ok(Message::UsbConnect { key }) => node.emit(Event::UsbConnect { from, key }),
+                                Ok(Message::Direct { step }) if step.is_valid() => node.direct_step(from, step),
+                                Ok(Message::Direct { .. }) => debug!("bad direct link step from {}", from.name),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
                             }
                         });
@@ -1976,6 +2034,241 @@ impl Node {
     }
 }
 
+/// Direct links (docs/protocol.md §4.17): a Wi-Fi link of their own between two nearby
+/// devices, set up for big transfers, which then go over a second connection on it. The
+/// host (a phone) makes the link, the joiner (a computer) joins it; their apps do that
+/// part, the core relays the steps, waits, and carries the transfers.
+impl Node {
+    /// Set up a direct link with a device now, and wait until it's up; big transfers do it
+    /// by themselves.
+    pub async fn direct_link(&self, to: &Fingerprint) -> Result<()> {
+        self.ensure_connection(to).await?;
+        let host = self.direct_role(to).ok_or(Error::Unsupported)?;
+        self.inner.direct_failed.lock().unwrap().remove(to);
+        if self.direct_wait(to, host).await.is_some() {
+            return Ok(());
+        }
+        let reason = self.inner.direct_failed.lock().unwrap().get(to).map(|(_, r)| r.clone());
+        Err(invalid(format!("no direct link: {}", reason.as_deref().unwrap_or("it didn't come up"))))
+    }
+
+    /// Tell the other device what this one's app did for a direct link (`end` ends it, as
+    /// [`Node::direct_end`]).
+    pub async fn direct_send(&self, to: &Fingerprint, step: DirectStep) -> Result<()> {
+        if !step.is_valid() {
+            return Err(invalid("that direct link step isn't valid"));
+        }
+        if let DirectStep::End { reason } = step {
+            self.direct_end(to, reason).await;
+            return Ok(());
+        }
+        self.send_message(to, &Message::Direct { step }).await
+    }
+
+    /// The joiner's last step: the link is up and the host said where it is (`up`), so
+    /// open the connection for transfers over it.
+    pub async fn direct_dial(&self, to: &Fingerprint, addr: SocketAddr) -> Result<()> {
+        let connecting = self.inner.endpoint.connect(addr, "linksy")?;
+        let conn = tokio::time::timeout(HANDSHAKE_TIMEOUT, connecting).await.map_err(|_| Error::Timeout)??;
+        if tls::peer_fingerprint(&conn)? != *to {
+            conn.close(0u32.into(), b"wrong device");
+            return Err(protocol("another device answered on the direct link"));
+        }
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Direct, None)).await.map_err(|_| Error::Timeout)??;
+        Ok(())
+    }
+
+    /// End the direct link with a device, up or being set up: the other device hears it,
+    /// and both get `DirectEnded`.
+    pub async fn direct_end(&self, to: &Fingerprint, reason: Option<String>) {
+        if self.direct_drop(to, reason.clone()) {
+            let _ = self.send_message(to, &Message::Direct { step: DirectStep::End { reason } }).await;
+        }
+    }
+
+    /// Whether this device would host (`true`) or join (`false`) a direct link with `to`,
+    /// from what both can do; hosting when it could do either.
+    fn direct_role(&self, to: &Fingerprint) -> Option<bool> {
+        [true, false].into_iter().find(|&host| self.can_direct(to, host))
+    }
+
+    /// Whether this device can host (or join) a direct link that `to` joins (or hosts).
+    fn can_direct(&self, to: &Fingerprint, host: bool) -> bool {
+        let (mine, theirs) = if host { ("direct_host", "direct_join") } else { ("direct_join", "direct_host") };
+        self.info().features.iter().any(|f| f == mine) && self.peer_info(to).is_some_and(|p| p.features.iter().any(|f| f == theirs))
+    }
+
+    /// The direct link a transfer of `total` bytes to `to` goes over: the one up, or a new
+    /// one when it's worth the wait.
+    async fn direct_for(&self, to: &Fingerprint, total: u64) -> Option<(quinn::Connection, Arc<Activity>)> {
+        if let Some(lane) = self.lane(to) {
+            return Some(lane);
+        }
+        let host = self.direct_role(to)?;
+        if !worth_direct(self.link(to)?, total, self.inner.config.direct_min)
+            || self.inner.direct_failed.lock().unwrap().get(to).is_some_and(|(at, _)| at.elapsed() < DIRECT_RETRY)
+        {
+            return None;
+        }
+        self.direct_wait(to, host).await
+    }
+
+    /// Start a direct link with `to`, or join the attempt under way, and wait for it.
+    async fn direct_wait(&self, to: &Fingerprint, host: bool) -> Option<(quinn::Connection, Arc<Activity>)> {
+        let (mut outcome, started) = self.direct_begin(to);
+        if started {
+            info!("setting up a direct link");
+            if host {
+                self.emit(Event::DirectWanted { id: *to });
+            } else if let Err(e) = self.send_message(to, &Message::Direct { step: DirectStep::Ask }).await {
+                self.direct_drop(to, Some(e.to_string()));
+            }
+        }
+        // Its own timer ends the attempt when it doesn't come up
+        let _ = outcome.wait_for(Option::is_some).await;
+        self.lane(to)
+    }
+
+    /// The attempt at a direct link with `to` under way, or a new one (`true`), which
+    /// fails if it isn't up in time.
+    fn direct_begin(&self, to: &Fingerprint) -> (watch::Receiver<Option<bool>>, bool) {
+        let mut direct = self.inner.direct.lock().unwrap();
+        if let Some((_, tx)) = direct.get(to) {
+            return (tx.subscribe(), false);
+        }
+        let attempt = self.inner.direct_attempts.fetch_add(1, Ordering::SeqCst);
+        let (tx, rx) = watch::channel(None);
+        direct.insert(*to, (attempt, tx));
+        let (node, id) = (self.clone(), *to);
+        tokio::spawn(async move {
+            tokio::time::sleep(DIRECT_SETUP).await;
+            let pending = node.inner.direct.lock().unwrap().get(&id).is_some_and(|(a, _)| *a == attempt);
+            if pending {
+                node.direct_end(&id, Some("it took too long".into())).await;
+            }
+        });
+        (rx, true)
+    }
+
+    /// Drop the direct link with `to`, or the attempt at one (remembered as failed); false
+    /// when there was neither.
+    fn direct_drop(&self, to: &Fingerprint, reason: Option<String>) -> bool {
+        let lane = self.inner.lanes.lock().unwrap().remove(to);
+        let attempt = self.inner.direct.lock().unwrap().remove(to);
+        if let Some((_, outcome)) = &attempt {
+            let why = reason.clone().unwrap_or_else(|| "the other device ended it".into());
+            info!("no direct link: {why}");
+            self.inner.direct_failed.lock().unwrap().insert(*to, (Instant::now(), why));
+            outcome.send_replace(Some(false));
+        }
+        if let Some(lane) = &lane {
+            lane.conn.close(0u32.into(), b"direct link ended");
+        }
+        let any = lane.is_some() || attempt.is_some();
+        if any {
+            self.emit(Event::DirectEnded { id: *to, reason });
+        }
+        any
+    }
+
+    /// A step of a direct link from `from`: the core's part, then the app's.
+    fn direct_step(&self, from: DeviceInfo, step: DirectStep) {
+        let id = from.id;
+        let refuse = |why: &str| {
+            let (node, step) = (self.clone(), DirectStep::End { reason: Some(why.into()) });
+            tokio::spawn(async move {
+                let _ = node.send_message(&id, &Message::Direct { step }).await;
+            });
+        };
+        match step {
+            DirectStep::Ask if self.can_direct(&id, true) => {
+                if self.direct_begin(&id).1 {
+                    self.emit(Event::DirectWanted { id });
+                }
+            }
+            DirectStep::Ask => refuse("this device can't host a direct link"),
+            DirectStep::Invite { .. } if !self.can_direct(&id, false) => refuse("this device can't join a direct link"),
+            DirectStep::End { reason } => {
+                self.direct_drop(&id, reason);
+            }
+            step => {
+                if matches!(step, DirectStep::Invite { .. }) {
+                    self.direct_begin(&id);
+                }
+                self.emit(Event::Direct { from, step });
+            }
+        }
+    }
+
+    fn lane(&self, id: &Fingerprint) -> Option<(quinn::Connection, Arc<Activity>)> {
+        let lanes = self.inner.lanes.lock().unwrap();
+        let lane = lanes.get(id).filter(|l| l.conn.close_reason().is_none())?;
+        Some((lane.conn.clone(), lane.activity.clone()))
+    }
+
+    /// A direct link's connection is up, either side.
+    fn add_lane(&self, conn: quinn::Connection, device: DeviceInfo) {
+        let activity = Activity::new();
+        let old = self.inner.lanes.lock().unwrap().insert(device.id, Lane { conn: conn.clone(), activity: activity.clone() });
+        if let Some(old) = old {
+            old.conn.close(0u32.into(), b"replaced");
+        }
+        if let Some((_, outcome)) = self.inner.direct.lock().unwrap().remove(&device.id) {
+            outcome.send_replace(Some(true));
+        }
+        self.inner.direct_failed.lock().unwrap().remove(&device.id);
+        info!(addr = %conn.remote_address(), "direct link to {} up", device.name);
+        self.emit(Event::DirectLinked { id: device.id });
+        tokio::spawn(self.clone().serve_lane(conn, device, activity));
+    }
+
+    /// Transfers arriving over a direct link; it closes once nothing has gone on for a while.
+    async fn serve_lane(self, conn: quinn::Connection, device: DeviceInfo, activity: Arc<Activity>) {
+        let mut check = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            tokio::select! {
+                bi = conn.accept_bi() => match bi {
+                    Ok((send, recv)) => {
+                        let (node, from, busy) = (self.clone(), device.clone(), activity.hold());
+                        tokio::spawn(async move {
+                            node.handle_stream(from, send, recv).await;
+                            drop(busy);
+                        });
+                    }
+                    Err(_) => break,
+                },
+                _ = check.tick() => if activity.idle_for().is_some_and(|d| d >= DIRECT_IDLE) {
+                    conn.close(0u32.into(), b"idle");
+                    break;
+                },
+            }
+        }
+        let mine = {
+            let mut lanes = self.inner.lanes.lock().unwrap();
+            let mine = lanes.get(&device.id).is_some_and(|l| l.conn.stable_id() == conn.stable_id());
+            if mine {
+                lanes.remove(&device.id);
+            }
+            mine
+        };
+        if mine {
+            info!("direct link to {} down", device.name);
+            self.emit(Event::DirectEnded { id: device.id, reason: None });
+        }
+    }
+}
+
+/// Whether sending `total` bytes over `link` is worth setting up a direct link first,
+/// which takes a few seconds; never instead of a cable.
+fn worth_direct(link: Link, total: u64, min: u64) -> bool {
+    match link {
+        Link::Usb => false,
+        Link::Lan => total >= min,
+        // Through the internet it's slow, so smaller ones gain too
+        Link::Away => total >= min / 8,
+    }
+}
+
 /// Away from home (docs/protocol.md §4.13).
 impl Node {
     async fn start_away(&self) {
@@ -2126,4 +2419,18 @@ fn bind_endpoint(identity: &Identity, addr: SocketAddr) -> Result<quinn::Endpoin
     };
     endpoint.set_default_client_config(tls::client_config(identity)?);
     Ok(endpoint)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn direct_links_only_when_worth_the_wait() {
+        let min = 256 << 20;
+        assert!(worth_direct(Link::Lan, min, min));
+        assert!(!worth_direct(Link::Lan, min - 1, min));
+        assert!(worth_direct(Link::Away, min / 8, min));
+        assert!(!worth_direct(Link::Usb, u64::MAX, min));
+    }
 }
