@@ -172,12 +172,34 @@ fn run(args: Args) -> Result<(), String> {
     });
 
     let (encoder, format) = encoder();
-    // On the CPU, a big screen (a phone-shaped second display: 2.5 million pixels) can take
-    // longer to encode than a frame lasts, and then every frame waits behind the last: at
-    // most 30 a second there, and the conversion on several threads. GPUs keep up with 60.
-    let software = !encoder.starts_with("va");
-    let rate = if software { "videorate drop-only=true max-rate=30 ! " } else { "" };
+    let gpu = encoder.starts_with("va") && gst::ElementFactory::find("vapostproc").is_some();
+    // The screen through the desktop (PipeWire), not a camera or a test pattern
+    let screen = source.starts_with("pipewiresrc");
+    let size = args.virtual_size.map(|(w, h)| format!(",width={w},height={h}")).unwrap_or_default();
+    // With a GPU encoder, frames stay on the GPU: the desktop hands them over in graphics
+    // memory (DMA-BUF), and the GPU converts and encodes them, up to 60 a second with almost
+    // no CPU. Where the desktop can't, they're uploaded (about 30 a second for a phone-shaped
+    // display). On the CPU, a big screen (2.5 million pixels) can take longer to encode than
+    // a frame lasts: at most 30 a second there, converted on several threads.
+    let mut memory = if gpu && screen { Memory::Gpu } else { Memory::System };
     let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(1, 4));
+    let chain = |memory: Memory| -> String {
+        // Copied: the desktop's few buffers go back to it at once
+        let copy = if screen && memory == Memory::System { " always-copy=true" } else { "" };
+        let caps = match memory {
+            // Caps with a memory feature, quoted for the parser
+            Memory::Gpu => format!("capsfilter caps=\"video/x-raw(memory:DMABuf){size}\""),
+            Memory::System if !size.is_empty() => format!("video/x-raw{size}"),
+            // Whatever the source gives (a bare "video/x-raw" isn't caps to the parser)
+            Memory::System => "identity".to_string(),
+        };
+        let convert = if gpu {
+            "vapostproc ! capsfilter caps=\"video/x-raw(memory:VAMemory),format=NV12\"".to_string()
+        } else {
+            format!("videorate drop-only=true max-rate=30 ! videoconvert n-threads={threads} ! video/x-raw,format={format}")
+        };
+        format!("{copy} ! {caps} ! queue name=captured max-size-buffers=1 leaky=downstream ! {convert} ! queue max-size-buffers=2 leaky=downstream ! {encoder} name=encoder")
+    };
     // GNOME can stop feeding a virtual monitor's stream when its layout changes (display
     // settings applied): no frame comes, not even the keepalive. Then the capture starts
     // again in the same session, the old one closed first.
@@ -186,11 +208,10 @@ fn run(args: Args) -> Result<(), String> {
     let mut restarts = 0;
     let result = loop {
         let description = format!(
-            "{source} ! {rate}queue name=captured max-size-buffers=1 leaky=downstream ! videoconvert n-threads={threads} \
-             ! video/x-raw,format={format} ! queue max-size-buffers=2 leaky=downstream ! {encoder} name=encoder \
-             ! video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1 \
+            "{source}{} ! video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1 \
              ! video/x-h264,stream-format=byte-stream,alignment=au \
              ! fdsink fd={} sync=false",
+            chain(memory),
             out.as_raw_fd()
         );
         let pipeline = gst::parse::launch(&description).map_err(|e| format!("pipeline: {e}"))?;
@@ -200,6 +221,11 @@ fn run(args: Args) -> Result<(), String> {
         let _ = pipeline.set_state(gst::State::Null);
         drop(pipeline);
         match outcome {
+            // The desktop couldn't hand frames over in graphics memory: upload them instead
+            Some(Ended(Err(e))) if memory == Memory::Gpu && last_frame.load(std::sync::atomic::Ordering::Relaxed) == 0 => {
+                eprintln!("linksy-screen: no frames in graphics memory ({e}), uploading them instead");
+                memory = Memory::System;
+            }
             Some(Stalled) if restarts < 5 => {
                 restarts += 1;
                 eprintln!("linksy-screen: the second display's stream stopped, starting it again once GNOME's display settings are kept");
@@ -224,6 +250,13 @@ fn run(args: Args) -> Result<(), String> {
 }
 
 use Outcome::{Ended, Stalled};
+
+/// Where frames come in: graphics memory, straight to the GPU encoder, or normal memory.
+#[derive(Clone, Copy, PartialEq)]
+enum Memory {
+    Gpu,
+    System,
+}
 
 enum Outcome {
     Ended(Result<(), String>),
@@ -279,11 +312,8 @@ fn open_capture(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(String, Op
         };
     }
     // The PipeWire remote stays open for the life of the pipeline (pipewiresrc closes it).
-    let mut source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000 always-copy=true", screen.fd.as_raw_fd(), screen.node);
-    // A virtual monitor takes the size its stream negotiates.
-    if let Some((w, h)) = args.virtual_size {
-        source.push_str(&format!(" ! video/x-raw,width={w},height={h}"));
-    }
+    // The memory the frames come in, and a virtual monitor's size, are chosen by the chain
+    let source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000", screen.fd.as_raw_fd(), screen.node);
     std::mem::forget(screen.fd);
     Ok((source, screen.input))
 }
@@ -356,9 +386,9 @@ fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
 fn encoder() -> (&'static str, &'static str) {
     let has = |name: &str| gst::ElementFactory::find(name).is_some();
     if has("vah264lpenc") && constant_bitrate("vah264lpenc") {
-        ("vah264lpenc rate-control=cbr bitrate=8000 key-int-max=60 target-usage=7", "NV12")
+        ("vah264lpenc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12")
     } else if has("vah264enc") && constant_bitrate("vah264enc") {
-        ("vah264enc rate-control=cbr bitrate=8000 key-int-max=60 target-usage=7", "NV12")
+        ("vah264enc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12")
     } else if has("x264enc") {
         // One slice per frame: zerolatency would cut each frame into a slice per thread,
         // which decoders fed a NAL unit at a time (phones) never assemble into a picture.
