@@ -201,6 +201,7 @@ pub(crate) fn load_css() {
 }
 
 fn main() -> glib::ExitCode {
+    linksy_logs::catch_crashes("linksy-app", env!("CARGO_PKG_VERSION"));
     // A phone notification's Reply button: just the reply window.
     let args: Vec<String> = std::env::args().collect();
     if let [_, flag, from, key] = args.as_slice()
@@ -256,24 +257,41 @@ fn main() -> glib::ExitCode {
     let about = gio::SimpleAction::new("about", None);
     let w = window.clone();
     about.connect_activate(move |_, _| {
-        let dialog = adw::AboutDialog::builder()
-            .application_name("Linksy")
-            .application_icon(APP_ID)
-            .version(env!("CARGO_PKG_VERSION"))
-            .comments(t!("Your devices, connected.\nShare files and more between nearby devices, without the cloud."))
-            .developer_name("Axel RAKOTOARIVAO")
-            .copyright("© 2026 Axel RAKOTOARIVAO")
-            .website("https://linksy.diary.mg")
-            .issue_url("https://github.com/LinkSy-mg/linksy-releases/issues")
-            // The libraries it builds in are credited in Legal.
-            .license_type(gtk::License::Agpl30)
-            .build();
-        dialog.add_legal_section(t!("Open-source components"), None, gtk::License::Custom, Some(t!("Linksy builds in open-source libraries under the MIT, Apache 2.0, BSD and similar licenses. Their notices ship with Linksy in the THIRD-PARTY-NOTICES file (in /usr/share/licenses/linksy on .deb and .rpm installs).")));
-        if let Some(win) = w.borrow().as_ref() {
-            dialog.present(Some(&win.window));
-        }
+        let w = w.clone();
+        glib::spawn_future_local(async move {
+            // Troubleshooting: logs.txt, to save or copy for a bug report
+            let logs = gio::spawn_blocking(|| linksy_logs::collect(&linksy_upgrade::revision())).await.unwrap_or_default();
+            let dialog = adw::AboutDialog::builder()
+                .application_name("Linksy")
+                .application_icon(APP_ID)
+                .version(env!("CARGO_PKG_VERSION"))
+                .comments(t!("Your devices, connected.\nShare files and more between nearby devices, without the cloud."))
+                .developer_name("Axel RAKOTOARIVAO")
+                .copyright("© 2026 Axel RAKOTOARIVAO")
+                .website("https://linksy.diary.mg")
+                .issue_url("https://github.com/LinkSy-mg/linksy-releases/issues")
+                // The libraries it builds in are credited in Legal.
+                .license_type(gtk::License::Agpl30)
+                .debug_info(logs)
+                .debug_info_filename("logs.txt")
+                .build();
+            dialog.add_legal_section(t!("Open-source components"), None, gtk::License::Custom, Some(t!("Linksy builds in open-source libraries under the MIT, Apache 2.0, BSD and similar licenses. Their notices ship with Linksy in the THIRD-PARTY-NOTICES file (in /usr/share/licenses/linksy on .deb and .rpm installs).")));
+            if let Some(win) = w.borrow().as_ref() {
+                dialog.present(Some(&win.window));
+            }
+        });
     });
     app.add_action(&about);
+
+    // Save logs.txt somewhere (after a crash)
+    let save_logs = gio::SimpleAction::new("save-logs", None);
+    let w = window.clone();
+    save_logs.connect_activate(move |_, _| {
+        if let Some(win) = w.borrow().as_ref() {
+            win.save_logs();
+        }
+    });
+    app.add_action(&save_logs);
 
     // From any window (a screen viewer missing a video part): the main window's Finish Setup.
     let finish = gio::SimpleAction::new("finish-setup", None);
@@ -358,5 +376,9 @@ fn main_window(app: &adw::Application, slot: &Rc<RefCell<Option<Rc<window::Windo
     }
     let w = window::Window::new(app);
     *slot.borrow_mut() = Some(w.clone());
+    // Crashed since last time: offer the logs once, for a bug report
+    if linksy_logs::unseen_crash() {
+        w.crash_toast();
+    }
     w
 }

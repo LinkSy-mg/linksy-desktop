@@ -1614,6 +1614,29 @@ impl Window {
         self.toasts.add_toast(toast);
     }
 
+    /// Linksy crashed last time: offer the logs.
+    pub fn crash_toast(&self) {
+        let toast = adw::Toast::builder().title(t!("Linksy Quit Unexpectedly")).button_label(t!("Save Logs…")).action_name("app.save-logs").timeout(0).build();
+        self.toasts.add_toast(toast);
+    }
+
+    /// Save logs.txt where the person chooses.
+    pub fn save_logs(&self) {
+        let dialog = gtk::FileDialog::builder().title(t!("Save Logs")).initial_name("logs.txt").modal(true).build();
+        let toasts = self.toasts.clone();
+        dialog.save(Some(&self.window), gio::Cancellable::NONE, move |file| {
+            let Some(path) = file.ok().and_then(|f| f.path()) else { return };
+            glib::spawn_future_local(async move {
+                let logs = gio::spawn_blocking(|| linksy_logs::collect(&linksy_upgrade::revision())).await.unwrap_or_default();
+                let text = match std::fs::write(&path, logs) {
+                    Ok(()) => t!("Logs saved. Attach logs.txt to your bug report.").to_string(),
+                    Err(e) => t!("Couldn't save the logs: {error}", error = e.to_string()),
+                };
+                toasts.add_toast(adw::Toast::new(&text));
+            });
+        });
+    }
+
     /// Something failed for a part this computer lacks: say so, with Finish Setup.
     pub(super) fn missing_part_toast(&self, text: &str) {
         let toast = adw::Toast::builder().title(glib::markup_escape_text(text)).button_label(t!("Finish Setup")).action_name("win.setup").timeout(8).build();
