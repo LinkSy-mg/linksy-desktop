@@ -775,6 +775,58 @@ async fn auto_accept_skips_the_prompt() {
 }
 
 #[tokio::test]
+async fn always_accept_from_one_device() {
+    let (a, b) = paired().await;
+    b.node.set_auto_accept(&a.node.info().id, true).unwrap();
+    assert!(b.node.devices().iter().any(|d| d.device.id == a.node.info().id && d.auto_accept));
+    let mut rb = b.node.subscribe();
+    let src = a.dir.path().join("trusted.txt");
+    std::fs::write(&src, b"from a friend").unwrap();
+    a.node.send_files(&b.node.info().id, vec![src]).await.unwrap();
+    let asked = wait_for(&mut rb, |e| match e {
+        Event::TransferRequest { .. } => Some(true),
+        Event::TransferComplete { .. } => Some(false),
+        _ => None,
+    })
+    .await;
+    assert!(!asked, "always accept still asked");
+    assert_eq!(std::fs::read(b.downloads().join("trusted.txt")).unwrap(), b"from a friend");
+}
+
+/// Files sent one by one, a moment apart, are asked about once.
+#[tokio::test]
+async fn offers_together_are_one_prompt() {
+    let (a, b) = paired().await;
+    let mut rb = b.node.subscribe();
+    let to = b.node.info().id;
+    for name in ["one.txt", "two.txt", "three.txt"] {
+        let src = a.dir.path().join(name);
+        std::fs::write(&src, name).unwrap();
+        a.node.send_files(&to, vec![src]).await.unwrap();
+    }
+    let (request, files) = wait_for(&mut rb, |e| match e {
+        Event::TransferRequest { transfer, files, .. } => Some((*transfer, files.len())),
+        _ => None,
+    })
+    .await;
+    assert_eq!(files, 3);
+    b.node.respond(request, true);
+    let mut done = 0;
+    wait_for(&mut rb, |e| match e {
+        Event::TransferRequest { .. } => panic!("asked twice"),
+        Event::TransferComplete { .. } => {
+            done += 1;
+            (done == 3).then_some(())
+        }
+        _ => None,
+    })
+    .await;
+    for name in ["one.txt", "two.txt", "three.txt"] {
+        assert_eq!(std::fs::read_to_string(b.downloads().join(name)).unwrap(), name);
+    }
+}
+
+#[tokio::test]
 async fn settings_persist_and_rename_reaches_peers() {
     let (a, b) = paired_with(|c| c.idle_after = Duration::from_millis(300)).await;
     let mut ra = a.node.subscribe();

@@ -28,6 +28,9 @@ pub struct TrustedDevice {
     /// `None`: it doesn't speak §4.16 yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub discovery_key: Option<String>,
+    /// Files from it are accepted without asking.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_accept: bool,
 }
 
 impl TrustedDevice {
@@ -84,7 +87,7 @@ impl TrustStore {
 
     pub fn add(&mut self, device: DeviceInfo, addr: Option<SocketAddr>) -> Result<()> {
         let paired_at = now();
-        self.devices.insert(device.id, TrustedDevice { device, last_addr: addr, paired_at, last_met: Some(paired_at), away_all: false, discovery_key: None });
+        self.devices.insert(device.id, TrustedDevice { device, last_addr: addr, paired_at, last_met: Some(paired_at), away_all: false, discovery_key: None, auto_accept: false });
         self.save()
     }
 
@@ -120,6 +123,14 @@ impl TrustStore {
     pub fn set_away_all(&mut self, id: &Fingerprint, on: bool) -> Result<bool> {
         let Some(d) = self.devices.get_mut(id) else { return Ok(false) };
         d.away_all = on;
+        self.save()?;
+        Ok(true)
+    }
+
+    /// Accept files from `id` without asking, or ask again.
+    pub fn set_auto_accept(&mut self, id: &Fingerprint, on: bool) -> Result<bool> {
+        let Some(d) = self.devices.get_mut(id) else { return Ok(false) };
+        d.auto_accept = on;
         self.save()?;
         Ok(true)
     }

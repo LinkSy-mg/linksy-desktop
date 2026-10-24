@@ -17,7 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::{AbortHandle, JoinSet};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -38,6 +38,8 @@ use crate::tls;
 
 const PAIR_TIMEOUT: Duration = Duration::from_secs(60);
 const OFFER_TIMEOUT: Duration = Duration::from_secs(120);
+/// Offers from one device within this of the first are asked about together.
+const GATHER: Duration = Duration::from_secs(1);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 /// Clipboard text limit; well under the protocol frame cap even after JSON escaping.
 pub const MAX_CLIPBOARD: usize = 256 * 1024;
@@ -284,6 +286,9 @@ pub struct DeviceView {
     /// home is off, or before the two have met on the same network.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub away_until: Option<u64>,
+    /// Files from it are accepted without asking.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub auto_accept: bool,
 }
 
 /// How a connection reaches the other device, by the address it comes from: bridges
@@ -359,6 +364,13 @@ impl Drop for Busy {
     }
 }
 
+/// Offers from one device waiting to be shown as one prompt: their files so far, and
+/// where the answer goes for the ones that joined the first.
+struct Gathering {
+    files: Vec<FileEntry>,
+    answer: watch::Sender<Option<bool>>,
+}
+
 struct Inner {
     id: Fingerprint,
     info: Mutex<DeviceInfo>,
@@ -376,6 +388,8 @@ struct Inner {
     discovery_key: Mutex<DiscoveryKey>,
     /// One dial at a time per device, so concurrent sends share a connection.
     dialing: Mutex<HashMap<Fingerprint, Arc<tokio::sync::Mutex<()>>>>,
+    /// Offers being gathered into one prompt, per device.
+    gathering: Mutex<HashMap<Fingerprint, Gathering>>,
     /// Accepted incoming sessions, for whoever runs the media side (the daemon).
     sessions: Mutex<Option<mpsc::UnboundedReceiver<Session>>>,
     sessions_tx: mpsc::UnboundedSender<Session>,
@@ -443,6 +457,7 @@ impl Node {
                 discovery: Mutex::new(None),
                 discovery_key: Mutex::new(discovery_key),
                 dialing: Mutex::new(HashMap::new()),
+                gathering: Mutex::default(),
                 invite: Mutex::new(None),
                 import_dir: Mutex::default(),
                 batteries: Mutex::default(),
@@ -558,6 +573,7 @@ impl Node {
                 usb: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Usb),
                 away: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Away),
                 away_all: t.away_all,
+                auto_accept: t.auto_accept,
                 // Only once each knows how to reach the other away.
                 away_until: (away_on && t.device.away.is_some()).then(|| t.lease_until()),
                 nearby: nearby.contains_key(&t.device.id),
@@ -579,7 +595,7 @@ impl Node {
             .collect();
         for (id, (device, _)) in nearby.iter() {
             if !trust.contains(id) {
-                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_all: false, away_until: None });
+                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_all: false, away_until: None, auto_accept: false });
             }
         }
         // Paired and reachable first, then devices to pair, then paired ones that are away.
@@ -1230,6 +1246,37 @@ impl Node {
         answer
     }
 
+    /// Ask about an offer. Offers from the same device arriving within [`GATHER`] of the
+    /// first join its prompt: one question, one answer for all of them.
+    async fn ask_offer(&self, from: &DeviceInfo, id: Uuid, files: &[FileEntry]) -> bool {
+        let joined = {
+            let mut gathering = self.inner.gathering.lock().unwrap();
+            match gathering.get_mut(&from.id) {
+                Some(g) => {
+                    g.files.extend_from_slice(files);
+                    Some(g.answer.subscribe())
+                }
+                None => {
+                    gathering.insert(from.id, Gathering { files: files.to_vec(), answer: watch::channel(None).0 });
+                    None
+                }
+            }
+        };
+        if let Some(mut rx) = joined {
+            // The first offer's answer; no if it never comes
+            let answer = tokio::time::timeout(GATHER + OFFER_TIMEOUT, rx.wait_for(Option::is_some)).await;
+            return matches!(answer.as_ref().map(|r| r.as_ref().map(|v| **v)), Ok(Ok(Some(true))));
+        }
+        tokio::time::sleep(GATHER).await;
+        let Some(g) = self.inner.gathering.lock().unwrap().remove(&from.id) else { return false };
+        let total = g.files.iter().map(|f| f.size).sum();
+        let answer = self.expect_answer(id);
+        self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: g.files, total });
+        let accepted = self.await_answer(id, answer, OFFER_TIMEOUT).await;
+        let _ = g.answer.send(Some(accepted));
+        accepted
+    }
+
     async fn accept_loop(self) {
         while let Some(incoming) = self.inner.endpoint.accept().await {
             let node = self.clone();
@@ -1754,12 +1801,10 @@ impl Node {
         } else {
             None
         };
-        let auto = import_to.is_some() || self.inner.settings.lock().unwrap().auto_accept;
-        let accepted = auto || {
-            let answer = self.expect_answer(id);
-            self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: files.clone(), total });
-            self.await_answer(id, answer, OFFER_TIMEOUT).await
-        };
+        let auto = import_to.is_some()
+            || self.inner.settings.lock().unwrap().auto_accept
+            || self.inner.trust.lock().unwrap().get(&from.id).is_some_and(|t| t.auto_accept);
+        let accepted = auto || self.ask_offer(&from, id, &files).await;
         if !accepted {
             let _ = write_msg(&mut send, &TransferMsg::Decline).await;
             let _ = send.finish();
@@ -1920,6 +1965,15 @@ impl Node {
     /// the small things.
     pub fn set_away_all(&self, id: &Fingerprint, on: bool) -> Result<()> {
         if !self.inner.trust.lock().unwrap().set_away_all(id, on)? {
+            return Err(Error::NotPaired);
+        }
+        self.emit(Event::DeviceUpdated { device: self.peer_info(id).or_else(|| self.inner.trust.lock().unwrap().get(id).map(|t| t.device.clone())).ok_or(Error::NotPaired)? });
+        Ok(())
+    }
+
+    /// Accept files from a paired device without asking, or ask again.
+    pub fn set_auto_accept(&self, id: &Fingerprint, on: bool) -> Result<()> {
+        if !self.inner.trust.lock().unwrap().set_auto_accept(id, on)? {
             return Err(Error::NotPaired);
         }
         self.emit(Event::DeviceUpdated { device: self.peer_info(id).or_else(|| self.inner.trust.lock().unwrap().get(id).map(|t| t.device.clone())).ok_or(Error::NotPaired)? });
