@@ -2,6 +2,22 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.4
+
+### Fixed
+- **Second Display lagged when Linksy ran as a service.** The service's memory limit
+  (64 MB) also covered the screen helper, which needs 150 to 250 MB for a phone-shaped
+  display, so the system kept taking memory back from it and it fell to a few frames a
+  second. Screen helpers now get a limit of their own (512 MB, released when the session
+  ends), and the service keeps its small one.
+- **A second display froze after changing GNOME's display settings.** It now starts again
+  by itself once the settings are kept.
+- **Screen helpers could outlive a crashed service.** They now end with it.
+
+### Known issue
+- Changing GNOME's display settings while a second display is on can revert them. Change
+  them with the second display off.
+
 ## 0.9.3
 
 ### Fixed
