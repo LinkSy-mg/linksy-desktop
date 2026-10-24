@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Battery, CallState, Config, ControlMsg, FsEntry, FsRequest, SmsThread, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind, VolumeState};
+use linksy_core::{Battery, CallState, Config, ControlMsg, DirectStep, FsEntry, FsRequest, SmsThread, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind, VolumeState};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -1315,4 +1315,72 @@ async fn usb_plugged_and_usb_connect_travel() {
     })
     .await;
     assert_eq!(key, "R5CX");
+}
+
+/// What a phone's and a computer's apps do for a direct link (docs/protocol.md §4.17), with
+/// loopback for the Wi-Fi link: the host is reachable where it already is.
+fn fake_direct_app(node: &Node) {
+    let mut rx = node.subscribe();
+    let node = node.clone();
+    tokio::spawn(async move {
+        while let Ok(ev) = rx.recv().await {
+            let node = node.clone();
+            tokio::spawn(async move {
+                match ev {
+                    Event::DirectWanted { id } => node.direct_send(&id, DirectStep::Invite { address: "02:00:00:00:00:01".into() }).await.unwrap(),
+                    Event::Direct { from, step: DirectStep::Invite { .. } } => {
+                        node.direct_send(&from.id, DirectStep::Listening { address: "02:00:00:00:00:02".into() }).await.unwrap()
+                    }
+                    Event::Direct { from, step: DirectStep::Listening { .. } } => {
+                        node.direct_send(&from.id, DirectStep::Connecting).await.unwrap();
+                        let port = node.local_addr().unwrap().port();
+                        node.direct_send(&from.id, DirectStep::Up { ip: Ipv4Addr::LOCALHOST.into(), port }).await.unwrap();
+                    }
+                    Event::Direct { from, step: DirectStep::Up { ip, port } } => node.direct_dial(&from.id, (ip, port).into()).await.unwrap(),
+                    _ => {}
+                }
+            });
+        }
+    });
+}
+
+#[tokio::test]
+async fn direct_link_comes_up_carries_files_and_ends_on_both() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "direct_host".into(), "direct_join".into()]).await;
+    let (a_id, b_id) = (a.node.info().id, b.node.info().id);
+    fake_direct_app(&a.node);
+    fake_direct_app(&b.node);
+    let mut on_a = a.node.subscribe();
+    let mut on_b = b.node.subscribe();
+
+    a.node.direct_link(&b_id).await.unwrap();
+    wait_for(&mut on_a, |e| matches!(e, Event::DirectLinked { id } if *id == b_id).then_some(())).await;
+    wait_for(&mut on_b, |e| matches!(e, Event::DirectLinked { id } if *id == a_id).then_some(())).await;
+
+    // Both ways over it
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("film.bin");
+    std::fs::write(&file, vec![7u8; 3 << 20]).unwrap();
+    for (from, to, rx) in [(&a, &b, &mut on_a), (&b, &a, &mut on_b)] {
+        let id = from.node.send_files(&to.node.info().id, vec![file.clone()]).await.unwrap();
+        wait_for(rx, |e| matches!(e, Event::TransferComplete { transfer, .. } if *transfer == id).then_some(())).await;
+        assert_eq!(std::fs::read(to.downloads().join("film.bin")).unwrap().len(), 3 << 20);
+        std::fs::remove_file(to.downloads().join("film.bin")).unwrap();
+    }
+
+    // Ended on one side: gone on both, and the usual connection still works
+    a.node.direct_end(&b_id, None).await;
+    wait_for(&mut on_a, |e| matches!(e, Event::DirectEnded { id, .. } if *id == b_id).then_some(())).await;
+    wait_for(&mut on_b, |e| matches!(e, Event::DirectEnded { id, .. } if *id == a_id).then_some(())).await;
+    a.node.notify(&b_id, "still", "here").await.unwrap();
+    wait_for(&mut on_b, |e| matches!(e, Event::Notification { .. }).then_some(())).await;
+}
+
+#[tokio::test]
+async fn direct_link_needs_a_host_and_a_joiner() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "direct_join".into()]).await;
+    assert!(matches!(a.node.direct_link(&b.node.info().id).await, Err(Error::Unsupported)));
+    // A bad step never leaves
+    let step = DirectStep::Up { ip: "8.8.8.8".parse().unwrap(), port: 47200 };
+    assert!(a.node.direct_send(&b.node.info().id, step).await.is_err());
 }
