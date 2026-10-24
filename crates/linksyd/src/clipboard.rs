@@ -104,7 +104,8 @@ pub fn can_watch() -> bool {
 
 fn probe_watch() -> bool {
     if std::env::var_os("WAYLAND_DISPLAY").is_none() {
-        return false;
+        // X11: read with xclip or xsel now and then
+        return std::env::var_os("DISPLAY").is_some() && x11_reader().is_some();
     }
     let Ok(mut child) = Command::new("wl-paste").args(["--watch", "true"]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() else {
         return false;
@@ -123,8 +124,46 @@ fn probe_watch() -> bool {
     true
 }
 
-/// Every new text on the clipboard, from `wl-paste --watch`. None where it can't watch.
+/// The command that prints X11's clipboard.
+fn x11_reader() -> Option<&'static [&'static str]> {
+    let tools: [&'static [&'static str]; 2] = [&["xclip", "-o", "-selection", "clipboard"], &["xsel", "--clipboard", "--output"]];
+    let path = std::env::var_os("PATH")?;
+    tools.into_iter().find(|t| std::env::split_paths(&path).any(|d| d.join(t[0]).is_file()))
+}
+
+/// Every new text on X11's clipboard: X11 apps own their clipboard and tell nobody when it
+/// changes, so it's read once a second.
+fn watch_x11() -> Option<mpsc::UnboundedReceiver<String>> {
+    let reader = x11_reader()?;
+    let (tx, rx) = mpsc::unbounded_channel();
+    std::thread::spawn(move || {
+        let read = || Command::new(reader[0]).args(&reader[1..]).stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success()).map(|o| o.stdout);
+        // What's there already isn't news
+        let mut last = read();
+        loop {
+            std::thread::sleep(Duration::from_secs(1));
+            let now = read();
+            if now == last {
+                continue;
+            }
+            last = now.clone();
+            if let Some(text) = now.and_then(|b| String::from_utf8(b).ok()).filter(|t| !t.is_empty())
+                && tx.send(text).is_err()
+            {
+                break;
+            }
+        }
+        debug!("clipboard watch ended");
+    });
+    Some(rx)
+}
+
+/// Every new text on the clipboard, from `wl-paste --watch` (X11: [`watch_x11`]). None
+/// where it can't watch.
 fn watch() -> Option<mpsc::UnboundedReceiver<String>> {
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        return watch_x11();
+    }
     // Each change prints the text and a NUL.
     let mut child = Command::new("wl-paste")
         .args(["--type", "text", "--watch", "sh", "-c", "cat; printf '\\0'"])
