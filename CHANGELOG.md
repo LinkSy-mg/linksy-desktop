@@ -2,6 +2,20 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.6
+
+### Fixed
+- **Second Display didn't start on KDE.** KDE makes its virtual monitor 1920×1080, or the
+  resolution picked in its sharing dialog, not in the phone's shape, and Linksy wouldn't
+  take any other size. It now uses KDE's size, and the phone fits it to its screen.
+- **The phone's pointer stopped at the right and bottom edge on KDE** ("Invalid position"
+  in the log).
+- **Shift could stay held** after using the phone as a keyboard: keys still down when a
+  remote input session ends are now released.
+- **The phone camera kept asking for a restart after enrolling the Secure Boot key** when
+  the driver had been signed with another key: it's now built again, signed with the
+  enrolled one.
+
 ## 0.9.5
 
 ### Changed

@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.6" date="2026-10-24">
+      <description>
+        <p>Second Display works on KDE, at the size KDE gives its virtual monitor, and the phone's pointer reaches the screen's edges there. Keys held from the phone are released when it disconnects, and the phone camera's driver is rebuilt with the Secure Boot key already enrolled.</p>
+      </description>
+    </release>
     <release version="0.9.5" date="2026-10-24">
       <description>
         <p>Second Display goes through the graphics chip when it can encode video, at up to 60 frames a second with almost no processor. On Fedora with AMD graphics, Finish Setup adds the full driver this needs.</p>
