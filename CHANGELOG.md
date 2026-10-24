@@ -2,6 +2,17 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.8
+
+### Added
+- **This computer's volume, ready for the phone.** A paired phone can show the computer's
+  volume and mute, follow them as they change, and set them (through WirePlumber, or
+  PulseAudio's pactl). The slider itself comes with a phone app update. Not in the Flatpak.
+
+### Fixed
+- **The tray menu's icons were full-colour pictures on GNOME** that looked like emoji next
+  to the text. They're one colour now, like the rest of the top bar.
+
 ## 0.9.7
 
 ### Added

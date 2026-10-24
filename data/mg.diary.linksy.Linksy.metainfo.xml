@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.8" date="2026-10-24">
+      <description>
+        <p>A paired phone can now follow and set this computer's volume (with a phone app update). The tray menu's icons are one colour, like the rest of the top bar.</p>
+      </description>
+    </release>
     <release version="0.9.7" date="2026-10-24">
       <description>
         <p>Linksy sits in the system tray on every desktop that has one, with your devices and what they can do in its menu. Cover art from browsers reaches the phone, and the phone camera's driver is really rebuilt with the enrolled Secure Boot key.</p>

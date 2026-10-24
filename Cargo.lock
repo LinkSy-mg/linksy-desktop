@@ -2517,7 +2517,7 @@ dependencies = [
 
 [[package]]
 name = "linksy"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "linksy-ipc",
  "linksy-logs",
@@ -2528,7 +2528,7 @@ dependencies = [
 
 [[package]]
 name = "linksy-app"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "async-channel",
  "gstreamer",
@@ -2547,7 +2547,7 @@ dependencies = [
 
 [[package]]
 name = "linksy-core"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "blake3",
  "getrandom 0.4.3",
@@ -2570,14 +2570,14 @@ dependencies = [
 
 [[package]]
 name = "linksy-i18n"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "linksy-ipc"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "linksy-core",
  "serde",
@@ -2587,21 +2587,21 @@ dependencies = [
 
 [[package]]
 name = "linksy-logs"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "linksy-news"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "linksy-i18n",
 ]
 
 [[package]]
 name = "linksy-qt"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "cxx",
  "cxx-qt",
@@ -2621,7 +2621,7 @@ dependencies = [
 
 [[package]]
 name = "linksy-screen"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "ashpd",
  "gstreamer",
@@ -2634,7 +2634,7 @@ dependencies = [
 
 [[package]]
 name = "linksy-setup"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "gio",
  "gstreamer",
@@ -2643,7 +2643,7 @@ dependencies = [
 
 [[package]]
 name = "linksy-upgrade"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "hex",
  "linksy-i18n",
@@ -2655,7 +2655,7 @@ dependencies = [
 
 [[package]]
 name = "linksyd"
-version = "0.9.7"
+version = "0.9.8"
 dependencies = [
  "argon2",
  "base64 0.23.1",
