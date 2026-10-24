@@ -1496,3 +1496,9 @@ robust against any encoder (GPU ones may slice too):
   `volume_state`, `volume_set`, feature `volume` (§4.10), core `watch_volume`,
   `set_volume`, `send_volume_state` and `Event::VolumeState` / `VolumeSet` / `VolumeWatch`.
   Phone to-do in §7.
+- **2026-10-24** — Core (after b5a9739): a picked file sent through a link to
+  `/proc/self/fd/N` is read at its own offsets, so the descriptor's position (the app's,
+  or another transfer's of the same file) never moves; and only while N still holds the
+  file that was offered (device and inode): if it was closed and the number reused, the
+  transfer fails with "… isn't the file that was offered any more" instead of sending
+  another file. Keep the descriptor open until the transfer ends.
