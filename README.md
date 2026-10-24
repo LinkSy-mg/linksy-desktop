@@ -52,13 +52,13 @@ Download the latest Linux release from
 
 ```sh
 flatpak install --user linksy-0.5.5.flatpak          # any distribution
-sudo apt install ./linksy_0.5.5_amd64.deb             # Ubuntu 24.10+, Debian 13+
+sudo apt install ./linksy_0.5.5_amd64.deb             # Ubuntu 24.04+, Debian 13+ (the Qt app: Ubuntu 25.04+)
 sudo dnf install ./linksy-0.5.5-1.x86_64.rpm          # Fedora 41+
 sudo zypper install --allow-unsigned-rpm ./linksy-0.5.5-1.suse.x86_64.rpm   # openSUSE Tumbleweed
 tar xzf linksy-0.5.5-linux-x86_64.tar.gz && linksy-0.5.5-linux-x86_64/install.sh  # into ~/.local
 ```
 
-The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.6+. The
+The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.5+. The
 background service starts with your session; the Flatpak sets that up the first time it opens.
 
 To cut a release: add the version's section to `CHANGELOG.md` and the metainfo's
@@ -79,7 +79,7 @@ cargo build --release      # linksyd + linksy
 cargo test                 # unit + end-to-end tests
 ```
 
-The GTK app and the screen helper need GTK ≥ 4.14, libadwaita ≥ 1.6 and GStreamer ≥ 1.22
+The GTK app and the screen helper need GTK ≥ 4.14, libadwaita ≥ 1.5 and GStreamer ≥ 1.22
 headers:
 
 ```sh

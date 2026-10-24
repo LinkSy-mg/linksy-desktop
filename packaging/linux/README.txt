@@ -12,8 +12,8 @@ Then open Linksy from your apps. Remove it with ./uninstall.sh (your device iden
 paired devices are kept unless you add --purge).
 
 Requirements
-  - x86_64, glibc 2.39 or newer (Fedora 41+, openSUSE Tumbleweed, Ubuntu 24.10+, Debian 13+)
-  - GTK 4.14+ and libadwaita 1.6+
+  - x86_64, glibc 2.39 or newer (Fedora 41+, openSUSE Tumbleweed, Ubuntu 24.04+ and Linux Mint 22+, Debian 13+)
+  - GTK 4.14+ and libadwaita 1.5+
   - For screens and cameras: GStreamer 1.22+ with pipewire-gstreamer, the GTK 4 sink
     (gstreamer1-plugin-gtk4) and an H.264 codec (openh264, x264 or libav)
 

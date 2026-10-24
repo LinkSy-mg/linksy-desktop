@@ -5,7 +5,7 @@
 # linksy-common alone (no window) is refused.
 # Usage: scripts/test-packages.sh [distro…]     (default: all; needs podman)
 # Exits 1 when any check fails (CI runs one distribution per job).
-#   Distros: fedora-44 fedora-43 opensuse debian-13 ubuntu-26.04 ubuntu-25.10
+#   Distros: fedora-44 fedora-43 opensuse debian-13 ubuntu-26.04 ubuntu-25.10 ubuntu-24.04
 # Reads dist/vX.Y.Z (this version) and, for the upgrade, dist/v<previous> when it's there.
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -13,7 +13,10 @@ LOG=$(mktemp)
 trap 'rm -f "$LOG"' EXIT
 V=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
 PREV=$(ls -1d dist/v* 2>/dev/null | sed 's|dist/v||' | sort -V | grep -v "^$V$" | tail -1)
-ALL=(fedora-44 fedora-43 opensuse debian-13 ubuntu-26.04 ubuntu-25.10)
+ALL=(fedora-44 fedora-43 opensuse debian-13 ubuntu-26.04 ubuntu-25.10 ubuntu-24.04)
+# The GTK app only, since 0.9: Qt 6.4 is too old for the Qt app (refused), and no earlier
+# release installed there to upgrade from
+GTK_ONLY=(ubuntu-24.04)
 [ $# -gt 0 ] && ALL=("$@")
 
 image() {
@@ -76,21 +79,28 @@ run() {   # distro, label, shell commands
     $CHECKS" 2>&1 | tee -a "$LOG"
 }
 
-# linksy-common needs one of the apps: alone, the install must be refused
+# What must not install: linksy-common alone (it needs one of the apps), or the Qt app
+# where Qt is too old. distro, command, label
 refused() {
-  echo "== $1: linksy-common alone"
+  echo "== $1: ${3:-linksy-common alone}"
   podman run --rm -v "$PWD/dist":/pkgs:ro,z "$(image "$1")" bash -c "
     case $1 in debian-*|ubuntu-*) apt-get update -qq >/dev/null 2>&1;; opensuse) zypper -q refresh >/dev/null 2>&1;; esac
     export DEBIAN_FRONTEND=noninteractive
-    if $2 >/tmp/install.log 2>&1; then echo '  installed with no window: FAILED'; else echo '  refused: ok'; fi" 2>&1 | tee -a "$LOG"
+    if $2 >/tmp/install.log 2>&1; then echo '  installed anyway: FAILED'; else echo '  refused: ok'; fi" 2>&1 | tee -a "$LOG"
 }
 
 for d in "${ALL[@]}"; do
   in=$(install_cmd "$d")
+  gtk_only=0
+  [[ " ${GTK_ONLY[*]} " == *" $d "* ]] && gtk_only=1
   run "$d" "linksy (GTK)" "$in $(files "$d" gtk)"
-  run "$d" "linksy-qt (Qt)" "$in $(files "$d" qt)"
+  if [ $gtk_only = 1 ]; then
+    refused "$d" "$in $(files "$d" qt)" "linksy-qt where Qt is too old"
+  else
+    run "$d" "linksy-qt (Qt)" "$in $(files "$d" qt)"
+  fi
   refused "$d" "$in $(files "$d" gtk | cut -d' ' -f1)"
-  if [ -n "$PREV" ] && [ -e "dist/$(old_files "$d" | awk '{print $NF}' | sed 's|/pkgs/||')" ]; then
+  if [ $gtk_only = 0 ] && [ -n "$PREV" ] && [ -e "dist/$(old_files "$d" | awk '{print $NF}' | sed 's|/pkgs/||')" ]; then
     run "$d" "upgrade from $PREV" "$in $(old_files "$d") && $in $(files "$d" gtk)"
   fi
 done
