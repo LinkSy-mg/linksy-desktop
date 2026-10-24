@@ -85,6 +85,27 @@ impl<'a> Progress<'a> {
     }
 }
 
+/// Opens a file to send. A link to one of this process's own descriptors (Android's
+/// picked files, `/proc/self/fd/N`) is read through a copy of that descriptor from the
+/// start: reopening the link can be refused when the app has no access to the file's
+/// real path.
+async fn open_source(path: &Path) -> io::Result<File> {
+    #[cfg(unix)]
+    if let Some(fd) = std::fs::read_link(path)
+        .ok()
+        .and_then(|t| t.to_str()?.strip_prefix("/proc/self/fd/")?.parse::<i32>().ok())
+    {
+        use std::os::fd::BorrowedFd;
+        use tokio::io::AsyncSeekExt;
+        // The descriptor stays open as long as the link does (whoever made it keeps it).
+        let own = unsafe { BorrowedFd::borrow_raw(fd) }.try_clone_to_owned()?;
+        let mut file = File::from_std(std::fs::File::from(own));
+        file.seek(io::SeekFrom::Start(0)).await?;
+        return Ok(file);
+    }
+    File::open(path).await
+}
+
 pub(crate) async fn send_files(
     send: &mut quinn::SendStream,
     recv: &mut quinn::RecvStream,
@@ -100,7 +121,7 @@ pub(crate) async fn send_files(
         if offset > f.entry.size {
             return Err(protocol("resume offset beyond end of file"));
         }
-        let mut file = File::open(&f.source).await?;
+        let mut file = open_source(&f.source).await?;
         let mut hasher = blake3::Hasher::new();
         // Hash the part the receiver already has without sending it.
         let mut skip = offset;
@@ -311,5 +332,26 @@ mod tests {
         let entries: Vec<_> = files.iter().map(|f| (f.entry.path.as_str(), f.entry.size)).collect();
         assert_eq!(entries, vec![("Holiday.mp4", 5)]);
         assert_eq!(files[0].source, link);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn open_source_reads_a_held_descriptor_from_the_start() {
+        use std::io::Read;
+        use std::os::fd::AsRawFd;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("real.bin"), b"hello").unwrap();
+        let mut held = std::fs::File::open(dir.path().join("real.bin")).unwrap();
+        // Read once, so the shared offset isn't at the start.
+        held.read_exact(&mut [0u8; 2]).unwrap();
+        let link = dir.path().join("Picked.bin");
+        std::os::unix::fs::symlink(format!("/proc/self/fd/{}", held.as_raw_fd()), &link).unwrap();
+        if std::fs::read_link(&link).is_err() {
+            return;
+        }
+        let mut file = open_source(&link).await.unwrap();
+        let mut got = String::new();
+        file.read_to_string(&mut got).await.unwrap();
+        assert_eq!(got, "hello");
     }
 }
