@@ -64,6 +64,8 @@ pub enum Request {
     /// Allow everything from away for a device (screens, files, camera…), or only the
     /// small things (docs/protocol.md §4.13).
     SetAwayAll { device: String, on: bool },
+    /// Accept files from a device without asking, or ask again.
+    SetAutoAccept { device: String, on: bool },
     /// Ask a phone where it is; answers its position or why not (docs/protocol.md §4.14).
     Locate { device: String },
     /// This version, the newest one if it's newer, and whether Linksy checks.
@@ -585,6 +587,10 @@ impl Client {
 
     pub async fn set_away_all(&self, device: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::SetAwayAll { device: device.into(), on }).await
+    }
+
+    pub async fn set_auto_accept(&self, device: impl Into<String>, on: bool) -> Result<(), ClientError> {
+        self.call(Request::SetAutoAccept { device: device.into(), on }).await
     }
 
     pub async fn locate(&self, device: impl Into<String>) -> Result<Location, ClientError> {

@@ -243,6 +243,11 @@ async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mi
             node.set_away_all(&id, on).map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
+        Request::SetAutoAccept { device, on } => {
+            let id = resolve(node, &device)?;
+            node.set_auto_accept(&id, on).map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
         Request::Locate { device } => {
             let id = resolve(node, &device)?;
             let mut events = node.subscribe();

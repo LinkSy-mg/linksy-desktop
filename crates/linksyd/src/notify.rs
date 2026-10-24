@@ -68,7 +68,7 @@ pub async fn run(node: Node) {
         match event {
             Event::PairingRequest { request, device, code, .. } => {
                 let body = t!("Check that {device} shows the code {code}.", device = device.name, code = spaced(&code));
-                prompt(node.clone(), request, Some(device.id), t!("Pair with {device}?", device = device.name), body, t!("Pair"));
+                prompt(node.clone(), request, Some(device.id), None, t!("Pair with {device}?", device = device.name), body, t!("Pair"));
             }
             Event::TransferRequest { transfer, from, files, total } => {
                 let what = match files.as_slice() {
@@ -76,7 +76,7 @@ pub async fn run(node: Node) {
                     many => t!("{n} items", n = many.len()),
                 };
                 let body = format!("{what} · {}", human_size(total));
-                prompt(node.clone(), transfer, None, t!("{device} wants to send you files", device = from.name), body, t!("Accept"));
+                prompt(node.clone(), transfer, None, Some(from.id), t!("{device} wants to send you files", device = from.name), body, t!("Accept"));
             }
             Event::SessionRequest { request, from, kind } => {
                 let (summary, body) = match kind {
@@ -109,7 +109,7 @@ pub async fn run(node: Node) {
                         t!("The right code was typed on {device}. Its terminal runs commands as you until it's ended. Linksy asks once a day.", device = from.name),
                     ),
                 };
-                prompt(node.clone(), request, None, summary, body, t!("Allow"));
+                prompt(node.clone(), request, None, None, summary, body, t!("Allow"));
             }
             Event::TransferStarted { transfer, peer, direction: Direction::Incoming, import, .. } => {
                 answered(transfer);
@@ -191,10 +191,15 @@ pub(crate) fn show(summary: String, body: String) {
 /// A notification with Accept/Decline that answers the request when clicked. It stays until
 /// answered (critical, no timeout), and goes when it is: clicking a button closes it (it
 /// isn't resident), and an answer from the app or the other device closes it too.
-fn prompt(node: Node, request: Uuid, pairing: Option<Fingerprint>, summary: String, body: String, accept_label: &'static str) {
+/// `always`: the device whose files the prompt can also accept from now on.
+fn prompt(node: Node, request: Uuid, pairing: Option<Fingerprint>, always: Option<Fingerprint>, summary: String, body: String, accept_label: &'static str) {
     tokio::task::spawn_blocking(move || {
         let mut n = base(&summary, &body);
-        n.action("accept", accept_label).action("decline", t!("Decline")).urgency(Urgency::Critical).timeout(Timeout::Never);
+        n.action("accept", accept_label);
+        if always.is_some() {
+            n.action("always", t!("Always Accept"));
+        }
+        n.action("decline", t!("Decline")).urgency(Urgency::Critical).timeout(Timeout::Never);
         match n.show() {
             Ok(handle) => {
                 PROMPTS.lock().unwrap().get_or_insert_default().insert(request, (handle.id(), pairing));
@@ -206,6 +211,15 @@ fn prompt(node: Node, request: Uuid, pairing: Option<Fingerprint>, summary: Stri
                 handle.wait_for_action(|action| match action {
                     "accept" => {
                         forget();
+                        node.respond(request, true);
+                    }
+                    "always" => {
+                        forget();
+                        if let Some(id) = always
+                            && let Err(e) = node.set_auto_accept(&id, true)
+                        {
+                            debug!("always accept failed: {e}");
+                        }
                         node.respond(request, true);
                     }
                     "decline" => {
