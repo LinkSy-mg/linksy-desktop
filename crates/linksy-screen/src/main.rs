@@ -189,14 +189,22 @@ fn run(args: Args) -> Result<(), String> {
     });
 
     let (encoder, format) = encoder();
+    // On the CPU, a big screen (a phone-shaped second display: 2.5 million pixels) can take
+    // longer to encode than a frame lasts, and then every frame waits behind the last: at
+    // most 30 a second there, and the conversion on several threads. GPUs keep up with 60.
+    let software = !encoder.starts_with("va");
+    let rate = if software { "videorate drop-only=true max-rate=30 ! " } else { "" };
+    let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(1, 4));
     let description = format!(
-        "{source} ! videoconvert ! video/x-raw,format={format} ! queue max-size-buffers=2 leaky=downstream ! {encoder} \
+        "{source} ! {rate}queue name=captured max-size-buffers=1 leaky=downstream ! videoconvert n-threads={threads} \
+         ! video/x-raw,format={format} ! queue max-size-buffers=2 leaky=downstream ! {encoder} name=encoder \
          ! video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1 \
          ! video/x-h264,stream-format=byte-stream,alignment=au \
          ! fdsink fd={} sync=false",
         out.as_raw_fd()
     );
     let pipeline = gst::parse::launch(&description).map_err(|e| format!("pipeline: {e}"))?;
+    count_frames(&pipeline, encoder.split_whitespace().next().unwrap_or("encoder"));
     pipeline.set_state(gst::State::Playing).map_err(|e| format!("could not start: {e}"))?;
     let bus = pipeline.bus().ok_or("pipeline has no bus")?;
     let result = loop {
@@ -212,6 +220,34 @@ fn run(args: Args) -> Result<(), String> {
     let _ = pipeline.set_state(gst::State::Null);
     drop(out);
     result
+}
+
+/// Every 10 seconds, how many frames the screen gave and how many were encoded (the
+/// rest were dropped because the encoder was behind), for Save Logs.
+fn count_frames(pipeline: &gst::Element, encoder: &str) {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let Some(bin) = pipeline.downcast_ref::<gst::Bin>() else { return };
+    let (captured, encoded) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+    for (name, pad, count) in [("captured", "sink", captured.clone()), ("encoder", "src", encoded.clone())] {
+        if let Some(pad) = bin.by_name(name).and_then(|e| e.static_pad(pad)) {
+            pad.add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                count.fetch_add(1, Ordering::Relaxed);
+                gst::PadProbeReturn::Ok
+            });
+        }
+    }
+    let encoder = encoder.to_string();
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(10));
+            let (c, e) = (captured.swap(0, Ordering::Relaxed), encoded.swap(0, Ordering::Relaxed));
+            if c == 0 && e == 0 {
+                continue;
+            }
+            eprintln!("linksy-screen: {:.1} fps from the screen, {:.1} encoded ({encoder}), {} dropped", c as f64 / 10.0, e as f64 / 10.0, c.saturating_sub(e));
+        }
+    });
 }
 
 /// A phone as touchpad and keyboard: apply its input until it stops. Nothing is shared.
@@ -246,7 +282,8 @@ fn encoder() -> (&'static str, &'static str) {
     } else if has("x264enc") {
         // One slice per frame: zerolatency would cut each frame into a slice per thread,
         // which decoders fed a NAL unit at a time (phones) never assemble into a picture.
-        ("x264enc tune=zerolatency speed-preset=superfast bitrate=8000 key-int-max=60 bframes=0 sliced-threads=false threads=1", "I420")
+        // Two threads work on two frames at once instead: one frame later, nearly twice as fast.
+        ("x264enc tune=zerolatency speed-preset=superfast bitrate=8000 key-int-max=60 bframes=0 sliced-threads=false threads=2", "I420")
     } else {
         ("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate=8000000 gop-size=60", "I420")
     }
