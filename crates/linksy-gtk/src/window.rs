@@ -460,6 +460,7 @@ impl Window {
                 page::Action::BrowseFiles => w.browse_files(id),
                 page::Action::LockWhenAway(on) => w.lock_when_away(id, on),
                 page::Action::AwayAll(on) => w.away_all(id, on),
+                page::Action::AutoAccept(on) => w.auto_accept(id, on),
                 page::Action::Locate => w.locate(id),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
@@ -761,6 +762,19 @@ impl Window {
         });
     }
 
+    /// Accept files from a device without asking, or ask again.
+    fn auto_accept(self: &Rc<Self>, id: Fingerprint, on: bool) {
+        let Some(c) = self.client() else { return };
+        let w = self.clone();
+        let call = self.bridge.call(&c, move |c| async move { c.set_auto_accept(id.to_string(), on).await });
+        glib::spawn_future_local(async move {
+            if let Err(e) = call.await {
+                w.toast_error(&e, Some(id));
+            }
+            w.refresh_devices();
+        });
+    }
+
     /// Allow everything from away for a device, or only the small things.
     fn away_all(self: &Rc<Self>, id: Fingerprint, on: bool) {
         let Some(c) = self.client() else { return };
@@ -908,7 +922,7 @@ impl Window {
                 }
                 self.render_page();
             }
-            Event::TransferRequest { transfer, from, files, total } => self.show_offer(transfer, &from.name, &files, total),
+            Event::TransferRequest { transfer, from, files, total } => self.show_offer(transfer, &from, &files, total),
             Event::TransferStarted { transfer, total, .. } => {
                 // Accepted elsewhere (desktop notification, another window): drop the prompt.
                 self.close_offer_dialog(&transfer);
@@ -1530,7 +1544,8 @@ impl Window {
 
     // ---- incoming offers ----
 
-    fn show_offer(self: &Rc<Self>, transfer: Uuid, from: &str, files: &[FileEntry], total: u64) {
+    fn show_offer(self: &Rc<Self>, transfer: Uuid, from: &DeviceInfo, files: &[FileEntry], total: u64) {
+        let (id, from) = (from.id, from.name.as_str());
         let what = match files {
             [one] => fmt::file_name(&one.path),
             many => fmt::plural(many.len(), "item"),
@@ -1546,7 +1561,7 @@ impl Window {
             }
             dialog.set_extra_child(Some(&list));
         }
-        dialog.add_responses(&[("decline", t!("Decline")), ("accept", t!("Accept"))]);
+        dialog.add_responses(&[("decline", t!("Decline")), ("always", t!("Always Accept")), ("accept", t!("Accept"))]);
         dialog.set_response_appearance("accept", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("accept"));
         dialog.set_close_response("decline");
@@ -1556,7 +1571,10 @@ impl Window {
             if w.state.borrow_mut().offer_dialogs.remove(&transfer).is_none() {
                 return;
             }
-            w.respond(transfer, response == "accept");
+            if response == "always" {
+                w.auto_accept(id, true);
+            }
+            w.respond(transfer, response != "decline");
         });
         self.state.borrow_mut().offer_dialogs.insert(transfer, dialog.clone());
         dialog.present(Some(&self.window));

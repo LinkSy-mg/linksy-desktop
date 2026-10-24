@@ -44,6 +44,8 @@ pub enum Action {
     LockWhenAway(bool),
     /// Allow everything from away for this device, or only the small things.
     AwayAll(bool),
+    /// Accept files from this device without asking.
+    AutoAccept(bool),
     Locate,
     Messages,
     BrowseFiles,
@@ -112,6 +114,8 @@ pub struct DevicePage {
     lock_row: adw::SwitchRow,
     /// "Allow Everything From Away" (docs/protocol.md §4.13).
     away_row: adw::SwitchRow,
+    /// "Always Accept Files".
+    accept_row: adw::SwitchRow,
     /// Terminals (docs/protocol.md §4.15): allowed for this phone, locked out, and running.
     /// The Terminal card: what to do next (set a code, allow, unlock), or that it's ready.
     terminal_box: gtk::Box,
@@ -364,6 +368,14 @@ impl DevicePage {
                 e(Action::AwayAll(row.is_active()));
             }
         });
+        let accept_row = adw::SwitchRow::builder().title(t!("Always Accept Files")).subtitle_lines(2).build();
+        accept_row.add_prefix(&gtk::Image::builder().icon_name("folder-download-symbolic").build());
+        let (e, s) = (emit.clone(), syncing.clone());
+        accept_row.connect_active_notify(move |row| {
+            if !s.get() {
+                e(Action::AutoAccept(row.is_active()));
+            }
+        });
         // Terminal: a card that says what's next, right here rather than in Preferences.
         let terminal_icon = gtk::Image::builder().icon_name("utilities-terminal-symbolic").pixel_size(28).valign(gtk::Align::Start).css_classes(["card-icon"]).build();
         let terminal_title = gtk::Label::builder().xalign(0.0).wrap(true).hexpand(true).css_classes(["title-4"]).build();
@@ -402,6 +414,7 @@ impl DevicePage {
         settings.append(&messages_row);
         settings.append(&files_row);
         settings.append(&lock_row);
+        settings.append(&accept_row);
         settings.append(&away_row);
         let terminals = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).visible(false).css_classes(["boxed-list"]).build();
 
@@ -556,6 +569,7 @@ impl DevicePage {
             files_row,
             lock_row,
             away_row,
+            accept_row,
             terminal_box,
             terminal_title,
             terminal_desc,
@@ -749,8 +763,10 @@ impl DevicePage {
             "Away from home, {device} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too.",
             device = d.device.name
         )));
+        self.accept_row.set_subtitle(&glib::markup_escape_text(&t!("Files from {device} are saved without asking.", device = d.device.name)));
         self.settings_visible(d.trusted);
         self.syncing.set(true);
+        self.accept_row.set_active(d.auto_accept);
         self.lock_row.set_active(locks);
         self.away_row.set_active(d.away_all);
         self.syncing.set(false);
