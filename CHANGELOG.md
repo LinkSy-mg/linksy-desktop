@@ -2,6 +2,19 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.1
+
+### Changed
+- **What's New covers every version you missed.** Coming from an older Linksy, it lists
+  each version's highlights since the one you last used, under its own heading, instead
+  of only the newest version's.
+
+### Fixed
+- **Update Now closed Linksy without starting it again.** The update replaces the program
+  while it runs, and Linksy tried to start the replaced one. It now starts the new one
+  once the old window has closed. (Updating from 0.9.0 still needs opening Linksy by hand
+  once: the old version does the restarting.)
+
 ## 0.9.0
 
 ### Added

@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.1" date="2026-10-24">
+      <description>
+        <p>After Update Now, Linksy starts again by itself. What's New lists the highlights of every version since the one you last used, each under its own heading.</p>
+      </description>
+    </release>
     <release version="0.9.0" date="2026-10-24">
       <description>
         <p>Linksy runs on more computers: Ubuntu 24.04 and Linux Mint 22, and Hyprland, Sway, niri and X11 desktops, with a second display on Hyprland and Sway, the installed screen locker for Lock When Away, and Finish Setup that knows what these desktops lack. On public Wi-Fi Linksy no longer announces the computer's name. Files sent together ask once, and Always Accept saves a device's files without asking. Save Logs gathers what's needed for a bug report.</p>
