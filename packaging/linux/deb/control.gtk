@@ -3,7 +3,8 @@ Version: @VERSION@
 Architecture: amd64
 Maintainer: Linksy <https://github.com/LinkSy-mg/linksy-releases>
 Installed-Size: @SIZE@
-Depends: linksy-common (= @VERSION@), libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.5), gstreamer1.0-gtk4
+Depends: linksy-common (= @VERSION@), libgtk-4-1 (>= 4.14), libadwaita-1-0 (>= 1.5)
+Recommends: gstreamer1.0-gtk4
 Section: net
 Priority: optional
 Homepage: https://github.com/LinkSy-mg/linksy-releases
