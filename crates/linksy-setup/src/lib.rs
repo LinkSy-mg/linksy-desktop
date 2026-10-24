@@ -296,6 +296,13 @@ fn notification_daemon() -> bool {
     owned || call("ListActivatableNames", None).ok().and_then(|v| v.get::<(Vec<String>,)>()).is_some_and(|(names,)| names.iter().any(|n| n == NAME))
 }
 
+/// An AMD graphics card or chip (PCI vendor 0x1002).
+fn amd_gpu() -> bool {
+    std::fs::read_dir("/sys/class/drm").is_ok_and(|d| {
+        d.flatten().any(|e| std::fs::read_to_string(e.path().join("device/vendor")).is_ok_and(|v| v.trim() == "0x1002"))
+    })
+}
+
 fn graphical_session() -> bool {
     std::process::Command::new("systemctl").args(["--user", "is-active", "--quiet", "graphical-session.target"]).status().is_ok_and(|s| s.success())
 }
@@ -427,6 +434,16 @@ pub fn check(ui: Ui) -> Vec<Item> {
             why: t!("Reading this computer's screen, and offering the phone's camera to apps."),
             need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, &suse, t!("Install PipeWire's GStreamer plugin and your desktop's screen sharing portal.")) },
         });
+        // Fedora's AMD video driver leaves H.264 encoding out (patents): RPM Fusion's full one
+        // lets the GPU encode a second display at up to 60 fps, instead of the CPU at 30
+        if fam == Family::Fedora && amd_gpu() && !has_element(&["vah264enc", "vah264lpenc"]) {
+            items.push(Item {
+                id: "gpu-video",
+                title: t!("Smoother Second Display"),
+                why: t!("Your graphics can encode video, but Fedora's driver leaves that out. RPM Fusion's full driver lets it send screens at up to 60 frames a second, with almost no processor."),
+                need: Need::Install(vec!["mesa-va-drivers-freeworld".to_string()]),
+            });
+        }
         let clip = in_path("wl-copy") || in_path("xclip") || in_path("xsel");
         items.push(Item {
             id: "clipboard",
@@ -500,7 +517,8 @@ fn setup_script(name: &str) -> Option<PathBuf> {
 pub fn root_args(items: &[Item]) -> Vec<String> {
     let packages: Vec<String> = items.iter().flat_map(|i| if let Need::Install(p) = &i.need { p.clone() } else { Vec::new() }).collect();
     let mut args = Vec::new();
-    if family() == Family::Fedora && packages.iter().any(|p| p.contains("v4l2loopback")) && !std::path::Path::new("/etc/yum.repos.d/rpmfusion-free.repo").exists() {
+    let from_fusion = |p: &String| p.contains("v4l2loopback") || p.ends_with("-freeworld");
+    if family() == Family::Fedora && packages.iter().any(from_fusion) && !std::path::Path::new("/etc/yum.repos.d/rpmfusion-free.repo").exists() {
         args.push("rpmfusion".to_string());
     }
     args.extend(packages.iter().map(|p| format!("pkg:{p}")));
@@ -565,6 +583,7 @@ pub fn step_text(step: &str) -> String {
         "Building the camera driver (a few minutes)" => t!("Building the camera driver (a few minutes)").into(),
         "Letting nearby devices find this computer" => t!("Letting nearby devices find this computer").into(),
         "Making the Linksy Camera" => t!("Making the Linksy Camera").into(),
+        "Building the camera driver again, signed with the approved key" => t!("Building the camera driver again, signed with the approved key").into(),
         "Letting Linksy use phones plugged in by cable" => t!("Letting Linksy use phones plugged in by cable").into(),
         s => match s.strip_prefix("Installing ") {
             Some(packages) => t!("Installing {packages}", packages),

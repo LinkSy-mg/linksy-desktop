@@ -5,14 +5,60 @@ Linksy for Linux. Each version's section becomes its release notes.
 ## Unreleased
 
 ### Added
-- **The KDE Plasma app sits in the system tray.** Closing its window keeps Linksy in the
-  tray. The icon fills in while a device is connected and dims when none is; its menu says
-  what's connected, and each paired device has a submenu with what its page offers: send
-  files or the clipboard, view its screen, ring, ping, locate or browse a phone, and start
-  or stop it as a second display, webcam or microphone. Anything being shared can be
-  stopped from the menu too, and it shows or hides the window and quits. A question from
-  another device, pairing, a file or a session, opens the window again on its own. Quit is
-  in the window's menu too.
+- **Linksy sits in the system tray** on KDE Plasma, GNOME (with the AppIndicator
+  extension), other desktops and in the Flatpak. The icon fills in while a device is
+  connected. Its menu has, for each paired device, what you can do with it (send files,
+  ring or ping, locate or browse a phone, use it as a second display, webcam or
+  microphone), a Stop for anything being shared, and Show Linksy. The tray belongs to the
+  background service, so no window stays open for it. Menu and icons by yurividal.
+
+## 0.9.6
+
+### Fixed
+- **Second Display didn't start on KDE.** KDE makes its virtual monitor 1920×1080, or the
+  resolution picked in its sharing dialog, not in the phone's shape, and Linksy wouldn't
+  take any other size. It now uses KDE's size, and the phone fits it to its screen.
+- **The phone's pointer stopped at the right and bottom edge on KDE** ("Invalid position"
+  in the log).
+- **Shift could stay held** after using the phone as a keyboard: keys still down when a
+  remote input session ends are now released.
+- **The phone camera kept asking for a restart after enrolling the Secure Boot key** when
+  the driver had been signed with another key: it's now built again, signed with the
+  enrolled one.
+
+## 0.9.5
+
+### Changed
+- **Second Display at up to 60 frames a second with a GPU encoder.** The screen now goes
+  from the desktop to the graphics chip in graphics memory, which converts and encodes it
+  without the processor: on a Ryzen 5 laptop, every frame GNOME draws (about 35 a second
+  while moving windows) instead of 18. Where the desktop can't hand over graphics memory,
+  frames are uploaded (about 30 a second); without a GPU encoder, the processor encodes
+  them as before.
+- **Finish Setup suggests RPM Fusion's full graphics driver** on Fedora with AMD graphics,
+  whose own driver leaves out video encoding.
+
+### Fixed
+- **Screen sharing that failed to start ended there.** Linksy now tries the next way to
+  encode (the GPU from graphics memory, then uploaded, then x264, then OpenH264) until one
+  works, and Save Logs says which part refused and why.
+- Finish Setup's notification daemon (mako) couldn't be installed by the setup helper.
+
+## 0.9.4
+
+### Fixed
+- **Second Display lagged when Linksy ran as a service.** The service's memory limit
+  (64 MB) also covered the screen helper, which needs 150 to 250 MB for a phone-shaped
+  display, so the system kept taking memory back from it and it fell to a few frames a
+  second. Screen helpers now get a limit of their own (512 MB, released when the session
+  ends), and the service keeps its small one.
+- **A second display froze after changing GNOME's display settings.** It now starts again
+  by itself once the settings are kept.
+- **Screen helpers could outlive a crashed service.** They now end with it.
+
+### Known issue
+- Changing GNOME's display settings while a second display is on can revert them. Change
+  them with the second display off.
 
 ## 0.9.3
 

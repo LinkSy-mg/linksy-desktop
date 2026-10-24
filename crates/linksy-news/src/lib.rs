@@ -33,6 +33,15 @@ pub struct Release {
 fn releases() -> Vec<Release> {
     vec![
         Release {
+            version: "0.9.5",
+            highlights: vec![Highlight {
+                gtk: "video-display-symbolic",
+                qt: "video-display",
+                title: t!("Smoother Second Display"),
+                body: t!("Screens go through the graphics chip when it can encode video, at up to 60 frames a second. On Fedora with AMD graphics, Finish Setup adds the driver it needs."),
+            }],
+        },
+        Release {
             version: "0.9.0",
             highlights: vec![
                 Highlight {
