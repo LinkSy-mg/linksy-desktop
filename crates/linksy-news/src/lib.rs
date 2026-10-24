@@ -34,6 +34,29 @@ struct Release {
 fn releases() -> Vec<Release> {
     vec![
         Release {
+            version: "0.9.0",
+            highlights: vec![
+                Highlight {
+                    gtk: "computer-symbolic",
+                    qt: "computer",
+                    title: t!("On More Computers"),
+                    body: t!("Ubuntu 24.04 and Linux Mint 22, Hyprland, Sway, niri and X11 desktops: a second display on Hyprland and Sway, your screen locker for Lock When Away, and Finish Setup that knows what they lack."),
+                },
+                Highlight {
+                    gtk: "network-wireless-symbolic",
+                    qt: "network-wireless",
+                    title: t!("Private on Public Wi-Fi"),
+                    body: t!("Linksy no longer tells everyone on the network this computer's name. Your devices still find it; others see a code that changes every 15 minutes."),
+                },
+                Highlight {
+                    gtk: "folder-download-symbolic",
+                    qt: "folder-download",
+                    title: t!("One Accept for a Batch"),
+                    body: t!("Files sent together ask once, and Always Accept saves a device's files without asking."),
+                },
+            ],
+        },
+        Release {
             version: "0.8.7",
             highlights: vec![
                 Highlight {
