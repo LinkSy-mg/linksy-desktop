@@ -32,6 +32,8 @@ finish-args:
   - --talk-name=org.freedesktop.ScreenSaver
   # The tray icon, on desktops that show one.
   - --talk-name=org.kde.StatusNotifierWatcher
+  # Big transfers over a phone's Wi-Fi Direct link, joined with NetworkManager.
+  - --system-talk-name=org.freedesktop.NetworkManager
 cleanup:
   - /include
   - /lib/pkgconfig
