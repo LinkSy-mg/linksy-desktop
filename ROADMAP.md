@@ -62,6 +62,8 @@ something Linksy relies on, Linksy brings its own fallback instead of asking for
   desktop#33).
 
 ### Every version, not only the newest — M
+*Desktop 0.9: the .deb installs on Ubuntu 24.04 and Linux Mint 22 (libadwaita 1.5, video
+without GStreamer's GTK 4 sink there), tested in CI on seven releases.*
 *Includes [@stadsport](https://github.com/LinkSy-mg/linksy-releases/issues/4)'s CachyOS setup report (fixed in 0.8.4).*
 Linksy should run on as many desktops and distribution versions as it reasonably can.
 - **Ubuntu 24.04 LTS** and what's built on it (Linux Mint 22, Pop!_OS, Zorin): the app
