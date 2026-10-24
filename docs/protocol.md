@@ -44,6 +44,7 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Open on PC (`open_url`) | Done | Done, both ways | §4.5 |
 | Battery, Ring / Find | Done | Done | §4.5 |
 | The computer's music on the phone | Done | Done | `media_watch`, `media_state`, `media_command` |
+| The computer's volume on the phone | Done (0.9.8) | To do | `volume_watch`, `volume_state`, `volume_set` (§4.5) |
 | The phone's music on the computer | Done | Not possible | needs notification-listener access |
 | Pause the computer's media during calls | Done | Done | `call_state`; never a `contact` |
 | Lock when away | Done | Done | `heartbeat`; foreground service |
@@ -237,6 +238,10 @@ and close the other with reason `duplicate`.
    "length_ms":215000,"can_next":true,"can_previous":true,"can_seek":true,"art":"<base64>"}]}
   {"type":"media_command","player":"spotify","command":{"action":"play_pause"}}
   // actions: play, pause, play_pause, next, previous, seek (+ "position_ms")
+  // The computer's volume (desktop 0.9.8):
+  {"type":"volume_watch","on":true}             // "send me your volume_state while connected"
+  {"type":"volume_state","seq":1760945000123,"level":0.7,"muted":false}   // level: 0 to 1
+  {"type":"volume_set","level":0.4}             // and/or "muted":true; either alone is fine
   {"type":"call_state","state":"ringing","contact":"Alice"}   // ringing | active | idle
   {"type":"heartbeat_watch","on":true,"every_s":20}            // computer → phone
   {"type":"heartbeat"}                                         // phone → computer, every every_s
@@ -297,6 +302,21 @@ and close the other with reason `duplicate`.
     computer's player (its media notification / page), `{on: false}` when it stops. The
     computer then sends `media_state` on every change while the connection lives, and
     acts on `media_command` for its players.
+
+  **Volume (desktop 0.9.8).** The computer's system volume: its default sound output's
+  `level` (0 = silent, 1 = 100 %) and `muted`. Only computers that announce the `volume`
+  feature (§4.10) have it; the Flatpak doesn't.
+  - **Phone → computer:** send `volume_watch {on: true}` while the phone shows the
+    computer's player (its page or the media notification), `{on: false}` when it stops.
+    The computer answers with `volume_state` at once and again every time the volume
+    changes, whatever changed it (its keys, its own slider), within a second. Keep the
+    newest `seq`, as for `media_state`.
+  - **Changing it:** `volume_set` with `level`, `muted`, or both. A level past 1 is taken
+    as 1. Moving the slider doesn't unmute by itself: send `"muted":false` with the level
+    to unmute too, as phones do with their own volume. The new `volume_state` follows.
+  - **Phone UI:** a slider and a mute button under the computer's player. While that page
+    is in front, the phone's own volume buttons can step the computer's volume
+    (±5 %: `volume_set` with the last level ± 0.05) instead of the phone's.
 
   **Calls.** Send `call_state` to paired computers that are around when a call starts
   ringing, is answered, and ends (`idle`). The computer pauses whatever plays when it
@@ -627,6 +647,7 @@ each with `entries` / `entry` / `data` / `ok` / `error`, and read a write's byte
 `DeviceInfo` has an optional `features` list (in `hello`/`welcome`), so the other side can
 hide what a device can't do. Names: `files`, `clipboard`, `open_url`, `battery`, `ring`,
 `media_remote` (controls the other's players), `media_state` (shares its own players),
+`volume` (shares its system volume and takes `volume_set`),
 `call_state`, `heartbeat`, `import`, `fs`, `input`, `screen`, `control` (can be
 controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifications),
 `sms`, `clipboard_file` (takes `"clipboard":true` offers), `clipboard_watch` (answers
@@ -1074,6 +1095,8 @@ DeviceView.battery: Option<Battery>         // last level each device reported
 node.post_notification(id, RemoteNotification{…})   node.remove_notification(id, key)
 node.send_media_state(id, &MediaState{ seq, players })   node.media_command(id, player, cmd)
 node.watch_media(id, on)                    // Event::MediaState / MediaCommand / MediaWatch
+node.watch_volume(id, on)  node.set_volume(id, Some(0.4), None)   // Event::VolumeState { from, state }
+node.send_volume_state(id, &VolumeState{ seq, level, muted })     // Event::VolumeWatch / VolumeSet
 node.send_call_state(id, CallState::Ringing | Active | Idle, contact)
 node.heartbeat(id)                          // Event::HeartbeatWatch { from, on, every_s } says when
 node.sms_threads(id, threads) / node.sms_messages(id, thread, messages, more)   // answers
@@ -1155,6 +1178,14 @@ Earlier notes, still valid:
   dragging them out).
 
 ## 7. Open items affecting mobile
+
+- [ ] **The computer's volume (desktop 0.9.8, §4.5 "Volume").** For a computer with the
+      `volume` feature: `node.watch_volume(id, true)` while its player shows (with
+      `watch_media`), a slider and a mute button from `Event::VolumeState`, and
+      `node.set_volume(id, level, muted)` when they move (throttle a dragged slider to
+      about 10 a second). Bonus: the phone's volume buttons step the computer's volume
+      while that page is in front. Also mobile#15's ±10 s: already possible with
+      `media_command` `seek` to `position_ms` ± 10000 when `can_seek`.
 
 Phone-side fixes found testing with a realme 15 Pro 5G (2026-10-19):
 
@@ -1461,3 +1492,7 @@ robust against any encoder (GPU ones may slice too):
   show Connect by USB Cable on the computer's page as described there.
 - **2026-10-24** — Desktop 0.9.6: on KDE a `display` comes at the desktop's own size, not the
   one in `session_accept` (§4.8); the phone fits it to its screen.
+- **2026-10-24** — Desktop 0.9.8: the computer's volume (§4.5 "Volume"): `volume_watch`,
+  `volume_state`, `volume_set`, feature `volume` (§4.10), core `watch_volume`,
+  `set_volume`, `send_volume_state` and `Event::VolumeState` / `VolumeSet` / `VolumeWatch`.
+  Phone to-do in §7.
