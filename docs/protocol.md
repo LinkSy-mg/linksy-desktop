@@ -499,7 +499,10 @@ their foreground services must keep running.
 may add its landscape screen size: `{"type":"session_accept","width":2400,"height":1080}`
 (core: `node.respond_session(request, true, Some((w, h)))`). The computer then makes the
 virtual monitor in that shape, at most 1080 px high (2800×1272 → 2376×1080). Without it,
-1920×1080 as before.
+1920×1080 as before. On KDE the desktop keeps its own size (1920×1080, or the resolution
+picked in KDE's sharing dialog) since desktop 0.9.6: read the size from the stream's SPS,
+fit it to the screen with black bars, and send `pointer` positions relative to the video,
+not the whole screen.
 
 **`input` sessions (desktop 0.4.1): the phone as touchpad, keyboard and presentation
 remote.** The *phone* requests `{"type":"session_request","id":…,"kind":"input"}`; the
@@ -1456,3 +1459,5 @@ robust against any encoder (GPU ones may slice too):
   should send a selection as one offer and mirror the prompt.
 - **2026-10-24** — Desktop 0.9: `usb_plugged` and `usb_connect` (§4.11) implemented. Phone:
   show Connect by USB Cable on the computer's page as described there.
+- **2026-10-24** — Desktop 0.9.6: on KDE a `display` comes at the desktop's own size, not the
+  one in `session_accept` (§4.8); the phone fits it to its screen.
