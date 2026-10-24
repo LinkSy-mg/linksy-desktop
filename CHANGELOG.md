@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.9.7
 
 ### Added
 - **Linksy sits in the system tray** on KDE Plasma, GNOME (with the AppIndicator
@@ -11,6 +11,18 @@ Linksy for Linux. Each version's section becomes its release notes.
   ring or ping, locate or browse a phone, use it as a second display, webcam or
   microphone), a Stop for anything being shared, and Show Linksy. The tray belongs to the
   background service, so no window stays open for it. Menu and icons by yurividal.
+
+### Changed
+- **Cover art from browsers reaches the phone.** A cover too big to send (a video's
+  thumbnail is often twice the size allowed) is now made smaller instead of left out.
+
+### Fixed
+- **The phone camera still failed after enrolling the Secure Boot key** (0.9.6's fix asked
+  akmods to retry, which kept the unsigned driver). The driver is now really built again,
+  signed with the enrolled key, and when it's still refused, the setup says why instead of
+  asking for another restart.
+- **A window the service opened shared its small memory limit,** the limit that made
+  Second Display slow in 0.9.4. It now has its own.
 
 ## 0.9.6
 
