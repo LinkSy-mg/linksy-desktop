@@ -1100,7 +1100,7 @@ the link, and carries the transfers over a **second QUIC connection** on it (`he
 **When.** The sender's core sets a link up before sending files of **256 MiB or more**
 (`Config.direct_min`), or an eighth of that when the devices are connected away from home
 (§4.13: they may still be side by side), never over a USB cable. It waits at most
-**25 s**, then sends over the usual connection. A link that failed isn't tried again with
+**45 s** (the first real one took 25 s), then sends over the usual connection. A link that failed isn't tried again with
 that device for 10 minutes. `node.direct_link(id)` sets one up on demand (for testing).
 A link with no transfer for **20 s** closes on both sides: `Event::DirectEnded`.
 
@@ -1641,3 +1641,7 @@ robust against any encoder (GPU ones may slice too):
   device, and never found it. `invite` now carries the host's Wi-Fi Direct `name`; the
   joiner finds the host by address, else by that name (or its Linksy name), only when one
   device has it. Phone: send `name`, and on `DirectEnded` also `cancelConnect` (§4.17).
+- **2026-10-25** — Second test: the link came up (5180 MHz, 192.168.49.x) after 25 s, the
+  moment the old limit ran out: 16 s to find each other, 9 to connect. The limit is
+  **45 s** now (core ≥ the commit after 103ae0a); the phone needs it too, its own timer ends
+  the attempt as well.
