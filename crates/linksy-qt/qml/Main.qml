@@ -457,6 +457,9 @@ Kirigami.ApplicationWindow {
     // The submenus made last time: Menu.clear() deletes plain items itself, but a submenu
     // (and the items in it) is ours to remove and destroy
     property var traySubmenus: []
+    // What the menu was last built from: devices and sessions arrive whole on every event,
+    // and rebuilding while Plasma has the menu open loses it
+    property string trayKey: ""
     onDevicesChanged: rebuildTray()
     onSessionsChanged: rebuildTray()
     onVisibleChanged: rebuildTray()
@@ -468,6 +471,11 @@ Kirigami.ApplicationWindow {
     }
 
     function rebuildTray() {
+        const key = JSON.stringify([backend.connected, backend.starting, root.visible,
+            devices.filter(d => d.trusted).map(d => [d.device.id, d.device.name, d.device.kind, d.device.features ?? null, d.connected, statusLine(d)]),
+            sessions.map(s => [s.session, s.kind, s.peer.id, s.peer.name, s.sharing])]);
+        if (key === trayKey) return;
+        trayKey = key;
         for (const sub of traySubmenus) { trayMenu.removeMenu(sub); sub.destroy() }
         trayMenu.clear();
         const subs = [];
@@ -492,7 +500,7 @@ Kirigami.ApplicationWindow {
             sub.icon.name = kinds[info.kind] ?? "computer";
             trayMenu.addMenu(sub);
             subs.push(sub);
-            add(sub, t("Show Linksy"), "window", () => { select(id); present() });
+            add(sub, t("Show Linksy"), "window", () => { present(); select(id) });
             separator(sub);
             add(sub, t("Send Files"), "document-send", () => { trayFilePicker.to = id; trayFilePicker.open() }, on);
             add(sub, t("Clipboard"), "edit-paste", () => {
@@ -500,7 +508,7 @@ Kirigami.ApplicationWindow {
                 if (!text) return trayResult(false, t("There's no text on the clipboard"));
                 request("clipboard", { to: id, text: text }, (ok, err) => trayResult(ok, ok ? t("Clipboard sent to {name}", { name: name }) : err));
             }, on);
-            add(sub, t("View Screen"), "video-display", () => { select(id); present(); viewScreen(id) }, on);
+            add(sub, t("View Screen"), "video-display", () => { present(); select(id); viewScreen(id) }, on);
             const phone = info.kind === "phone";
             if (phone && can(info, "ring"))
                 add(sub, t("Ring"), "audio-volume-high", () => request("ring", { to: id, on: true }, (ok, err) => trayResult(ok, ok ? t("Ringing {name}…", { name: name }) : err)), on);
