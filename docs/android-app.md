@@ -24,6 +24,7 @@ offer those features to Android phones.
 | Battery (`battery`) | Done | Sent on connect, when the computer is found nearby, at ±5 points and on plug/unplug |
 | Ring / Find (`ring`, `ring_stop`) | Done both ways | Alarm stream at full volume, "Found it" screen, 30 s max |
 | Media: the computer's players on the phone | Done | Phone sends `media_watch {on}` while the computer's page is open, shows each player with play/pause/next/previous (`media_command`) |
+| The computer's volume (`volume_watch`, `volume_state`, `volume_set`) | Done (0.2.6) | Only for computers announcing `volume`. Watched with the players; a slider and mute under them, the phone's volume keys step it 5 % while that page is in front |
 | Calls (`call_state`) | Done | From Android's audio mode (no phone permission), so WhatsApp/VoIP calls count too. **`contact` is never sent** |
 | Lock when away (`heartbeat_watch` / `heartbeat`) | Done | Heartbeats come from the core's runtime; a `connectedDevice` foreground service + partial wake lock keep them going with the screen off (tested in forced Doze). Only while the app process lives: send `heartbeat_watch` again on every connect |
 | Photo auto-import (`import: true`) | Done | Per computer, off by default. Source is **a folder the user picks** (usually DCIM/Camera), not the whole gallery. Sends folders named `YYYY-MM` (so files land in `Pictures/<phone>/YYYY-MM/…`), ≤ 40 files / ~300 MB per offer, only photos taken after it was turned on. A declined import is shown as "turned off on the computer" |
@@ -129,6 +130,10 @@ default SMS app.
   pad on the presenter remote (keysyms `0x30`-`0x39`, Enter, Backspace), reverse
   scrolling, and Shift releases (`0xffe1`/`0xffe2` up) after shifted `text`, since KWin
   leaves Shift held. Computer volume still needs a protocol message.
+- **2026-10-24** — Phone 0.2.6 on core `fb63c93` (desktop 0.9.8): the computer's volume
+  (`volume_watch` alongside `media_watch`, `volume_set` with `level` and/or `muted`,
+  newest `seq` kept), the number pad steps aside while the keyboard is up on the presenter
+  remote, and a redesigned Transfers page that is always a tap away.
 
 - **2026-10-24** — Phone 0.2.4 on core `6282520`: private discovery (§4.16), with
   pairing mode while Add Device, the scanner or Pair by address is open; Update Now
