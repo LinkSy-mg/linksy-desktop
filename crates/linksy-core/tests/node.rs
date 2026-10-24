@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Battery, CallState, Config, ControlMsg, FsEntry, FsRequest, SmsThread, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind};
+use linksy_core::{Battery, CallState, Config, ControlMsg, FsEntry, FsRequest, SmsThread, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind, VolumeState};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -426,6 +426,50 @@ async fn mirrored_notifications_go_both_ways() {
     let huge = RemoteNotification { icon: Some("A".repeat(200_000)), ..n.clone() };
     assert!(phone.node.post_notification(&pc_id, huge).await.is_err());
     assert!(phone.node.post_notification(&pc_id, RemoteNotification { key: String::new(), ..n }).await.is_err());
+}
+
+#[tokio::test]
+async fn volume_watched_set_and_kept_newest() {
+    let (phone, pc) = paired().await;
+    let mut on_pc = pc.node.subscribe();
+    let mut on_phone = phone.node.subscribe();
+    let (pc_id, phone_id) = (pc.node.info().id, phone.node.info().id);
+
+    phone.node.watch_volume(&pc_id, true).await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::VolumeWatch { on: true, .. }).then_some(())).await;
+    pc.node.send_volume_state(&phone_id, &VolumeState { seq: 20, level: 0.7, muted: false }).await.unwrap();
+    let got = wait_for(&mut on_phone, |e| match e {
+        Event::VolumeState { state, .. } => Some(*state),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, VolumeState { seq: 20, level: 0.7, muted: false });
+    // An older one arriving late is dropped
+    pc.node.send_volume_state(&phone_id, &VolumeState { seq: 10, level: 0.1, muted: true }).await.unwrap();
+    pc.node.send_volume_state(&phone_id, &VolumeState { seq: 30, level: 0.5, muted: false }).await.unwrap();
+    let next = wait_for(&mut on_phone, |e| match e {
+        Event::VolumeState { state, .. } => Some(state.seq),
+        _ => None,
+    })
+    .await;
+    assert_eq!(next, 30);
+    assert!(pc.node.send_volume_state(&phone_id, &VolumeState { seq: 40, level: f64::NAN, muted: false }).await.is_err());
+
+    // Beyond 100 %: kept at 100 %
+    phone.node.set_volume(&pc_id, Some(1.7), None).await.unwrap();
+    let set = wait_for(&mut on_pc, |e| match e {
+        Event::VolumeSet { level, muted, .. } => Some((*level, *muted)),
+        _ => None,
+    })
+    .await;
+    assert_eq!(set, (Some(1.0), None));
+    phone.node.set_volume(&pc_id, None, Some(true)).await.unwrap();
+    let mute = wait_for(&mut on_pc, |e| match e {
+        Event::VolumeSet { level, muted, .. } => Some((*level, *muted)),
+        _ => None,
+    })
+    .await;
+    assert_eq!(mute, (None, Some(true)));
 }
 
 #[tokio::test]

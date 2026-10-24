@@ -28,7 +28,7 @@ use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::fs::FsCall;
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{Battery, CallState, PluggedPhone, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, 
+use crate::protocol::{Battery, CallState, PluggedPhone, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState, 
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -169,6 +169,12 @@ pub enum Event {
     MediaCommand { from: DeviceInfo, player: String, command: MediaCommand },
     /// A device wants this one's `media_state` while connected (`on`), or no longer.
     MediaWatch { from: DeviceInfo, on: bool },
+    /// A device's volume, newest (older ones are dropped here).
+    VolumeState { from: DeviceInfo, state: VolumeState },
+    /// A device asks to change this one's volume: `level` (0 to 1), `muted`, or both.
+    VolumeSet { from: DeviceInfo, level: Option<f64>, muted: Option<bool> },
+    /// A device wants this one's `volume_state` while connected (`on`), or no longer.
+    VolumeWatch { from: DeviceInfo, on: bool },
     /// A phone's call: ringing, answered, or over.
     CallState { from: DeviceInfo, state: CallState, contact: Option<String> },
     /// A device checked in ("still here").
@@ -415,6 +421,8 @@ struct Inner {
     batteries: Mutex<HashMap<Fingerprint, Battery>>,
     /// The newest media snapshot `seq` seen from each device.
     media_seq: Mutex<HashMap<Fingerprint, u64>>,
+    /// The same for volume.
+    volume_seq: Mutex<HashMap<Fingerprint, u64>>,
     /// Away from home, when on (docs/protocol.md §4.13).
     away: Mutex<Option<Arc<crate::away::Away>>>,
 }
@@ -466,6 +474,7 @@ impl Node {
                 import_dir: Mutex::default(),
                 batteries: Mutex::default(),
                 media_seq: Mutex::default(),
+                volume_seq: Mutex::default(),
                 sessions: Mutex::new(Some(sessions)),
                 sessions_tx,
                 fs: Mutex::new(Some(fs)),
@@ -848,6 +857,28 @@ impl Node {
     /// Ask a device for its media players while connected (`on`), or stop.
     pub async fn watch_media(&self, to: &Fingerprint, on: bool) -> Result<()> {
         self.send_message(to, &Message::MediaWatch { on }).await
+    }
+
+    /// Send this device's volume (bump `seq` each time).
+    pub async fn send_volume_state(&self, to: &Fingerprint, state: &VolumeState) -> Result<()> {
+        if !state.level.is_finite() {
+            return Err(invalid("the volume isn't a number"));
+        }
+        self.send_message(to, &Message::VolumeState(*state)).await
+    }
+
+    /// Change another device's volume: `level` from 0 to 1, `muted`, or both.
+    pub async fn set_volume(&self, to: &Fingerprint, level: Option<f64>, muted: Option<bool>) -> Result<()> {
+        if level.is_some_and(|l| !l.is_finite()) {
+            return Err(invalid("the volume isn't a number"));
+        }
+        let level = level.map(|l| l.clamp(0.0, 1.0));
+        self.send_message(to, &Message::VolumeSet { level, muted }).await
+    }
+
+    /// Ask a device for its volume while connected (`on`), or stop.
+    pub async fn watch_volume(&self, to: &Fingerprint, on: bool) -> Result<()> {
+        self.send_message(to, &Message::VolumeWatch { on }).await
     }
 
     /// Tell a device about a call on this one (phones), so it can pause its media.
@@ -1563,6 +1594,29 @@ impl Node {
                                 }
                                 Ok(Message::MediaCommand { player, command }) => node.emit(Event::MediaCommand { from, player, command }),
                                 Ok(Message::MediaWatch { on }) => node.emit(Event::MediaWatch { from, on }),
+                                Ok(Message::VolumeState(state)) if state.level.is_finite() => {
+                                    let newer = {
+                                        let mut seqs = node.inner.volume_seq.lock().unwrap();
+                                        let last = seqs.entry(from.id).or_insert(0);
+                                        let newer = state.seq > *last;
+                                        if newer {
+                                            *last = state.seq;
+                                        }
+                                        newer
+                                    };
+                                    if newer {
+                                        node.emit(Event::VolumeState { from, state });
+                                    }
+                                }
+                                Ok(Message::VolumeState(_)) => debug!("bad volume from {}", from.name),
+                                // Not a number, or out of range: nothing, or within 0 to 1
+                                Ok(Message::VolumeSet { level, muted }) => {
+                                    let level = level.filter(|l| l.is_finite()).map(|l| l.clamp(0.0, 1.0));
+                                    if level.is_some() || muted.is_some() {
+                                        node.emit(Event::VolumeSet { from, level, muted });
+                                    }
+                                }
+                                Ok(Message::VolumeWatch { on }) => node.emit(Event::VolumeWatch { from, on }),
                                 Ok(Message::CallState { state, contact }) => node.emit(Event::CallState { from, state, contact }),
                                 Ok(Message::Heartbeat) => node.emit(Event::Heartbeat { from }),
                                 Ok(Message::ClipboardWatch { on }) => node.emit(Event::ClipboardWatch { from, on }),

@@ -314,6 +314,18 @@ pub enum Message {
     MediaCommand { player: String, command: MediaCommand },
     /// Start (or stop) sending `media_state` to the sender while connected.
     MediaWatch { on: bool },
+    /// The sender's sound output (its system volume), sent when it changes to a device that
+    /// asked with `volume_watch`.
+    VolumeState(VolumeState),
+    /// Change the receiver's volume: `level` (0 to 1), `muted`, or both.
+    VolumeSet {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        level: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        muted: Option<bool>,
+    },
+    /// Start (or stop) sending `volume_state` to the sender while connected.
+    VolumeWatch { on: bool },
     /// The sender (a phone) has a call coming in, going on, or none any more.
     CallState {
         state: CallState,
@@ -500,6 +512,15 @@ pub struct MediaPlayer {
     pub art: Option<String>,
 }
 
+/// A device's sound output: its system volume, from 0 (silent) to 1 (100 %), and whether
+/// it's muted. `seq` as in [`MediaState`]: a later one replaces an earlier one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct VolumeState {
+    pub seq: u64,
+    pub level: f64,
+    pub muted: bool,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum MediaCommand {
@@ -593,6 +614,17 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn volume_messages_read_as_documented() {
+        let state: Message = serde_json::from_str(r#"{"type":"volume_state","seq":5,"level":0.4,"muted":false}"#).unwrap();
+        assert_eq!(state, Message::VolumeState(VolumeState { seq: 5, level: 0.4, muted: false }));
+        // Either half alone
+        let set: Message = serde_json::from_str(r#"{"type":"volume_set","muted":true}"#).unwrap();
+        assert_eq!(set, Message::VolumeSet { level: None, muted: Some(true) });
+        assert_eq!(serde_json::to_string(&Message::VolumeSet { level: Some(0.5), muted: None }).unwrap(), r#"{"type":"volume_set","level":0.5}"#);
+        assert_eq!(serde_json::from_str::<Message>(r#"{"type":"volume_watch","on":true}"#).unwrap(), Message::VolumeWatch { on: true });
+    }
 
     #[test]
     fn control_frames_round_trip_and_skip_junk() {
