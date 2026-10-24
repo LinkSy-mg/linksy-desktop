@@ -105,7 +105,7 @@ async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror
     writer.abort();
 }
 
-async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mirror, away: &Away, photos: &Photos, req: Request) -> Result<Value, String> {
+pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, mirror: &Mirror, away: &Away, photos: &Photos, req: Request) -> Result<Value, String> {
     let json = |v: serde_json::Result<Value>| v.map_err(|e| e.to_string());
     match req {
         Request::Status => json(serde_json::to_value(Status {

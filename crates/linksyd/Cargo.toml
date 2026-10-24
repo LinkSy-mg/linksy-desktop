@@ -25,6 +25,7 @@ zbus = { version = "5.19.0", default-features = false, features = ["async-io"] }
 futures-util = { version = "0.3.34", default-features = false }
 nusb = { version = "0.2.8", features = ["tokio"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
+ksni = { version = "0.3.7", default-features = false, features = ["async-io"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
