@@ -12,7 +12,7 @@ url='https://github.com/LinkSy-mg/linksy-desktop'
 license=('AGPL-3.0-or-later')
 makedepends=('cargo' 'lld' 'gtk4' 'libadwaita' 'gstreamer' 'gst-plugins-base' 'qt6-base' 'qt6-declarative')
 source=("$pkgbase-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('ed36361be4e370d2e8497728ee71e91b85d72fe6dec7dee55807899c1a7a6774')
+sha256sums=('99664551c692ef45e53c6ed904da48dc147dbf7f62f1ddb0481e52d817f7b8da')
 
 prepare() {
   cd linksy-desktop-$pkgver
