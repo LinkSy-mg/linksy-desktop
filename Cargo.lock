@@ -2429,6 +2429,7 @@ name = "linksy"
 version = "0.8.7"
 dependencies = [
  "linksy-ipc",
+ "linksy-logs",
  "linksy-upgrade",
  "qrcode",
  "tokio",
@@ -2444,6 +2445,7 @@ dependencies = [
  "libadwaita",
  "linksy-i18n",
  "linksy-ipc",
+ "linksy-logs",
  "linksy-news",
  "linksy-setup",
  "linksy-upgrade",
@@ -2493,6 +2495,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "linksy-logs"
+version = "0.8.7"
+dependencies = [
+ "tempfile",
+]
+
+[[package]]
 name = "linksy-news"
 version = "0.8.7"
 dependencies = [
@@ -2509,6 +2518,7 @@ dependencies = [
  "cxx-qt-lib",
  "linksy-i18n",
  "linksy-ipc",
+ "linksy-logs",
  "linksy-news",
  "linksy-setup",
  "linksy-upgrade",
@@ -2525,6 +2535,7 @@ dependencies = [
  "ashpd",
  "gstreamer",
  "linksy-core",
+ "linksy-logs",
  "tokio",
 ]
 
@@ -2560,6 +2571,7 @@ dependencies = [
  "linksy-core",
  "linksy-i18n",
  "linksy-ipc",
+ "linksy-logs",
  "notify-rust",
  "nusb",
  "serde",
