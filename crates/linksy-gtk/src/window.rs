@@ -265,7 +265,7 @@ impl Window {
         let stack = gtk::Stack::builder().transition_type(gtk::StackTransitionType::Crossfade).build();
         stack.add_named(&split, Some("main"));
         stack.add_named(&offline, Some("offline"));
-        stack.add_named(&adw::Spinner::builder().width_request(32).height_request(32).halign(gtk::Align::Center).valign(gtk::Align::Center).build(), Some("loading"));
+        stack.add_named(&gtk::Spinner::builder().spinning(true).width_request(32).height_request(32).halign(gtk::Align::Center).valign(gtk::Align::Center).build(), Some("loading"));
         stack.set_visible_child_name("loading");
 
         // Device names go in as plain text.
@@ -1644,6 +1644,11 @@ impl Window {
         let toast = adw::Toast::builder().title(glib::markup_escape_text(text)).button_label(t!("Finish Setup")).action_name("win.setup").timeout(8).build();
         self.toasts.add_toast(toast);
     }
+}
+
+/// A spinning spinner (GTK's: libadwaita's needs 1.6, newer than Ubuntu 24.04's).
+pub(super) fn spinner() -> gtk::Spinner {
+    gtk::Spinner::builder().spinning(true).build()
 }
 
 fn main_menu() -> gtk::MenuButton {

@@ -163,7 +163,7 @@ impl Window {
                     let (w, v, item) = (self.clone(), v.clone(), item.clone());
                     button.connect_clicked(move |b| {
                         b.set_sensitive(false);
-                        b.set_child(Some(&adw::Spinner::new()));
+                        b.set_child(Some(&super::spinner()));
                         w.clone().fix(v.clone(), vec![item.clone()]);
                     });
                 }
@@ -176,7 +176,7 @@ impl Window {
     /// user's own account does), then show what's left.
     fn fix(self: Rc<Self>, v: SetupView, items: Vec<Item>) {
         v.everything.set_sensitive(false);
-        v.everything.set_child(Some(&adw::Spinner::new()));
+        v.everything.set_child(Some(&super::spinner()));
         glib::spawn_future_local(async move {
             let args = root_args(&items);
             let mut result = if args.is_empty() { Ok(()) } else { run_as_root(&args, &v.progress).await };

@@ -62,7 +62,7 @@ impl Window {
     fn run_upgrade(self: Rc<Self>, plan: Plan) {
         let label = gtk::Label::builder().label(t!("Checking the release")).wrap(true).justify(gtk::Justification::Center).css_classes(["dim-label"]).build();
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).margin_top(12).margin_bottom(30).margin_start(30).margin_end(30).build();
-        let spinner = adw::Spinner::builder().width_request(32).height_request(32).halign(gtk::Align::Center).build();
+        let spinner = gtk::Spinner::builder().spinning(true).width_request(32).height_request(32).halign(gtk::Align::Center).build();
         body.append(&spinner);
         body.append(&label);
         let view = adw::ToolbarView::new();

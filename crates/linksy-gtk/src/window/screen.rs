@@ -424,7 +424,7 @@ struct Viewer {
 
 impl Viewer {
     fn open(owner: &Rc<Window>, device: Fingerprint, name: &str) -> Self {
-        let waiting = adw::StatusPage::builder().child(&adw::Spinner::builder().width_request(32).height_request(32).build()).build();
+        let waiting = adw::StatusPage::builder().child(&gtk::Spinner::builder().spinning(true).width_request(32).height_request(32).build()).build();
         let picture = gtk::Picture::builder()
             .content_fit(gtk::ContentFit::Contain)
             .hexpand(true)

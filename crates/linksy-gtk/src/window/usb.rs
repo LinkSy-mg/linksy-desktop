@@ -10,7 +10,7 @@ use gtk::glib;
 use linksy_i18n::t;
 use linksy_ipc::{UsbState, UsbStatus};
 
-use super::Window;
+use super::{Window, spinner};
 
 /// One step: its number (waiting), a spinner (under way) or a check (done).
 struct Step {
@@ -22,7 +22,7 @@ impl Step {
     fn new(n: u32, title: &str) -> Self {
         let mark = gtk::Stack::builder().valign(gtk::Align::Center).width_request(24).build();
         mark.add_named(&gtk::Label::builder().label(n.to_string()).css_classes(["step-number"]).build(), Some("todo"));
-        mark.add_named(&adw::Spinner::new(), Some("busy"));
+        mark.add_named(&spinner(), Some("busy"));
         mark.add_named(&gtk::Image::builder().icon_name("object-select-symbolic").css_classes(["success"]).build(), Some("done"));
         let row = adw::ActionRow::builder().title(title).subtitle_lines(4).build();
         row.add_prefix(&mark);
@@ -114,7 +114,7 @@ impl Window {
         let t = toasts.clone();
         allow.connect_clicked(move |b| {
             b.set_sensitive(false);
-            b.set_child(Some(&adw::Spinner::new()));
+            b.set_child(Some(&spinner()));
             let (b, t) = (b.clone(), t.clone());
             glib::spawn_future_local(async move {
                 if let Err(e) = super::setup::allow_usb().await {
