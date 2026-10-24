@@ -30,7 +30,9 @@ impl Window {
         self.show_news_of(linksy_news::latest(env!("CARGO_PKG_VERSION")));
     }
 
-    fn show_news_of(self: &Rc<Self>, news: Vec<linksy_news::Highlight>) {
+    /// `news`: one version's highlights, or (after skipping versions) each version's,
+    /// newest first, under its own heading.
+    fn show_news_of(self: &Rc<Self>, news: Vec<linksy_news::Release>) {
         let version = env!("CARGO_PKG_VERSION");
         let dialog = adw::Dialog::builder().title(t!("What's New")).content_width(460).build();
         let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(24).margin_top(6).margin_bottom(24).margin_start(28).margin_end(28).build();
@@ -39,7 +41,9 @@ impl Window {
         let logo = crate::mark::new(72, false);
         logo.set_halign(gtk::Align::Center);
         logo.add_css_class("news-pop");
-        let heading = gtk::Label::builder().label(t!("What's New in Linksy {version}", version)).wrap(true).justify(gtk::Justification::Center).css_classes(["title-1"]).build();
+        let several = news.len() > 1;
+        let title = if several { t!("What's New Since Your Last Update").to_string() } else { t!("What's New in Linksy {version}", version) };
+        let heading = gtk::Label::builder().label(&title).wrap(true).justify(gtk::Justification::Center).css_classes(["title-1"]).build();
         let top = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
         top.append(&logo);
         top.append(&heading);
@@ -47,18 +51,24 @@ impl Window {
 
         let list = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(18).build();
         let mut rows = Vec::new();
-        for h in &news {
-            let icon = gtk::Image::builder().icon_name(h.gtk).pixel_size(20).valign(gtk::Align::Start).css_classes(["news-icon"]).build();
-            let title = gtk::Label::builder().label(h.title).xalign(0.0).wrap(true).css_classes(["heading"]).build();
-            let text = gtk::Label::builder().label(h.body).xalign(0.0).wrap(true).css_classes(["dim-label"]).build();
-            let words = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(3).hexpand(true).build();
-            words.append(&title);
-            words.append(&text);
-            let row = gtk::Box::builder().spacing(14).opacity(0.0).build();
-            row.append(&icon);
-            row.append(&words);
-            list.append(&row);
-            rows.push((row, icon));
+        for release in &news {
+            if several {
+                let label = gtk::Label::builder().label(t!("Linksy {version}", version = release.version)).xalign(0.0).margin_top(6).css_classes(["caption-heading", "dim-label"]).build();
+                list.append(&label);
+            }
+            for h in &release.highlights {
+                let icon = gtk::Image::builder().icon_name(h.gtk).pixel_size(20).valign(gtk::Align::Start).css_classes(["news-icon"]).build();
+                let title = gtk::Label::builder().label(h.title).xalign(0.0).wrap(true).css_classes(["heading"]).build();
+                let text = gtk::Label::builder().label(h.body).xalign(0.0).wrap(true).css_classes(["dim-label"]).build();
+                let words = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(3).hexpand(true).build();
+                words.append(&title);
+                words.append(&text);
+                let row = gtk::Box::builder().spacing(14).opacity(0.0).build();
+                row.append(&icon);
+                row.append(&words);
+                list.append(&row);
+                rows.push((row, icon));
+            }
         }
         body.append(&list);
 

@@ -12,9 +12,6 @@ use linksy_i18n::t;
 /// Linksy's source, for "Star Linksy on GitHub".
 pub const REPO: &str = "https://github.com/LinkSy-mg/linksy-desktop";
 
-/// At most this many highlights at once, when several versions were skipped.
-const MOST: usize = 5;
-
 /// One thing worth noticing.
 #[derive(Clone)]
 pub struct Highlight {
@@ -25,9 +22,11 @@ pub struct Highlight {
     pub body: &'static str,
 }
 
-struct Release {
-    version: &'static str,
-    highlights: Vec<Highlight>,
+/// One version's highlights.
+#[derive(Clone)]
+pub struct Release {
+    pub version: &'static str,
+    pub highlights: Vec<Highlight>,
 }
 
 /// Newest first.
@@ -122,17 +121,55 @@ fn releases() -> Vec<Release> {
                 },
             ],
         },
+        Release {
+            version: "0.8.3",
+            highlights: vec![
+                Highlight {
+                    gtk: "emblem-shared-symbolic",
+                    qt: "emblem-shared",
+                    title: t!("Linksy Is Open Source"),
+                    body: t!("Its code is public under the GNU AGPL: read it, build it, and help make it better."),
+                },
+                Highlight {
+                    gtk: "system-software-install-symbolic",
+                    qt: "system-software-install",
+                    title: t!("Packages for openSUSE"),
+                    body: t!("Each release now has an .rpm for openSUSE Tumbleweed, beside the Fedora one."),
+                },
+            ],
+        },
+        Release {
+            version: "0.8.0",
+            highlights: vec![
+                Highlight {
+                    gtk: "preferences-desktop-locale-symbolic",
+                    qt: "preferences-desktop-locale",
+                    title: t!("Linksy Speaks Your Language"),
+                    body: t!("Ten languages, from English and Français to 日本語 and Malagasy, following your computer's."),
+                },
+                Highlight {
+                    gtk: "media-removable-symbolic",
+                    qt: "drive-removable-media-usb",
+                    title: t!("Connect by USB Cable"),
+                    body: t!("A guide on a phone's page uses the cable for a faster webcam and microphone, with no Wi-Fi needed."),
+                },
+                Highlight {
+                    gtk: "audio-input-microphone-symbolic",
+                    qt: "audio-input-microphone",
+                    title: t!("See the Microphone Level"),
+                    body: t!("While a phone's microphone is on, its card shows how loud it is, and Listen plays it here."),
+                },
+            ],
+        },
     ]
 }
 
-/// The highlights of `version` and the versions after `since` up to it, newest first.
-fn between(since: Option<&str>, version: &str) -> Vec<Highlight> {
+/// The versions after `since` up to `version` (included) that have highlights, newest first.
+fn between(since: Option<&str>, version: &str) -> Vec<Release> {
     releases()
         .into_iter()
         .filter(|r| newer(version, r.version) || r.version == version)
         .filter(|r| since.is_none_or(|s| newer(r.version, s)))
-        .flat_map(|r| r.highlights)
-        .take(MOST)
         .collect()
 }
 
@@ -158,10 +195,10 @@ fn used_before() -> bool {
     ["trusted.json", "history.json"].iter().any(|f| std::fs::metadata(data.join(f)).is_ok_and(|m| m.len() > 2))
 }
 
-/// What to show now that `version` opens: its highlights (and those of versions skipped
-/// since the last one seen) once, then nothing. Empty on a fresh install, and for
-/// screenshots and development setups.
-pub fn to_show(version: &str) -> Vec<Highlight> {
+/// What to show now that `version` opens: its highlights and those of every version since
+/// the last one seen, grouped by version, once; then nothing. Empty on a fresh install,
+/// and for screenshots and development setups.
+pub fn to_show(version: &str) -> Vec<Release> {
     if std::env::var_os("LINKSY_SCREENSHOT").is_some() || std::env::var_os("LINKSY_SOCKET").is_some() {
         return Vec::new();
     }
@@ -169,9 +206,9 @@ pub fn to_show(version: &str) -> Vec<Highlight> {
     match seen {
         Some(s) if !newer(version, &s) => Vec::new(),
         Some(s) => between(Some(&s), version),
-        // Nothing noted: an update from before What's New (show this version's), or a
-        // fresh install (nothing)
-        None if used_before() => between(Some(previous(version)), version),
+        // Nothing noted: an update from before What's New (0.8.4), so from an unknown
+        // version: everything there is; or a fresh install (nothing)
+        None if used_before() => between(None, version),
         None => {
             mark_seen(version);
             Vec::new()
@@ -185,7 +222,7 @@ fn previous(version: &str) -> &'static str {
 }
 
 /// `version`'s highlights, for What's New in the menu.
-pub fn latest(version: &str) -> Vec<Highlight> {
+pub fn latest(version: &str) -> Vec<Release> {
     between(Some(previous(version)), version)
 }
 
@@ -212,9 +249,15 @@ mod tests {
 
     #[test]
     fn skipped_versions_add_up() {
-        assert_eq!(between(Some("0.8.4"), "0.8.5").len(), 2);
-        assert_eq!(between(Some("0.8.5"), "0.8.6").len(), 1);
-        assert_eq!(between(Some("0.8.3"), "0.8.5").len(), 5);
+        let count = |r: Vec<Release>| (r.len(), r.iter().map(|r| r.highlights.len()).sum::<usize>());
+        assert_eq!(count(between(Some("0.8.4"), "0.8.5")), (1, 2));
+        assert_eq!(count(between(Some("0.8.5"), "0.8.6")), (1, 1));
+        assert_eq!(count(between(Some("0.8.3"), "0.8.5")), (2, 5));
         assert!(between(Some("0.8.5"), "0.8.5").is_empty());
+        // From 0.8.0 to 0.9.0: every version after it, newest first, nothing capped
+        let from_080 = between(Some("0.8.0"), "0.9.0");
+        assert_eq!(from_080.first().map(|r| r.version), Some("0.9.0"));
+        assert_eq!(from_080.last().map(|r| r.version), Some("0.8.3"));
+        assert_eq!(between(None, "0.9.0").last().map(|r| r.version), Some("0.8.0"));
     }
 }

@@ -9,7 +9,7 @@ import org.kde.kirigami as Kirigami
 Kirigami.Dialog {
     id: dialog
     required property var app
-    property var news: ({ version: "", notes: "", repo: "", highlights: [] })
+    property var news: ({ version: "", several: false, notes: "", repo: "", highlights: [] })
     // Plasma's animation speed: 0 when animations are off
     readonly property int step: Kirigami.Units.longDuration
 
@@ -46,7 +46,7 @@ Kirigami.Dialog {
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.Wrap
             level: 1
-            text: dialog.app.t("What's New in Linksy {version}", { version: dialog.news.version })
+            text: dialog.news.several ? dialog.app.t("What's New Since Your Last Update") : dialog.app.t("What's New in Linksy {version}", { version: dialog.news.version })
         }
 
         Repeater {
@@ -71,8 +71,18 @@ Kirigami.Dialog {
                     }
                 }
 
+                // After skipped versions: which version the next highlights came in
+                QQC2.Label {
+                    visible: row.modelData.heading !== undefined
+                    Layout.fillWidth: true
+                    Layout.topMargin: Kirigami.Units.smallSpacing
+                    font.bold: true
+                    opacity: 0.7
+                    text: dialog.app.t("Linksy {version}", { version: row.modelData.heading ?? "" })
+                }
                 Rectangle {
                     id: bubble
+                    visible: row.modelData.heading === undefined
                     Layout.alignment: Qt.AlignTop
                     Layout.preferredWidth: Kirigami.Units.iconSizes.medium + Kirigami.Units.smallSpacing * 2
                     Layout.preferredHeight: Layout.preferredWidth
@@ -88,6 +98,7 @@ Kirigami.Dialog {
                     }
                 }
                 ColumnLayout {
+                    visible: row.modelData.heading === undefined
                     Layout.fillWidth: true
                     spacing: 2
                     Kirigami.Heading {
