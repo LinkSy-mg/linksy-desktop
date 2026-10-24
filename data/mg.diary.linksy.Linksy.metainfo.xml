@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.2" date="2026-10-24">
+      <description>
+        <p>Second Display no longer lags on computers without a hardware video encoder: it runs at up to 30 frames a second on several processor cores. In the Flatpak, Save Logs now includes the service's log.</p>
+      </description>
+    </release>
     <release version="0.9.1" date="2026-10-24">
       <description>
         <p>After Update Now, Linksy starts again by itself. What's New lists the highlights of every version since the one you last used, each under its own heading.</p>

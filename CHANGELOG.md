@@ -2,6 +2,16 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.2
+
+### Fixed
+- **Second Display lagged on computers without a hardware video encoder** (Fedora's AMD
+  drivers, for one). A phone-shaped display is about 2.5 million pixels, and encoding it
+  on one processor core took longer than a frame lasts, so the delay kept growing. It now
+  runs at up to 30 frames a second on several cores and keeps up.
+- **The Flatpak's Save Logs had no log in it.** The Flatpak's service now writes its log
+  to a file of its own, and Save Logs includes it.
+
 ## 0.9.1
 
 ### Changed
