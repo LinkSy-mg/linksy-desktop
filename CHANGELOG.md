@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.3
+
+### Fixed
+- **Second Display was still slow on a laptop without a hardware encoder.** With windows
+  moving on it, the encoder's finer motion search cost ten times more than expected and
+  the display fell to a few frames a second on battery. It now uses the fastest setting at
+  twice the bitrate: 30 frames a second, and sharp.
+
 ## 0.9.2
 
 ### Fixed
