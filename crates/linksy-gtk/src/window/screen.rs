@@ -270,13 +270,11 @@ impl Window {
             Some(dev) => format!("v4l2src device={}", dev.display()),
             None => "pipewiresrc target-object=linksy-camera always-copy=true".to_string(),
         };
-        let pipeline = match gst::parse::launch(&format!("{source} ! videoconvert ! gtk4paintablesink name=sink sync=false")) {
+        let pipeline = match gst::parse::launch(&format!("{source} ! videoconvert ! {}", video_sink())) {
             Ok(p) => p,
             Err(_) => return self.missing_part_toast(t!("Can't preview: a video part is missing")),
         };
-        if let Some(paintable) = pipeline.downcast_ref::<gst::Bin>().and_then(|b| b.by_name("sink")).map(|s| s.property::<gdk::Paintable>("paintable")) {
-            self.camera_picture.set_paintable(Some(&paintable));
-        }
+        show_video(&pipeline, &self.camera_picture, |_| {});
         let _ = pipeline.set_state(gst::State::Playing);
         self.state.borrow_mut().preview = Some((id, pipeline));
         // The phone's camera controls, under the preview (docs/android-app.md §2.8).
@@ -716,25 +714,20 @@ impl Viewer {
         }
         let socket = OwnedFd::from(stream);
         let Some(decoder) = decoder() else { return self.missing_part() };
-        if gst::ElementFactory::find("gtk4paintablesink").is_none() {
-            return self.missing_part();
-        }
-        let description = format!("fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! gtk4paintablesink name=sink sync=false", socket.as_raw_fd());
+        let description = format!("fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! {}", socket.as_raw_fd(), video_sink());
         let pipeline = match gst::parse::launch(&description) {
             Ok(p) => p,
             Err(e) => return self.ended(t!("Can't Show This Screen"), &t!("A video component is missing: {error}", error = e)),
         };
         *self.socket.borrow_mut() = Some(socket);
-        let sink = pipeline.downcast_ref::<gst::Bin>().and_then(|b| b.by_name("sink"));
-        if let Some(paintable) = sink.map(|s| s.property::<gdk::Paintable>("paintable")) {
-            self.picture.set_paintable(Some(&paintable));
-            // Fit the window to the screen's shape once frames arrive (and again if the
-            // other device rotates), like iPhone Mirroring; not for full-screen displays.
-            if self.kind.get() != SessionKind::Display {
-                let (window, picture) = (self.window.clone(), self.picture.clone());
-                paintable.connect_invalidate_size(move |p| fit_to_video(window.upcast_ref(), &picture, p));
+        // Fit the window to the screen's shape once frames arrive (and again if the other
+        // device rotates), like iPhone Mirroring; not for full-screen displays.
+        let (window, picture, fit) = (self.window.clone(), self.picture.clone(), self.kind.get() != SessionKind::Display);
+        show_video(&pipeline, &self.picture, move |p| {
+            if fit {
+                fit_to_video(window.upcast_ref(), &picture, p);
             }
-        }
+        });
         let bus = pipeline.bus().expect("pipeline bus");
         let v = self.clone();
         let watch = bus.add_watch_local(move |_, msg| {
@@ -833,6 +826,57 @@ fn mouse_button(gdk_button: u32) -> Option<MouseButton> {
 /// may not load (a stale plugin registry), so each is tried for real.
 /// libav's default frame threading holds one frame per CPU thread before showing any
 /// (about 400 ms on a 12-thread laptop); slice threading shows each as it's decoded.
+/// The end of a pipeline that shows video: GStreamer's GTK 4 sink, or where there's none
+/// (Ubuntu 24.04 has no package for it) a sink whose frames are drawn as textures.
+fn video_sink() -> &'static str {
+    // LINKSY_VIDEO_FALLBACK=1 tries the other way where the sink exists
+    if gst::ElementFactory::find("gtk4paintablesink").is_some() && std::env::var_os("LINKSY_VIDEO_FALLBACK").is_none() {
+        "gtk4paintablesink name=sink sync=false"
+    } else {
+        "video/x-raw,format=RGBA ! fakesink name=sink sync=false signal-handoffs=true"
+    }
+}
+
+/// Show the video of `pipeline` (ended by [`video_sink`]) in `picture`; `resized` runs
+/// when the video's size changes.
+fn show_video(pipeline: &gst::Element, picture: &gtk::Picture, resized: impl Fn(&gdk::Paintable) + 'static) {
+    let Some(sink) = pipeline.downcast_ref::<gst::Bin>().and_then(|b| b.by_name("sink")) else { return };
+    if sink.factory().is_some_and(|f| f.name() == "gtk4paintablesink") {
+        let paintable = sink.property::<gdk::Paintable>("paintable");
+        picture.set_paintable(Some(&paintable));
+        paintable.connect_invalidate_size(move |p| resized(p));
+        return;
+    }
+    // One frame waits at most: a busy window skips frames rather than falling behind
+    let (tx, rx) = async_channel::bounded::<(glib::Bytes, i32, i32)>(1);
+    sink.connect("handoff", false, move |args| {
+        let frame = || {
+            let buffer = args.get(1)?.get::<gst::Buffer>().ok()?;
+            let caps = args.get(2)?.get::<gst::Pad>().ok()?.current_caps()?;
+            let s = caps.structure(0)?;
+            let (w, h) = (s.get::<i32>("width").ok()?, s.get::<i32>("height").ok()?);
+            let map = buffer.map_readable().ok()?;
+            Some((glib::Bytes::from(map.as_slice()), w, h))
+        };
+        if let Some(f) = frame() {
+            let _ = tx.try_send(f);
+        }
+        None
+    });
+    let picture = picture.clone();
+    glib::spawn_future_local(async move {
+        let mut size = (0, 0);
+        while let Ok((bytes, w, h)) = rx.recv().await {
+            let texture = gdk::MemoryTexture::new(w, h, gdk::MemoryFormat::R8g8b8a8, &bytes, w as usize * 4);
+            picture.set_paintable(Some(&texture));
+            if size != (w, h) {
+                size = (w, h);
+                resized(texture.upcast_ref());
+            }
+        }
+    });
+}
+
 fn decoder() -> Option<&'static str> {
     let name = ["avdec_h264", "vah264dec", "openh264dec"].into_iter().find(|name| gst::ElementFactory::make(name).build().is_ok())?;
     Some(if name == "avdec_h264" { "avdec_h264 thread-type=slice" } else { name })
