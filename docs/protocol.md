@@ -659,7 +659,9 @@ controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifica
 `sms`, `clipboard_file` (takes `"clipboard":true` offers), `clipboard_watch` (answers
 `clipboard_watch`), `microphone` (shares its microphone), `picture` (sends and shows
 `picture`), `direct_host` (hosts direct links: a phone with Wi-Fi Direct, §4.17),
-`direct_join` (joins them: a computer whose NetworkManager has a Wi-Fi Direct device).
+`direct_join` (joins them: a computer whose NetworkManager has a Wi-Fi Direct device, or a
+phone), `direct_group` (hosts and joins Wi-Fi Direct groups by name and passphrase: phones,
+§4.17 "Phone to phone").
 Set `Config.features` in the core. A desktop announces all of them,
 except `clipboard_watch` where its desktop doesn't let apps watch the clipboard (GNOME).
 When a device sends no list (older versions), the desktop assumes everything except, for
@@ -1147,6 +1149,57 @@ private (or link-local) IPv4 address and a port, so a paired device can't point 
 joiner anywhere else. The second connection is mutual TLS as always; Wi-Fi Direct's own
 WPA2 is on top.
 
+**Phone to phone: a group with a passphrase (core ≥ this change).** Two phones can't use
+the steps above: Android gives each app `02:00:00:00:00:00` for its own address, so neither
+can tell the other where it is, and an incoming connection the app didn't start shows a
+dialog. Instead the host makes a group with a name and a passphrase, and the joiner joins
+it with them, which Android 10 and later do without any prompt or address.
+
+- **Feature `direct_group`:** the device hosts and joins groups by name and passphrase.
+  Phones announce `direct_host`, `direct_join` and `direct_group`. A Linux computer doesn't:
+  NetworkManager joins a Wi-Fi Direct group only through its push-button setup; joining by
+  passphrase would mean an ordinary Wi-Fi connection that takes the computer off its own
+  network. So phone ↔ computer keeps the steps above, phone ↔ phone uses the group.
+- **Who hosts:** when both could host and join, **the device with the smaller id hosts**
+  (byte-wise, as for duplicate connections, §4.4). Both cores work it out the same; the
+  other sends `ask` as usual. `DirectWanted` only ever comes on one of the two.
+- **Credentials:** when both have `direct_group`, the core generates them and puts them in
+  `Event::DirectWanted { id, group: Some(DirectGroup { ssid, passphrase, frequency: None }) }`:
+  `DIRECT-xy-Linksy` and 20 random characters. Checked on both sides: the name starts with
+  `DIRECT-`, at least `DIRECT-xy`, at most 32 bytes; the passphrase is 8 to 63 printable
+  ASCII characters; a frequency is 2400 to 7125 MHz. The passphrase travels only inside the
+  paired devices' TLS connection, `Debug` prints it as `…`, and the apps must not log it.
+  `direct_send` refuses a group `invite` to a device without `direct_group`.
+
+```json
+{"type":"direct","step":{"type":"invite","address":"02:00:00:00:00:00","name":"Pixel 9",
+ "group":{"ssid":"DIRECT-k4-Linksy","passphrase":"…20 characters…","frequency":5180}}}
+{"type":"direct","step":{"type":"up","ip":"192.168.49.1","port":47200}}
+```
+
+Steps (no `listening`, no `connecting`):
+
+1. The sender wants a link; the host (smaller id) gets `DirectWanted { id, group: Some(g) }`
+   (the other one sends `ask` first, as above).
+2. **Host:** `removeGroup` (anything left over), then
+   `createGroup(channel, WifiP2pConfig.Builder().setNetworkName(g.ssid).setPassphrase(g.passphrase)
+   .setGroupOperatingBand(GROUP_OWNER_BAND_5GHZ when WifiManager.is5GHzBandSupported(), else
+   GROUP_OWNER_BAND_AUTO).enablePersistentMode(false).build(), listener)`. Once it's up:
+   `requestGroupInfo` for its `frequency`, then
+   `direct_send(id, Invite { address, name: Some(deviceName), group: Some(g with frequency) })`,
+   and right after, `direct_send(id, Up { ip: groupOwnerAddress (192.168.49.1), port: node.local_addr().port })`.
+3. **Joiner**, on `Event::Direct { step: Invite { group: Some(g), .. } }`:
+   `connect(channel, WifiP2pConfig.Builder().setNetworkName(g.ssid).setPassphrase(g.passphrase)
+   (.setGroupOperatingFrequency(f) when g.frequency is Some(f)).build(), listener)`. Only one of
+   the band or the frequency may be set on a Builder. When
+   `WIFI_P2P_CONNECTION_CHANGED_ACTION` says `groupFormed` and not `isGroupOwner`, and `up`
+   has arrived (either order): `node.direct_dial(id, ip:port)`.
+4. Both get `DirectLinked`; transfers go over it. Same limits as above: 256 MiB, 45 s,
+   10 minutes after a failure, closed after 20 s idle, a live link never restarted.
+5. **End:** on `DirectEnded`, both `removeGroup` (the joiner leaves, the host closes it),
+   the joiner also `cancelConnect`. Failures of the app's own: `direct_end(id, Some(reason))`
+   first. Never log `g.passphrase`.
+
 **Android, the host** (`WifiP2pManager`, API 29+ for `requestDeviceInfo`):
 
 - Announce `direct_host` where `PackageManager.FEATURE_WIFI_DIRECT` exists. Permissions:
@@ -1218,7 +1271,7 @@ node.watch_volume(id, on)  node.set_volume(id, Some(0.4), None)   // Event::Volu
 node.send_volume_state(id, &VolumeState{ seq, level, muted })     // Event::VolumeWatch / VolumeSet
 node.direct_send(id, DirectStep::Invite { address } | Listening | Connecting | Up { ip, port })   // §4.17
 node.direct_dial(id, addr)  node.direct_end(id, reason)  node.direct_link(id)
-// Event::DirectWanted { id } (host: start) / Direct { from, step } / DirectLinked { id } / DirectEnded { id, reason }
+// Event::DirectWanted { id, group } (host: start; group: Some(credentials) phone to phone) / Direct { from, step } / DirectLinked { id } / DirectEnded { id, reason }
 node.send_call_state(id, CallState::Ringing | Active | Idle, contact)
 node.heartbeat(id)                          // Event::HeartbeatWatch { from, on, every_s } says when
 node.sms_threads(id, threads) / node.sms_messages(id, thread, messages, more)   // answers
@@ -1301,6 +1354,13 @@ Earlier notes, still valid:
 
 ## 7. Open items affecting mobile
 
+- [ ] **Direct links phone to phone (§4.17 "Phone to phone").** Announce `direct_group` next
+      to `direct_host` and `direct_join` (Android 10+). Host on `DirectWanted { group: Some(g) }`:
+      `createGroup` with the Builder (name, passphrase, 5 GHz), then `invite` with the group
+      and its frequency, then `up`. Joiner on an `invite` with a group: `connect` with the
+      Builder, then `direct_dial` once connected and `up` arrived. `removeGroup` on
+      `DirectEnded` on both. `DirectWanted { group: None }` keeps the computer steps. Never log
+      the passphrase.
 - [ ] **Direct links, the host side (desktop 0.9.9, §4.17).** Announce `direct_host`,
       then the Android steps in §4.17: `DirectWanted` → `invite`; `listening` → find the
       computer, `connect` with group-owner intent 15 → `connecting`; group formed →
@@ -1654,3 +1714,8 @@ robust against any encoder (GPU ones may slice too):
   that task started (fixed in core, with a test). Also: asking for a link that's up
   (`direct_link`, an `ask`) keeps it, and a link that closes logs why.
   `Config.direct_idle` (default 20 s) sets how long an idle link stays.
+- **2026-10-25** — Core: **direct links phone to phone** (§4.17 "Phone to phone"). Feature
+  `direct_group`; `invite` may carry `group { ssid, passphrase, frequency }`, generated by
+  the core in `Event::DirectWanted { id, group }` when both have `direct_group`; the joiner
+  joins with Android's `WifiP2pConfig.Builder`, no `listening`/`connecting`. When both
+  could host, the smaller id hosts. Phone to computer is unchanged.
