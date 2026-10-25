@@ -32,6 +32,12 @@ pub const EPOCH_SECS: u64 = 900;
 /// How often the announced records are checked against what they should be (a new epoch,
 /// pairing mode over).
 const ANNOUNCE_CHECK_EVERY: Duration = Duration::from_secs(10);
+/// A browse queries more and more rarely, in the end once an hour, and a phone in power
+/// saving easily misses the few tries to resolve a new record. So a fresh browse starts this
+/// long after each new epoch, when paired devices announce under a new name...
+const BROWSE_AFTER_EPOCH: Duration = Duration::from_secs(5);
+/// ...and this long after a paired device's record went, in case its new one was missed.
+const BROWSE_AFTER_LOST: Duration = Duration::from_secs(1);
 
 /// A device's discovery key: its tags are made from it.
 pub type DiscoveryKey = [u8; 32];
@@ -58,6 +64,11 @@ pub(crate) fn new_key(dir: &Path) -> Result<DiscoveryKey> {
 
 pub fn epoch_now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) / EPOCH_SECS
+}
+
+/// How long until the next epoch starts, at `unix_secs`.
+fn until_next_epoch(unix_secs: u64) -> Duration {
+    Duration::from_secs(EPOCH_SECS - unix_secs % EPOCH_SECS)
 }
 
 /// The tag `key` announces during `epoch`: the first 16 bytes of
@@ -159,53 +170,43 @@ impl Discovery {
                 tick.tick().await;
                 let visible: Vec<String> = s.lock().unwrap().names.keys().cloned().collect();
                 for fullname in visible {
-                    if d.verify(fullname, mdns_sd::VERIFY_TIMEOUT_DEFAULT).is_err() {
-                        return;
+                    match d.verify(fullname, mdns_sd::VERIFY_TIMEOUT_DEFAULT) {
+                        Err(mdns_sd::Error::DaemonShutdown) => return,
+                        // A full queue: the next round asks again.
+                        Err(e) => debug!("mdns: could not check a device: {e}"),
+                        Ok(()) => {}
                     }
                 }
             }
         });
 
-        let (s, tx) = (this.shared.clone(), this.tx.clone());
+        let (d, s, tx) = (this.daemon.clone(), this.shared.clone(), this.tx.clone());
         tokio::spawn(async move {
-            while let Ok(ev) = browse.recv_async().await {
-                match ev {
-                    ServiceEvent::ServiceResolved(r) => {
-                        let mut addrs: Vec<SocketAddr> = r.addresses.iter().filter_map(|ip| socket_addr(ip, r.port)).collect();
-                        // IPv4 first: link-local IPv6 needs a scope and fails more often.
-                        addrs.sort_by_key(|a| (!a.is_ipv4(), a.to_string()));
-                        if addrs.is_empty() {
-                            continue;
-                        }
-                        let found = {
-                            let mut s = s.lock().unwrap();
-                            if let Some(t) = r.get_property_val_str("t") {
-                                s.tags.insert(r.fullname.clone(), (t.to_string(), addrs.clone()));
-                                recognise(&s.announce.peers, t)
-                            } else {
-                                parse_device(&r)
+            let mut browse = browse;
+            loop {
+                let unix = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                let again = tokio::time::sleep(until_next_epoch(unix) + BROWSE_AFTER_EPOCH);
+                tokio::pin!(again);
+                loop {
+                    tokio::select! {
+                        ev = browse.recv_async() => match ev.map(|ev| on_event(ev, &s, &tx)) {
+                            Ok(Seen::Lost) => {
+                                let soon = tokio::time::Instant::now() + BROWSE_AFTER_LOST;
+                                if soon < again.deadline() {
+                                    again.as_mut().reset(soon);
+                                }
                             }
-                            .inspect(|device| {
-                                s.names.insert(r.fullname.clone(), device.id);
-                            })
-                        };
-                        if let Some(device) = found
-                            && tx.send(DiscoveryEvent::Found { device, addrs }).is_err()
-                        {
-                            break;
-                        }
+                            Ok(Seen::Other) => {}
+                            Ok(Seen::Closed) | Err(_) => return,
+                        },
+                        _ = &mut again => break,
                     }
-                    ServiceEvent::ServiceRemoved(_, fullname) => {
-                        let lost = {
-                            let mut s = s.lock().unwrap();
-                            s.tags.remove(&fullname);
-                            forget_name(&mut s, &fullname)
-                        };
-                        if let Some(id) = lost {
-                            let _ = tx.send(DiscoveryEvent::Lost { id });
-                        }
-                    }
-                    other => debug!("mdns: {other:?}"),
+                }
+                // Browsing again replaces the listener; the old one's queries stop with it.
+                match d.browse(SERVICE_TYPE) {
+                    Ok(b) => browse = b,
+                    Err(mdns_sd::Error::DaemonShutdown) => return,
+                    Err(e) => debug!("mdns: could not browse again: {e}"),
                 }
             }
         });
@@ -261,6 +262,64 @@ impl Discovery {
 
     pub(crate) fn stop(self) {
         let _ = self.daemon.shutdown();
+    }
+}
+
+/// What a browse event came to.
+enum Seen {
+    /// A paired or pairing device is gone.
+    Lost,
+    Other,
+    /// The node stopped listening.
+    Closed,
+}
+
+fn on_event(ev: ServiceEvent, s: &Mutex<Shared>, tx: &mpsc::UnboundedSender<DiscoveryEvent>) -> Seen {
+    match ev {
+        ServiceEvent::ServiceResolved(r) => {
+            let mut addrs: Vec<SocketAddr> = r.addresses.iter().filter_map(|ip| socket_addr(ip, r.port)).collect();
+            // IPv4 first: link-local IPv6 needs a scope and fails more often.
+            addrs.sort_by_key(|a| (!a.is_ipv4(), a.to_string()));
+            if addrs.is_empty() {
+                return Seen::Other;
+            }
+            let found = {
+                let mut s = s.lock().unwrap();
+                if let Some(t) = r.get_property_val_str("t") {
+                    s.tags.insert(r.fullname.clone(), (t.to_string(), addrs.clone()));
+                    recognise(&s.announce.peers, t)
+                } else {
+                    parse_device(&r)
+                }
+                .inspect(|device| {
+                    s.names.insert(r.fullname.clone(), device.id);
+                })
+            };
+            if let Some(device) = found
+                && tx.send(DiscoveryEvent::Found { device, addrs }).is_err()
+            {
+                return Seen::Closed;
+            }
+            Seen::Other
+        }
+        ServiceEvent::ServiceRemoved(_, fullname) => {
+            let lost = {
+                let mut s = s.lock().unwrap();
+                s.tags.remove(&fullname);
+                forget_name(&mut s, &fullname)
+            };
+            match lost {
+                Some(id) => match tx.send(DiscoveryEvent::Lost { id }) {
+                    Ok(()) => Seen::Lost,
+                    Err(_) => Seen::Closed,
+                },
+                None => Seen::Other,
+            }
+        }
+        other => {
+            debug!("mdns: {other:?}");
+            Seen::Other
+        }
     }
 }
 
@@ -345,6 +404,13 @@ mod tests {
         let key: DiscoveryKey = std::array::from_fn(|i| i as u8);
         assert_eq!(tag(&key, 1_959_000), "9f88efcbdfd95b47eee92701da5f9d99");
         assert_ne!(tag(&key, 1_959_000), tag(&key, 1_959_001));
+    }
+
+    #[test]
+    fn next_epoch_is_never_now() {
+        assert_eq!(until_next_epoch(1_959_000 * EPOCH_SECS), Duration::from_secs(EPOCH_SECS));
+        assert_eq!(until_next_epoch(1_959_000 * EPOCH_SECS + 899), Duration::from_secs(1));
+        assert_eq!(until_next_epoch(1_959_000 * EPOCH_SECS + 300), Duration::from_secs(600));
     }
 
     /// Checked against `openssl dgst -sha256 -mac HMAC`.
