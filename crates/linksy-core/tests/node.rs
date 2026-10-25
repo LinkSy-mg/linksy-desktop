@@ -819,6 +819,23 @@ async fn auto_accept_skips_the_prompt() {
 }
 
 #[tokio::test]
+async fn always_allow_the_screen_from_one_device() {
+    let (a, b) = paired().await;
+    let (ida, idb) = (a.node.info().id, b.node.info().id);
+    b.node.set_allow_screen(&ida, true).unwrap();
+    assert!(b.node.devices().iter().any(|d| d.device.id == ida && d.allow_screen));
+    let _incoming = b.node.incoming_sessions().unwrap();
+    let mut rb = b.node.subscribe();
+    for kind in [SessionKind::Screen, SessionKind::Control, SessionKind::Input] {
+        a.node.request_session(&idb, kind).await.unwrap_or_else(|e| panic!("{kind:?}: {e:?}"));
+    }
+    assert!(!std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { .. })), "asked anyway");
+    // The camera is still asked about
+    a.node.request_session(&idb, SessionKind::Camera).await.unwrap();
+    assert!(std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { kind: SessionKind::Camera, .. })), "camera not asked");
+}
+
+#[tokio::test]
 async fn always_accept_from_one_device() {
     let (a, b) = paired().await;
     b.node.set_auto_accept(&a.node.info().id, true).unwrap();
@@ -1180,14 +1197,17 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     assert_eq!(text, "from far away");
     assert_eq!(b.node.link(&ida), Some(Link::Away));
 
-    // A screen from away: refused without asking Beta's user...
+    // A screen from away: refused without asking Beta's user, even allowed for good...
     let _incoming = b.node.incoming_sessions();
+    b.node.set_allow_screen(&ida, true).unwrap();
     let err = a.node.request_session(&idb, SessionKind::Screen).await.unwrap_err();
     assert!(matches!(err, Error::NotFromAway), "{err:?}");
-    // ...until Beta allows everything from away for Alpha.
+    // ...until Beta allows everything from away for Alpha, and then it's still asked.
     b.node.set_away_all(&ida, true).unwrap();
     auto_answer(&b.node, true);
+    let mut rb = b.node.subscribe();
     a.node.request_session(&idb, SessionKind::Screen).await.expect("allowed from away");
+    assert!(std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { .. })), "not asked from away");
 }
 
 #[tokio::test]

@@ -322,6 +322,9 @@ pub struct DeviceView {
     /// Files from it are accepted without asking.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_accept: bool,
+    /// It sees and controls the screen without asking, except from away.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub allow_screen: bool,
 }
 
 /// How a connection reaches the other device, by the address it comes from: bridges
@@ -634,6 +637,7 @@ impl Node {
                 away: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Away),
                 away_all: t.away_all,
                 auto_accept: t.auto_accept,
+                allow_screen: t.allow_screen,
                 // Only once each knows how to reach the other away.
                 away_until: (away_on && t.device.away.is_some()).then(|| t.lease_until()),
                 nearby: nearby.contains_key(&t.device.id),
@@ -655,7 +659,7 @@ impl Node {
             .collect();
         for (id, (device, _)) in nearby.iter() {
             if !trust.contains(id) {
-                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_all: false, away_until: None, auto_accept: false });
+                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false });
             }
         }
         // Paired and reachable first, then devices to pair, then paired ones that are away.
@@ -1879,8 +1883,14 @@ impl Node {
                 }
             }
         }
-        // Otherwise always asks: nothing like auto-accept applies to someone seeing your
-        // screen.
+        // Otherwise asks, unless the user allowed this device the screen for good; from away
+        // it always asks.
+        if kind.may_always_allow()
+            && self.link(&from.id) != Some(Link::Away)
+            && self.inner.trust.lock().unwrap().get(&from.id).is_some_and(|t| t.allow_screen)
+        {
+            ask = false;
+        }
         let accepted = !ask || {
             let answer = self.expect_answer(id);
             self.emit(Event::SessionRequest { request: id, from: from.clone(), kind });
@@ -2381,6 +2391,15 @@ impl Node {
     /// Accept files from a paired device without asking, or ask again.
     pub fn set_auto_accept(&self, id: &Fingerprint, on: bool) -> Result<()> {
         if !self.inner.trust.lock().unwrap().set_auto_accept(id, on)? {
+            return Err(Error::NotPaired);
+        }
+        self.emit(Event::DeviceUpdated { device: self.peer_info(id).or_else(|| self.inner.trust.lock().unwrap().get(id).map(|t| t.device.clone())).ok_or(Error::NotPaired)? });
+        Ok(())
+    }
+
+    /// Let a paired device see and control the screen without asking, or ask again.
+    pub fn set_allow_screen(&self, id: &Fingerprint, on: bool) -> Result<()> {
+        if !self.inner.trust.lock().unwrap().set_allow_screen(id, on)? {
             return Err(Error::NotPaired);
         }
         self.emit(Event::DeviceUpdated { device: self.peer_info(id).or_else(|| self.inner.trust.lock().unwrap().get(id).map(|t| t.device.clone())).ok_or(Error::NotPaired)? });

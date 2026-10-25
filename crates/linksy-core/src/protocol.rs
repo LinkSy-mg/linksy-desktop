@@ -133,6 +133,13 @@ impl SessionKind {
     pub fn has_input(self) -> bool {
         matches!(self, Self::Control | Self::Display | Self::Input)
     }
+
+    /// Whether a paired device may be allowed it for good, so it starts without asking:
+    /// seeing or controlling the screen, or using the mouse and keyboard. Never the
+    /// camera, the microphone or a terminal.
+    pub fn may_always_allow(self) -> bool {
+        matches!(self, Self::Screen | Self::Control | Self::Input)
+    }
 }
 
 /// Input sent by the viewer of a `control` session, framed like every other message

@@ -211,7 +211,7 @@ mod tests {
     fn the_lease_lasts_a_week_from_the_last_meeting() {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
         let device = DeviceInfo { id: Fingerprint::of(b"x"), name: "Pixel".into(), kind: DeviceKind::Phone, os: "android".into(), features: vec![], away: None };
-        let t = |met: u64| TrustedDevice { device: device.clone(), last_addr: None, paired_at: 0, last_met: Some(met), away_all: false, discovery_key: None, auto_accept: false };
+        let t = |met: u64| TrustedDevice { device: device.clone(), last_addr: None, paired_at: 0, last_met: Some(met), away_all: false, discovery_key: None, auto_accept: false, allow_screen: false };
         assert!(t(now - 6 * 86_400).lease_ok());
         assert!(!t(now - 8 * 86_400).lease_ok());
     }
