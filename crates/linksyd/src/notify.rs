@@ -17,6 +17,13 @@ pub(crate) const DESKTOP_ENTRY: &str = "mg.diary.linksy.Linksy";
 /// Battery level, in percent, at which a device's low battery is announced (once).
 const LOW_BATTERY: u8 = 15;
 
+/// What a prompt's "always" button allows a device from now on.
+#[derive(Clone, Copy)]
+enum Always {
+    Files(Fingerprint),
+    Screen(Fingerprint),
+}
+
 /// Prompts on screen: request → the notification's id, and for pairing the device asking.
 type Prompts = HashMap<Uuid, (u32, Option<Fingerprint>)>;
 static PROMPTS: Mutex<Option<Prompts>> = Mutex::new(None);
@@ -59,6 +66,8 @@ pub async fn run(node: Node) {
     let mut incoming: std::collections::HashMap<Uuid, (String, bool)> = Default::default();
     // Devices already warned about a low battery; cleared once they charge or recover.
     let mut warned: std::collections::HashSet<Fingerprint> = Default::default();
+    // Session requests asked about: one that starts without being asked is said.
+    let mut asked: std::collections::HashSet<Uuid> = Default::default();
     loop {
         let event = match events.recv().await {
             Ok(e) => e,
@@ -76,7 +85,7 @@ pub async fn run(node: Node) {
                     many => t!("{n} items", n = many.len()),
                 };
                 let body = format!("{what} · {}", human_size(total));
-                prompt(node.clone(), transfer, None, Some(from.id), t!("{device} wants to send you files", device = from.name), body, t!("Accept"));
+                prompt(node.clone(), transfer, None, Some(Always::Files(from.id)), t!("{device} wants to send you files", device = from.name), body, t!("Accept"));
             }
             Event::SessionRequest { request, from, kind } => {
                 let (summary, body) = match kind {
@@ -109,7 +118,9 @@ pub async fn run(node: Node) {
                         t!("The right code was typed on {device}. Its terminal runs commands as you until it's ended. Linksy asks once a day.", device = from.name),
                     ),
                 };
-                prompt(node.clone(), request, None, None, summary, body, t!("Allow"));
+                asked.insert(request);
+                let always = kind.may_always_allow().then_some(Always::Screen(from.id));
+                prompt(node.clone(), request, None, always, summary, body, t!("Allow"));
             }
             Event::TransferStarted { transfer, peer, direction: Direction::Incoming, import, .. } => {
                 answered(transfer);
@@ -128,7 +139,22 @@ pub async fn run(node: Node) {
                     show(t!("Transfer from {device} failed", device = from), capitalize(&reason));
                 }
             }
-            Event::SessionStarted { session, .. } | Event::SessionEnded { session } => answered(session),
+            Event::SessionStarted { session, peer, kind, sharing } => {
+                answered(session);
+                // Allowed for good: still say it, the moment it starts
+                if !asked.remove(&session) && sharing && kind.may_always_allow() {
+                    let summary = match kind {
+                        SessionKind::Control => t!("{name} is controlling your screen", name = peer.name),
+                        SessionKind::Input => t!("{name} is your touchpad and keyboard", name = peer.name),
+                        _ => t!("{name} is watching your screen", name = peer.name),
+                    };
+                    show(summary, t!("Allowed without asking, as you chose. Stop it in Linksy, or turn it off on {device}'s page.", device = peer.name));
+                }
+            }
+            Event::SessionEnded { session } => {
+                asked.remove(&session);
+                answered(session);
+            }
             Event::PairingFailed { device, .. } => pairing_over(device.id),
             Event::Paired { device } => {
                 pairing_over(device.id);
@@ -191,14 +217,16 @@ pub(crate) fn show(summary: String, body: String) {
 /// A notification with Accept/Decline that answers the request when clicked. It stays until
 /// answered (critical, no timeout), and goes when it is: clicking a button closes it (it
 /// isn't resident), and an answer from the app or the other device closes it too.
-/// `always`: the device whose files the prompt can also accept from now on.
-fn prompt(node: Node, request: Uuid, pairing: Option<Fingerprint>, always: Option<Fingerprint>, summary: String, body: String, accept_label: &'static str) {
+/// `always`: what the prompt can also allow from now on.
+fn prompt(node: Node, request: Uuid, pairing: Option<Fingerprint>, always: Option<Always>, summary: String, body: String, accept_label: &'static str) {
     tokio::task::spawn_blocking(move || {
         let mut n = base(&summary, &body);
         n.action("accept", accept_label);
-        if always.is_some() {
-            n.action("always", t!("Always Accept"));
-        }
+        match always {
+            Some(Always::Files(_)) => n.action("always", t!("Always Accept")),
+            Some(Always::Screen(_)) => n.action("always", t!("Always Allow")),
+            None => &mut n,
+        };
         n.action("decline", t!("Decline")).urgency(Urgency::Critical).timeout(Timeout::Never);
         match n.show() {
             Ok(handle) => {
@@ -215,10 +243,13 @@ fn prompt(node: Node, request: Uuid, pairing: Option<Fingerprint>, always: Optio
                     }
                     "always" => {
                         forget();
-                        if let Some(id) = always
-                            && let Err(e) = node.set_auto_accept(&id, true)
-                        {
-                            debug!("always accept failed: {e}");
+                        let set = match always {
+                            Some(Always::Files(id)) => node.set_auto_accept(&id, true),
+                            Some(Always::Screen(id)) => node.set_allow_screen(&id, true),
+                            None => Ok(()),
+                        };
+                        if let Err(e) = set {
+                            debug!("always failed: {e}");
                         }
                         node.respond(request, true);
                     }
