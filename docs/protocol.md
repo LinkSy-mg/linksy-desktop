@@ -437,8 +437,15 @@ A media session is a **bidirectional stream** whose first frame is a session req
 {"type":"session_request","id":"<uuid>","kind":"screen"}
 ```
 
-The receiving device **always asks its user** ("Pixel 9 wants to see your screen",
-Allow / Don't Allow; auto-accept never applies) and answers within 120 s:
+The receiving device **asks its user** ("Pixel 9 wants to see your screen", Allow /
+Always Allow / Don't Allow; auto-accept for files never applies) and answers within 120 s.
+**Always Allow** is only offered for `screen`, `control` and `input`: it marks the
+requesting device (core: `node.set_allow_screen(id, on)`, `DeviceView.allow_screen`, a
+switch **Always Allow Screen and Control** on its page), and from then on those three
+start without asking, on the same network or cable. From away they're always asked
+(and only after Allow Everything From Away, §4.13). The camera, the microphone, a second
+display and terminals are always asked. A session that started without asking is still
+announced when it starts ([desktop#49](https://github.com/LinkSy-mg/linksy-desktop/issues/49)).
 
 ```json
 {"type":"session_accept"}
@@ -1734,3 +1741,7 @@ robust against any encoder (GPU ones may slice too):
   fresh mDNS browse 5 s after each epoch boundary and 1 s after a paired device's record
   goes, so a missed new record no longer leaves the device "not nearby" for up to an hour
   (desktop#50). The presence check no longer stops for good after one failed query.
+- **2026-10-25** — Desktop: **Always Allow** for `screen`, `control` and `input` (§4.8,
+  desktop#49). No protocol change: a local choice per device, `set_allow_screen` in the
+  core, never from away. Phone: the same button is optional when a computer asks to see
+  the phone's screen (`screen`); the core already skips the prompt once it's set.
