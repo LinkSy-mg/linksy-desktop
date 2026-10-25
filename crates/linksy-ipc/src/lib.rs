@@ -66,6 +66,8 @@ pub enum Request {
     SetAwayAll { device: String, on: bool },
     /// Accept files from a device without asking, or ask again.
     SetAutoAccept { device: String, on: bool },
+    /// Let a device see and control the screen without asking, or ask again.
+    SetAllowScreen { device: String, on: bool },
     /// Ask a phone where it is; answers its position or why not (docs/protocol.md §4.14).
     Locate { device: String },
     /// This version, the newest one if it's newer, and whether Linksy checks.
@@ -591,6 +593,10 @@ impl Client {
 
     pub async fn set_auto_accept(&self, device: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::SetAutoAccept { device: device.into(), on }).await
+    }
+
+    pub async fn set_allow_screen(&self, device: impl Into<String>, on: bool) -> Result<(), ClientError> {
+        self.call(Request::SetAllowScreen { device: device.into(), on }).await
     }
 
     pub async fn locate(&self, device: impl Into<String>) -> Result<Location, ClientError> {

@@ -248,6 +248,11 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             node.set_auto_accept(&id, on).map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
+        Request::SetAllowScreen { device, on } => {
+            let id = resolve(node, &device)?;
+            node.set_allow_screen(&id, on).map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
         Request::Locate { device } => {
             let id = resolve(node, &device)?;
             let mut events = node.subscribe();
