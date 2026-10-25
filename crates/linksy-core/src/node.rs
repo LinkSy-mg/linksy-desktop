@@ -28,7 +28,7 @@ use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::fs::FsCall;
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{Battery, CallState, DirectStep, PluggedPhone, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState, 
+use crate::protocol::{Battery, CallState, DirectGroup, DirectStep, PluggedPhone, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState, 
     FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -222,8 +222,9 @@ pub enum Event {
     SmsMessage { from: DeviceInfo, thread: String, message: SmsMessage },
     SmsSent { from: DeviceInfo, client_id: String, ok: bool, error: Option<String> },
     /// Direct links (docs/protocol.md §4.17). This device hosts one: set it up with this
-    /// device (answer with [`Node::direct_send`], `invite` first).
-    DirectWanted { id: Fingerprint },
+    /// device (answer with [`Node::direct_send`], `invite` first). With `group` (both have
+    /// `direct_group`), make a group with these credentials and send them in the `invite`.
+    DirectWanted { id: Fingerprint, group: Option<DirectGroup> },
     /// A step from the other device, for what this device's app does next.
     Direct { from: DeviceInfo, step: DirectStep },
     /// The link is up: big transfers go over it.
@@ -2084,6 +2085,10 @@ impl Node {
             self.direct_end(to, reason).await;
             return Ok(());
         }
+        let joins_groups = self.peer_info(to).is_some_and(|p| p.features.iter().any(|f| f == "direct_group"));
+        if matches!(step, DirectStep::Invite { group: Some(_), .. }) && !joins_groups {
+            return Err(invalid("that device doesn't join direct link groups"));
+        }
         self.send_message(to, &Message::Direct { step }).await
     }
 
@@ -2108,10 +2113,24 @@ impl Node {
         }
     }
 
-    /// Whether this device would host (`true`) or join (`false`) a direct link with `to`,
-    /// from what both can do; hosting when it could do either.
+    /// Whether this device hosts (`true`) or joins (`false`) a direct link with `to`, from
+    /// what both can do. When both could do either (two phones), the one with the smaller
+    /// id hosts, which both work out the same.
     fn direct_role(&self, to: &Fingerprint) -> Option<bool> {
-        [true, false].into_iter().find(|&host| self.can_direct(to, host))
+        match (self.can_direct(to, true), self.can_direct(to, false)) {
+            (true, true) => Some(self.inner.id < *to),
+            (host, join) => (host || join).then_some(host),
+        }
+    }
+
+    /// Credentials for a group the host makes, when both devices do groups (`direct_group`).
+    fn direct_group(&self, to: &Fingerprint) -> Option<DirectGroup> {
+        let has = |features: &[String]| features.iter().any(|f| f == "direct_group");
+        if has(&self.info().features) && self.peer_info(to).is_some_and(|p| has(&p.features)) {
+            DirectGroup::random().ok()
+        } else {
+            None
+        }
     }
 
     /// Whether this device can host (or join) a direct link that `to` joins (or hosts).
@@ -2145,7 +2164,7 @@ impl Node {
         if started {
             info!("setting up a direct link");
             if host {
-                self.emit(Event::DirectWanted { id: *to });
+                self.emit(Event::DirectWanted { id: *to, group: self.direct_group(to) });
             } else if let Err(e) = self.send_message(to, &Message::Direct { step: DirectStep::Ask }).await {
                 self.direct_drop(to, Some(e.to_string()));
             }
@@ -2209,13 +2228,13 @@ impl Node {
         match step {
             // Up already: nothing to set up
             DirectStep::Ask if self.lane(&id).is_some() => {}
-            DirectStep::Ask if self.can_direct(&id, true) => {
+            DirectStep::Ask if self.direct_role(&id) == Some(true) => {
                 if self.direct_begin(&id).1 {
-                    self.emit(Event::DirectWanted { id });
+                    self.emit(Event::DirectWanted { id, group: self.direct_group(&id) });
                 }
             }
             DirectStep::Ask => refuse("this device can't host a direct link"),
-            DirectStep::Invite { .. } if !self.can_direct(&id, false) => refuse("this device can't join a direct link"),
+            DirectStep::Invite { .. } if self.direct_role(&id) != Some(false) => refuse("this device can't join a direct link"),
             DirectStep::End { reason } => {
                 self.direct_drop(&id, reason);
             }

@@ -397,8 +397,8 @@ pub enum Message {
 
 /// The steps of a direct link (docs/protocol.md §4.17), between a device that hosts it
 /// (feature `direct_host`: a phone, with Wi-Fi Direct) and one that joins it
-/// (`direct_join`: a computer). Addresses are Wi-Fi Direct device addresses
-/// (`aa:bb:cc:dd:ee:ff`).
+/// (`direct_join`: a computer, or another phone). Addresses are Wi-Fi Direct device
+/// addresses (`aa:bb:cc:dd:ee:ff`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DirectStep {
@@ -406,11 +406,15 @@ pub enum DirectStep {
     Ask,
     /// Host → joiner: the host's address and its Wi-Fi Direct name; become findable and
     /// answer `listening`. Android doesn't tell apps their own address (they get
-    /// `02:00:00:00:00:00`), so the joiner finds the host by name then.
+    /// `02:00:00:00:00:00`), so the joiner finds the host by name then. With `group` (both
+    /// have `direct_group`), the host made a group with these credentials instead: join
+    /// it and wait for `up`, no `listening` or `connecting`.
     Invite {
         address: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<DirectGroup>,
     },
     /// Joiner → host: findable at this address.
     Listening { address: String },
@@ -430,13 +434,54 @@ impl DirectStep {
     /// this one's, for tests).
     pub fn is_valid(&self) -> bool {
         match self {
-            Self::Invite { address, name } => is_device_address(address) && name.as_ref().is_none_or(|n| n.len() <= 64),
+            Self::Invite { address, name, group } => {
+                is_device_address(address) && name.as_ref().is_none_or(|n| n.len() <= 64) && group.as_ref().is_none_or(DirectGroup::is_valid)
+            }
             Self::Listening { address } => is_device_address(address),
             Self::Up { ip: std::net::IpAddr::V4(ip), port } => (ip.is_private() || ip.is_link_local() || ip.is_loopback()) && *port != 0,
             Self::Up { .. } => false,
             Self::End { reason } => reason.as_ref().is_none_or(|r| r.len() <= 200),
             Self::Ask | Self::Connecting => true,
         }
+    }
+}
+
+/// A Wi-Fi Direct group the host makes with a name and passphrase, which the joiner joins
+/// with them: no address needed, and no prompt on Android 10 and later (phone to phone).
+/// The passphrase only ever travels inside the paired devices' TLS connection; it's left
+/// out of `Debug`, so logs never show it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DirectGroup {
+    /// `DIRECT-xy…`, at most 32 bytes.
+    pub ssid: String,
+    /// WPA2: 8 to 63 printable ASCII characters.
+    pub passphrase: String,
+    /// The group's frequency in MHz once it's up, so the joiner looks there first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frequency: Option<u32>,
+}
+
+impl DirectGroup {
+    /// New credentials: `DIRECT-xy-Linksy` and a 20-character passphrase, random.
+    pub fn random() -> std::io::Result<Self> {
+        const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+        let mut bytes = [0u8; 22];
+        getrandom::fill(&mut bytes).map_err(std::io::Error::other)?;
+        let mut pick = bytes.iter().map(|b| CHARS[*b as usize % CHARS.len()] as char);
+        let ssid = format!("DIRECT-{}{}-Linksy", pick.next().unwrap_or('L'), pick.next().unwrap_or('k'));
+        Ok(Self { ssid, passphrase: pick.collect(), frequency: None })
+    }
+
+    pub fn is_valid(&self) -> bool {
+        let ssid = self.ssid.len() <= 32 && self.ssid.starts_with("DIRECT-") && self.ssid.len() >= "DIRECT-xy".len();
+        let passphrase = (8..=63).contains(&self.passphrase.len()) && self.passphrase.bytes().all(|b| (0x20..=0x7e).contains(&b));
+        ssid && passphrase && self.frequency.is_none_or(|f| (2400..=7125).contains(&f))
+    }
+}
+
+impl std::fmt::Debug for DirectGroup {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DirectGroup").field("ssid", &self.ssid).field("passphrase", &"…").field("frequency", &self.frequency).finish()
     }
 }
 
@@ -684,9 +729,9 @@ mod tests {
     #[test]
     fn direct_steps_read_as_documented() {
         let invite: Message = serde_json::from_str(r#"{"type":"direct","step":{"type":"invite","address":"AA:bb:cc:dd:ee:01"}}"#).unwrap();
-        assert_eq!(invite, Message::Direct { step: DirectStep::Invite { address: "AA:bb:cc:dd:ee:01".into(), name: None } });
+        assert_eq!(invite, Message::Direct { step: DirectStep::Invite { address: "AA:bb:cc:dd:ee:01".into(), name: None, group: None } });
         let named: Message = serde_json::from_str(r#"{"type":"direct","step":{"type":"invite","address":"02:00:00:00:00:00","name":"realme 15 Pro 5G"}}"#).unwrap();
-        assert_eq!(named, Message::Direct { step: DirectStep::Invite { address: "02:00:00:00:00:00".into(), name: Some("realme 15 Pro 5G".into()) } });
+        assert_eq!(named, Message::Direct { step: DirectStep::Invite { address: "02:00:00:00:00:00".into(), name: Some("realme 15 Pro 5G".into()), group: None } });
         let up = Message::Direct { step: DirectStep::Up { ip: "192.168.49.1".parse().unwrap(), port: 47200 } };
         assert_eq!(serde_json::to_string(&up).unwrap(), r#"{"type":"direct","step":{"type":"up","ip":"192.168.49.1","port":47200}}"#);
         assert_eq!(serde_json::from_str::<Message>(r#"{"type":"direct","step":{"type":"connecting"}}"#).unwrap(), Message::Direct { step: DirectStep::Connecting });
@@ -695,12 +740,45 @@ mod tests {
 
         assert!(DirectStep::Listening { address: "02:00:00:00:00:0a".into() }.is_valid());
         assert!(!DirectStep::Listening { address: "02:00:00:00:00:0".into() }.is_valid());
-        assert!(!DirectStep::Invite { address: "02:00:00:00:00:zz".into(), name: None }.is_valid());
-        assert!(!DirectStep::Invite { address: "02:00:00:00:00:00".into(), name: Some("x".repeat(65)) }.is_valid());
+        assert!(!DirectStep::Invite { address: "02:00:00:00:00:zz".into(), name: None, group: None }.is_valid());
+        assert!(!DirectStep::Invite { address: "02:00:00:00:00:00".into(), name: Some("x".repeat(65)), group: None }.is_valid());
         // Only a private address on the link: never somewhere on the internet
         assert!(!DirectStep::Up { ip: "8.8.8.8".parse().unwrap(), port: 47200 }.is_valid());
         assert!(!DirectStep::Up { ip: "192.168.49.1".parse().unwrap(), port: 0 }.is_valid());
         assert!(!DirectStep::Up { ip: "::1".parse().unwrap(), port: 47200 }.is_valid());
+    }
+
+    #[test]
+    fn direct_groups_round_trip_check_their_credentials_and_hide_the_passphrase() {
+        let group = DirectGroup::random().unwrap();
+        assert!(group.is_valid(), "{group:?}");
+        assert!(group.ssid.starts_with("DIRECT-") && group.ssid.ends_with("-Linksy") && group.passphrase.len() == 20);
+        assert_ne!(DirectGroup::random().unwrap().passphrase, group.passphrase);
+
+        let json = r#"{"type":"direct","step":{"type":"invite","address":"02:00:00:00:00:00","name":"Pixel 9","group":{"ssid":"DIRECT-k4-Linksy","passphrase":"correct horse battery","frequency":5180}}}"#;
+        let invite: Message = serde_json::from_str(json).unwrap();
+        let Message::Direct { step: step @ DirectStep::Invite { group: Some(_), .. } } = &invite else { panic!("{invite:?}") };
+        assert!(step.is_valid());
+        assert_eq!(serde_json::to_string(&invite).unwrap(), json);
+        // Never in logs
+        assert!(!format!("{invite:?}").contains("horse"));
+
+        let ok = DirectGroup { ssid: "DIRECT-k4-Linksy".into(), passphrase: "12345678".into(), frequency: None };
+        assert!(ok.is_valid());
+        let bad = [
+            DirectGroup { ssid: "Linksy".into(), ..ok.clone() },
+            DirectGroup { ssid: "DIRECT-".into(), ..ok.clone() },
+            DirectGroup { ssid: format!("DIRECT-{}", "x".repeat(26)), ..ok.clone() },
+            DirectGroup { passphrase: "1234567".into(), ..ok.clone() },
+            DirectGroup { passphrase: "x".repeat(64), ..ok.clone() },
+            DirectGroup { passphrase: "pass\nword1".into(), ..ok.clone() },
+            DirectGroup { passphrase: "pässword".into(), ..ok.clone() },
+            DirectGroup { frequency: Some(900), ..ok.clone() },
+        ];
+        for group in bad {
+            assert!(!group.is_valid(), "{group:?}");
+            assert!(!DirectStep::Invite { address: "02:00:00:00:00:00".into(), name: None, group: Some(group) }.is_valid());
+        }
     }
 
     #[test]

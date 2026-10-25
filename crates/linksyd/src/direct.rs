@@ -46,7 +46,8 @@ pub async fn run(node: Node) {
     let mut links: HashMap<Fingerprint, mpsc::UnboundedSender<DirectStep>> = HashMap::new();
     loop {
         match events.recv().await {
-            Ok(Event::Direct { from, step: DirectStep::Invite { address, name } }) => {
+            // This computer doesn't announce direct_group: hosts invite it to find them
+            Ok(Event::Direct { from, step: DirectStep::Invite { address, name, .. } }) => {
                 let (steps, rx) = mpsc::unbounded_channel();
                 // Replaces one still going, which ends with its channel
                 links.insert(from.id, steps);
