@@ -157,17 +157,24 @@ impl Window {
             ),
         };
         let dialog = adw::AlertDialog::new(Some(&heading), Some(&body));
-        dialog.add_responses(&[("deny", t!("Don't Allow")), ("allow", t!("Allow"))]);
+        dialog.add_responses(&[("deny", t!("Don't Allow"))]);
+        if kind.may_always_allow() {
+            dialog.add_responses(&[("always", t!("Always Allow"))]);
+        }
+        dialog.add_responses(&[("allow", t!("Allow"))]);
         dialog.set_response_appearance("allow", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("deny"));
         dialog.set_close_response("deny");
-        let w = Rc::downgrade(self);
+        let (w, id) = (Rc::downgrade(self), from.id);
         dialog.connect_response(None, move |_, response| {
             let Some(w) = w.upgrade() else { return };
             if w.state.borrow_mut().offer_dialogs.remove(&request).is_none() {
                 return;
             }
-            w.respond(request, response == "allow");
+            if response == "always" {
+                w.allow_screen(id, true);
+            }
+            w.respond(request, response != "deny");
         });
         // Shares the offer prompts' bookkeeping: closed if answered elsewhere.
         self.state.borrow_mut().offer_dialogs.insert(request, dialog.clone());

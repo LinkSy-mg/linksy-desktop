@@ -46,6 +46,8 @@ pub enum Action {
     AwayAll(bool),
     /// Accept files from this device without asking.
     AutoAccept(bool),
+    /// Let this device see and control the screen without asking.
+    AllowScreen(bool),
     Locate,
     Messages,
     BrowseFiles,
@@ -116,6 +118,8 @@ pub struct DevicePage {
     away_row: adw::SwitchRow,
     /// "Always Accept Files".
     accept_row: adw::SwitchRow,
+    /// "Always Allow Screen and Control".
+    screen_row: adw::SwitchRow,
     /// Terminals (docs/protocol.md §4.15): allowed for this phone, locked out, and running.
     /// The Terminal card: what to do next (set a code, allow, unlock), or that it's ready.
     terminal_box: gtk::Box,
@@ -376,6 +380,14 @@ impl DevicePage {
                 e(Action::AutoAccept(row.is_active()));
             }
         });
+        let screen_row = adw::SwitchRow::builder().title(t!("Always Allow Screen and Control")).subtitle_lines(3).build();
+        screen_row.add_prefix(&gtk::Image::builder().icon_name("video-display-symbolic").build());
+        let (e, s) = (emit.clone(), syncing.clone());
+        screen_row.connect_active_notify(move |row| {
+            if !s.get() {
+                e(Action::AllowScreen(row.is_active()));
+            }
+        });
         // Terminal: a card that says what's next, right here rather than in Preferences.
         let terminal_icon = gtk::Image::builder().icon_name("utilities-terminal-symbolic").pixel_size(28).valign(gtk::Align::Start).css_classes(["card-icon"]).build();
         let terminal_title = gtk::Label::builder().xalign(0.0).wrap(true).hexpand(true).css_classes(["title-4"]).build();
@@ -415,6 +427,7 @@ impl DevicePage {
         settings.append(&files_row);
         settings.append(&lock_row);
         settings.append(&accept_row);
+        settings.append(&screen_row);
         settings.append(&away_row);
         let terminals = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).visible(false).css_classes(["boxed-list"]).build();
 
@@ -570,6 +583,7 @@ impl DevicePage {
             lock_row,
             away_row,
             accept_row,
+            screen_row,
             terminal_box,
             terminal_title,
             terminal_desc,
@@ -764,9 +778,14 @@ impl DevicePage {
             device = d.device.name
         )));
         self.accept_row.set_subtitle(&glib::markup_escape_text(&t!("Files from {device} are saved without asking.", device = d.device.name)));
+        self.screen_row.set_subtitle(&glib::markup_escape_text(&t!(
+            "{device} can see and control this screen without asking, on the same network or by cable. Linksy still tells you when it starts.",
+            device = d.device.name
+        )));
         self.settings_visible(d.trusted);
         self.syncing.set(true);
         self.accept_row.set_active(d.auto_accept);
+        self.screen_row.set_active(d.allow_screen);
         self.lock_row.set_active(locks);
         self.away_row.set_active(d.away_all);
         self.syncing.set(false);

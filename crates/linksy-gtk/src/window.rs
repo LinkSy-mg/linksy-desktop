@@ -461,6 +461,7 @@ impl Window {
                 page::Action::LockWhenAway(on) => w.lock_when_away(id, on),
                 page::Action::AwayAll(on) => w.away_all(id, on),
                 page::Action::AutoAccept(on) => w.auto_accept(id, on),
+                page::Action::AllowScreen(on) => w.allow_screen(id, on),
                 page::Action::Locate => w.locate(id),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
@@ -767,6 +768,19 @@ impl Window {
         let Some(c) = self.client() else { return };
         let w = self.clone();
         let call = self.bridge.call(&c, move |c| async move { c.set_auto_accept(id.to_string(), on).await });
+        glib::spawn_future_local(async move {
+            if let Err(e) = call.await {
+                w.toast_error(&e, Some(id));
+            }
+            w.refresh_devices();
+        });
+    }
+
+    /// Let a device see and control the screen without asking, or ask again.
+    fn allow_screen(self: &Rc<Self>, id: Fingerprint, on: bool) {
+        let Some(c) = self.client() else { return };
+        let w = self.clone();
+        let call = self.bridge.call(&c, move |c| async move { c.set_allow_screen(id.to_string(), on).await });
         glib::spawn_future_local(async move {
             if let Err(e) = call.await {
                 w.toast_error(&e, Some(id));
