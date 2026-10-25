@@ -278,7 +278,7 @@ Kirigami.ApplicationWindow {
             request("status", {}, (ok, s) => { if (ok) root.status = s });
             break;
         case "session_request":
-            sessionDialog.ask(ev.request, ev.from.name, ev.kind);
+            sessionDialog.ask(ev.request, ev.from, ev.kind);
             break;
         case "session_started":
             if (sessionDialog.request === ev.session) sessionDialog.close();
@@ -470,8 +470,13 @@ Kirigami.ApplicationWindow {
     Kirigami.PromptDialog {
         id: sessionDialog
         property string request
-        function ask(req, from, kind) {
-            request = req;
+        property string from
+        // Seeing or controlling the screen may be allowed for good (SessionKind::may_always_allow)
+        property bool always: false
+        function ask(req, device, kind) {
+            request = req; from = device.id;
+            always = ["screen", "control", "input"].includes(kind);
+            const name = device.name;
             const asks = {
                 camera: ["{name} Wants to Use Your Camera", "Your camera will turn on and {name} will see it until you stop."],
                 display: ["{name} Wants to Use This Screen", "Linksy will fill this screen with {name}'s second display; your mouse and keyboard here will work on it. Press F11 to leave full screen."],
@@ -482,8 +487,8 @@ Kirigami.ApplicationWindow {
                 terminal: ["{name} Wants a Terminal", "The right terminal code was typed on {name}. Its terminal runs commands as you until it's ended, here or on the phone. Linksy asks once a day."]
             };
             const [heading, body] = asks[kind] ?? asks.screen;
-            title = root.t(heading, { name: from });
-            subtitle = root.t(body, { name: from });
+            title = root.t(heading, { name });
+            subtitle = root.t(body, { name });
             root.present();
             open();
         }
@@ -492,6 +497,15 @@ Kirigami.ApplicationWindow {
             Kirigami.Action {
                 text: root.t("Allow")
                 onTriggered: { root.request("respond", { request: sessionDialog.request, accept: true }); sessionDialog.close() }
+            },
+            Kirigami.Action {
+                text: root.t("Always Allow")
+                visible: sessionDialog.always
+                onTriggered: {
+                    root.request("set_allow_screen", { device: sessionDialog.from, on: true }, () => root.refreshDevices());
+                    root.request("respond", { request: sessionDialog.request, accept: true });
+                    sessionDialog.close();
+                }
             },
             Kirigami.Action {
                 text: root.t("Don't Allow")

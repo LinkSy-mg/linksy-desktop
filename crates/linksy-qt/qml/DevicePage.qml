@@ -264,6 +264,21 @@ Kirigami.ScrollablePage {
                 onToggled: app.request("set_auto_accept", { device: page.info.id, on: checked }, () => app.refreshDevices())
             }
             QQC2.Switch {
+                id: screenSwitch
+                Kirigami.FormData.label: app.t("Always Allow Screen and Control") + ":"
+                visible: page.view?.trusted ?? false
+                checked: page.view?.allow_screen ?? false
+                onToggled: app.request("set_allow_screen", { device: page.info.id, on: checked }, () => app.refreshDevices())
+            }
+            QQC2.Label {
+                visible: screenSwitch.visible
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                text: app.t("{device} can see and control this screen without asking, on the same network or by cable. Linksy still tells you when it starts.", { device: page.name })
+            }
+            QQC2.Switch {
                 Kirigami.FormData.label: app.t("Allow Everything From Away") + ":"
                 visible: page.view !== null && page.view.away_until !== undefined
                 checked: page.view?.away_all ?? false
