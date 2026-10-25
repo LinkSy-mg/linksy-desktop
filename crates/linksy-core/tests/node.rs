@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Battery, CallState, Config, ControlMsg, DirectStep, FsEntry, FsRequest, SmsThread, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind, VolumeState};
+use linksy_core::{Battery, CallState, Config, ControlMsg, DirectGroup, DirectStep, FsEntry, FsRequest, SmsThread, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind, VolumeState};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -1327,7 +1327,18 @@ fn fake_direct_app(node: &Node) {
             let node = node.clone();
             tokio::spawn(async move {
                 match ev {
-                    Event::DirectWanted { id } => node.direct_send(&id, DirectStep::Invite { address: "02:00:00:00:00:01".into(), name: None }).await.unwrap(),
+                    // Phone to phone: make the group, invite with it, and say where Linksy is on it
+                    Event::DirectWanted { id, group: Some(group) } => {
+                        let group = Some(DirectGroup { frequency: Some(5180), ..group });
+                        node.direct_send(&id, DirectStep::Invite { address: "02:00:00:00:00:00".into(), name: None, group }).await.unwrap();
+                        let port = node.local_addr().unwrap().port();
+                        node.direct_send(&id, DirectStep::Up { ip: Ipv4Addr::LOCALHOST.into(), port }).await.unwrap();
+                    }
+                    Event::DirectWanted { id, group: None } => {
+                        node.direct_send(&id, DirectStep::Invite { address: "02:00:00:00:00:01".into(), name: None, group: None }).await.unwrap()
+                    }
+                    // Joined the group (here, nothing to join): wait for up
+                    Event::Direct { step: DirectStep::Invite { group: Some(group), .. }, .. } => assert!(group.is_valid()),
                     Event::Direct { from, step: DirectStep::Invite { .. } } => {
                         node.direct_send(&from.id, DirectStep::Listening { address: "02:00:00:00:00:02".into() }).await.unwrap()
                     }
@@ -1417,4 +1428,76 @@ async fn direct_link_stays_up_while_a_transfer_runs_then_closes_when_idle() {
     // Idle afterwards: closed on both
     wait_for(&mut on_a, |e| matches!(e, Event::DirectEnded { .. }).then_some(())).await;
     wait_for(&mut on_b, |e| matches!(e, Event::DirectEnded { .. }).then_some(())).await;
+}
+
+#[tokio::test]
+async fn two_phones_agree_on_one_host_and_link_through_its_group() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "direct_host".into(), "direct_join".into(), "direct_group".into()]).await;
+    let (a_id, b_id) = (a.node.info().id, b.node.info().id);
+    // The one with the smaller id hosts, whichever asks
+    let (host, joiner) = if a_id < b_id { (&a, &b) } else { (&b, &a) };
+    let host_id = host.node.info().id;
+    fake_direct_app(&a.node);
+    fake_direct_app(&b.node);
+    let mut on_host = host.node.subscribe();
+    let mut on_joiner = joiner.node.subscribe();
+
+    joiner.node.direct_link(&host_id).await.unwrap();
+    let group = wait_for(&mut on_host, |e| match e {
+        Event::DirectWanted { group, .. } => Some(group.clone()),
+        _ => None,
+    })
+    .await
+    .expect("credentials for a group");
+    assert!(group.is_valid());
+    // The joiner got them, and never listened or connected the old way
+    let mut steps = Vec::new();
+    wait_for(&mut on_joiner, |e| match e {
+        Event::DirectWanted { .. } => panic!("both host"),
+        Event::Direct { step, .. } => {
+            steps.push(step.clone());
+            None
+        }
+        Event::DirectLinked { .. } => Some(()),
+        _ => None,
+    })
+    .await;
+    assert!(matches!(&steps[0], DirectStep::Invite { group: Some(g), .. } if g.ssid == group.ssid && g.passphrase == group.passphrase), "{steps:?}");
+    assert!(steps.iter().all(|s| matches!(s, DirectStep::Invite { .. } | DirectStep::Up { .. })), "{steps:?}");
+
+    // Files go over it
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("clip.bin");
+    std::fs::write(&file, vec![9u8; 1 << 20]).unwrap();
+    let id = joiner.node.send_files(&host_id, vec![file]).await.unwrap();
+    wait_for(&mut on_joiner, |e| matches!(e, Event::TransferComplete { transfer, .. } if *transfer == id).then_some(())).await;
+}
+
+#[tokio::test]
+async fn group_credentials_go_only_to_a_device_that_joins_groups() {
+    // A phone with groups and a computer without: the old way, no credentials
+    let phone = dev_with("Phone", |c| c.features = vec!["files".into(), "direct_host".into(), "direct_join".into(), "direct_group".into()]).await;
+    let pc = dev_with("Computer", |c| c.features = vec!["files".into(), "direct_join".into()]).await;
+    auto_answer(&phone.node, true);
+    auto_answer(&pc.node, true);
+    let mut addr = phone.node.local_addr().unwrap();
+    if addr.ip().is_unspecified() {
+        addr.set_ip(std::net::Ipv6Addr::LOCALHOST.into());
+    }
+    let mut on_phone = phone.node.subscribe();
+    pc.node.pair(addr).await.unwrap();
+    wait_for(&mut on_phone, |e| matches!(e, Event::Connected { .. }).then_some(())).await;
+    let pc_id = pc.node.info().id;
+    // The phone hosts: the computer can only join
+    let phone2 = phone.node.clone();
+    tokio::spawn(async move { phone2.direct_link(&pc_id).await });
+    let group = wait_for(&mut on_phone, |e| match e {
+        Event::DirectWanted { group, .. } => Some(group.clone()),
+        _ => None,
+    })
+    .await;
+    assert!(group.is_none());
+    let creds = DirectGroup::random().unwrap();
+    let step = DirectStep::Invite { address: "02:00:00:00:00:00".into(), name: None, group: Some(creds) };
+    assert!(phone.node.direct_send(&pc_id, step).await.is_err());
 }
