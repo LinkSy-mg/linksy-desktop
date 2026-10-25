@@ -1060,6 +1060,17 @@ A match means "that device is here, at these addresses": dial it as before (§4.
 handshake still proves who it is; a tag is never trusted for more than choosing whom to
 dial. Re-check at each epoch.
 
+**Browse again at each epoch.** At a new epoch every paired device shows up under a new
+instance name, and a browser that misses it may not ask again for a long time: mDNS
+libraries query less and less often (mdns-sd: up to once an hour) and give up resolving a
+new instance after a few seconds, which a phone or a laptop in Wi-Fi power saving easily
+misses. A paired device then stays "not nearby" while it's right there
+([desktop#50](https://github.com/LinkSy-mg/linksy-desktop/issues/50)). So start a fresh
+browse (or send a fresh query) a few seconds after each epoch boundary, and soon after a
+paired device's record goes away (goodbye or no answer), in case its new record was missed.
+Desktop: 5 s after the boundary and 1 s after a loss (`discovery.rs`). Android: restart
+`NsdManager` discovery the same way if it doesn't requery on its own.
+
 **Pairing mode.** A device being added has to be findable by strangers. While its
 **Add Device** screen is open (computer: the invite dialog; phone: the add or scan screen),
 and for at most 5 minutes, a device also announces a second record in the §4.1 format
@@ -1719,3 +1730,7 @@ robust against any encoder (GPU ones may slice too):
   the core in `Event::DirectWanted { id, group }` when both have `direct_group`; the joiner
   joins with Android's `WifiP2pConfig.Builder`, no `listening`/`connecting`. When both
   could host, the smaller id hosts. Phone to computer is unchanged.
+- **2026-10-25** — Discovery (§4.16 "Browse again at each epoch"): the desktop starts a
+  fresh mDNS browse 5 s after each epoch boundary and 1 s after a paired device's record
+  goes, so a missed new record no longer leaves the device "not nearby" for up to an hour
+  (desktop#50). The presence check no longer stops for good after one failed query.
