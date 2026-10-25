@@ -10,24 +10,27 @@ pkgdesc='Your phone and your Linux computer, working as one: files, clipboard, s
 arch=('x86_64')
 url='https://github.com/LinkSy-mg/linksy-desktop'
 license=('AGPL-3.0-or-later')
-makedepends=('cargo' 'lld' 'gtk4' 'libadwaita' 'gstreamer' 'gst-plugins-base' 'qt6-base' 'qt6-declarative')
-source=("$pkgbase-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('ea0f7ce4ccd16081fe999dd45c53fc7976b5d1bebb6d24d81925c062f42b51be')
+makedepends=('cargo' 'git' 'lld' 'gtk4' 'libadwaita' 'gstreamer' 'gst-plugins-base' 'qt6-base' 'qt6-declarative')
+# Ring's C code built as GCC LTO bitcode doesn't link with rust-lld
+options=('!debug' '!lto')
+# The tag, not its tarball: this file is in the tarball, so it can't hold the tarball's sum
+source=("git+$url.git#tag=v$pkgver")
+sha256sums=('SKIP')
 
 prepare() {
-  cd linksy-desktop-$pkgver
+  cd linksy-desktop
   export RUSTUP_TOOLCHAIN=stable
   cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
 }
 
 build() {
-  cd linksy-desktop-$pkgver
+  cd linksy-desktop
   export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target QMAKE=/usr/bin/qmake6
   cargo build --frozen --release -p linksyd -p linksy -p linksy-app -p linksy-screen -p linksy-qt
 }
 
 check() {
-  cd linksy-desktop-$pkgver
+  cd linksy-desktop
   export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target
   cargo test --frozen --release -p linksy-core --lib
 }
@@ -45,7 +48,7 @@ package_linksy-common() {
               'v4l2loopback-utils: the phone as a webcam in every app')
   # Before 0.8.4, one linksy package held everything
   conflicts=('linksy<0.8.4')
-  cd linksy-desktop-$pkgver
+  cd linksy-desktop
   for b in linksyd linksy linksy-screen; do
     install -Dm755 "target/release/$b" "$pkgdir/usr/bin/$b"
   done
@@ -70,7 +73,7 @@ package_linksy() {
   pkgdesc='Your phone and your Linux computer, working as one (GTK app, for GNOME and most desktops)'
   depends=("linksy-common=$pkgver" 'gtk4' 'libadwaita' 'gst-plugin-gtk4')
   provides=('linksy-window')
-  cd linksy-desktop-$pkgver
+  cd linksy-desktop
   install -Dm755 target/release/linksy-app "$pkgdir/usr/bin/linksy-app"
 }
 
@@ -78,6 +81,6 @@ package_linksy-qt() {
   pkgdesc='Your phone and your Linux computer, working as one (Qt app, for KDE Plasma)'
   depends=("linksy-common=$pkgver" 'qt6-base' 'qt6-declarative' 'kirigami' 'kirigami-addons' 'qqc2-desktop-style' 'gst-plugin-qml6')
   provides=('linksy-window')
-  cd linksy-desktop-$pkgver
+  cd linksy-desktop
   install -Dm755 target/release/linksy-qt "$pkgdir/usr/bin/linksy-qt"
 }
