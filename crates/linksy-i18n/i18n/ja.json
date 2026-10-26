@@ -193,6 +193,7 @@
   "Language": "言語",
   "Later": "後で",
   "Let Linksy Use the Cable": "Linksy にケーブルの使用を許可",
+  "Let one of your devices see and control this screen without asking every time: choose Always Allow when it asks, or use the switch on its page. Linksy still tells you when it starts.": "あなたのデバイスが、毎回確認せずにこの画面を表示・操作できるようにします。確認されたときに「常に許可」を選ぶか、そのデバイスのページのスイッチを使います。開始時には Linksy が通知します。",
   "Let {name} open a shell on this computer after typing the terminal code. It runs as you.": "ターミナルコードを入力すると、{name} がこのコンピュータでシェルを開けるようにします。あなたのユーザーとして実行されます。",
   "Letting Linksy use phones plugged in by cable": "ケーブルで接続したスマートフォンを Linksy が使えるようにします。",
   "Letting nearby devices find this computer": "近くのデバイスがこのコンピュータを見つけられるようにします。",

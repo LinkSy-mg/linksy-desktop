@@ -193,6 +193,7 @@
   "Language": "语言",
   "Later": "稍后",
   "Let Linksy Use the Cable": "允许 Linksy 使用数据线",
+  "Let one of your devices see and control this screen without asking every time: choose Always Allow when it asks, or use the switch on its page. Linksy still tells you when it starts.": "让你的某台设备无需每次询问即可查看和控制此屏幕：在它询问时选择“始终允许”，或使用其页面上的开关。开始时 Linksy 仍会通知你。",
   "Let {name} open a shell on this computer after typing the terminal code. It runs as you.": "允许 {name} 在输入终端代码后在这台电脑上打开 Shell。它以你的身份运行。",
   "Letting Linksy use phones plugged in by cable": "让 Linksy 能使用通过数据线连接的手机。",
   "Letting nearby devices find this computer": "让附近设备能发现这台电脑。",

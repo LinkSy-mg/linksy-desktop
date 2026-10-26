@@ -33,6 +33,15 @@ pub struct Release {
 fn releases() -> Vec<Release> {
     vec![
         Release {
+            version: "0.9.10",
+            highlights: vec![Highlight {
+                gtk: "security-high-symbolic",
+                qt: "security-high",
+                title: t!("Always Allow"),
+                body: t!("Let one of your devices see and control this screen without asking every time: choose Always Allow when it asks, or use the switch on its page. Linksy still tells you when it starts."),
+            }],
+        },
+        Release {
             version: "0.9.9",
             highlights: vec![Highlight {
                 gtk: "network-wireless-hotspot-symbolic",

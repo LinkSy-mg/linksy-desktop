@@ -193,6 +193,7 @@
   "Language": "Idioma",
   "Later": "Más tarde",
   "Let Linksy Use the Cable": "Permitir que Linksy use el cable",
+  "Let one of your devices see and control this screen without asking every time: choose Always Allow when it asks, or use the switch on its page. Linksy still tells you when it starts.": "Deja que uno de tus dispositivos vea y controle esta pantalla sin preguntar cada vez: elige “Permitir siempre” cuando pregunte, o usa el interruptor de su página. Linksy te avisa igualmente cuando empieza.",
   "Let {name} open a shell on this computer after typing the terminal code. It runs as you.": "Permite que {name} abra una shell en esta computadora tras escribir el código de terminal. Se ejecuta con tu usuario.",
   "Letting Linksy use phones plugged in by cable": "Permitiendo que Linksy use teléfonos conectados por cable",
   "Letting nearby devices find this computer": "Permitiendo que los dispositivos cercanos encuentren esta computadora",
