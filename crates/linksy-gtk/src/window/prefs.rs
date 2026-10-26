@@ -96,6 +96,7 @@ impl Window {
         page.add(&device);
         page.add(&receiving);
         page.add(&connection);
+        page.add(&self.screen_group(&dialog));
         // Only if a paired phone can send its notifications at all.
         let any = self.state.borrow().devices.iter().any(|d| d.trusted && super::can(&d.device, "notifications") && d.device.os == "android");
         if any {
@@ -307,6 +308,36 @@ impl Window {
                 s();
             });
         }
+        group
+    }
+
+    /// The screen other devices see: the one picked in the desktop's dialog the first time,
+    /// remembered, until the user asks to pick again (another monitor, say).
+    fn screen_group(self: &Rc<Self>, dialog: &adw::PreferencesDialog) -> adw::PreferencesGroup {
+        let group = adw::PreferencesGroup::builder().title(t!("Screen Sharing")).build();
+        let row = adw::ActionRow::builder()
+            .title(t!("Choose the Screen Again"))
+            .subtitle(t!("Linksy remembers the screen you picked when a device first asked to see or control this computer. Choose again to pick another monitor the next time one asks."))
+            .build();
+        row.add_prefix(&gtk::Image::builder().icon_name("video-display-symbolic").build());
+        let again = gtk::Button::builder().label(t!("Choose Again")).valign(gtk::Align::Center).build();
+        row.add_suffix(&again);
+        group.add(&row);
+        let (w, dialog) = (self.clone(), dialog.clone());
+        again.connect_clicked(move |button| {
+            let Some(c) = w.client() else { return };
+            let call = w.bridge.call(&c, |c| async move { c.forget_screen().await });
+            let (dialog, button) = (dialog.clone(), button.clone());
+            glib::spawn_future_local(async move {
+                match call.await {
+                    Ok(_) => {
+                        button.set_sensitive(false);
+                        dialog.add_toast(adw::Toast::new(t!("The next time a device asks, you pick the screen.")));
+                    }
+                    Err(e) => dialog.add_toast(adw::Toast::new(&glib::markup_escape_text(&fmt::capitalize(&e)))),
+                }
+            });
+        });
         group
     }
 
