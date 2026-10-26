@@ -319,7 +319,7 @@ fn watch_bus(pipeline: &gst::Element, last_frame: Option<&std::sync::Arc<std::sy
     let bus = pipeline.bus()?;
     loop {
         let Some(msg) = bus.timed_pop(gst::ClockTime::from_mseconds(500)) else {
-            // The keepalive sends the last frame every second: three without any is a stall
+            // The keepalive sends the last frame 10 times a second: 3 s without any is a stall
             if let Some(last) = last_frame {
                 let ms = last.load(std::sync::atomic::Ordering::Relaxed);
                 if ms > 0 && now_ms() > ms + 3000 {
@@ -366,7 +366,9 @@ fn open_capture(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(String, Op
     }
     // The PipeWire remote stays open for the life of the pipeline (pipewiresrc closes it).
     // The memory the frames come in, and a virtual monitor's size, are chosen by the chain
-    let source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=1000", screen.fd.as_raw_fd(), screen.node);
+    // The last frame again every 100 ms while the screen is still: encoders hold one back until
+    // the next comes, which left a tap's cursor a second late
+    let source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=100", screen.fd.as_raw_fd(), screen.node);
     std::mem::forget(screen.fd);
     Ok((source, screen.input))
 }
