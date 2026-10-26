@@ -2,6 +2,31 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.10
+
+### Added
+- **Always Allow, for screen and control.** A device of yours can see and control this
+  computer's screen, or use its mouse and keyboard, without asking each time: choose Always
+  Allow when it asks (in the notification or in the app), or turn on Always Allow Screen
+  and Control on its page. Linksy still shows a notification when it starts, and Stop is in
+  the tray. Away from home it always asks, and so do the camera, the microphone, a second
+  display and terminals.
+
+### Fixed
+- **Taps on KDE's extended screen land where you tap.** With display scaling on (125 %,
+  150 %), taps from the phone landed further right and down than meant, and near the
+  right and bottom edges not at all.
+- **Paired devices no longer stay "not nearby".** After a paired device changed its private
+  name (every 15 minutes), this computer could miss it for up to an hour, until the service
+  restarted. It now looks again a few seconds after each change, and right after a device
+  goes.
+- **The .deb and .rpm packages install one file at a time.** `linksy-common` and the app
+  each needed the other, so gdebi, GNOME Software and Discover refused both. Open
+  `linksy-common` first, then the app; with only `linksy-common`, Linksy in the menu opens
+  the download page.
+- **The Arch package builds with LTO turned on in makepkg.conf**, and from the release's
+  git tag.
+
 ## 0.9.9
 
 ### Added
