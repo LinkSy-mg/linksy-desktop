@@ -130,8 +130,17 @@ fn parse_args() -> Result<Args, String> {
     Ok(Args { config, socket, notifications, open_links, usb, direct })
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 2)]
-async fn main() -> ExitCode {
+fn main() -> ExitCode {
+    // Two malloc arenas, not one per thread: set before any thread starts (desktop#26)
+    // SAFETY: no other thread is running yet
+    #[cfg(target_env = "gnu")]
+    unsafe {
+        libc::mallopt(libc::M_ARENA_MAX, 2);
+    }
+    tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("tokio runtime").block_on(run())
+}
+
+async fn run() -> ExitCode {
     linksy_logs::catch_crashes("linksyd", env!("CARGO_PKG_VERSION"));
     // The Flatpak's service has no journal: its output (and its screen helper's) goes to a
     // file of its own, for Save Logs
