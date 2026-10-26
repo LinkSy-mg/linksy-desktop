@@ -16,4 +16,6 @@ esac
 has linksy-app && run linksy-app "$@"
 has linksy-qt && run linksy-qt
 echo "linksy-open: neither linksy-app nor linksy-qt is installed" >&2
+# Only linksy-common is here: show where to get the app rather than nothing
+command -v xdg-open >/dev/null 2>&1 && xdg-open https://linksy.diary.mg/#download
 exit 1
