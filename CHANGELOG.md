@@ -13,6 +13,10 @@ Linksy for Linux. Each version's section becomes its release notes.
   shared screen, the frame with the new cursor could arrive up to a second late. The last
   frame now goes again every 100 ms.
 
+### Changed
+- **The service uses about a quarter less memory at rest** (24 MB to 18 MB here): it gives
+  back what it isn't using every few minutes.
+
 ## 0.9.11
 
 ### Added
