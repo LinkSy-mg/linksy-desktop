@@ -873,6 +873,14 @@ carries its packets, like the USB cable (§4.11).
   `DeviceInfo.away` (`{"id","relay","addrs"}`, in the handshake only), takes away
   connections from paired devices, and **falls back to away by itself** when a device
   doesn't answer on the network (`ensure_connection`). `node.connect_away(id)` forces it.
+- **Only while needed (desktop 0.9.12).** With a relay, the core runs the iroh endpoint
+  only while a paired device could use it: one whose away address is known and whose week
+  (below) isn't over. Otherwise it rests, since it holds about 10 MB and is never idle:
+  `DeviceInfo.away` then carries `{"id","relay"}` without `addrs`, enough to reach it
+  through the relay once it runs. It starts as soon as pairing or a handshake brings such
+  a device, and stops two minutes after there's none (forgotten, or the week over).
+  Without a relay it always runs. `node.away_running()` says which. Nothing to do on the
+  phone beyond taking the new core.
 - **Links.** Away connections come from `127.0.0.2` (the bridge), USB from other loopback
   addresses, the network from anywhere else: `link_of(addr)` / `node.link(id)` →
   `Link::{Usb, Lan, Away}`. A better link replaces a worse one to the same device (both
