@@ -26,6 +26,7 @@
 //! §4.8): about 100 KB/s, and nothing to decode.
 
 mod mutter;
+mod outputs;
 mod portal;
 
 use std::os::fd::AsRawFd;

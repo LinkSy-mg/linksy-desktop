@@ -185,8 +185,15 @@ pub async fn screen(token: Option<String>, control: bool, virtual_monitor: bool)
         .map_err(|_| "remote control was cancelled".to_string())?;
     let stream = first(selected.streams())?;
     let node = stream.pipe_wire_node_id();
-    let size = stream.size().map(|(w, h)| (w as f64, h as f64));
-    let fd = screencast.open_pipe_wire_remote(&session, Default::default()).await.map_err(|e| e.to_string())?;
+    let mut size = stream.size().map(|(w, h)| (w as f64, h as f64));
+    // KDE's second display, scaled: positions go in its size on the desktop, not its pixels
+    if let Some(pixels) = size.filter(|_| virtual_monitor)
+        && let Some(desktop) = crate::outputs::kde_virtual_size(pixels).filter(|&d| d != pixels)
+    {
+        eprintln!("linksy-screen: the second display is {}x{} pixels, {}x{} on the desktop (scaled); the phone's taps follow the desktop's", pixels.0, pixels.1, desktop.0, desktop.1);
+        size = Some(desktop);
+    }
+    let fd =screencast.open_pipe_wire_remote(&session, Default::default()).await.map_err(|e| e.to_string())?;
     let allowed = input_allowed(selected.devices());
     let restore_token = if allowed { selected.restore_token().map(str::to_string) } else { None };
     Ok(Screen { fd, node, restore_token, input: Some(Input::Desktop { proxy: remote, session, node, size, allowed, held: Default::default() }) })

@@ -13,3 +13,6 @@ tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time"] }
 libc = "0.2.191"
 # GNOME's display layout, to keep a second display in it
 zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
+# KDE's second display: its size on the desktop when it's scaled
+wayland-client = "0.31.15"
+wayland-protocols = { version = "0.32.12", features = ["client", "unstable"] }
