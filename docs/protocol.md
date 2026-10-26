@@ -479,7 +479,8 @@ After `session_accept`:
   SPS/PPS repeated before every keyframe (`config-interval=-1`), access-unit aligned.
   **Profile: Constrained Baseline** (every decoder handles it, including OpenH264 and
   phone hardware). Desktop sends ~8 Mbit/s, keyframe at least every 2 s (60 frames),
-  up to 30 fps, at the screen's resolution.
+  up to 30 fps, at the screen's resolution. While the screen is still, the
+  last frame comes again every 100 ms, so the newest change never waits in an encoder.
 - **Viewer → sharer:** framed JSON control messages (u32 BE length + JSON). A sharer must
   keep reading this half and ignore unknown types. In `screen` sessions the viewer sends
   nothing; in **`control`** sessions (same media, plus input; the prompt says "wants to
@@ -1763,3 +1764,6 @@ robust against any encoder (GPU ones may slice too):
   in a `screen` or `control` `session_request`; the computer forgets the screen its user
   picked last time and shows the desktop's dialog again. Core: `request_session_choosing`,
   `Session.choose`. Phone: a **Choose Screen** action on a computer's screen viewer.
+- **2026-10-26** — Desktop: while a shared screen is still, the computer repeats its last frame
+  every 100 ms (§4.8). Encoders keep one frame back until the next, so a tap's cursor used to
+  show up to a second late. No protocol change; a viewer sees at least 10 frames a second.
