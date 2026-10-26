@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Install the built packages in clean containers and check they work: each app installs with
 # what it needs, no library is missing, the Qt window loads its QML, linksy-open picks the
-# right window, upgrading from the previous release moves files over cleanly, and
-# linksy-common alone (no window) is refused.
+# right window, upgrading from the previous release moves files over cleanly, and installing
+# one file at a time (linksy-common first, as gdebi or a software store does) works.
 # Usage: scripts/test-packages.sh [distro…]     (default: all; needs podman)
 # Exits 1 when any check fails (CI runs one distribution per job).
 #   Distros: fedora-44 fedora-43 opensuse debian-13 ubuntu-26.04 ubuntu-25.10 ubuntu-24.04
@@ -79,10 +79,9 @@ run() {   # distro, label, shell commands
     $CHECKS" 2>&1 | tee -a "$LOG"
 }
 
-# What must not install: linksy-common alone (it needs one of the apps), or the Qt app
-# where Qt is too old. distro, command, label
+# What must not install: the Qt app where Qt is too old. distro, command, label
 refused() {
-  echo "== $1: ${3:-linksy-common alone}"
+  echo "== $1: $3"
   podman run --rm -v "$PWD/dist":/pkgs:ro,z "$(image "$1")" bash -c "
     case $1 in debian-*|ubuntu-*) apt-get update -qq >/dev/null 2>&1;; opensuse) zypper -q refresh >/dev/null 2>&1;; esac
     export DEBIAN_FRONTEND=noninteractive
@@ -99,7 +98,7 @@ for d in "${ALL[@]}"; do
   else
     run "$d" "linksy-qt (Qt)" "$in $(files "$d" qt)"
   fi
-  refused "$d" "$in $(files "$d" gtk | cut -d' ' -f1)"
+  run "$d" "one file at a time" "$in $(files "$d" gtk | cut -d' ' -f1) && $in $(files "$d" gtk | cut -d' ' -f2)"
   if [ $gtk_only = 0 ] && [ -n "$PREV" ] && [ -e "dist/$(old_files "$d" | awk '{print $NF}' | sed 's|/pkgs/||')" ]; then
     run "$d" "upgrade from $PREV" "$in $(old_files "$d") && $in $(files "$d" gtk)"
   fi

@@ -36,8 +36,9 @@ This is the GTK app, for GNOME and most desktops; linksy-qt is the one for KDE P
 Summary:        Your devices, connected (service and tools)
 # Before 0.8.4, one linksy package held everything
 Conflicts:      linksy < 0.8.4
-# Never without a window: the GTK app, or the Qt app when that's the one asked for
-Requires:       (linksy = %{version}-%{release} or linksy-qt = %{version}-%{release})
+# Comes with a window: the GTK app, or the Qt app when that's the one asked for. Only
+# recommended, so installers that take one file at a time can take this one first.
+Recommends:     (linksy = %{version}-%{release} or linksy-qt = %{version}-%{release})
 %if 0%{?linksy_suse}
 Requires:       gstreamer-plugins-good
 Requires:       gstreamer-plugin-pipewire
