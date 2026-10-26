@@ -398,6 +398,12 @@ impl Sessions {
         self.running.lock().unwrap().insert(id, (task.abort_handle(), info));
     }
 
+    /// Forget the screen picked in the desktop's dialog for seeing and for controlling
+    /// this one: the dialog shows the next time a device asks. Whether one was kept.
+    pub fn forget_screen(&self) -> bool {
+        ["screen", "control"].into_iter().filter(|kind| std::fs::remove_file(self.data_dir.join(format!("{kind}-token"))).is_ok()).count() > 0
+    }
+
     pub fn pending(&self) -> Vec<PendingSession> {
         self.pending.lock().unwrap().values().cloned().collect()
     }

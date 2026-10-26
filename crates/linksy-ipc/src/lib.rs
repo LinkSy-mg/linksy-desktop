@@ -68,6 +68,9 @@ pub enum Request {
     SetAutoAccept { device: String, on: bool },
     /// Let a device see and control the screen without asking, or ask again.
     SetAllowScreen { device: String, on: bool },
+    /// Forget the screen this computer's user picked for other devices to see or control,
+    /// so the desktop's dialog shows the next time one asks. Answers whether one was kept.
+    ForgetScreen,
     /// Ask a phone where it is; answers its position or why not (docs/protocol.md §4.14).
     Locate { device: String },
     /// This version, the newest one if it's newer, and whether Linksy checks.
@@ -597,6 +600,10 @@ impl Client {
 
     pub async fn set_allow_screen(&self, device: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::SetAllowScreen { device: device.into(), on }).await
+    }
+
+    pub async fn forget_screen(&self) -> Result<bool, ClientError> {
+        self.call(Request::ForgetScreen).await
     }
 
     pub async fn locate(&self, device: impl Into<String>) -> Result<Location, ClientError> {
