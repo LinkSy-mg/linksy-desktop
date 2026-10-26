@@ -168,6 +168,43 @@ button.tl-action { padding: 2px 8px; min-height: 24px; font-weight: 700; color: 
 /* Opaque: a card is see-through in dark mode, and pages scroll under this one */
 .card.corner-panel { padding: 12px 14px; border-radius: 14px; background-color: @popover_bg_color; color: @popover_fg_color; box-shadow: 0 4px 18px alpha(black, 0.18); }
 .tl-node.failed { background-color: alpha(@error_color, 0.12); color: @error_color; }
+button.corner-title { padding: 2px 6px; margin-left: -6px; font-weight: 800; }
+
+/* Transfers, a page as on the phone: this computer in the accent, the other device in
+   Signal cyan (#22C3E6), files running along a lane between them */
+.transfers-card { padding: 16px 16px 16px 18px; }
+.transfer-speed { font-size: 28px; font-weight: 800; }
+.transfer-waiting { font-size: 20px; font-weight: 700; }
+.transfer-percent { font-weight: 800; color: @accent_color; }
+.flow-lane, .transfer-ring { color: @accent_color; }
+.lane-end { min-width: 32px; min-height: 32px; border-radius: 10px; }
+.lane-end.me { background-color: alpha(@accent_bg_color, 0.14); color: @accent_color; }
+.lane-end.other { background-color: alpha(#22C3E6, 0.16); color: #0F9CBB; }
+.route-pill { padding: 2px 9px 2px 8px; border-radius: 99px; font-size: 0.75em; font-weight: 700; background-color: @popover_bg_color; color: alpha(currentColor, 0.7); border: 1px solid alpha(currentColor, 0.15); }
+.route-pill.direct { color: @accent_color; border-color: alpha(@accent_color, 0.3); }
+.transfers-feels { color: @accent_color; font-weight: 600; }
+.transfers-caps { font-size: 0.8em; font-weight: 700; letter-spacing: 1.3px; }
+.transfer-name { font-weight: 500; }
+.transfer-name.going { font-weight: 700; }
+.transfer-going { color: @accent_color; }
+.transfer-failed { color: @error_color; }
+.transfers-badge { min-width: 52px; min-height: 52px; border-radius: 99px; background-color: alpha(@accent_bg_color, 0.12); color: @accent_color; }
+/* The island: one pill, a card while it's open */
+.island { padding: 4px; border-radius: 99px; background-color: @card_bg_color; box-shadow: 0 0 0 1px alpha(currentColor, 0.06), 0 10px 30px alpha(black, 0.06); transition: border-radius 300ms cubic-bezier(0.16, 1, 0.3, 1); }
+.island.open { border-radius: 24px; }
+.sidebar-footer .island button.island-part { padding: 0; min-width: 44px; min-height: 44px; border-radius: 99px; }
+.sidebar-footer .island button.island-transfers.selected { background-color: alpha(@accent_bg_color, 0.12); }
+.sidebar-footer .island button.island-main { padding: 0 14px; min-height: 44px; border-radius: 99px; font-weight: 700; background-color: alpha(currentColor, 0.07); transition: background-color 150ms, color 150ms; }
+.sidebar-footer .island button.island-main:hover { background-color: @accent_bg_color; color: @accent_fg_color; }
+.sidebar-footer .island button.island-part:hover { color: @accent_color; background-color: alpha(@accent_bg_color, 0.1); }
+.island-ring, .island-accent { color: @accent_color; }
+.island-count { font-weight: 800; }
+list.island-list { background: none; }
+list.island-list > row { border-radius: 12px; padding: 8px 6px; }
+.island-option-icon { min-width: 36px; min-height: 36px; border-radius: 99px; background-color: alpha(currentColor, 0.06); }
+list.transfers-recent { background: none; }
+list.transfers-recent > row { border-radius: 12px; padding: 6px 8px; }
+list.transfers-recent image.open { -gtk-icon-transform: rotate(180deg); }
 
 /* Dialogs */
 .pair-code {
@@ -231,6 +268,7 @@ fn main() -> glib::ExitCode {
         app.set_accels_for_action("win.add-device", &["<Control>n"]);
         app.set_accels_for_action("win.toggle-sidebar", &["F9"]);
         app.set_accels_for_action("win.view-screen", &["<Control><Shift>s"]);
+        app.set_accels_for_action("win.transfers", &["<Control>t"]);
         app.set_accels_for_action("win.show-help-overlay", &["<Control>question"]);
         app.set_accels_for_action("app.quit", &["<Control>q"]);
         app.set_accels_for_action("window.close", &["<Control>w"]);

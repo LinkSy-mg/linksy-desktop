@@ -997,7 +997,7 @@ fn local(at_ms: u64) -> Option<glib::DateTime> {
 }
 
 /// "Today", "Yesterday", "Monday 13 October".
-fn day_label(at_ms: u64) -> String {
+pub(super) fn day_label(at_ms: u64) -> String {
     let (Some(then), Ok(now)) = (local(at_ms), glib::DateTime::now_local()) else { return String::new() };
     let key = |d: &glib::DateTime| (d.year(), d.day_of_year());
     if key(&then) == key(&now) {
@@ -1009,6 +1009,6 @@ fn day_label(at_ms: u64) -> String {
     }
 }
 
-fn time_label(at_ms: u64) -> String {
+pub(super) fn time_label(at_ms: u64) -> String {
     local(at_ms).and_then(|t| t.format("%H:%M").ok()).map(|s| s.to_string()).unwrap_or_default()
 }

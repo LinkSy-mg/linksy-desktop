@@ -36,8 +36,8 @@ pub fn new(size: i32, live: bool) -> gtk::DrawingArea {
 }
 
 /// Signal blue `#2563FF` and cyan `#22C3E6`.
-const SENDER: (f64, f64, f64) = (0x25 as f64 / 255.0, 0x63 as f64 / 255.0, 1.0);
-const RECEIVER: (f64, f64, f64) = (0x22 as f64 / 255.0, 0xC3 as f64 / 255.0, 0xE6 as f64 / 255.0);
+pub const SENDER: (f64, f64, f64) = (0x25 as f64 / 255.0, 0x63 as f64 / 255.0, 1.0);
+pub const RECEIVER: (f64, f64, f64) = (0x22 as f64 / 255.0, 0xC3 as f64 / 255.0, 0xE6 as f64 / 255.0);
 
 fn draw(_area: &gtk::DrawingArea, cr: &cairo::Context, w: i32, h: i32, phase: Option<f64>) {
     let (r, g, b) = SENDER;
@@ -69,7 +69,7 @@ fn draw(_area: &gtk::DrawingArea, cr: &cairo::Context, w: i32, h: i32, phase: Op
     let _ = cr.fill();
 }
 
-fn reduced_motion(widget: &impl IsA<gtk::Widget>) -> bool {
+pub fn reduced_motion(widget: &impl IsA<gtk::Widget>) -> bool {
     !widget.settings().is_gtk_enable_animations()
 }
 

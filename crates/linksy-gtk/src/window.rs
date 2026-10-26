@@ -4,6 +4,8 @@
 
 mod camera;
 mod corner;
+mod island;
+mod transfers;
 mod invite;
 mod messages;
 mod news;
@@ -23,8 +25,8 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use linksy_ipc::linksy_core::{DeviceInfo, DeviceKind, DeviceView, Event, FileEntry, Fingerprint, SessionKind, Uuid};
-use linksy_ipc::{Client, HistoryEntry};
+use linksy_ipc::linksy_core::{DeviceInfo, DeviceKind, DeviceView, Direction, Event, FileEntry, Fingerprint, SessionKind, Uuid};
+use linksy_ipc::{Client, HistoryEntry, Shared};
 use linksy_i18n::t;
 
 use crate::bridge::{Bridge, Update};
@@ -92,6 +94,10 @@ struct State {
     /// Opening Linksy starts its service once, if it isn't running.
     started_service: bool,
     restarted_service: bool,
+    transfers_open: bool,
+    moving: Vec<transfers::Moving>,
+    recent: Vec<HistoryEntry>,
+    direct: HashMap<Fingerprint, bool>,
 }
 
 pub struct Window {
@@ -130,8 +136,9 @@ pub struct Window {
     camera_title: adw::WindowTitle,
     // Texting through a phone
     messages: Rc<messages::MessagesView>,
-    /// Transfers in progress, at the bottom right whatever the page.
     corner: Rc<corner::Corner>,
+    transfers: Rc<transfers::TransfersPage>,
+    island: Rc<island::Island>,
 }
 
 impl Window {
@@ -177,15 +184,14 @@ impl Window {
         sidebar_box.append(&nearby_group);
         let sidebar_scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&sidebar_box).build();
 
-        let add = gtk::Button::builder().action_name("win.add-device").css_classes(["pill"]).build();
-        add.set_child(Some(&adw::ButtonContent::builder().icon_name("list-add-symbolic").label(t!("Add Device")).build()));
+        let island = island::Island::new();
         let me_label = gtk::Label::builder().css_classes(["dim-label", "caption"]).ellipsize(gtk::pango::EllipsizeMode::End).build();
         let setup_button = gtk::Button::builder().action_name("win.setup").css_classes(["flat", "setup-button"]).visible(false).build();
         let update_button = gtk::Button::builder().css_classes(["flat", "update-button"]).tooltip_text(t!("See what's new")).visible(false).build();
         let footer = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).css_classes(["sidebar-footer"]).build();
         footer.append(&update_button);
         footer.append(&setup_button);
-        footer.append(&add);
+        footer.append(&island.root);
         footer.append(&me_label);
 
         let sidebar_view = adw::ToolbarView::new();
@@ -231,6 +237,8 @@ impl Window {
         camera_picture.add_controller(click);
         let messages = messages::MessagesView::new();
         content_stack.add_named(&messages.root, Some("messages"));
+        let transfers = transfers::TransfersPage::new();
+        content_stack.add_named(&transfers.root, Some("transfers"));
         let camera_back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(t!("Back")).visible(false).build();
         let camera_title = adw::WindowTitle::new("", t!("Camera Preview"));
         let content_header = adw::HeaderBar::builder().show_title(false).title_widget(&camera_title).build();
@@ -326,6 +334,55 @@ impl Window {
             camera_title,
             messages,
             corner,
+            transfers,
+            island,
+        });
+        let w = Rc::downgrade(&win);
+        win.transfers.set_handler(move |action| {
+            if let Some(w) = w.upgrade() {
+                w.transfer_action(action);
+            }
+        });
+        let w = Rc::downgrade(&win);
+        win.island.set_handler(move |pick| {
+            let Some(w) = w.upgrade() else { return };
+            match pick {
+                island::Pick::Transfers => w.open_transfers(),
+                island::Pick::Send(id) => w.choose_files_for(id),
+                island::Pick::AddDevice => w.show_invite(),
+                island::Pick::PairAddress => w.ask_pair_address(),
+                island::Pick::UsbCable => w.show_usb_cable(),
+            }
+        });
+        // An open island closes on Escape or a click anywhere else
+        let keys = gtk::EventControllerKey::builder().propagation_phase(gtk::PropagationPhase::Capture).build();
+        let w = Rc::downgrade(&win);
+        keys.connect_key_pressed(move |_, key, _, _| {
+            if let Some(w) = w.upgrade()
+                && key == gdk::Key::Escape
+                && w.island.is_open()
+            {
+                w.island.close();
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
+        });
+        win.window.add_controller(keys);
+        let click = gtk::GestureClick::builder().propagation_phase(gtk::PropagationPhase::Capture).button(0).build();
+        let w = Rc::downgrade(&win);
+        click.connect_pressed(move |_, _, x, y| {
+            let Some(w) = w.upgrade() else { return };
+            let inside = w.window.pick(x, y, gtk::PickFlags::DEFAULT).is_some_and(|p| p.is_ancestor(&w.island.root) || p == w.island.root);
+            if w.island.is_open() && !inside {
+                w.island.close();
+            }
+        });
+        win.window.add_controller(click);
+        let w = Rc::downgrade(&win);
+        win.corner.set_open(move || {
+            if let Some(w) = w.upgrade() {
+                w.open_transfers();
+            }
         });
         let w = Rc::downgrade(&win);
         win.corner.set_handler(move |action| {
@@ -385,8 +442,9 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 13] = [
+        let actions: [(&str, Run); 14] = [
             ("choose-files", |w| w.choose_files()),
+            ("transfers", |w| w.open_transfers()),
             ("toggle-sidebar", |w| w.split.set_show_sidebar(!w.split.shows_sidebar())),
             ("start-service", |w| w.start_service()),
             ("messages", |w| {
@@ -437,8 +495,13 @@ impl Window {
         self.paired_list.connect_row_selected(move |_, row| {
             let Some(w) = w.upgrade() else { return };
             let Some(id) = row.and_then(|r| r.widget_name().parse::<Fingerprint>().ok()) else { return };
+            let was = std::mem::replace(&mut w.state.borrow_mut().transfers_open, false);
             w.select(Some(id));
+            if was {
+                w.render_page();
+            }
         });
+
         // The avatar strip stands in for the hidden sidebar on wide windows.
         for prop in ["show-sidebar", "collapsed"] {
             let w = Rc::downgrade(self);
@@ -960,10 +1023,20 @@ impl Window {
                 self.render_page();
             }
             Event::TransferRequest { transfer, from, files, total } => self.show_offer(transfer, &from, &files, total),
-            Event::TransferStarted { transfer, total, .. } => {
+            Event::TransferStarted { transfer, total, peer, direction, files, import } => {
                 // Accepted elsewhere (desktop notification, another window): drop the prompt.
                 self.close_offer_dialog(&transfer);
                 self.state.borrow_mut().progress.insert(transfer, Progress { total, ..Default::default() });
+                let files: Vec<(String, Option<u64>)> = files.into_iter().map(|f| (f.path, Some(f.size))).collect();
+                let moving = transfers::Moving { id: transfer, peer: peer.id, peer_name: peer.name, incoming: direction == Direction::Incoming, import, files, total };
+                {
+                    let mut state = self.state.borrow_mut();
+                    match state.moving.iter_mut().find(|m| m.id == transfer) {
+                        Some(m) => *m = moving,
+                        None => state.moving.push(moving),
+                    }
+                }
+                self.transfers_changed();
             }
             Event::TransferProgress { transfer, bytes, total } => self.update_progress(transfer, bytes, total),
             Event::TransferComplete { transfer, .. } => {
@@ -1021,7 +1094,18 @@ impl Window {
             Event::MediaState { .. } | Event::MediaCommand { .. } | Event::MediaWatch { .. } | Event::CallState { .. } => {}
             Event::VolumeState { .. } | Event::VolumeSet { .. } | Event::VolumeWatch { .. } => {}
             // Direct links are the service's to set up (docs/protocol.md §4.17).
-            Event::DirectWanted { .. } | Event::Direct { .. } | Event::DirectLinked { .. } | Event::DirectEnded { .. } => {}
+            Event::DirectWanted { id, .. } | Event::Direct { from: DeviceInfo { id, .. }, .. } => {
+                self.state.borrow_mut().direct.entry(id).or_insert(false);
+                self.transfers_changed();
+            }
+            Event::DirectLinked { id } => {
+                self.state.borrow_mut().direct.insert(id, true);
+                self.transfers_changed();
+            }
+            Event::DirectEnded { id, .. } => {
+                self.state.borrow_mut().direct.remove(&id);
+                self.transfers_changed();
+            }
             Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } | Event::ClipboardWatch { .. } | Event::ClipboardFile { .. } => {}
             // Between the service and phones (USB cable, §4.11)
             Event::UsbPlugged { .. } | Event::UsbConnect { .. } => {}
@@ -1040,6 +1124,10 @@ impl Window {
 
     fn history_changed(self: &Rc<Self>, entry: HistoryEntry) {
         self.corner.entry(&entry);
+        if matches!(entry.what, Shared::Files { .. }) {
+            self.note_transfer(entry.clone());
+            self.transfers_changed();
+        }
         if let Some(p) = self.state.borrow().progress.get(&entry.id) {
             self.corner.progress(entry.id, p);
         }
@@ -1073,21 +1161,106 @@ impl Window {
         if let Some(p) = state.progress.get(&id) {
             self.corner.progress(id, p);
         }
+        let again = state.transfers_open && self.transfers.update(&state.moving, &state.progress);
+        drop(state);
+        self.update_island();
+        if again {
+            self.render_transfers();
+        }
     }
 
-    /// Transfers already running when the window connects, for the corner.
     fn refresh_corner(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
         let call = self.bridge.call(&c, |c| async move { c.history(None).await });
         let w = self.clone();
         glib::spawn_future_local(async move {
             if let Ok(history) = call.await {
-                // Oldest first, as they started: each goes on top
                 for e in history.iter().rev().filter(|e| matches!(e.status, linksy_ipc::HistoryStatus::InProgress)) {
                     w.corner.entry(e);
                 }
+                {
+                    let mut state = w.state.borrow_mut();
+                    state.moving.clear();
+                    state.recent.clear();
+                }
+                for e in history.into_iter().rev() {
+                    w.note_transfer(e);
+                }
+                w.transfers_changed();
             }
         });
+    }
+
+    fn note_transfer(&self, e: HistoryEntry) {
+        let Shared::Files { files, sizes, total, import, .. } = &e.what else { return };
+        let mut state = self.state.borrow_mut();
+        if matches!(e.status, linksy_ipc::HistoryStatus::InProgress) {
+            if !state.moving.iter().any(|m| m.id == e.id) {
+                let moving = transfers::Moving {
+                    id: e.id,
+                    peer: e.peer,
+                    peer_name: e.peer_name.clone(),
+                    incoming: e.direction == Direction::Incoming,
+                    import: *import,
+                    files: files.iter().enumerate().map(|(i, f)| (f.clone(), (sizes.len() == files.len()).then(|| sizes[i]))).collect(),
+                    total: *total,
+                };
+                state.moving.push(moving);
+            }
+        } else {
+            state.moving.retain(|m| m.id != e.id);
+            state.recent.retain(|r| r.id != e.id);
+            state.recent.insert(0, e);
+            state.recent.truncate(40);
+        }
+    }
+
+    fn transfers_changed(&self) {
+        self.update_island();
+        if self.state.borrow().transfers_open {
+            self.render_transfers();
+        }
+    }
+
+    fn update_island(&self) {
+        let state = self.state.borrow();
+        let files: usize = state.moving.iter().map(|m| m.files.len()).sum();
+        let (bytes, total) = state.moving.iter().filter_map(|m| state.progress.get(&m.id)).fold((0, 0), |(b, t), p| (b + p.bytes, t + p.total));
+        self.island.set_moving(files, (total > 0).then(|| bytes as f64 / total as f64));
+    }
+
+    fn open_transfers(self: &Rc<Self>) {
+        self.state.borrow_mut().transfers_open = true;
+        self.paired_list.unselect_all();
+        self.render_page();
+        self.show_content();
+    }
+
+    fn render_transfers(&self) {
+        let state = self.state.borrow();
+        let first = state.moving.first().map(|m| m.peer);
+        let device = first.and_then(|id| state.devices.iter().find(|d| d.device.id == id));
+        let route = match (first.and_then(|id| state.direct.get(&id)), device) {
+            (Some(true), _) => transfers::Route::Direct,
+            (Some(false), _) => transfers::Route::DirectSetup,
+            (None, Some(d)) if d.usb => transfers::Route::Usb,
+            (None, Some(d)) if d.away => transfers::Route::Away,
+            _ => transfers::Route::Wifi,
+        };
+        let kind = device.map(|d| d.device.kind).unwrap_or(DeviceKind::Phone);
+        self.transfers.show(&state.moving, kind, route, &state.recent, &state.progress);
+    }
+
+    fn transfer_action(self: &Rc<Self>, action: page::Action) {
+        match action {
+            page::Action::Cancel(t) => self.cancel(t),
+            page::Action::Open(paths) => self.open_received(&paths),
+            page::Action::ShowInFolder(path) => {
+                let launcher = gtk::FileLauncher::new(Some(&gio::File::for_path(path)));
+                launcher.open_containing_folder(Some(&self.window), gio::Cancellable::NONE, |_| {});
+            }
+            _ => {}
+        }
     }
 
     // ---- sidebar ----
@@ -1098,6 +1271,7 @@ impl Window {
             let (p, n) = state.devices.iter().cloned().partition(|d| d.trusted);
             (p, n, state.selected)
         };
+        self.island.set_devices(&paired);
         self.paired_list.remove_all();
         let mut to_select = None;
         for d in &paired {
@@ -1121,7 +1295,9 @@ impl Window {
         self.paired_list.set_visible(!paired.is_empty());
         self.nearby_group.set_visible(!nearby.is_empty());
         self.no_devices.set_visible(paired.is_empty() && nearby.is_empty());
+        let transfers_open = self.state.borrow().transfers_open;
         match to_select {
+            _ if transfers_open => {}
             Some(row) => self.paired_list.select_row(Some(&row)),
             // Nothing selected yet: open the first paired device on wide layouts, so the
             // window doesn't start on an empty page.
@@ -1234,6 +1410,16 @@ impl Window {
     // ---- device page ----
 
     fn render_page(&self) {
+        let transfers_open = self.state.borrow().transfers_open;
+        self.island.set_selected(transfers_open);
+        self.corner.root.set_visible(!transfers_open);
+        if transfers_open {
+            self.content.set_title(t!("Transfers"));
+            self.page.menu.set_visible(false);
+            self.content_stack.set_visible_child_name("transfers");
+            self.render_transfers();
+            return;
+        }
         let staged = self.state.borrow().staged.clone();
         // A preview stays open until left, unless its device or its camera went away.
         let (selected, camera, previewing) = {
@@ -1301,10 +1487,14 @@ impl Window {
 
     /// Choose files and send them to the selected device.
     fn choose_files(self: &Rc<Self>) {
-        let Some(d) = self.selected_device().filter(|d| d.trusted) else {
-            self.toast(t!("Pick a device first"));
-            return;
-        };
+        match self.selected_device().filter(|d| d.trusted) {
+            Some(d) => self.choose_files_for(d.device.id),
+            None => self.toast(t!("Pick a device first")),
+        }
+    }
+
+    fn choose_files_for(self: &Rc<Self>, id: Fingerprint) {
+        let Some(d) = self.device(&id).filter(|d| d.trusted) else { return };
         let dialog = gtk::FileDialog::builder().title(t!("Send to {name}", name = d.device.name)).accept_label(t!("Send")).modal(true).build();
         let w = self.clone();
         let id = d.device.id;
@@ -1774,11 +1964,16 @@ fn status_text(d: &DeviceView) -> &'static str {
     }
 }
 
-fn progress_text(p: &Progress) -> String {
-    let speed = match (p.samples.first(), p.samples.last()) {
+/// Bytes a second, over the last few seconds.
+fn speed(p: &Progress) -> f64 {
+    match (p.samples.first(), p.samples.last()) {
         (Some((t0, b0)), Some((t1, b1))) if t1 > t0 => (b1 - b0) as f64 / t1.duration_since(*t0).as_secs_f64(),
         _ => 0.0,
-    };
+    }
+}
+
+fn progress_text(p: &Progress) -> String {
+    let speed = speed(p);
     let mut text = t!("{done} of {total}", done = fmt::size(p.bytes), total = fmt::size(p.total));
     if speed > 0.0 && p.bytes < p.total {
         let left = Duration::from_secs_f64((p.total - p.bytes) as f64 / speed);

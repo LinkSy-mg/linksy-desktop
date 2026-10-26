@@ -1,7 +1,4 @@
-//! Transfers in a corner: while files go either way, a small panel at the bottom right of
-//! the window shows each transfer (what, with whom, progress, Cancel), whichever page is
-//! open. It folds to one bar, and goes away a few seconds after the last one ends, leaving
-//! Open and Show in Folder until then.
+//! Transfers in progress in a panel at the bottom right of the window, on every page.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -17,7 +14,6 @@ use linksy_i18n::t;
 use super::{Progress, page::Action, progress_text};
 use crate::{fmt, mark};
 
-/// How long finished transfers stay, for Open and Show in Folder.
 const LINGER: Duration = Duration::from_secs(8);
 
 type Handler = RefCell<Option<Rc<dyn Fn(Action)>>>;
@@ -45,11 +41,12 @@ pub(super) struct Corner {
     folded: Cell<bool>,
     hide: RefCell<Option<glib::SourceId>>,
     handler: Handler,
+    title: gtk::Button,
 }
 
 impl Corner {
     pub fn new() -> Rc<Self> {
-        let title = gtk::Label::builder().label(t!("Transfers")).xalign(0.0).css_classes(["heading"]).build();
+        let title = gtk::Button::builder().label(t!("Transfers")).css_classes(["flat", "corner-title"]).build();
         let overall = gtk::ProgressBar::builder().hexpand(true).valign(gtk::Align::Center).visible(false).css_classes(["transfer-progress"]).build();
         let fold = gtk::Button::builder().icon_name("pan-down-symbolic").tooltip_text(t!("Show Less")).css_classes(["flat", "circular"]).build();
         let close = gtk::Button::builder().icon_name("window-close-symbolic").tooltip_text(t!("Close")).css_classes(["flat", "circular"]).visible(false).build();
@@ -77,10 +74,9 @@ impl Corner {
             .margin_start(12)
             .child(&card)
             .build();
-        // Hidden: nothing to click through
         root.set_can_target(false);
 
-        let corner = Rc::new(Self { root, list, details, overall, fold, close, rows: RefCell::default(), folded: Cell::new(false), hide: RefCell::default(), handler: RefCell::default() });
+        let corner = Rc::new(Self { root, list, details, overall, fold, close, rows: RefCell::default(), folded: Cell::new(false), hide: RefCell::default(), handler: RefCell::default(), title });
         let c = Rc::downgrade(&corner);
         corner.fold.connect_clicked(move |_| {
             if let Some(c) = c.upgrade() {
@@ -100,10 +96,12 @@ impl Corner {
         *self.handler.borrow_mut() = Some(Rc::new(f));
     }
 
-    /// A transfer started, moved on or ended (history), any device. Other kinds of entry
-    /// aren't transfers, and one that ends before it was shown isn't news.
+    pub fn set_open(&self, f: impl Fn() + 'static) {
+        self.title.connect_clicked(move |_| f());
+    }
+
     pub fn entry(self: &Rc<Self>, e: &HistoryEntry) {
-        let Shared::Files { files, total, saved, import } = &e.what else { return };
+        let Shared::Files { files, total, saved, import, .. } = &e.what else { return };
         let running = matches!(e.status, HistoryStatus::InProgress);
         let known = self.rows.borrow().iter().any(|r| r.id == e.id);
         if !known && !running {
@@ -118,7 +116,6 @@ impl Corner {
         self.refresh();
     }
 
-    /// How far a shown transfer is.
     pub fn progress(&self, id: Uuid, p: &Progress) {
         let mut rows = self.rows.borrow_mut();
         let Some(row) = rows.iter_mut().find(|r| r.id == id && r.running) else { return };
@@ -160,7 +157,6 @@ impl Corner {
         let root = gtk::Box::builder().spacing(10).build();
         root.append(&node);
         root.append(&body);
-        // Newest first
         self.list.prepend(&root);
         self.rows.borrow_mut().push(Row { id, root, peer: e.peer_name.clone(), detail, bar, actions, running: true, bytes: 0, total });
     }
@@ -210,7 +206,6 @@ impl Corner {
         button
     }
 
-    /// Shown while anything runs; once all have ended, for a few seconds more.
     fn refresh(self: &Rc<Self>) {
         let running = self.rows.borrow().iter().any(|r| r.running);
         if let Some(id) = self.hide.borrow_mut().take() {
@@ -233,7 +228,6 @@ impl Corner {
         self.update_overall();
     }
 
-    /// Away now, with the ended transfers; running ones stay for when it shows again.
     fn dismiss(&self) {
         if let Some(id) = self.hide.borrow_mut().take() {
             id.remove();
@@ -251,7 +245,6 @@ impl Corner {
         }
     }
 
-    /// The service went away: nothing it said still holds.
     pub fn reset(&self) {
         if let Some(id) = self.hide.borrow_mut().take() {
             id.remove();
@@ -271,7 +264,6 @@ impl Corner {
         self.update_overall();
     }
 
-    /// Folded: one bar for everything running.
     fn update_overall(&self) {
         let rows = self.rows.borrow();
         let (bytes, total) = rows.iter().filter(|r| r.running).fold((0, 0), |(b, t), r| (b + r.bytes, t + r.total));
