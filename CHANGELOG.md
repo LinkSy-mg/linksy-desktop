@@ -16,6 +16,12 @@ Linksy for Linux. Each version's section becomes its release notes.
 ### Changed
 - **The service uses about a quarter less memory at rest** (24 MB to 18 MB here): it gives
   back what it isn't using every few minutes.
+- **Away from home waits for a device that can use it.** Until a paired device can reach
+  this computer from away (none paired yet, or none met on the same network in the last
+  week), the service doesn't run it, and takes 7 MB instead of 16.
+- **Big transfers no longer swell the history.** A transfer of thousands of files kept
+  every name in memory for good (about 4 MB for 20,000); older ones now keep their first
+  file and how many there were.
 
 ## 0.9.11
 
