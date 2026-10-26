@@ -447,6 +447,20 @@ start without asking, on the same network or cable. From away they're always ask
 display and terminals are always asked. A session that started without asking is still
 announced when it starts ([desktop#49](https://github.com/LinkSy-mg/linksy-desktop/issues/49)).
 
+**Choosing the screen again.** A computer remembers which screen its user picked in the
+desktop's dialog, per kind, and never shows the dialog again. To show another monitor, the
+viewer adds `"choose": true` to a `screen` or `control` request; the computer then shows
+the dialog again, its user picks, and that pick is remembered instead. It's ignored for
+other kinds, and absent means false (older computers ignore it and show the remembered
+screen). Core: `node.request_session_choosing(to, kind)`; the sharing side reads
+`Session.choose`. The phone offers it as **Choose Screen** on a computer's screen viewer:
+end the running session, then request again with `choose`. Someone has to be at the
+computer to pick ([desktop#15](https://github.com/LinkSy-mg/linksy-desktop/issues/15)).
+
+```json
+{"type":"session_request","id":"<uuid>","kind":"control","choose":true}
+```
+
 ```json
 {"type":"session_accept"}
 {"type":"session_decline"}                          // the user said no
@@ -1745,3 +1759,7 @@ robust against any encoder (GPU ones may slice too):
   desktop#49). No protocol change: a local choice per device, `set_allow_screen` in the
   core, never from away. Phone: the same button is optional when a computer asks to see
   the phone's screen (`screen`); the core already skips the prompt once it's set.
+- **2026-10-26** — **Choose the screen again** (§4.8, desktop#15): optional `"choose": true`
+  in a `screen` or `control` `session_request`; the computer forgets the screen its user
+  picked last time and shows the desktop's dialog again. Core: `request_session_choosing`,
+  `Session.choose`. Phone: a **Choose Screen** action on a computer's screen viewer.
