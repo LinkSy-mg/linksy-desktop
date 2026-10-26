@@ -2,6 +2,26 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.11
+
+### Added
+- **Transfers, like on your phone.** A Transfers page shows the speed, with files running
+  between the two devices at their real pace and how they go (same Wi-Fi, USB cable, away
+  from home or Wi-Fi Direct), each file with its progress, and recent transfers with every
+  device. Ctrl+T opens it.
+- **Transfers in a corner.** While files go either way, a panel at the bottom right shows
+  each transfer on every page, with Cancel; it folds to one bar and goes away a few seconds
+  after the last one ends, with Open and Show in Folder until then.
+- **The island.** At the bottom of your devices, Transfers, Send Files and Add Device sit
+  in one pill, as on the phone: Send Files lists your devices, Add Device offers the QR
+  code, an address or the USB cable.
+- **Choose which screen a phone sees.** A phone can ask for the screen to be picked again
+  (with the Linksy for Android update that adds Choose Screen), and Preferences › Screen
+  Sharing › Choose Again does the same from here.
+
+### Changed
+- Transfer history keeps each file's size.
+
 ## 0.9.10
 
 ### Added
