@@ -33,7 +33,7 @@ pub enum Input {
         session: Session<RemoteDesktop>,
         node: u32,
         /// The stream's size in the compositor's coordinates, for absolute positions.
-        size: Option<(f64, f64)>,
+        size: crate::outputs::Size,
         /// Whether the user allowed input; when not, it's said once and dropped.
         allowed: bool,
         /// Keys pressed and not released yet: released when the session ends, so a release
@@ -57,7 +57,7 @@ impl Input {
             return;
         }
         let result = match *msg {
-            ControlMsg::Pointer { x, y } => match size {
+            ControlMsg::Pointer { x, y } => match { *size.lock().unwrap() } {
                 Some((w, h)) => {
                     // Inside the stream: the portal refuses its right and bottom edge
                     // (x = width), where a touchpad drag to the edge ends up (KDE: "Invalid position")
@@ -137,7 +137,7 @@ pub async fn input_only(token: Option<String>) -> Result<(Input, Option<String>)
         .map_err(|_| "remote control was cancelled".to_string())?;
     let allowed = input_allowed(selected.devices());
     let restore_token = if allowed { selected.restore_token().map(str::to_string) } else { None };
-    Ok((Input::Desktop { proxy: remote, session, node: 0, size: None, allowed, held: Default::default() }, restore_token))
+    Ok((Input::Desktop { proxy: remote, session, node: 0, size: Default::default(), allowed, held: Default::default() }, restore_token))
 }
 
 fn state(pressed: bool) -> KeyState {
@@ -185,13 +185,11 @@ pub async fn screen(token: Option<String>, control: bool, virtual_monitor: bool)
         .map_err(|_| "remote control was cancelled".to_string())?;
     let stream = first(selected.streams())?;
     let node = stream.pipe_wire_node_id();
-    let mut size = stream.size().map(|(w, h)| (w as f64, h as f64));
+    let pixels = stream.size().map(|(w, h)| (w as f64, h as f64));
+    let size = crate::outputs::Size::new(std::sync::Mutex::new(pixels));
     // KDE's second display, scaled: positions go in its size on the desktop, not its pixels
-    if let Some(pixels) = size.filter(|_| virtual_monitor)
-        && let Some(desktop) = crate::outputs::kde_virtual_size(pixels).filter(|&d| d != pixels)
-    {
-        eprintln!("linksy-screen: the second display is {}x{} pixels, {}x{} on the desktop (scaled); the phone's taps follow the desktop's", pixels.0, pixels.1, desktop.0, desktop.1);
-        size = Some(desktop);
+    if let Some(pixels) = pixels.filter(|_| virtual_monitor) {
+        crate::outputs::follow_kde_display(stream.mapping_id().map(str::to_string), pixels, size.clone());
     }
     let fd =screencast.open_pipe_wire_remote(&session, Default::default()).await.map_err(|e| e.to_string())?;
     let allowed = input_allowed(selected.devices());
