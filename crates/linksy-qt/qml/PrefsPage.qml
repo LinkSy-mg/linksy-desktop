@@ -190,6 +190,28 @@ Kirigami.ScrollablePage {
             opacity: 0.7
             font: Kirigami.Theme.smallFont
         }
+        // The screen other devices see: picked in the desktop's dialog once, then remembered
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: app.t("Screen Sharing")
+        }
+        QQC2.Button {
+            id: chooseAgain
+            icon.name: "video-display"
+            text: app.t("Choose the Screen Again")
+            onClicked: app.request("forget_screen", {}, (ok, err) => {
+                if (!ok) return app.toast(err);
+                chooseAgain.enabled = false;
+                app.toast(app.t("The next time a device asks, you pick the screen."));
+            })
+        }
+        QQC2.Label {
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            wrapMode: Text.Wrap
+            text: app.t("Linksy remembers the screen you picked when a device first asked to see or control this computer. Choose again to pick another monitor the next time one asks.")
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
         Kirigami.Separator {
             Kirigami.FormData.isSection: true
             Kirigami.FormData.label: app.t("Terminal")
