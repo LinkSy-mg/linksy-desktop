@@ -186,7 +186,8 @@ impl Corner {
             row.actions.remove(&child);
         }
         if done && incoming && !saved.is_empty() {
-            let open = self.button("", t!("Open"), Action::Open(saved.to_vec()));
+            let partial = matches!(e.what, Shared::Files { more, .. } if more > 0);
+            let open = self.button("", t!("Open"), Action::Open(if partial { saved[0].parent().map(|f| vec![f.to_path_buf()]).unwrap_or_default() } else { saved.to_vec() }));
             open.set_label(t!("Open"));
             open.set_css_classes(&["flat", "tl-action"]);
             open.set_tooltip_text(None);

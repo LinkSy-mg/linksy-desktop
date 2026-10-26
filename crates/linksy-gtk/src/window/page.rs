@@ -847,12 +847,12 @@ impl DevicePage {
     fn entry_row(&self, e: &HistoryEntry, progress: Option<&Progress>, last: bool) -> (gtk::ListBoxRow, Option<LiveRow>) {
         let incoming = e.direction == Direction::Incoming;
         let (icon, title) = match &e.what {
-            Shared::Files { files, import: true, .. } => ("image-x-generic-symbolic", fmt::plural(files.len(), "photo")),
+            Shared::Files { import: true, .. } => ("image-x-generic-symbolic", fmt::plural(e.what.file_count(), "photo")),
             Shared::Files { files, .. } => (
                 if incoming { "folder-download-symbolic" } else { "document-send-symbolic" },
-                match files.as_slice() {
-                    [one] => fmt::file_name(one),
-                    many => fmt::plural(many.len(), "item"),
+                match (files.as_slice(), e.what.file_count()) {
+                    ([one], 1) => fmt::file_name(one),
+                    (_, count) => fmt::plural(count, "item"),
                 },
             ),
             Shared::Clipboard { text } if text.is_empty() => ("edit-paste-symbolic", t!("Clipboard text").to_string()),
@@ -959,14 +959,21 @@ impl DevicePage {
                 body.add_css_class("tl-card");
                 live = Some(LiveRow { detail, bar });
             }
-            (HistoryStatus::Done, Shared::Files { saved, .. }) if incoming && !saved.is_empty() => {
+            (HistoryStatus::Done, Shared::Files { saved, more, .. }) if incoming && !saved.is_empty() => {
                 let first = saved[0].clone();
                 action(t!("Show in Folder"), Box::new(move || Action::ShowInFolder(first.clone())));
                 row.set_activatable(true);
-                row.set_tooltip_text(Some(if saved.len() == 1 { t!("Open, or drag it anywhere") } else { t!("Open the folder, or drag the files anywhere") }));
-                row.add_controller(drag_files(saved));
                 row.set_widget_name(&e.id.to_string());
-                self.received.borrow_mut().insert(e.id.to_string(), saved.clone());
+                // The history kept only the first of many: it opens their folder
+                let opens = match saved[0].parent() {
+                    Some(folder) if *more > 0 => vec![folder.to_path_buf()],
+                    _ => {
+                        row.set_tooltip_text(Some(if saved.len() == 1 { t!("Open, or drag it anywhere") } else { t!("Open the folder, or drag the files anywhere") }));
+                        row.add_controller(drag_files(saved));
+                        saved.clone()
+                    }
+                };
+                self.received.borrow_mut().insert(e.id.to_string(), opens);
             }
             (_, Shared::Link { url }) => {
                 let url = url.clone();

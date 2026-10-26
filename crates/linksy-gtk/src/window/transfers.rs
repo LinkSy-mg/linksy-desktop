@@ -269,9 +269,10 @@ impl TransfersPage {
     }
 
     fn recent_row(self: &Rc<Self>, e: &HistoryEntry) -> gtk::ListBoxRow {
-        let Shared::Files { files, total, saved, import, .. } = &e.what else { unreachable!("only files are listed") };
+        let Shared::Files { files, total, saved, import, more, .. } = &e.what else { unreachable!("only files are listed") };
         let incoming = e.direction == linksy_ipc::linksy_core::Direction::Incoming;
-        let group = files.len() > 1;
+        let count = e.what.file_count();
+        let group = count > 1;
         let icon = if group {
             gio::ThemedIcon::new(if incoming { "folder-download-symbolic" } else { "document-send-symbolic" }).upcast::<gio::Icon>()
         } else {
@@ -279,9 +280,9 @@ impl TransfersPage {
         };
         let ring = Ring::new(&icon);
         let title = if *import {
-            fmt::plural(files.len(), "photo")
+            fmt::plural(count, "photo")
         } else if group {
-            fmt::plural(files.len(), "item")
+            fmt::plural(count, "item")
         } else {
             fmt::file_name(&files[0])
         };
@@ -325,6 +326,10 @@ impl TransfersPage {
                 line.append(&gtk::Label::builder().label(fmt::file_name(name)).xalign(0.0).hexpand(true).ellipsize(gtk::pango::EllipsizeMode::Middle).build());
                 let file = gtk::ListBoxRow::builder().child(&line).activatable(saved.get(i).is_some()).build();
                 list.append(&file);
+            }
+            if *more > 0 {
+                let label = gtk::Label::builder().label(t!("and {count} more", count = *more)).xalign(0.0).css_classes(["caption", "dim-label"]).build();
+                list.append(&gtk::ListBoxRow::builder().child(&label).activatable(false).build());
             }
             let w = Rc::downgrade(self);
             let paths = saved.clone();
