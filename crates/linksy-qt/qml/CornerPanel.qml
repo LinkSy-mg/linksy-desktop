@@ -98,13 +98,15 @@ QQC2.Pane {
                         readonly property string status: e.status.state
                         readonly property var progress: panel.app.progress[e.id] ?? null
                         readonly property var saved: what.saved ?? []
+                        // `import` is a keyword QML's parser trips on in a one-line binding
+                        readonly property bool imported: what["import"] === true
                         Layout.fillWidth: true
                         spacing: Kirigami.Units.smallSpacing
 
                         readonly property string detail: {
                             const amount = panel.app.size(what.total);
                             switch (status) {
-                            case "done": return [e.peer_name, panel.app.t(what.import ? "Imported" : incoming ? "Received" : "Sent"), amount].join(" · ");
+                            case "done": return [e.peer_name, panel.app.t(imported ? "Imported" : incoming ? "Received" : "Sent"), amount].join(" · ");
                             case "declined": return [e.peer_name, panel.app.t("Declined")].join(" · ");
                             case "cancelled": return [e.peer_name, panel.app.t("Cancelled")].join(" · ");
                             case "failed": return [e.peer_name, panel.app.t("Failed: {reason}", { reason: e.status.reason })].join(" · ");
@@ -117,7 +119,7 @@ QQC2.Pane {
                             Layout.alignment: Qt.AlignTop
                             Layout.preferredWidth: Kirigami.Units.iconSizes.small
                             Layout.preferredHeight: Kirigami.Units.iconSizes.small
-                            source: row.what.import ? "image-x-generic" : row.incoming ? "folder-download" : "document-send"
+                            source: row.imported ? "image-x-generic" : row.incoming ? "folder-download" : "document-send"
                             color: row.status === "in_progress" ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
                             opacity: ["failed", "declined", "cancelled"].includes(row.status) ? 0.4 : 0.8
                         }
@@ -128,7 +130,7 @@ QQC2.Pane {
                                 Layout.fillWidth: true
                                 QQC2.Label {
                                     Layout.fillWidth: true
-                                    text: row.what.import ? panel.plural(row.what.files.length, "photo")
+                                    text: row.imported ? panel.plural(row.what.files.length, "photo")
                                         : row.what.files.length === 1 ? row.what.files[0].split("/").pop() : panel.plural(row.what.files.length, "item")
                                     font.bold: true
                                     elide: Text.ElideMiddle
