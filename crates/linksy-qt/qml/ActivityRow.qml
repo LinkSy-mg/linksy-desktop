@@ -36,10 +36,13 @@ RowLayout {
 
     readonly property var look: {
         switch (what.kind) {
-        case "files":
-            if (what.import) return ["image-x-generic", plural(what.files.length + (what.more ?? 0), "photo")];
+        case "files": {
+            // `import` reads as QML's import statement here: by name instead
+            const count = what.files.length + (what.more ?? 0);
+            if (what["import"]) return ["image-x-generic", plural(count, "photo")];
             return [incoming ? "folder-download" : "document-send",
-                    what.files.length + (what.more ?? 0) === 1 ? what.files[0].split("/").pop() : plural(what.files.length + (what.more ?? 0), "item")];
+                    count === 1 ? what.files[0].split("/").pop() : plural(count, "item")];
+        }
         case "clipboard": return ["edit-paste", what.text ? `“${oneLine(what.text, 80)}”` : app.t("Clipboard text")];
         case "ping": return ["preferences-desktop-notification-bell", what.body ? `${what.title}: ${what.body}` : what.title];
         case "link": return ["internet-web-browser", oneLine(what.url, 120)];
