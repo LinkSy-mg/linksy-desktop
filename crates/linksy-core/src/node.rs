@@ -66,6 +66,10 @@ const INVITE_TTL: Duration = Duration::from_secs(300);
 const DIRECT_SETUP: Duration = Duration::from_secs(45);
 /// After a direct link with a device failed, transfers don't wait for another this long.
 const DIRECT_RETRY: Duration = Duration::from_secs(600);
+/// How often the away endpoint is checked against who could use it, and how long it stays
+/// up once no one could.
+const AWAY_CHECK: Duration = Duration::from_secs(60);
+const AWAY_REST: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -548,8 +552,13 @@ impl Node {
         }
         tokio::spawn(node.clone().reconnect_loop());
         tokio::spawn(node.clone().idle_loop());
-        if node.inner.config.away && node.settings().away {
-            node.start_away().await;
+        if node.inner.config.away {
+            if node.away_needed() {
+                node.start_away().await;
+            } else {
+                node.rest_away();
+            }
+            tokio::spawn(node.clone().away_loop());
         }
         info!(id = %node.inner.id.short(), addr = %node.local_addr()?, "linksy node started");
         Ok(node)
@@ -594,18 +603,6 @@ impl Node {
         if new.stay_connected && !old.stay_connected {
             self.reconnect_all();
         }
-        // Another relay: the away endpoint starts again on it (its away connections drop;
-        // peers learn the new relay at their next handshake).
-        if new.relay != old.relay && self.inner.config.away {
-            self.stop_away().await;
-            if new.away {
-                self.start_away().await;
-            }
-        }
-        // Turned on after starting without it: start it now. (Off is checked at each use.)
-        if new.away && !old.away && self.inner.config.away && self.inner.away.lock().unwrap().is_none() {
-            self.start_away().await;
-        }
         self.emit(Event::SettingsChanged { settings: new.clone() });
         Ok(new)
     }
@@ -624,7 +621,7 @@ impl Node {
 
     /// Paired and nearby devices, merged.
     pub fn devices(&self) -> Vec<DeviceView> {
-        let away_on = self.inner.away.lock().unwrap().is_some() && self.settings().away;
+        let away_on = self.inner.config.away && self.settings().away;
         let trust = self.inner.trust.lock().unwrap();
         let peers = self.inner.peers.lock().unwrap();
         let nearby = self.inner.nearby.lock().unwrap();
@@ -2335,9 +2332,71 @@ fn worth_direct(link: Link, total: u64, min: u64) -> bool {
 
 /// Away from home (docs/protocol.md §4.13).
 impl Node {
+    /// The user's own relay (settings) wins over the one the service lists (config).
+    fn away_relay(&self) -> Option<String> {
+        self.settings().relay.or_else(|| self.inner.config.relay.clone())
+    }
+
+    /// Whether the away endpoint has anyone to serve: a paired device that knows how to
+    /// reach this one away and still may (their week isn't over). Without a relay, devices
+    /// learn its addresses only while it runs, so it always does.
+    fn away_needed(&self) -> bool {
+        if !self.settings().away {
+            return false;
+        }
+        self.away_relay().is_none() || self.inner.trust.lock().unwrap().list().iter().any(|t| t.device.away.is_some() && t.lease_ok())
+    }
+
+    /// Run the away endpoint only while it's needed, on the relay in use (desktop#26: it
+    /// holds about 10 MB and is never idle).
+    async fn away_loop(self) {
+        let mut events = self.subscribe();
+        let mut unneeded: Option<Instant> = None;
+        loop {
+            let needed = self.away_needed();
+            let away = self.inner.away.lock().unwrap().clone();
+            match away {
+                // Another relay: start again on it (its away connections drop; devices learn
+                // the new relay at their next handshake)
+                Some(a) if needed && !a.uses(self.away_relay().as_deref()) => {
+                    self.stop_away().await;
+                    self.start_away().await;
+                }
+                Some(_) if needed => unneeded = None,
+                Some(_) => {
+                    if unneeded.get_or_insert_with(Instant::now).elapsed() >= AWAY_REST {
+                        self.stop_away().await;
+                        unneeded = None;
+                    }
+                }
+                None if needed => self.start_away().await,
+                None => self.rest_away(),
+            }
+            let tick = tokio::time::sleep(AWAY_CHECK);
+            tokio::pin!(tick);
+            loop {
+                tokio::select! {
+                    _ = &mut tick => break,
+                    event = events.recv() => match event {
+                        // Pairing, a handshake (an away address, the week renewed), settings
+                        Ok(Event::Paired { .. } | Event::Connected { .. } | Event::SettingsChanged { .. }) | Err(broadcast::error::RecvError::Lagged(_)) => break,
+                        Ok(_) => {}
+                        Err(broadcast::error::RecvError::Closed) => return,
+                    },
+                }
+            }
+        }
+    }
+
+    /// While the endpoint rests, the handshake still says how to reach it through the relay
+    /// (and nothing while away from home is off).
+    fn rest_away(&self) {
+        let resting = self.away_relay().filter(|_| self.settings().away).and_then(|relay| crate::away::Away::resting_addr(&self.inner.config.data_dir, &relay).ok());
+        self.inner.info.lock().unwrap().away = resting;
+    }
+
     async fn start_away(&self) {
-        // The user's own relay (settings) wins over the one the service lists (config).
-        let relay = self.settings().relay.or_else(|| self.inner.config.relay.clone());
+        let relay = self.away_relay();
         let away = match crate::away::Away::start(&self.inner.config.data_dir, relay.as_deref()).await {
             Ok(a) => a,
             Err(e) => return warn!("away from home is off: {e}"),
@@ -2366,11 +2425,11 @@ impl Node {
         });
     }
 
-    /// Close the away endpoint, if it runs; its address leaves the handshake.
+    /// Close the away endpoint, if it runs.
     async fn stop_away(&self) {
         let away = self.inner.away.lock().unwrap().take();
         if let Some(away) = away {
-            self.inner.info.lock().unwrap().away = None;
+            self.rest_away();
             let _ = tokio::time::timeout(Duration::from_secs(2), away.close()).await;
         }
     }
@@ -2381,6 +2440,11 @@ impl Node {
         }
         let trust = self.inner.trust.lock().unwrap();
         trust.list().iter().any(|t| t.device.away.as_ref().is_some_and(|a| a.id == iroh_id) && t.lease_ok())
+    }
+
+    /// Whether the away endpoint runs now: it rests while no device could use it.
+    pub fn away_running(&self) -> bool {
+        self.inner.away.lock().unwrap().is_some()
     }
 
     /// How a connected device is reached now.

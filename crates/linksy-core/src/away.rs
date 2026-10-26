@@ -85,6 +85,19 @@ impl Away {
         }
     }
 
+    /// The away address while the endpoint isn't running: its id and relay, which is all a
+    /// device needs to reach it through the relay once it runs.
+    pub fn resting_addr(data_dir: &Path, relay: &str) -> Result<AwayAddr> {
+        let key = load_or_create_key(&data_dir.join("away.key"))?;
+        let relay = RelayUrl::from_str(relay).map_err(|e| Error::Protocol(format!("relay address: {e}")))?;
+        Ok(AwayAddr { id: key.public().to_string(), relay: Some(relay.to_string()), addrs: Vec::new() })
+    }
+
+    /// Whether it runs on `relay`.
+    pub fn uses(&self, relay: Option<&str>) -> bool {
+        self.relay == relay.and_then(|r| RelayUrl::from_str(r).ok())
+    }
+
     /// Reach `to` and bridge it: returns the local address to dial (Linksy's own QUIC
     /// handshake, with the pinned key, runs through it).
     pub async fn dial(&self, to: &AwayAddr) -> Result<SocketAddr> {

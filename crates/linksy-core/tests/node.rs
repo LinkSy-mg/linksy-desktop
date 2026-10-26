@@ -1225,6 +1225,31 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     assert!(std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { .. })), "not asked from away");
 }
 
+/// With a relay, the away endpoint runs only once a paired device could use it (desktop#26),
+/// and the handshake says how to reach it through the relay meanwhile.
+#[tokio::test]
+async fn away_waits_for_a_device_that_can_use_it() {
+    let tweak = |c: &mut Config| {
+        c.away = true;
+        c.relay = Some("https://127.0.0.1:9".into());
+    };
+    let alone = dev_with("Alone", tweak).await;
+    assert!(!alone.node.away_running());
+    let resting = alone.node.info().away.expect("its away address");
+    assert!(resting.relay.is_some() && resting.addrs.is_empty());
+
+    let (a, b) = paired_with(tweak).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !(a.node.away_running() && b.node.away_running()) {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("away started once paired");
+    let idb = b.node.info().id;
+    assert!(a.node.devices().into_iter().find(|d| d.device.id == idb).unwrap().away_until.is_some());
+}
+
 #[tokio::test]
 async fn not_reachable_from_away_without_its_address() {
     // Away from home off on both: neither learns the other's away address.
