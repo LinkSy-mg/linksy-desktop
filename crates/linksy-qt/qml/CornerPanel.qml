@@ -14,7 +14,7 @@ QQC2.Pane {
     readonly property var running: entries.filter(e => e.status.state === "in_progress")
     property bool folded: false
 
-    visible: entries.length > 0
+    visible: entries.length > 0 && !app.transfersOpen
     width: Math.min(Kirigami.Units.gridUnit * 20, parent.width - Kirigami.Units.largeSpacing * 2)
     anchors.right: parent.right
     anchors.bottom: parent.bottom
@@ -48,9 +48,10 @@ QQC2.Pane {
         spacing: Kirigami.Units.smallSpacing
         RowLayout {
             Layout.fillWidth: true
-            Kirigami.Heading {
-                level: 4
+            QQC2.ToolButton {
                 text: panel.app.t("Transfers")
+                font.bold: true
+                onClicked: panel.app.openTransfers()
             }
             QQC2.ProgressBar {
                 Layout.fillWidth: true

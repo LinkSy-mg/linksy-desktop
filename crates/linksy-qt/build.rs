@@ -7,6 +7,8 @@ fn main() {
         "qml/DevicePage.qml",
         "qml/ActivityRow.qml",
         "qml/CornerPanel.qml",
+        "qml/TransfersPage.qml",
+        "qml/Island.qml",
         "qml/InviteDialog.qml",
         "qml/PrefsPage.qml",
         "qml/ScreenPage.qml",

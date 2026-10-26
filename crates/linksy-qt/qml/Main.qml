@@ -27,6 +27,11 @@ Kirigami.ApplicationWindow {
     // Transfers for the corner panel, any device: from their start to a few seconds after
     // the last one ends
     property var corner: []
+    // The Transfers page: on its way (oldest first), ended lately, and direct links (id: up)
+    readonly property bool transfersOpen: pageStack.lastItem?.objectName === "transfers"
+    property var moving: []
+    property var recent: []
+    property var direct: ({})
     property var pictures: ({})
     property var sessions: []
     property var pending: ({})
@@ -54,6 +59,7 @@ Kirigami.ApplicationWindow {
         onConnectedChanged: {
             if (!connected) {
                 root.corner = [];
+                root.moving = [];
                 return;
             }
             root.refreshAll();
@@ -194,7 +200,13 @@ Kirigami.ApplicationWindow {
         refreshHistory();
         refreshUpdates();
         // Transfers already running, newest first
-        request("history", {}, (ok, list) => { if (ok) root.corner = list.filter(e => e.what.kind === "files" && e.status.state === "in_progress") });
+        request("history", {}, (ok, list) => {
+            if (!ok) return;
+            const files = list.filter(e => e.what.kind === "files");
+            root.corner = files.filter(e => e.status.state === "in_progress");
+            root.moving = files.filter(e => e.status.state === "in_progress").reverse().map(e => movingFrom(e));
+            root.recent = files.filter(e => e.status.state !== "in_progress").slice(0, 40);
+        });
     }
 
     // The service checks once a day; ask it now and then what it found
@@ -236,6 +248,7 @@ Kirigami.ApplicationWindow {
     }
 
     function select(id) {
+        if (transfersOpen) while (pageStack.depth > 1) pageStack.pop();
         selectedId = id;
         history = [];
         refreshHistory();
@@ -270,7 +283,23 @@ Kirigami.ApplicationWindow {
         case "transfer_request":
             offerDialog.ask(ev.transfer, ev.from, ev.files, ev.total);
             break;
-        case "transfer_started":
+        case "direct_wanted": case "direct_linked": case "direct_ended": case "direct": {
+            const id = ev.type === "direct" ? ev.from.id : ev.id;
+            const d = Object.assign({}, direct);
+            if (ev.type === "direct_ended") delete d[id];
+            else if (ev.type === "direct_linked") d[id] = true;
+            else if (!(id in d)) d[id] = false;
+            direct = d;
+            break;
+        }
+        case "transfer_started": {
+            const m = { id: ev.transfer, peer: ev.peer.id, peer_name: ev.peer.name, incoming: ev.direction === "incoming",
+                        imported: ev["import"] === true, total: ev.total, files: ev.files.map(f => ({ name: f.path, size: f.size })) };
+            const list = moving.filter(x => x.id !== ev.transfer);
+            const i = moving.findIndex(x => x.id === ev.transfer);
+            if (i >= 0) list.splice(i, 0, m); else list.push(m);
+            moving = list;
+        }
             if (offerDialog.transfer === ev.transfer) offerDialog.close();
             setProgress(ev.transfer, 0, ev.total);
             break;
@@ -321,11 +350,32 @@ Kirigami.ApplicationWindow {
 
     function historyUpdated(entry) {
         cornerUpdated(entry);
+        if (entry.what.kind === "files") {
+            if (entry.status.state === "in_progress") {
+                if (!moving.some(m => m.id === entry.id)) moving = moving.concat([movingFrom(entry)]);
+            } else {
+                moving = moving.filter(m => m.id !== entry.id);
+                recent = [entry].concat(recent.filter(r => r.id !== entry.id)).slice(0, 40);
+            }
+        }
         if (entry.peer !== selectedId) return;
         const list = history.slice();
         const i = list.findIndex(e => e.id === entry.id);
         if (i >= 0) list[i] = entry; else list.unshift(entry);
         history = list;
+    }
+
+    function movingFrom(e) {
+        const sizes = e.what.sizes ?? [];
+        return { id: e.id, peer: e.peer, peer_name: e.peer_name, incoming: e.direction === "incoming", imported: e.what["import"] === true,
+                 total: e.what.total, files: e.what.files.map((f, i) => ({ name: f, size: sizes.length === e.what.files.length ? sizes[i] : null })) };
+    }
+
+    function openTransfers() {
+        if (transfersOpen) return;
+        selectedId = "";
+        while (pageStack.depth > 1) pageStack.pop();
+        pageStack.push(Qt.resolvedUrl("TransfersPage.qml"), { app: root });
     }
 
     // A transfer started, moved on or ended; one that ends before it was shown isn't news
@@ -406,6 +456,11 @@ Kirigami.ApplicationWindow {
                 }
             }
         }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+T"
+        onActivated: root.openTransfers()
     }
 
     // Under the dialogs, which open in the same layer later

@@ -170,6 +170,12 @@ Kirigami.ScrollablePage {
 
     footer: QQC2.ToolBar {
         contentItem: ColumnLayout {
+            Island {
+                Layout.fillWidth: true
+                Layout.margins: Kirigami.Units.smallSpacing
+                visible: backend.connected
+                app: page.app
+            }
             QQC2.Button {
                 Layout.fillWidth: true
                 // Screenshots (LINKSY_SCREENSHOT) show the app as on a finished setup
