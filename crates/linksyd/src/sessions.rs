@@ -258,7 +258,12 @@ impl Sessions {
         // Each kind remembers its own answer to the desktop's dialog.
         let kind = format!("{:?}", session.kind).to_lowercase();
         if !device {
-            cmd.arg("--token-file").arg(self.data_dir.join(format!("{kind}-token")));
+            let token = self.data_dir.join(format!("{kind}-token"));
+            // Asked to pick the screen again: the dialog shows, and the new pick is kept
+            if session.choose {
+                let _ = std::fs::remove_file(&token);
+            }
+            cmd.arg("--token-file").arg(token);
         }
         if self.test_pattern && !device {
             cmd.arg("--test");
