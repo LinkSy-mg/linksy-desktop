@@ -16,6 +16,7 @@ use super::{LiveRow, Progress, drag_files, kind_icon, kind_name, progress_text, 
 use crate::fmt;
 
 /// Things the page asks the window to do.
+#[derive(Clone)]
 pub enum Action {
     SendFiles,
     SendClipboard,

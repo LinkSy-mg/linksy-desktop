@@ -164,6 +164,10 @@ row.activity-failed .tl-node { background-color: alpha(@error_color, 0.12); colo
 button.tl-action { padding: 2px 8px; min-height: 24px; font-weight: 700; color: @accent_color; }
 .activity-empty { padding: 28px 12px; }
 .transfer-progress trough, .transfer-progress progress { min-height: 6px; border-radius: 99px; }
+/* Transfers in a corner, over every page */
+/* Opaque: a card is see-through in dark mode, and pages scroll under this one */
+.card.corner-panel { padding: 12px 14px; border-radius: 14px; background-color: @popover_bg_color; color: @popover_fg_color; box-shadow: 0 4px 18px alpha(black, 0.18); }
+.tl-node.failed { background-color: alpha(@error_color, 0.12); color: @error_color; }
 
 /* Dialogs */
 .pair-code {

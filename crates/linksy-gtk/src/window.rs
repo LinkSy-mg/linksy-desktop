@@ -3,6 +3,7 @@
 //! service's events and history.
 
 mod camera;
+mod corner;
 mod invite;
 mod messages;
 mod news;
@@ -129,6 +130,8 @@ pub struct Window {
     camera_title: adw::WindowTitle,
     // Texting through a phone
     messages: Rc<messages::MessagesView>,
+    /// Transfers in progress, at the bottom right whatever the page.
+    corner: Rc<corner::Corner>,
 }
 
 impl Window {
@@ -274,8 +277,11 @@ impl Window {
         outer.append(&sharing_banner);
         stack.set_vexpand(true);
         outer.append(&stack);
+        let corner = corner::Corner::new();
+        let overlay = gtk::Overlay::builder().child(&outer).build();
+        overlay.add_overlay(&corner.root);
         let toasts = adw::ToastOverlay::new();
-        toasts.set_child(Some(&outer));
+        toasts.set_child(Some(&overlay));
         window.set_content(Some(&toasts));
 
         // Medium windows collapse the texting view; narrow ones also show one
@@ -288,6 +294,7 @@ impl Window {
         window.add_breakpoint(medium);
         let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 620sp").expect("breakpoint"));
         narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
+        narrow.add_setter(&corner.root, "halign", Some(&gtk::Align::Fill.to_value()));
         collapse_texts(&narrow);
         window.add_breakpoint(narrow);
 
@@ -318,6 +325,20 @@ impl Window {
             camera_back,
             camera_title,
             messages,
+            corner,
+        });
+        let w = Rc::downgrade(&win);
+        win.corner.set_handler(move |action| {
+            let Some(w) = w.upgrade() else { return };
+            match action {
+                page::Action::Cancel(t) => w.cancel(t),
+                page::Action::Open(paths) => w.open_received(&paths),
+                page::Action::ShowInFolder(path) => {
+                    let launcher = gtk::FileLauncher::new(Some(&gio::File::for_path(path)));
+                    launcher.open_containing_folder(Some(&w.window), gio::Cancellable::NONE, |_| {});
+                }
+                _ => {}
+            }
         });
         let w = Rc::downgrade(&win);
         win.camera_back.connect_clicked(move |_| {
@@ -582,6 +603,7 @@ impl Window {
                     w.restore_sessions();
                     w.refresh_updates();
                     w.refresh_terminals();
+                    w.refresh_corner();
                     while let Ok(update) = updates.recv().await {
                         match update {
                             Update::Event(ev) => w.handle_event(ev),
@@ -590,6 +612,7 @@ impl Window {
                     }
                     // Service went away.
                     w.state.borrow_mut().client = None;
+                    w.corner.reset();
                     w.stack.set_visible_child_name("offline");
                 }
                 Err(_) => {
@@ -1016,6 +1039,10 @@ impl Window {
     }
 
     fn history_changed(self: &Rc<Self>, entry: HistoryEntry) {
+        self.corner.entry(&entry);
+        if let Some(p) = self.state.borrow().progress.get(&entry.id) {
+            self.corner.progress(entry.id, p);
+        }
         if self.state.borrow().selected != Some(entry.peer) {
             return;
         }
@@ -1043,6 +1070,24 @@ impl Window {
             row.detail.set_label(&detail);
             mark::ease_progress(&row.bar, fraction);
         }
+        if let Some(p) = state.progress.get(&id) {
+            self.corner.progress(id, p);
+        }
+    }
+
+    /// Transfers already running when the window connects, for the corner.
+    fn refresh_corner(self: &Rc<Self>) {
+        let Some(c) = self.client() else { return };
+        let call = self.bridge.call(&c, |c| async move { c.history(None).await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            if let Ok(history) = call.await {
+                // Oldest first, as they started: each goes on top
+                for e in history.iter().rev().filter(|e| matches!(e.status, linksy_ipc::HistoryStatus::InProgress)) {
+                    w.corner.entry(e);
+                }
+            }
+        });
     }
 
     // ---- sidebar ----
