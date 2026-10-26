@@ -24,6 +24,9 @@ Kirigami.ApplicationWindow {
     property string selectedId: ""
     property var history: []
     property var progress: ({})
+    // Transfers for the corner panel, any device: from their start to a few seconds after
+    // the last one ends
+    property var corner: []
     property var pictures: ({})
     property var sessions: []
     property var pending: ({})
@@ -49,7 +52,10 @@ Kirigami.ApplicationWindow {
         onEvent: json => root.handleEvent(JSON.parse(json))
         onHistory: json => root.historyUpdated(JSON.parse(json))
         onConnectedChanged: {
-            if (!connected) return;
+            if (!connected) {
+                root.corner = [];
+                return;
+            }
             root.refreshAll();
             // Development aid: open a screen for scripts/qt-shot.sh
             const open = backend.env("LINKSY_SCREENSHOT_OPEN");
@@ -187,6 +193,8 @@ Kirigami.ApplicationWindow {
         joinDisplays();
         refreshHistory();
         refreshUpdates();
+        // Transfers already running, newest first
+        request("history", {}, (ok, list) => { if (ok) root.corner = list.filter(e => e.what.kind === "files" && e.status.state === "in_progress") });
     }
 
     // The service checks once a day; ask it now and then what it found
@@ -312,11 +320,37 @@ Kirigami.ApplicationWindow {
     }
 
     function historyUpdated(entry) {
+        cornerUpdated(entry);
         if (entry.peer !== selectedId) return;
         const list = history.slice();
         const i = list.findIndex(e => e.id === entry.id);
         if (i >= 0) list[i] = entry; else list.unshift(entry);
         history = list;
+    }
+
+    // A transfer started, moved on or ended; one that ends before it was shown isn't news
+    function cornerUpdated(entry) {
+        if (entry.what.kind !== "files") return;
+        const list = corner.slice();
+        const i = list.findIndex(e => e.id === entry.id);
+        if (i >= 0) list[i] = entry;
+        else if (entry.status.state === "in_progress") list.unshift(entry);
+        else return;
+        corner = list;
+        if (list.some(e => e.status.state === "in_progress")) cornerLinger.stop();
+        else cornerLinger.restart();
+    }
+
+    // Away now, with the ended transfers
+    function dismissCorner() {
+        cornerLinger.stop();
+        corner = corner.filter(e => e.status.state === "in_progress");
+    }
+
+    Timer {
+        id: cornerLinger
+        interval: 8000
+        onTriggered: root.dismissCorner()
     }
 
     // bytes < 0: done, forget it. Keeps a few seconds of samples for the speed.
@@ -372,6 +406,12 @@ Kirigami.ApplicationWindow {
                 }
             }
         }
+    }
+
+    // Under the dialogs, which open in the same layer later
+    CornerPanel {
+        parent: root.overlay
+        app: root
     }
 
     // Before the service answers, or when it's gone
