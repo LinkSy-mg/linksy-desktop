@@ -173,10 +173,13 @@ pub struct HistoryEntry {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Shared {
-    /// `files` are relative paths as offered; `saved` where incoming ones landed.
-    /// `import`: photos a phone imported into the picture library.
+    /// `files` are relative paths as offered, and `sizes` each one's size (none in entries
+    /// before 0.10); `saved` where incoming ones landed. `import`: photos a phone imported
+    /// into the picture library.
     Files {
         files: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        sizes: Vec<u64>,
         total: u64,
         #[serde(default)]
         saved: Vec<PathBuf>,

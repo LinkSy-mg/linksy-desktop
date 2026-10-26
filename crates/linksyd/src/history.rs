@@ -137,7 +137,7 @@ impl History {
                         peer: peer.id,
                         peer_name: peer.name,
                         direction,
-                        what: Shared::Files { files: files.into_iter().map(|f| f.path).collect(), total, saved: Vec::new(), import },
+                        what: Shared::Files { sizes: files.iter().map(|f| f.size).collect(), files: files.into_iter().map(|f| f.path).collect(), total, saved: Vec::new(), import },
                         status: HistoryStatus::InProgress,
                     });
                 }
@@ -161,7 +161,7 @@ impl History {
                             peer: from.id,
                             peer_name: from.name,
                             direction: Direction::Incoming,
-                            what: Shared::Files { files: files.into_iter().map(|f| f.path).collect(), total, saved: Vec::new(), import: false },
+                            what: Shared::Files { sizes: files.iter().map(|f| f.size).collect(), files: files.into_iter().map(|f| f.path).collect(), total, saved: Vec::new(), import: false },
                             status,
                         }),
                         None => self.update(transfer, |e| e.status = status),
