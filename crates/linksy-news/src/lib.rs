@@ -33,6 +33,15 @@ pub struct Release {
 fn releases() -> Vec<Release> {
     vec![
         Release {
+            version: "0.9.11",
+            highlights: vec![Highlight {
+                gtk: "network-transmit-receive-symbolic",
+                qt: "network-transmit-receive",
+                title: t!("Transfers, Like on Your Phone"),
+                body: t!("A page with the speed, each file and its progress, and a panel in the corner on every page. Send Files and Add Device now sit together at the bottom of your devices."),
+            }],
+        },
+        Release {
             version: "0.9.10",
             highlights: vec![Highlight {
                 gtk: "security-high-symbolic",
