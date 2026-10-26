@@ -835,6 +835,21 @@ async fn always_allow_the_screen_from_one_device() {
     assert!(std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { kind: SessionKind::Camera, .. })), "camera not asked");
 }
 
+/// Asked to pick the screen again: the sharing side's session says so, for screens only.
+#[tokio::test]
+async fn choose_the_screen_again() {
+    let (a, b) = paired().await;
+    let idb = b.node.info().id;
+    let mut incoming = b.node.incoming_sessions().unwrap();
+    let cases = [(SessionKind::Control, true, true), (SessionKind::Screen, false, false), (SessionKind::Display, true, false)];
+    for (kind, asked, choose) in cases {
+        let request = if asked { a.node.request_session_choosing(&idb, kind).await } else { a.node.request_session(&idb, kind).await };
+        request.unwrap_or_else(|e| panic!("{kind:?}: {e:?}"));
+        let session = tokio::time::timeout(Duration::from_secs(5), incoming.recv()).await.unwrap().unwrap();
+        assert_eq!((session.kind, session.choose), (kind, choose));
+    }
+}
+
 #[tokio::test]
 async fn always_accept_from_one_device() {
     let (a, b) = paired().await;

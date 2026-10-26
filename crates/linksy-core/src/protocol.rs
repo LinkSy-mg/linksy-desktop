@@ -226,6 +226,10 @@ pub enum SessionMsg {
         /// For a `terminal`: the code, the size, and which one to reattach.
         #[serde(flatten, default, skip_serializing_if = "Option::is_none")]
         terminal: Option<TerminalOpen>,
+        /// For a `screen` or `control`: show the desktop's dialog again, so its user picks
+        /// the screen (another monitor), instead of the one picked last time.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        choose: bool,
     },
     /// For a `display`, the accepting device may give its screen's size (landscape), so
     /// the second display is made in its shape.
@@ -706,7 +710,7 @@ mod tests {
     fn terminal_requests_round_trip() {
         let id = Uuid::nil();
         let open = TerminalOpen { code: "482913".into(), cols: 80, rows: 24, resume: None };
-        let msg = SessionMsg::SessionRequest { id, kind: SessionKind::Terminal, terminal: Some(open) };
+        let msg = SessionMsg::SessionRequest { id, kind: SessionKind::Terminal, terminal: Some(open), choose: false };
         let json = serde_json::to_string(&msg).unwrap();
         assert!(json.contains(r#""code":"482913""#) && json.contains(r#""kind":"terminal""#), "{json}");
         assert_eq!(serde_json::from_str::<SessionMsg>(&json).unwrap(), msg);
@@ -714,10 +718,16 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(serde_json::from_value::<SessionMsg>(value).unwrap(), msg);
         // Other sessions carry no terminal part.
-        let screen = SessionMsg::SessionRequest { id, kind: SessionKind::Screen, terminal: None };
+        let screen = SessionMsg::SessionRequest { id, kind: SessionKind::Screen, terminal: None, choose: false };
         let json = serde_json::to_string(&screen).unwrap();
+        assert!(!json.contains("choose"), "{json}");
         assert_eq!(serde_json::from_str::<SessionMsg>(&json).unwrap(), screen);
         assert_eq!(serde_json::from_str::<SessionMsg>(r#"{"type":"session_request","id":"00000000-0000-0000-0000-000000000000","kind":"screen"}"#).unwrap(), screen);
+        // Picking the screen again
+        let choose = SessionMsg::SessionRequest { id, kind: SessionKind::Control, terminal: None, choose: true };
+        let json = r#"{"type":"session_request","id":"00000000-0000-0000-0000-000000000000","kind":"control","choose":true}"#;
+        assert_eq!(serde_json::from_str::<SessionMsg>(json).unwrap(), choose);
+        assert_eq!(serde_json::from_value::<SessionMsg>(serde_json::from_str(json).unwrap()).unwrap(), choose);
     }
 
     use super::*;

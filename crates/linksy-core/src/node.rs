@@ -243,6 +243,8 @@ pub struct Session {
     pub sharing: bool,
     /// The size the other side's screen has, when it said (a second display's shape).
     pub size: Option<(u32, u32)>,
+    /// The other side asked to pick the screen again (`choose`), not the one picked last time.
+    pub choose: bool,
     pub send: quinn::SendStream,
     pub recv: quinn::RecvStream,
     _busy: Option<Busy>,
@@ -973,7 +975,7 @@ impl Node {
     /// session (its output on `recv`; `ControlMsg::Term*` frames on `send`) and the
     /// terminal's id.
     pub async fn request_terminal(&self, to: &Fingerprint, open: crate::protocol::TerminalOpen) -> Result<(Session, String)> {
-        let (session, terminal) = self.open_session(to, SessionKind::Terminal, Some(open)).await?;
+        let (session, terminal) = self.open_session(to, SessionKind::Terminal, Some(open), false).await?;
         Ok((session, terminal.unwrap_or_default()))
     }
 
@@ -1099,16 +1101,22 @@ impl Node {
     /// with us; for [`SessionKind::Display`], to show ours as its second display. Resolves
     /// once its user allowed it (or fails if they declined).
     pub async fn request_session(&self, to: &Fingerprint, kind: SessionKind) -> Result<Session> {
-        Ok(self.open_session(to, kind, None).await?.0)
+        Ok(self.open_session(to, kind, None, false).await?.0)
     }
 
-    async fn open_session(&self, to: &Fingerprint, kind: SessionKind, terminal: Option<crate::protocol::TerminalOpen>) -> Result<(Session, Option<String>)> {
+    /// [`Node::request_session`] for a `screen` or `control` whose user picks the screen
+    /// again (another monitor) in their desktop's dialog, not the one picked last time.
+    pub async fn request_session_choosing(&self, to: &Fingerprint, kind: SessionKind) -> Result<Session> {
+        Ok(self.open_session(to, kind, None, true).await?.0)
+    }
+
+    async fn open_session(&self, to: &Fingerprint, kind: SessionKind, terminal: Option<crate::protocol::TerminalOpen>, choose: bool) -> Result<(Session, Option<String>)> {
         let (conn, activity) = self.ensure_connection(to).await?;
         let busy = activity.hold();
         let peer = self.peer_info(to).ok_or(Error::Unreachable)?;
         let id = Uuid::new_v4();
         let (mut send, mut recv) = conn.open_bi().await?;
-        write_msg(&mut send, &SessionMsg::SessionRequest { id, kind, terminal }).await?;
+        write_msg(&mut send, &SessionMsg::SessionRequest { id, kind, terminal, choose }).await?;
         let (size, terminal) = match tokio::time::timeout(OFFER_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
             SessionMsg::SessionAccept { width: Some(w), height: Some(h), terminal } if w > 0 && h > 0 => (Some((w, h)), terminal),
             SessionMsg::SessionAccept { terminal, .. } => (None, terminal),
@@ -1120,7 +1128,7 @@ impl Node {
         };
         let sharing = kind.requester_shares();
         self.emit(Event::SessionStarted { session: id, peer: peer.clone(), kind, sharing });
-        Ok((Session { id, peer, kind, sharing, size, send, recv, _busy: Some(busy), events: self.inner.events.clone() }, terminal))
+        Ok((Session { id, peer, kind, sharing, size, choose: false, send, recv, _busy: Some(busy), events: self.inner.events.clone() }, terminal))
     }
 
     /// Sessions this device accepted. Can be taken once; the taker runs the media (capture
@@ -1817,7 +1825,7 @@ impl Node {
                 _ => debug!("bad offer from {}", from.name),
             },
             Some("session_request") => match serde_json::from_value(first) {
-                Ok(SessionMsg::SessionRequest { id, kind, terminal }) => self.handle_session(from, send, recv, id, kind, terminal).await,
+                Ok(SessionMsg::SessionRequest { id, kind, terminal, choose }) => self.handle_session(from, send, recv, id, kind, terminal, choose).await,
                 _ => debug!("bad session request from {}", from.name),
             },
             Some("fs") => {
@@ -1845,7 +1853,8 @@ impl Node {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn handle_session(self, from: DeviceInfo, mut send: quinn::SendStream, recv: quinn::RecvStream, id: Uuid, kind: SessionKind, terminal: Option<crate::protocol::TerminalOpen>) {
+    #[allow(clippy::too_many_arguments)]
+    async fn handle_session(self, from: DeviceInfo, mut send: quinn::SendStream, recv: quinn::RecvStream, id: Uuid, kind: SessionKind, terminal: Option<crate::protocol::TerminalOpen>, choose: bool) {
         let decline = |reason: &str, tries_left: Option<u32>| SessionMsg::SessionDecline { reason: Some(reason.into()), tries_left };
         // From away, screens, control, camera, microphone and terminals need the user's yes
         // for this device beforehand; it isn't even asked otherwise.
@@ -1911,7 +1920,8 @@ impl Node {
         }
         let sharing = !kind.requester_shares();
         self.emit(Event::SessionStarted { session: id, peer: from.clone(), kind, sharing });
-        let session = Session { id, peer: from, kind, sharing, size: None, send, recv, _busy: busy, events: self.inner.events.clone() };
+        let choose = choose && matches!(kind, SessionKind::Screen | SessionKind::Control);
+        let session = Session { id, peer: from, kind, sharing, size: None, choose, send, recv, _busy: busy, events: self.inner.events.clone() };
         // Nobody to run it (no daemon took the receiver): dropping ends it.
         let _ = self.inner.sessions_tx.send(session);
     }
