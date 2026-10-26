@@ -37,9 +37,9 @@ RowLayout {
     readonly property var look: {
         switch (what.kind) {
         case "files":
-            if (what.import) return ["image-x-generic", plural(what.files.length, "photo")];
+            if (what.import) return ["image-x-generic", plural(what.files.length + (what.more ?? 0), "photo")];
             return [incoming ? "folder-download" : "document-send",
-                    what.files.length === 1 ? what.files[0].split("/").pop() : plural(what.files.length, "item")];
+                    what.files.length + (what.more ?? 0) === 1 ? what.files[0].split("/").pop() : plural(what.files.length + (what.more ?? 0), "item")];
         case "clipboard": return ["edit-paste", what.text ? `“${oneLine(what.text, 80)}”` : app.t("Clipboard text")];
         case "ping": return ["preferences-desktop-notification-bell", what.body ? `${what.title}: ${what.body}` : what.title];
         case "link": return ["internet-web-browser", oneLine(what.url, 120)];

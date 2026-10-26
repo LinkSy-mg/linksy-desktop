@@ -374,7 +374,8 @@ Kirigami.ScrollablePage {
                 required property var modelData
                 readonly property var e: modelData
                 readonly property bool incoming: e.direction === "incoming"
-                readonly property bool group: e.what.files.length > 1
+                readonly property int count: e.what.files.length + (e.what.more ?? 0)
+                readonly property bool group: count > 1
                 readonly property bool ended: e.status.state === "done"
                 readonly property var saved: e.what.saved ?? []
                 property bool open: false
@@ -397,8 +398,8 @@ Kirigami.ScrollablePage {
                             QQC2.Label {
                                 Layout.fillWidth: true
                                 elide: Text.ElideMiddle
-                                text: recentItem.e.what["import"] === true ? page.plural(recentItem.e.what.files.length, "photo")
-                                    : recentItem.group ? page.plural(recentItem.e.what.files.length, "item") : recentItem.e.what.files[0].split("/").pop()
+                                text: recentItem.e.what["import"] === true ? page.plural(recentItem.count, "photo")
+                                    : recentItem.group ? page.plural(recentItem.count, "item") : recentItem.e.what.files[0].split("/").pop()
                             }
                             QQC2.Label {
                                 Layout.fillWidth: true
@@ -441,6 +442,13 @@ Kirigami.ScrollablePage {
                         text: modelData.split("/").pop()
                         onClicked: Qt.openUrlExternally("file://" + recentItem.saved[index])
                     }
+                }
+                QQC2.Label {
+                    visible: recentItem.open && (recentItem.e.what.more ?? 0) > 0
+                    Layout.leftMargin: Kirigami.Units.gridUnit * 3
+                    text: page.app.t("and {count} more", { count: recentItem.e.what.more ?? 0 })
+                    opacity: 0.6
+                    font: Kirigami.Theme.smallFont
                 }
             }
         }

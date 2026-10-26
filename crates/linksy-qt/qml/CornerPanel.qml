@@ -99,6 +99,7 @@ QQC2.Pane {
                         readonly property string status: e.status.state
                         readonly property var progress: panel.app.progress[e.id] ?? null
                         readonly property var saved: what.saved ?? []
+                        readonly property int count: what.files.length + (what.more ?? 0)
                         // `import` is a keyword QML's parser trips on in a one-line binding
                         readonly property bool imported: what["import"] === true
                         Layout.fillWidth: true
@@ -131,8 +132,8 @@ QQC2.Pane {
                                 Layout.fillWidth: true
                                 QQC2.Label {
                                     Layout.fillWidth: true
-                                    text: row.imported ? panel.plural(row.what.files.length, "photo")
-                                        : row.what.files.length === 1 ? row.what.files[0].split("/").pop() : panel.plural(row.what.files.length, "item")
+                                    text: row.imported ? panel.plural(row.count, "photo")
+                                        : row.count === 1 ? row.what.files[0].split("/").pop() : panel.plural(row.count, "item")
                                     font.bold: true
                                     elide: Text.ElideMiddle
                                 }
@@ -149,7 +150,7 @@ QQC2.Pane {
                                     visible: row.status === "done" && row.incoming && row.saved.length > 0
                                     text: panel.app.t("Open")
                                     // One file opens; several, their folder
-                                    onClicked: Qt.openUrlExternally("file://" + (row.saved.length === 1 ? row.saved[0] : row.saved[0].slice(0, row.saved[0].lastIndexOf("/"))))
+                                    onClicked: Qt.openUrlExternally("file://" + (row.count === 1 ? row.saved[0] : row.saved[0].slice(0, row.saved[0].lastIndexOf("/"))))
                                 }
                                 QQC2.ToolButton {
                                     visible: row.status === "done" && row.incoming && row.saved.length > 0
