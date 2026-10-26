@@ -185,6 +185,10 @@ pub enum Shared {
         saved: Vec<PathBuf>,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         import: bool,
+        /// Files left out of `files`, `sizes` and `saved` to keep the history small (older
+        /// big transfers keep their first file only).
+        #[serde(default, skip_serializing_if = "is_zero")]
+        more: usize,
     },
     /// The text is kept in memory only, never written to disk (it may be a password).
     Clipboard { #[serde(default)] text: String },
@@ -221,6 +225,20 @@ pub enum Shared {
         #[serde(default)]
         display: bool,
     },
+}
+
+impl Shared {
+    /// How many files it was, counting those the history left out.
+    pub fn file_count(&self) -> usize {
+        match self {
+            Self::Files { files, more, .. } => files.len() + more,
+            _ => 0,
+        }
+    }
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// Photo auto-import: photos a phone sends as imports land in `folder/<phone name>/`

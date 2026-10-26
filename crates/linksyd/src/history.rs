@@ -14,6 +14,7 @@ use tokio::sync::broadcast::{self, error::RecvError};
 use tracing::warn;
 
 const KEEP: usize = 500;
+const FILES_KEPT: usize = 1000;
 
 #[derive(Clone)]
 pub struct History {
@@ -35,6 +36,7 @@ impl History {
                 e.status = HistoryStatus::Failed { reason: "interrupted".into() };
             }
         }
+        fold(&mut entries);
         let (updates, _) = broadcast::channel(128);
         Self { inner: Arc::new(Inner { path, entries: Mutex::new(entries), updates }) }
     }
@@ -72,17 +74,21 @@ impl History {
     }
 
     fn upsert(&self, entry: HistoryEntry) {
-        {
+        let id = entry.id;
+        let entry = {
             let mut entries = self.inner.entries.lock().unwrap();
-            match entries.iter_mut().find(|e| e.id == entry.id) {
-                Some(e) => *e = entry.clone(),
+            match entries.iter_mut().find(|e| e.id == id) {
+                Some(e) => *e = entry,
                 None => {
-                    entries.push(entry.clone());
+                    entries.push(entry);
                     let excess = entries.len().saturating_sub(KEEP);
                     entries.drain(..excess);
                 }
             }
-        }
+            fold(&mut entries);
+            entries.iter().rev().find(|e| e.id == id).cloned()
+        };
+        let Some(entry) = entry else { return };
         if entry.status != HistoryStatus::InProgress {
             self.save();
         }
@@ -137,7 +143,7 @@ impl History {
                         peer: peer.id,
                         peer_name: peer.name,
                         direction,
-                        what: Shared::Files { sizes: files.iter().map(|f| f.size).collect(), files: files.into_iter().map(|f| f.path).collect(), total, saved: Vec::new(), import },
+                        what: Shared::Files { sizes: files.iter().map(|f| f.size).collect(), files: files.into_iter().map(|f| f.path).collect(), total, saved: Vec::new(), import, more: 0 },
                         status: HistoryStatus::InProgress,
                     });
                 }
@@ -161,7 +167,7 @@ impl History {
                             peer: from.id,
                             peer_name: from.name,
                             direction: Direction::Incoming,
-                            what: Shared::Files { sizes: files.iter().map(|f| f.size).collect(), files: files.into_iter().map(|f| f.path).collect(), total, saved: Vec::new(), import: false },
+                            what: Shared::Files { sizes: files.iter().map(|f| f.size).collect(), files: files.into_iter().map(|f| f.path).collect(), total, saved: Vec::new(), import: false, more: 0 },
                             status,
                         }),
                         None => self.update(transfer, |e| e.status = status),
@@ -211,6 +217,30 @@ impl History {
     }
 }
 
+/// Newest first, entries keep their whole file lists up to [`FILES_KEPT`] names in all;
+/// past that, a bigger one keeps its first file and counts the rest (desktop#26: a folder of
+/// 20,000 files held 4 MB for good). Running transfers keep all: their pages follow each file.
+fn fold(entries: &mut [HistoryEntry]) {
+    let mut left = FILES_KEPT;
+    for e in entries.iter_mut().rev().filter(|e| e.status != HistoryStatus::InProgress) {
+        let Shared::Files { files, sizes, saved, more, .. } = &mut e.what else { continue };
+        if files.len() <= left {
+            left -= files.len();
+            continue;
+        }
+        *more += files.len() - 1;
+        first_only(files);
+        first_only(sizes);
+        first_only(saved);
+        left = left.saturating_sub(1);
+    }
+}
+
+fn first_only<T>(list: &mut Vec<T>) {
+    list.truncate(1);
+    list.shrink_to_fit();
+}
+
 fn incoming(from: &DeviceInfo, what: Shared) -> HistoryEntry {
     HistoryEntry {
         id: Uuid::new_v4(),
@@ -258,5 +288,42 @@ mod tests {
             reloaded.upsert(entry(b, Shared::Ping { title: "x".into(), body: String::new() }));
         }
         assert_eq!(reloaded.list(None).len(), KEEP);
+    }
+
+    fn files(n: usize, status: HistoryStatus) -> HistoryEntry {
+        let names: Vec<String> = (0..n).map(|i| format!("f{i}")).collect();
+        let what = Shared::Files { sizes: vec![1; n], saved: names.iter().map(|f| PathBuf::from("/dl").join(f)).collect(), files: names, total: n as u64, import: false, more: 0 };
+        HistoryEntry { status, ..entry(Fingerprint([1; 32]), what) }
+    }
+
+    fn kept(e: &HistoryEntry) -> (usize, usize) {
+        match &e.what {
+            Shared::Files { files, sizes, saved, more, .. } => {
+                assert!(sizes.len() == files.len() && saved.len() == files.len());
+                (files.len(), *more)
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn big_transfers_keep_their_first_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        let h = History::load(path.clone());
+        h.upsert(files(1500, HistoryStatus::Done));
+        for _ in 0..3 {
+            h.upsert(files(400, HistoryStatus::Done));
+        }
+        let running = files(2000, HistoryStatus::InProgress);
+        h.upsert(running.clone());
+        let counts = |h: &History| h.list(None).iter().map(kept).collect::<Vec<_>>();
+        assert_eq!(counts(&h), [(2000, 0), (400, 0), (400, 0), (1, 399), (1, 1499)]);
+        assert_eq!(h.list(None)[4].what.file_count(), 1500);
+
+        // Once it ends, it's one more big one
+        h.update(running.id, |e| e.status = HistoryStatus::Done);
+        assert_eq!(counts(&h), [(1, 1999), (400, 0), (400, 0), (1, 399), (1, 1499)]);
+        assert_eq!(counts(&History::load(path)), counts(&h));
     }
 }
