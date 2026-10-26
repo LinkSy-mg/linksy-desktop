@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.12" date="2026-10-26">
+      <description>
+        <p>Taps on a scaled KDE second display land where you tap, and the cursor shows at once after a tap on a still screen.</p>
+      </description>
+    </release>
     <release version="0.9.11" date="2026-10-26">
       <description>
         <p>Transfers like on the phone: a page with the speed, each file and its progress, a panel in the corner on every page, and Send Files and Add Device together at the bottom of your devices. A phone can ask to pick which screen it sees.</p>

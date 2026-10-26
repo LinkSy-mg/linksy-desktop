@@ -2,6 +2,17 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.12
+
+### Fixed
+- **Taps on KDE's extended screen land where you tap, again.** 0.9.10's fix didn't find
+  the second display on some computers, so with scaling on (125 %, 150 %) taps still landed
+  lower right. Linksy now finds it by the name KDE gives it, follows its scale while it's
+  shared, and says in Save Logs what it found.
+- **The cursor shows at once after a tap on a still screen.** When nothing moved on the
+  shared screen, the frame with the new cursor could arrive up to a second late. The last
+  frame now goes again every 100 ms.
+
 ## 0.9.11
 
 ### Added
