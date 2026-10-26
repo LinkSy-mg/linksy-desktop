@@ -19,5 +19,7 @@ cat <<NOTES
 
 On KDE Plasma, use \`linksy-qt\` in place of \`linksy\` in the commands. The Qt app needs Qt 6.8 and KDE Frameworks 6.13 or newer (Debian 13, Ubuntu 25.04+, Fedora, openSUSE Tumbleweed).
 
+Opening the files one at a time instead (Software, Discover, gdebi): \`linksy-common\` first, then the app, both of this version.
+
 NOTES
 cat "dist/v$V/notes.md"
