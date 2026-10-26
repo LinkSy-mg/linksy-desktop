@@ -10,6 +10,8 @@ mod lock;
 mod mirror;
 mod photos;
 mod pictures;
+#[cfg(target_os = "linux")]
+mod rest;
 mod update;
 mod sessions;
 #[cfg(target_os = "linux")]
@@ -214,6 +216,8 @@ async fn run() -> ExitCode {
     }
     let history = history::History::load(data_dir.join("history.json"));
     tokio::spawn(history.clone().run(node.clone()));
+    #[cfg(target_os = "linux")]
+    tokio::spawn(rest::run());
     let socket = args.socket.clone();
     let sessions = sessions::Sessions::new(data_dir.clone(), socket.clone());
     tokio::spawn(sessions.clone().run(node.clone()));
