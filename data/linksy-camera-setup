@@ -54,7 +54,10 @@ fi
 enroll() {
   for key in /etc/pki/akmods/certs/public_key.der /var/lib/dkms/mok.pub /var/lib/shim-signed/mok/MOK.der; do
     [ -f "$key" ] || continue
-    command -v mokutil >/dev/null || return 0
+    if ! command -v mokutil >/dev/null; then
+      echo "Secure Boot needs the camera driver approved: install mokutil, then try again" >&2
+      exit 1
+    fi
     mokutil --test-key "$key" 2>&1 | grep -q "already enrolled" && return 0
     # Asked before and not restarted since: ask again, with a new code to show.
     mokutil --list-new 2>/dev/null | grep -q . && mokutil --revoke-import >/dev/null 2>&1
