@@ -215,7 +215,8 @@ impl Window {
         alert.set_response_appearance("restart", adw::ResponseAppearance::Suggested);
         alert.set_default_response(Some("later"));
         alert.connect_response(Some("restart"), |_, _| {
-            let _ = gio::Subprocess::newv(&["systemctl".as_ref(), "reboot".as_ref()], gio::SubprocessFlags::NONE);
+            // elogind's where there's no systemd (Artix, Void)
+            let _ = gio::Subprocess::newv(&["sh".as_ref(), "-c".as_ref(), "if [ -d /run/systemd/system ]; then systemctl reboot; else loginctl reboot; fi".as_ref()], gio::SubprocessFlags::NONE);
         });
         alert.present(Some(parent));
     }
