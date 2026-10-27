@@ -113,7 +113,7 @@ impl History {
             }
         }
         let tmp = self.inner.path.with_extension("json.tmp");
-        let written = serde_json::to_vec(&entries).map_err(std::io::Error::other).and_then(|b| std::fs::write(&tmp, b)).and_then(|_| std::fs::rename(&tmp, &self.inner.path));
+        let written = serde_json::to_vec(&entries).map_err(std::io::Error::other).and_then(|b| linksy_core::identity::write_private(&tmp, &b)).and_then(|_| std::fs::rename(&tmp, &self.inner.path));
         if let Err(e) = written {
             warn!("could not save history: {e}");
         }
@@ -263,6 +263,17 @@ mod tests {
 
     fn entry(peer: Fingerprint, what: Shared) -> HistoryEntry {
         HistoryEntry { id: Uuid::new_v4(), at: 1, peer, peer_name: "Peer".into(), direction: Direction::Incoming, what, status: HistoryStatus::Done }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saves_history_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("history.json");
+        let h = History::load(path.clone());
+        h.upsert(entry(Fingerprint([1; 32]), Shared::Ping { title: "Ping".into(), body: String::new() }));
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]

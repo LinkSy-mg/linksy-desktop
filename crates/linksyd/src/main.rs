@@ -93,7 +93,10 @@ fn parse_args() -> Result<Args, String> {
         match a.as_str() {
             "--name" => config.name = value("--name")?,
             "--port" => config.port = value("--port")?.parse().map_err(|_| "--port needs a number")?,
-            "--data-dir" => config.data_dir = value("--data-dir")?.into(),
+            "--data-dir" => {
+                config.data_dir = value("--data-dir")?.into();
+                config.keep_data_dir_mode = true;
+            }
             "--download-dir" => config.download_dir = value("--download-dir")?.into(),
             "--socket" => socket = value("--socket")?.into(),
             "--no-discovery" => config.discovery = false,

@@ -84,6 +84,8 @@ pub struct Config {
     pub data_dir: PathBuf,
     /// Where received files are saved.
     pub download_dir: PathBuf,
+    /// The user chose `data_dir` (`--data-dir`): don't change the mode of one that exists.
+    pub keep_data_dir_mode: bool,
     pub name: String,
     pub kind: DeviceKind,
     /// UDP port; 0 picks a free one.
@@ -116,6 +118,7 @@ impl Config {
         Self {
             data_dir,
             download_dir,
+            keep_data_dir_mode: false,
             name: name.into(),
             kind: DeviceKind::Desktop,
             port: 0,
@@ -501,7 +504,7 @@ pub struct Node {
 
 impl Node {
     pub async fn start(config: Config) -> Result<Self> {
-        std::fs::create_dir_all(&config.data_dir)?;
+        crate::identity::create_private_dir(&config.data_dir, config.keep_data_dir_mode)?;
         let identity = Identity::load_or_create(&config.data_dir)?;
         let trust = TrustStore::load(config.data_dir.join("trusted.json"))?;
         let settings = Settings::load(&config.data_dir.join("settings.json"), &config)?;

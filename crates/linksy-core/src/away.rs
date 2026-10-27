@@ -165,12 +165,7 @@ fn load_or_create_key(path: &Path) -> Result<SecretKey> {
         return Ok(SecretKey::from_bytes(&raw));
     }
     let key = SecretKey::generate();
-    std::fs::write(path, key.to_bytes())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
-    }
+    crate::identity::write_private(path, &key.to_bytes())?;
     Ok(key)
 }
 
@@ -218,6 +213,16 @@ mod tests {
     use crate::identity::{DeviceInfo, DeviceKind, Fingerprint};
     use crate::node::{Link, link_of};
     use crate::trust::TrustedDevice;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_away_key_is_owner_only_from_creation() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("away.key");
+        super::load_or_create_key(&path).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
 
     #[test]
     fn links_by_address() {
