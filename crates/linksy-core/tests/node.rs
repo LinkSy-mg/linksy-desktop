@@ -111,7 +111,7 @@ async fn pairing_shows_same_code_and_trusts_both_ways() {
 
     a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
     let code_a = wait_for(&mut ra, |e| match e {
-        Event::PairingRequest { code, incoming: false, .. } => Some(code.clone()),
+        Event::PairingRequest { code, incoming: false, older: false, .. } => Some(code.clone()),
         _ => None,
     })
     .await;

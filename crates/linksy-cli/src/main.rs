@@ -191,7 +191,7 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                         return Ok(());
                     }
                     Ok(ev) = events.recv() => {
-                        if let Event::PairingRequest { request, device, code, incoming: false } = ev {
+                        if let Event::PairingRequest { request, device, code, incoming: false, .. } = ev {
                             println!("Pairing code: {} {}", &code[..3], &code[3..]);
                             let ok = ask(&format!("Does {} show the same code?", device.name)).await;
                             c.respond(request, ok).await.map_err(err)?;
@@ -492,7 +492,7 @@ async fn watch(c: &Client) -> Result<(), String> {
             Event::DeviceLost { id } => println!("· {} left", id.short()),
             Event::Connected { device } => println!("● {} connected", device.name),
             Event::Disconnected { id } => println!("○ {} disconnected", id.short()),
-            Event::PairingRequest { request, device, code, incoming: true } => {
+            Event::PairingRequest { request, device, code, incoming: true, .. } => {
                 println!("{} wants to pair. Code: {} {}", device.name, &code[..3], &code[3..]);
                 let ok = ask("Does the other screen show the same code?").await;
                 let _ = c.respond(request, ok).await;

@@ -14,6 +14,8 @@ use crate::error::{Result, protocol};
 use crate::identity::DeviceInfo;
 
 pub const PROTOCOL_VERSION: u32 = 1;
+/// Pairing with commit and reveal (docs/protocol.md §4.4).
+pub const PAIRING_VERSION: u32 = 2;
 const MAX_FRAME: usize = 1 << 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,13 +45,19 @@ pub enum Handshake {
         /// code comparison.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         invite: Option<String>,
+        #[serde(default)]
+        pairing: u32,
     },
     Welcome {
         device: DeviceInfo,
         #[serde(default)]
         stay_connected: bool,
+        #[serde(default)]
+        pairing: u32,
     },
     Reject { reason: RejectReason },
+    PairCommit { commit: String },
+    PairNonce { nonce: String },
     PairDecision { accept: bool },
 }
 

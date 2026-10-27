@@ -70,13 +70,15 @@ pub fn peer_fingerprint(conn: &quinn::Connection) -> Result<Fingerprint> {
     Ok(Fingerprint::of(cert))
 }
 
-/// Six-digit code both users compare when pairing. It is derived from the TLS session
-/// itself, so a man in the middle (who would hold two different sessions) cannot make
-/// both screens show the same code.
-pub fn pairing_code(conn: &quinn::Connection) -> Result<String> {
+/// Six-digit code both users compare when pairing, from the TLS session and the pairing
+/// nonces (dialer's, listener's). Older devices have none.
+pub fn pairing_code(conn: &quinn::Connection, nonces: Option<([u8; 32], [u8; 32])>) -> Result<String> {
     let mut out = [0u8; 8];
-    conn.export_keying_material(&mut out, b"linksy pairing code v1", b"")
-        .map_err(|_| Error::Protocol("could not derive pairing code".into()))?;
+    match nonces {
+        Some((dialer, listener)) => conn.export_keying_material(&mut out, b"linksy pairing code v2", &[dialer, listener].concat()),
+        None => conn.export_keying_material(&mut out, b"linksy pairing code v1", b""),
+    }
+    .map_err(|_| Error::Protocol("could not derive pairing code".into()))?;
     let n = u64::from_be_bytes(out) % 1_000_000;
     Ok(format!("{n:06}"))
 }

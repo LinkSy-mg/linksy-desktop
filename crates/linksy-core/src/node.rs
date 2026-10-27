@@ -17,6 +17,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::task::{AbortHandle, JoinSet};
 use tracing::{debug, info, warn};
@@ -29,7 +30,7 @@ use crate::fs::FsCall;
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
 use crate::protocol::{Battery, CallState, DirectGroup, DirectStep, PluggedPhone, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState, 
-    FileEntry, Handshake, Intent, Message, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
+    FileEntry, Handshake, Intent, Message, PAIRING_VERSION, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
 use crate::transfer::{self, Progress};
@@ -146,8 +147,16 @@ pub enum Event {
     DeviceLost { id: Fingerprint },
     Connected { device: DeviceInfo },
     Disconnected { id: Fingerprint },
-    /// Show `code` and ask the user to confirm it matches the other screen.
-    PairingRequest { request: Uuid, device: DeviceInfo, code: String, incoming: bool },
+    /// Show `code` and ask the user to confirm it matches the other screen. `older`: suggest
+    /// updating the other device.
+    PairingRequest {
+        request: Uuid,
+        device: DeviceInfo,
+        code: String,
+        incoming: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        older: bool,
+    },
     Paired { device: DeviceInfo },
     PairingFailed { device: DeviceInfo, reason: String },
     /// Ask the user whether to accept these files.
@@ -1410,14 +1419,14 @@ impl Node {
         let conn = incoming.await?;
         let fp = tls::peer_fingerprint(&conn)?;
         let (mut send, mut recv) = tokio::time::timeout(HANDSHAKE_TIMEOUT, conn.accept_bi()).await.map_err(|_| Error::Timeout)??;
-        let (device, intent, peer_stays, invite) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
-            Handshake::Hello { version, device, intent, stay_connected, invite } => {
+        let (device, intent, peer_stays, invite, pairing) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
+            Handshake::Hello { version, device, intent, stay_connected, invite, pairing } => {
                 if version != PROTOCOL_VERSION {
                     write_msg(&mut send, &Handshake::Reject { reason: RejectReason::IncompatibleVersion }).await?;
                     send.finish()?;
                     return Err(protocol(format!("peer speaks protocol v{version}")));
                 }
-                (device, intent, stay_connected, invite)
+                (device, intent, stay_connected, invite, pairing)
             }
             other => return Err(protocol(format!("expected hello, got {other:?}"))),
         };
@@ -1447,7 +1456,7 @@ impl Node {
                 // it's them. Unknown or stale tokens fall back to comparing codes.
                 let preapproved = invite.as_deref().is_some_and(|t| self.redeem_invite(t));
                 write_msg(&mut send, &self.welcome()).await?;
-                self.run_pairing(&conn, &mut send, &mut recv, &device, true, preapproved).await?;
+                self.run_pairing(&conn, &mut send, &mut recv, &device, true, preapproved, pairing >= PAIRING_VERSION).await?;
                 self.register(conn, device, fp, peer_stays);
             }
         }
@@ -1472,17 +1481,17 @@ impl Node {
         }
         let (mut send, mut recv) = conn.open_bi().await?;
         let scanned = invite.is_some();
-        let hello = Handshake::Hello { version: PROTOCOL_VERSION, device: self.info(), intent, stay_connected: self.stays(), invite };
+        let hello = Handshake::Hello { version: PROTOCOL_VERSION, device: self.info(), intent, stay_connected: self.stays(), invite, pairing: PAIRING_VERSION };
         write_msg(&mut send, &hello).await?;
-        let (device, peer_stays) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
-            Handshake::Welcome { device, stay_connected } if device.id == fp => (device, stay_connected),
+        let (device, peer_stays, pairing) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
+            Handshake::Welcome { device, stay_connected, pairing } if device.id == fp => (device, stay_connected, pairing),
             Handshake::Welcome { .. } => return Err(protocol("device id does not match its certificate")),
             Handshake::Reject { reason: RejectReason::NotPaired } => return Err(Error::NotPaired),
             Handshake::Reject { reason } => return Err(protocol(format!("rejected: {reason:?}"))),
             other => return Err(protocol(format!("unexpected {other:?}"))),
         };
         if intent == Intent::Pair {
-            self.run_pairing(&conn, &mut send, &mut recv, &device, false, scanned).await?;
+            self.run_pairing(&conn, &mut send, &mut recv, &device, false, scanned, pairing >= PAIRING_VERSION).await?;
         }
         let _ = send.finish();
         if intent == Intent::Direct {
@@ -1497,6 +1506,7 @@ impl Node {
     /// Both sides show the same code and each user confirms; pairing succeeds only if
     /// both accept. A decline on either side ends it on both. `preapproved` (QR invite)
     /// skips the question on this side.
+    #[allow(clippy::too_many_arguments)]
     async fn run_pairing(
         &self,
         conn: &quinn::Connection,
@@ -1505,7 +1515,9 @@ impl Node {
         device: &DeviceInfo,
         incoming: bool,
         preapproved: bool,
+        nonces: bool,
     ) -> Result<()> {
+        let nonces = if nonces { Some(exchange_nonces(send, recv, incoming).await?) } else { None };
         if preapproved {
             write_msg(send, &Handshake::PairDecision { accept: true }).await?;
             let remote = match tokio::time::timeout(PAIR_TIMEOUT, read_msg(recv)).await.map_err(|_| Error::Timeout)?? {
@@ -1514,10 +1526,10 @@ impl Node {
             };
             return self.finish_pairing(conn, send, device, true, remote).await;
         }
-        let code = tls::pairing_code(conn)?;
+        let code = tls::pairing_code(conn, nonces)?;
         let request = Uuid::new_v4();
         let answer = self.expect_answer(request);
-        self.emit(Event::PairingRequest { request, device: device.clone(), code, incoming });
+        self.emit(Event::PairingRequest { request, device: device.clone(), code, incoming, older: nonces.is_none() });
 
         let read_remote = async {
             match read_msg(recv).await? {
@@ -1583,7 +1595,7 @@ impl Node {
     }
 
     fn welcome(&self) -> Handshake {
-        Handshake::Welcome { device: self.info(), stay_connected: self.stays() }
+        Handshake::Welcome { device: self.info(), stay_connected: self.stays(), pairing: PAIRING_VERSION }
     }
 
     fn stays(&self) -> bool {
@@ -2604,6 +2616,40 @@ async fn first_ok<T>(a: impl Future<Output = Result<T>>, b: impl Future<Output =
     Err(error.unwrap_or(Error::Unreachable))
 }
 
+/// Commit and reveal (docs/protocol.md §4.4). Returns (dialer's nonce, listener's).
+async fn exchange_nonces(send: &mut quinn::SendStream, recv: &mut quinn::RecvStream, incoming: bool) -> Result<([u8; 32], [u8; 32])> {
+    let mut mine = [0u8; 32];
+    getrandom::fill(&mut mine).map_err(std::io::Error::other)?;
+    if incoming {
+        write_msg(send, &Handshake::PairCommit { commit: hex::encode(Sha256::digest(mine)) }).await?;
+        let theirs = read_nonce(recv).await?;
+        write_msg(send, &Handshake::PairNonce { nonce: hex::encode(mine) }).await?;
+        return Ok((theirs, mine));
+    }
+    let mut commit = [0u8; 32];
+    match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(recv)).await.map_err(|_| Error::Timeout)?? {
+        Handshake::PairCommit { commit: c } => hex::decode_to_slice(c, &mut commit).map_err(|_| protocol("bad pairing commitment"))?,
+        other => return Err(protocol(format!("unexpected {other:?}"))),
+    }
+    write_msg(send, &Handshake::PairNonce { nonce: hex::encode(mine) }).await?;
+    let theirs = read_nonce(recv).await?;
+    if <[u8; 32]>::from(Sha256::digest(theirs)) != commit {
+        return Err(protocol("pairing nonce doesn't match its commitment"));
+    }
+    Ok((mine, theirs))
+}
+
+async fn read_nonce(recv: &mut quinn::RecvStream) -> Result<[u8; 32]> {
+    match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(recv)).await.map_err(|_| Error::Timeout)?? {
+        Handshake::PairNonce { nonce } => {
+            let mut out = [0u8; 32];
+            hex::decode_to_slice(nonce, &mut out).map_err(|_| protocol("bad pairing nonce"))?;
+            Ok(out)
+        }
+        other => Err(protocol(format!("unexpected {other:?}"))),
+    }
+}
+
 /// An `http(s)` link with something after the scheme, no longer than [`MAX_URL`]: the only
 /// kind a device may ask another to open.
 fn is_web_link(url: &str) -> bool {
@@ -2679,5 +2725,65 @@ mod tests {
         assert!(tokio::time::timeout(Duration::from_secs(1), first_ok(slow, fails)).await.is_err());
         let both = first_ok(async { Err::<i32, _>(Error::Timeout) }, async { Err(Error::NotPaired) }).await;
         assert!(matches!(both, Err(Error::Timeout)));
+    }
+
+    async fn test_node(dir: &std::path::Path) -> Node {
+        let mut c = Config::new(dir.join("data"), dir.join("downloads"), "New");
+        c.bind = "127.0.0.1".parse().unwrap();
+        c.discovery = false;
+        Node::start(c).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn older_devices_still_pair_with_a_code() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = test_node(dir.path()).await;
+        let mut events = node.subscribe();
+        let old = Identity::generate().unwrap();
+        let mut endpoint = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        endpoint.set_default_client_config(tls::client_config(&old).unwrap());
+        let conn = endpoint.connect(node.local_addr().unwrap(), "linksy").unwrap().await.unwrap();
+        let (mut send, mut recv) = conn.open_bi().await.unwrap();
+        // Hello as 0.9.13 says it: no `pairing`
+        let device = serde_json::json!({"id": Fingerprint::of(&old.cert), "name": "Old", "kind": "phone", "os": "android"});
+        write_msg(&mut send, &serde_json::json!({"type": "hello", "version": 1, "device": device, "intent": "pair"})).await.unwrap();
+        assert!(matches!(read_msg(&mut recv).await.unwrap(), Handshake::Welcome { pairing: PAIRING_VERSION, .. }));
+        let (request, code) = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Event::PairingRequest { request, code, older: true, .. } = events.recv().await.unwrap() {
+                    break (request, code);
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(code, tls::pairing_code(&conn, None).unwrap());
+        node.respond(request, true);
+        write_msg(&mut send, &Handshake::PairDecision { accept: true }).await.unwrap();
+        assert!(matches!(read_msg(&mut recv).await.unwrap(), Handshake::PairDecision { accept: true }));
+        tokio::time::timeout(Duration::from_secs(10), async { while !matches!(events.recv().await.unwrap(), Event::Paired { .. }) {} }).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_reveal_that_misses_its_commitment_ends_pairing() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = test_node(dir.path()).await;
+        let liar = Identity::generate().unwrap();
+        let endpoint = quinn::Endpoint::server(tls::server_config(&liar).unwrap(), "127.0.0.1:0".parse().unwrap()).unwrap();
+        let addr = endpoint.local_addr().unwrap();
+        let device = DeviceInfo { id: Fingerprint::of(&liar.cert), name: "Liar".into(), kind: DeviceKind::Phone, os: "android".into(), features: vec![], away: None };
+        tokio::spawn(async move {
+            let conn = endpoint.accept().await.unwrap().await.unwrap();
+            let (mut send, mut recv) = conn.accept_bi().await.unwrap();
+            let _: Handshake = read_msg(&mut recv).await.unwrap();
+            write_msg(&mut send, &Handshake::Welcome { device, stay_connected: false, pairing: PAIRING_VERSION }).await.unwrap();
+            write_msg(&mut send, &Handshake::PairCommit { commit: hex::encode(Sha256::digest([1u8; 32])) }).await.unwrap();
+            let _: Handshake = read_msg(&mut recv).await.unwrap();
+            write_msg(&mut send, &Handshake::PairNonce { nonce: hex::encode([2u8; 32]) }).await.unwrap();
+            conn.closed().await;
+        });
+        let err = node.pair(addr).await.unwrap_err();
+        assert!(err.to_string().contains("commitment"), "{err}");
+        assert!(node.trusted().is_empty());
     }
 }
