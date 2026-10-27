@@ -274,7 +274,12 @@ fn firewall_need() -> Option<Need> {
 /// Whether the background service starts with every login: None when it isn't installed
 /// as a user service (run from the source tree).
 fn autostart_need() -> Option<Need> {
-    let state = std::process::Command::new("systemctl").args(["--user", "is-enabled", "linksyd.service"]).stderr(std::process::Stdio::null()).output().ok()?;
+    let state = match std::process::Command::new("systemctl").args(["--user", "is-enabled", "linksyd.service"]).stderr(std::process::Stdio::null()).output() {
+        Ok(s) if !s.stdout.is_empty() => s,
+        // No systemd, or no user manager (Artix, Void: desktop#11): desktops start the service
+        // from its XDG autostart entry, tiling compositors from a line in their config
+        _ => return compositor_autostart().map(Need::Manual),
+    };
     match String::from_utf8_lossy(&state.stdout).trim() {
         // Enabled, but tiling compositors seldom start systemd's graphical session, which
         // starts it: then one line in their config does
