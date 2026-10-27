@@ -267,7 +267,7 @@ Kirigami.ApplicationWindow {
             refreshDevices();
             break;
         case "pairing_request":
-            pairDialog.ask(ev.request, ev.device, ev.code, ev.incoming);
+            pairDialog.ask(ev.request, ev.device, ev.code, ev.incoming, ev.older);
             break;
         case "paired":
             pairDialog.close();
@@ -494,8 +494,9 @@ Kirigami.ApplicationWindow {
         property bool incoming
         property string code
         property string peer
-        function ask(req, device, c, inc) {
-            request = req; code = c; incoming = inc; peer = device.name;
+        property bool older
+        function ask(req, device, c, inc, old) {
+            request = req; code = c; incoming = inc; peer = device.name; older = !!old;
             title = inc ? root.t("{name} Wants to Pair", { name: device.name }) : root.t("Pair with {name}", { name: device.name });
             root.present();
             open();
@@ -515,13 +516,24 @@ Kirigami.ApplicationWindow {
                 onTriggered: { root.request("respond", { request: pairDialog.request, accept: false }); pairDialog.close() }
             }
         ]
-        Kirigami.Heading {
-            Layout.alignment: Qt.AlignHCenter
-            horizontalAlignment: Text.AlignHCenter
-            level: 1
-            font.letterSpacing: 4
-            font.family: "monospace"
-            text: pairDialog.code.length === 6 ? pairDialog.code.slice(0, 3) + " " + pairDialog.code.slice(3) : pairDialog.code
+        ColumnLayout {
+            Kirigami.Heading {
+                Layout.alignment: Qt.AlignHCenter
+                horizontalAlignment: Text.AlignHCenter
+                level: 1
+                font.letterSpacing: 4
+                font.family: "monospace"
+                text: pairDialog.code.length === 6 ? pairDialog.code.slice(0, 3) + " " + pairDialog.code.slice(3) : pairDialog.code
+            }
+            QQC2.Label {
+                visible: pairDialog.older
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                text: root.t("Updating Linksy on {name} makes pairing even safer.", { name: pairDialog.peer })
+            }
         }
     }
 
