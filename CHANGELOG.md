@@ -12,6 +12,12 @@ Linksy for Linux. Each version's section becomes its release notes.
 - **The cursor shows at once after a tap on a still screen.** When nothing moved on the
   shared screen, the frame with the new cursor could arrive up to a second late. The last
   frame now goes again every 100 ms.
+- **Linksy reconnects far sooner after a network switch.** When this computer's network changes,
+  links that stopped answering close at once instead of after 30 seconds, and devices that
+  stay connected are dialed again. A device not seen on the network is tried away from home
+  right away rather than after its old addresses fail, and one that comes back away is no
+  longer refused while its old link lingers. Phones get the same with the Linksy for
+  Android update that reports network changes.
 
 ### Changed
 - **The service uses about a quarter less memory at rest** (24 MB to 18 MB here): it gives
