@@ -7,10 +7,28 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Result, invalid};
+use crate::identity::DeviceInfo;
 use crate::node::Config;
 
 /// Longest device name; it has to fit in an mDNS instance name with the short id.
 pub const MAX_NAME: usize = 48;
+
+/// A name a peer sent, made safe to show, store and put in a prompt: control and bidi
+/// characters dropped, whitespace collapsed, capped at [`MAX_NAME`]. May come back empty.
+pub(crate) fn clean_name(name: &str) -> String {
+    let visible = name.chars().filter(|c| c.is_whitespace() || !(c.is_control() || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')));
+    visible.collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_NAME).collect::<String>().trim_end().to_string()
+}
+
+/// A peer's handshake device, with its name cleaned (see [`clean_name`]) so a
+/// hostile one can't crowd the pairing code out of a prompt. A name left empty becomes the short id.
+pub(crate) fn tidy_peer(mut device: DeviceInfo) -> DeviceInfo {
+    device.name = clean_name(&device.name);
+    if device.name.is_empty() {
+        device.name = device.id.short();
+    }
+    device
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Settings {
@@ -160,6 +178,17 @@ mod tests {
         assert!(s.clone().validated().is_err());
         s.name = "x".repeat(MAX_NAME + 1);
         assert!(s.validated().is_err());
+    }
+
+    #[test]
+    fn peer_names_are_cleaned() {
+        assert_eq!(clean_name("Pixel 9"), "Pixel 9");
+        assert_eq!(clean_name("  Living \n\t Room  "), "Living Room");
+        assert_eq!(clean_name("Evil\u{202e}\u{2066}\u{200f}\u{7}\u{0}Name"), "EvilName");
+        assert_eq!(clean_name(&"x".repeat(MAX_NAME * 100)).chars().count(), MAX_NAME);
+        assert_eq!(clean_name("\n\u{202e} "), "");
+        // Cut exactly at a space: no trailing one is left.
+        assert_eq!(clean_name(&format!("{} tail", "x".repeat(MAX_NAME - 1))), "x".repeat(MAX_NAME - 1));
     }
 
     #[test]

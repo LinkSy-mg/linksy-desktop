@@ -1426,7 +1426,7 @@ impl Node {
                     send.finish()?;
                     return Err(protocol(format!("peer speaks protocol v{version}")));
                 }
-                (device, intent, stay_connected, invite, pairing)
+                (crate::settings::tidy_peer(device), intent, stay_connected, invite, pairing)
             }
             other => return Err(protocol(format!("expected hello, got {other:?}"))),
         };
@@ -1484,7 +1484,7 @@ impl Node {
         let hello = Handshake::Hello { version: PROTOCOL_VERSION, device: self.info(), intent, stay_connected: self.stays(), invite, pairing: PAIRING_VERSION };
         write_msg(&mut send, &hello).await?;
         let (device, peer_stays, pairing) = match tokio::time::timeout(HANDSHAKE_TIMEOUT, read_msg(&mut recv)).await.map_err(|_| Error::Timeout)?? {
-            Handshake::Welcome { device, stay_connected, pairing } if device.id == fp => (device, stay_connected, pairing),
+            Handshake::Welcome { device, stay_connected, pairing } if device.id == fp => (crate::settings::tidy_peer(device), stay_connected, pairing),
             Handshake::Welcome { .. } => return Err(protocol("device id does not match its certificate")),
             Handshake::Reject { reason: RejectReason::NotPaired } => return Err(Error::NotPaired),
             Handshake::Reject { reason } => return Err(protocol(format!("rejected: {reason:?}"))),
@@ -1864,7 +1864,7 @@ impl Node {
     }
 
     fn peer_renamed(&self, id: Fingerprint, name: String) {
-        let name: String = name.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(crate::settings::MAX_NAME).collect();
+        let name = crate::settings::clean_name(&name);
         if name.is_empty() {
             return;
         }

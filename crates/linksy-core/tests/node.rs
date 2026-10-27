@@ -705,6 +705,24 @@ async fn features_travel_in_the_handshake() {
 }
 
 #[tokio::test]
+async fn hostile_peer_names_arrive_cleaned() {
+    let hostile = format!("Mallory\n\u{202e}Code 000000\u{7} {}", "x".repeat(5000));
+    let (evil, good) = paired_with(move |c| {
+        if c.name == "Alpha" {
+            c.name = hostile.clone();
+        }
+    })
+    .await;
+    let evil_id = evil.node.info().id;
+    let seen = good.node.devices().into_iter().find(|d| d.device.id == evil_id).unwrap().device.name;
+    assert!(seen.starts_with("Mallory Code 000000 xxx") && seen.chars().count() == 48, "{seen:?}");
+    assert!(!seen.contains(|c: char| c.is_control() || c == '\u{202e}'));
+    // The same goes for the name the other side stored.
+    let stored = std::fs::read_to_string(good.dir.path().join("data").join("trusted.json")).unwrap();
+    assert!(!stored.contains("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"));
+}
+
+#[tokio::test]
 async fn idle_connection_closes_and_next_send_reconnects() {
     let (a, b) = paired_with(|c| c.idle_after = Duration::from_millis(400)).await;
     let mut ra = a.node.subscribe();

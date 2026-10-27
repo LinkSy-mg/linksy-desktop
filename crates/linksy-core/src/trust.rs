@@ -67,7 +67,11 @@ impl TrustStore {
         let devices = match std::fs::read(&path) {
             Ok(bytes) => serde_json::from_slice::<Vec<TrustedDevice>>(&bytes)?
                 .into_iter()
-                .map(|d| (d.device.id, d))
+                .map(|mut d| {
+                    // Names stored before they were cleaned on arrival.
+                    d.device = crate::settings::tidy_peer(d.device);
+                    (d.device.id, d)
+                })
                 .collect(),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
             Err(e) => return Err(e.into()),
@@ -175,5 +179,23 @@ impl TrustStore {
         std::fs::write(&tmp, serde_json::to_vec_pretty(&list)?)?;
         std::fs::rename(tmp, path)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::identity::DeviceKind;
+
+    #[test]
+    fn stored_names_are_cleaned_on_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trusted.json");
+        let id = Fingerprint::of(b"x");
+        let device = DeviceInfo { id, name: format!("Evil\n\u{202e}Code 1 {}", "x".repeat(5000)), kind: DeviceKind::Phone, os: String::new(), features: Vec::new(), away: None };
+        let mut store = TrustStore::load(path.clone()).unwrap();
+        store.add(device, None).unwrap();
+        let name = TrustStore::load(path).unwrap().get(&id).unwrap().device.name.clone();
+        assert!(name.starts_with("Evil Code 1 xxx") && name.chars().count() == crate::MAX_NAME, "{name:?}");
     }
 }

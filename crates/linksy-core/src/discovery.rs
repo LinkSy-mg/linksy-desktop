@@ -372,14 +372,14 @@ fn sync_records(daemon: &ServiceDaemon, shared: &Mutex<Shared>, port: u16) {
 fn parse_device(s: &mdns_sd::ResolvedService) -> Option<DeviceInfo> {
     let id = s.get_property_val_str("id")?.parse().ok()?;
     let kind: DeviceKind = serde_json::from_value(serde_json::Value::String(s.get_property_val_str("kind")?.into())).ok()?;
-    Some(DeviceInfo {
+    Some(crate::settings::tidy_peer(DeviceInfo {
         id,
         name: s.get_property_val_str("name")?.to_string(),
         kind,
         os: s.get_property_val_str("os").unwrap_or("").to_string(),
         features: Vec::new(),
         away: None,
-    })
+    }))
 }
 
 fn socket_addr(ip: &ScopedIp, port: u16) -> Option<SocketAddr> {
@@ -411,6 +411,17 @@ mod tests {
         assert_eq!(until_next_epoch(1_959_000 * EPOCH_SECS), Duration::from_secs(EPOCH_SECS));
         assert_eq!(until_next_epoch(1_959_000 * EPOCH_SECS + 899), Duration::from_secs(1));
         assert_eq!(until_next_epoch(1_959_000 * EPOCH_SECS + 300), Duration::from_secs(600));
+    }
+
+    #[test]
+    fn announced_names_are_cleaned() {
+        let device = |name: &str| DeviceInfo { id: crate::identity::Fingerprint::of(b"x"), name: name.into(), kind: DeviceKind::Phone, os: String::new(), features: Vec::new(), away: None };
+        assert_eq!(crate::settings::tidy_peer(device("Pixel 9")).name, "Pixel 9");
+        assert_eq!(crate::settings::tidy_peer(device("A\nB\u{202e}")).name, "A B");
+        let long = crate::settings::tidy_peer(device(&"x".repeat(5000))).name;
+        assert_eq!(long.chars().count(), crate::MAX_NAME);
+        let fallback = crate::settings::tidy_peer(device("\u{202e}\n"));
+        assert_eq!(fallback.name, fallback.id.short());
     }
 
     /// Checked against `openssl dgst -sha256 -mac HMAC`.
