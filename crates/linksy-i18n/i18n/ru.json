@@ -589,6 +589,7 @@
   "{name} didn't allow control": "{name} не разрешил управление",
   "{name} didn't allow it": "{name} не разрешил",
   "{name} didn't confirm the code": "{name} не подтвердил код",
+  "Updating Linksy on {name} makes pairing even safer.": "Обновление Linksy на {name} сделает сопряжение ещё безопаснее.",
   "{name} didn't say: {reason}": "{name} не ответил: {reason}",
   "{name} doesn't match the release's checksum: not installing it. Try again later.": "{name} не совпадает с контрольной суммой выпуска: не устанавливается. Попробуйте позже.",
   "{name} has a terminal open here": "У {name} открыт терминал здесь",

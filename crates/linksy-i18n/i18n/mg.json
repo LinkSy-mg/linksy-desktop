@@ -589,6 +589,7 @@
   "{name} didn't allow control": "Tsy navelan'i {name} ny fifehezana",
   "{name} didn't allow it": "Tsy navelan'i {name}",
   "{name} didn't confirm the code": "Tsy nohamafisin'i {name} ny kaody",
+  "Updating Linksy on {name} makes pairing even safer.": "Mbola azo antoka kokoa ny fampifandraisana raha havaozina ny Linksy ao amin'i {name}.",
   "{name} didn't say: {reason}": "Tsy niteny {name}: {reason}",
   "{name} doesn't match the release's checksum: not installing it. Try again later.": "Tsy mifanaraka amin'ny checksum an'ilay famoahana {name}: tsy apetraka. Andramo indray any aoriana.",
   "{name} has a terminal open here": "Manana terminal misokatra eto {name}",

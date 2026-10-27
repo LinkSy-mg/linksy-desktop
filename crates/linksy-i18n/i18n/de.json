@@ -589,6 +589,7 @@
   "{name} didn't allow control": "{name} hat die Steuerung nicht erlaubt",
   "{name} didn't allow it": "{name} hat es nicht erlaubt",
   "{name} didn't confirm the code": "{name} hat den Code nicht bestätigt",
+  "Updating Linksy on {name} makes pairing even safer.": "Ein Update von Linksy auf {name} macht das Koppeln noch sicherer.",
   "{name} didn't say: {reason}": "{name} hat es nicht verraten: {reason}",
   "{name} doesn't match the release's checksum: not installing it. Try again later.": "{name} passt nicht zur Prüfsumme der Version: wird nicht installiert. Versuch es später erneut.",
   "{name} has a terminal open here": "{name} hat hier ein Terminal offen",

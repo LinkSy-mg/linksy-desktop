@@ -589,6 +589,7 @@
   "{name} didn't allow control": "{name} で操作が許可されませんでした",
   "{name} didn't allow it": "{name} で許可されませんでした",
   "{name} didn't confirm the code": "{name} でコードが確認されませんでした",
+  "Updating Linksy on {name} makes pairing even safer.": "{name} の Linksy を更新すると、ペアリングがさらに安全になります。",
   "{name} didn't say: {reason}": "{name} から応答がありませんでした: {reason}",
   "{name} doesn't match the release's checksum: not installing it. Try again later.": "{name} がリリースのチェックサムと一致しないため、インストールしません。後でもう一度お試しください。",
   "{name} has a terminal open here": "{name} がここでターミナルを開いています",

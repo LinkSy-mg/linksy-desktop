@@ -1005,7 +1005,7 @@ impl Window {
             | Event::DeviceUpdated { .. }
             | Event::Connected { .. }
             | Event::Disconnected { .. } => self.refresh_devices(),
-            Event::PairingRequest { request, device, code, incoming } => self.show_pairing(request, device, code, incoming),
+            Event::PairingRequest { request, device, code, incoming, older } => self.show_pairing(request, device, code, incoming, older),
             Event::Paired { device } => {
                 self.close_pair_dialog(&device.id);
                 self.close_invite_dialog();
@@ -1758,7 +1758,7 @@ impl Window {
         entry.grab_focus();
     }
 
-    fn show_pairing(self: &Rc<Self>, request: Uuid, device: DeviceInfo, code: String, incoming: bool) {
+    fn show_pairing(self: &Rc<Self>, request: Uuid, device: DeviceInfo, code: String, incoming: bool, older: bool) {
         let (heading, body) = if incoming {
             (t!("{name} Wants to Pair", name = device.name), t!("Pair only if {name} shows this same code.", name = device.name))
         } else {
@@ -1766,7 +1766,13 @@ impl Window {
         };
         let dialog = adw::AlertDialog::new(Some(&heading), Some(&body));
         let code_label = gtk::Label::builder().label(fmt::spaced_code(&code)).css_classes(["pair-code"]).build();
-        dialog.set_extra_child(Some(&code_label));
+        let extra = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).build();
+        extra.append(&code_label);
+        if older {
+            let hint = t!("Updating Linksy on {name} makes pairing even safer.", name = device.name);
+            extra.append(&gtk::Label::builder().label(hint).wrap(true).justify(gtk::Justification::Center).css_classes(["dim-label", "caption"]).build());
+        }
+        dialog.set_extra_child(Some(&extra));
         dialog.add_responses(&[("decline", if incoming { t!("Decline") } else { t!("Cancel") }), ("accept", t!("Pair"))]);
         dialog.set_response_appearance("accept", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("accept"));

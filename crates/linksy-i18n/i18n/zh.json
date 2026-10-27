@@ -589,6 +589,7 @@
   "{name} didn't allow control": "{name} 未允许控制",
   "{name} didn't allow it": "{name} 未允许",
   "{name} didn't confirm the code": "{name} 未确认代码",
+  "Updating Linksy on {name} makes pairing even safer.": "在 {name} 上更新 Linksy，配对会更加安全。",
   "{name} didn't say: {reason}": "{name} 未答复：{reason}",
   "{name} doesn't match the release's checksum: not installing it. Try again later.": "{name} 与发布版本的校验和不符，不予安装。请稍后再试。",
   "{name} has a terminal open here": "{name} 在此打开了一个终端",
