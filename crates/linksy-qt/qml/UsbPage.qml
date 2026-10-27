@@ -179,6 +179,7 @@ Kirigami.ScrollablePage {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         opacity: 0.7
+                        textFormat: Text.PlainText
                         text: app.t("{name} switches to Linksy as soon as it's plugged in, without asking. Off: only when you press Connect.", { name: page.phone?.name ?? "" })
                     }
                 }

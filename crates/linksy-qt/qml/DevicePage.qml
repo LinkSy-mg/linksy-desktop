@@ -96,6 +96,7 @@ Kirigami.ScrollablePage {
                 Kirigami.Heading {
                     level: 1
                     text: page.name
+                    textFormat: Text.PlainText
                 }
                 QQC2.Label {
                     Layout.fillWidth: true
@@ -189,6 +190,7 @@ Kirigami.ScrollablePage {
             visible: useAs.visible
             Kirigami.Heading {
                 level: 3
+                textFormat: Text.PlainText
                 text: app.t("Use {device} as", { device: page.name })
             }
             // Faster by cable, for a phone not on one yet
@@ -255,6 +257,7 @@ Kirigami.ScrollablePage {
                 wrapMode: Text.Wrap
                 opacity: 0.7
                 font: Kirigami.Theme.smallFont
+                textFormat: Text.PlainText
                 text: app.t("Lock this computer when {device} leaves. It never unlocks it.", { device: page.name })
             }
             QQC2.Switch {
@@ -276,6 +279,7 @@ Kirigami.ScrollablePage {
                 wrapMode: Text.Wrap
                 opacity: 0.7
                 font: Kirigami.Theme.smallFont
+                textFormat: Text.PlainText
                 text: app.t("{device} can see and control this screen without asking, on the same network or by cable. Linksy still tells you when it starts.", { device: page.name })
             }
             QQC2.Switch {
@@ -298,6 +302,7 @@ Kirigami.ScrollablePage {
                 wrapMode: Text.Wrap
                 opacity: 0.7
                 font: Kirigami.Theme.smallFont
+                textFormat: Text.PlainText
                 text: app.terminal.code_set ? app.t("Let {name} open a shell on this computer after typing the terminal code. It runs as you.", { name: page.name })
                                             : app.t("Not set: no phone can open a terminal")
             }
