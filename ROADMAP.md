@@ -18,7 +18,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.9 | Works on every desktop | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Private discovery · One Accept for a batch (desktop done in 0.9.0; screen control on Hyprland and Sway moves to 0.10) |
 | **0.10** | **Lighter and smoother** | Lighter at rest · Transfers in a corner panel · Choose which monitor to view · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
 | **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply |
-| **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
+| **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
 | **0.13** | **The cable, for real** | USB that works on every phone, end to end |
 | **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (your own relay done in desktop 0.8.4 and Android 0.2.3) |
 | **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth |
@@ -224,6 +224,16 @@ Today screens run at up to 30 fps (the webcam already does 60).
 - **Falls back:** to 30 fps on a slow link or device, on its own.
 - **Done when:** scrolling a page on the computer is smooth on the phone, at 60 fps, on
   the local network.
+
+### Wi-Fi Direct at full speed on any router — M
+A direct link ran at about 79 MB/s when the phone picked the channel the computer's Wi-Fi
+was on, and about 17 MB/s when it picked another (5220 MHz against 5240): the computer's
+one Wi-Fi chip keeps hopping between the two.
+- **Desktop:** say which channel its Wi-Fi is on when it asks for a link.
+- **Phone:** create the group on that channel (`setGroupOperatingFrequency`) and let the
+  computer join it, instead of choosing during negotiation. First check that
+  NetworkManager can join a group that already exists.
+- **Done when:** a big transfer runs at full speed whatever channel the router uses.
 
 ### Transfers with no shared network — M
 No Wi-Fi network around, or one that blocks devices from seeing each other (hotels,
