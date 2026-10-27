@@ -6,3 +6,7 @@ if [ "$1" = remove ] && command -v systemctl >/dev/null; then
   systemctl disable linksy-camera.service >/dev/null 2>&1 || true
   rm -f /etc/systemd/system/linksy-camera.service
 fi
+# Its files without systemd (desktop#54)
+if [ "$1" = remove ]; then
+  rm -f /etc/modules-load.d/linksy-camera.conf /etc/modprobe.d/linksy-camera.conf
+fi

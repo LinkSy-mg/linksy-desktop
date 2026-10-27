@@ -25,6 +25,13 @@ if ! command -v v4l2loopback-ctl >/dev/null; then
 fi
 
 # At every boot first: when the driver waits for a restart, the camera is there after it.
+# Without systemd (Artix, Void, Gentoo: desktop#54), the init loads the drivers listed in
+# modules-load.d, and these options make the driver bring our camera as it loads.
+if [ ! -d /run/systemd/system ]; then
+  mkdir -p /etc/modules-load.d /etc/modprobe.d
+  echo v4l2loopback > /etc/modules-load.d/linksy-camera.conf
+  echo 'options v4l2loopback devices=1 card_label="Linksy Camera" exclusive_caps=1 max_width=1920 max_height=1920' > /etc/modprobe.d/linksy-camera.conf
+else
 cat > /etc/systemd/system/linksy-camera.service <<'EOF'
 [Unit]
 Description=Linksy Camera (a phone's camera as a webcam in every app)
@@ -40,6 +47,7 @@ WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
 systemctl enable linksy-camera.service >/dev/null 2>&1
+fi
 
 # Secure Boot refuses a driver built here until its key is approved, once, in the blue
 # screen at the next restart (MOK). Ask for that with a short code to type there.

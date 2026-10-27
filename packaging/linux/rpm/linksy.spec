@@ -108,7 +108,7 @@ if [ $1 -eq 0 ]; then
   systemctl --global disable linksyd.service >/dev/null 2>&1 || :
   # The camera device Finish Setup made, if it did
   systemctl disable linksy-camera.service >/dev/null 2>&1 || :
-  rm -f /etc/systemd/system/linksy-camera.service
+  rm -f /etc/systemd/system/linksy-camera.service /etc/modules-load.d/linksy-camera.conf /etc/modprobe.d/linksy-camera.conf
 fi
 
 %files
