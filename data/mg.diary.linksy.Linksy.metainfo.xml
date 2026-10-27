@@ -74,7 +74,7 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
-    <release version="0.9.12" date="2026-10-26">
+    <release version="0.9.12" date="2026-10-27">
       <description>
         <p>Taps on a scaled KDE second display land where you tap, the cursor shows at once after a tap on a still screen, and Linksy reconnects far sooner after a network switch. The service uses about a quarter less memory at rest, and less still until a device can reach it from away or after big transfers.</p>
       </description>
