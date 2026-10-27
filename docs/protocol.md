@@ -154,10 +154,15 @@ details can be checked.
 - The UDP socket asks the kernel for 8 MiB send and receive buffers (core 0.9.9; Linux
   gives about 200 KiB by default and caps the request at `net.core.rmem_max`). A burst at
   Wi-Fi speed overflows a small buffer, and QUIC reads the drops as congestion.
-- **Pairing code:** TLS exporter (RFC 8446 §7.5) with label `linksy pairing code v1`,
-  empty context, 8 bytes output. Interpret as a big-endian `u64`, take `% 1_000_000`,
-  format as 6 digits with leading zeros. Both ends of the same TLS session get the same
-  code; a man in the middle cannot make both screens match. Display as `123 456`.
+- **Pairing code (core 0.9.14):** TLS exporter (RFC 8446 §7.5) with label
+  `linksy pairing code v2`, context = dialer's nonce ‖ listener's nonce (32 bytes each,
+  §4.4), 8 bytes output. Interpret as a big-endian `u64`, take `% 1_000_000`, format as
+  6 digits with leading zeros. Display as `123 456`.
+- **Older devices** (no `pairing` in their `hello`/`welcome`) still pair: same code but
+  label `linksy pairing code v1` and an empty context. A man in the middle can steer
+  that one to match (it plays TLS server and retries its handshake until both codes
+  agree, about a million tries), so `pairing_request` then carries `"older":true` and
+  the apps add a calm line: "Updating Linksy on {name} makes pairing even safer."
 
 ### 4.4 Framing and handshake — `src/protocol.rs`, `src/node.rs`
 
@@ -196,8 +201,25 @@ The dialer checks `welcome.device.id` equals the listener's certificate fingerpr
 For `intent: connect`, a dialer also refuses (closes) if the peer isn't in its trust
 list.
 
-**Pairing** (after `welcome`, on the same stream): both sides compute the code, show it,
-and ask their user. Each side sends its decision once:
+Both `hello` and `welcome` carry `"pairing":2` (core 0.9.14). Older versions leave it
+out.
+
+**Commit and reveal** (after `welcome`, on the same stream, only when both sent
+`"pairing":2`; QR pairing does it too). Each side makes a 32-byte random nonce:
+
+```json
+{"type":"pair_commit","commit":"<64 hex: SHA-256 of the listener's nonce>"}  // listener
+{"type":"pair_nonce","nonce":"<64 hex>"}                                      // dialer
+{"type":"pair_nonce","nonce":"<64 hex>"}                                      // listener
+```
+
+The dialer checks the listener's nonce against the commitment and drops the connection
+if it doesn't match. Neither side picks its nonce after seeing the other's, so a man in
+the middle gets one chance in a million per attempt, and every attempt either shows on
+a screen or needs a user to start pairing again.
+
+**Pairing:** both sides compute the code (§4.3), show it, and ask their user. Each side
+sends its decision once:
 
 ```json
 {"type":"pair_decision","accept":true}
@@ -1345,7 +1367,7 @@ node.request_session(id, kind) -> Session   node.incoming_sessions()    // scree
 
 Events (JSON-serializable, same shapes as the desktop IPC):
 `device_found`, `device_lost`, `device_updated`, `connected`, `disconnected`,
-`pairing_request {request, device, code, incoming}`, `paired`, `pairing_failed`,
+`pairing_request {request, device, code, incoming, older?}`, `paired`, `pairing_failed`,
 `transfer_request {transfer, from, files, total}`, `transfer_started`,
 `transfer_progress {transfer, bytes, total}`, `transfer_complete {transfer, saved}`,
 `transfer_failed {transfer, reason}`, `settings_changed`, `notification`, `clipboard`.
