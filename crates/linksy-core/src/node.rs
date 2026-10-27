@@ -1425,6 +1425,7 @@ impl Node {
         let trusted = self.inner.trust.lock().unwrap().contains(&fp);
         match intent {
             Intent::Connect if trusted => {
+                self.clear_stale(&fp, &conn).await;
                 write_msg(&mut send, &self.welcome()).await?;
                 self.register(conn, device, fp, peer_stays);
             }
@@ -1484,6 +1485,7 @@ impl Node {
         if intent == Intent::Direct {
             self.add_lane(conn, device.clone());
         } else {
+            self.clear_stale(&fp, &conn).await;
             self.register(conn, device.clone(), self.inner.id, peer_stays);
         }
         Ok(device)
@@ -1583,6 +1585,18 @@ impl Node {
 
     fn stays(&self) -> bool {
         self.inner.settings.lock().unwrap().stay_connected
+    }
+
+    /// A new connection that isn't on a better link than the registered one (away while
+    /// the network one is up) can be refused as a duplicate, unless the old one is gone: a
+    /// device that changed networks can't say goodbye on the one it left, so it's checked.
+    async fn clear_stale(&self, id: &Fingerprint, new: &quinn::Connection) {
+        let old = self.inner.peers.lock().unwrap().get(id).map(|p| p.conn.clone());
+        let Some(old) = old.filter(|o| o.stable_id() != new.stable_id() && o.close_reason().is_none() && link_of(o.remote_address()) >= link_of(new.remote_address())) else { return };
+        if !alive(&old).await {
+            debug!("{}'s old link is gone", id.short());
+            old.close(0u32.into(), b"gone");
+        }
     }
 
     /// The networks this device is on changed (the service or the app saw it). Links that
