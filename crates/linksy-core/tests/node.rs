@@ -1250,6 +1250,45 @@ async fn away_waits_for_a_device_that_can_use_it() {
     assert!(a.node.devices().into_iter().find(|d| d.device.id == idb).unwrap().away_until.is_some());
 }
 
+/// A device that left the network can't say goodbye. After a network change its link is
+/// checked and closed within seconds instead of after the 30 s timeout. Beta's runtime is
+/// frozen to play the device that left.
+#[test]
+fn network_change_closes_links_that_stopped_answering() {
+    let runtime = |name| tokio::runtime::Builder::new_multi_thread().worker_threads(1).thread_name(name).enable_all().build().unwrap();
+    let (ra, rb) = (runtime("alpha"), runtime("beta"));
+    let b = rb.block_on(async {
+        let b = dev_with("Beta", |c| c.stay_connected = true).await;
+        auto_answer(&b.node, true);
+        b
+    });
+    let addr = b.node.local_addr().unwrap();
+    ra.block_on(async {
+        let a = dev_with("Alpha", |c| c.stay_connected = true).await;
+        auto_answer(&a.node, true);
+        a.node.pair(addr).await.unwrap();
+        let idb = b.node.info().id;
+
+        // Answering: kept
+        let mut events = a.node.subscribe();
+        a.node.network_changed();
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert!(a.node.devices().iter().any(|d| d.device.id == idb && d.connected));
+        assert!(!std::iter::from_fn(|| events.try_recv().ok()).any(|e| matches!(e, Event::Disconnected { .. })));
+
+        // Gone: closed
+        rb.spawn(async { std::thread::sleep(Duration::from_secs(8)) });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let started = std::time::Instant::now();
+        a.node.network_changed();
+        wait_for(&mut events, |e| matches!(e, Event::Disconnected { id } if *id == idb).then_some(())).await;
+        assert!(started.elapsed() < Duration::from_secs(5), "took {:?}", started.elapsed());
+        drop(a);
+    });
+    rb.shutdown_background();
+    ra.shutdown_background();
+}
+
 #[tokio::test]
 async fn not_reachable_from_away_without_its_address() {
     // Away from home off on both: neither learns the other's away address.

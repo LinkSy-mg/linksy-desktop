@@ -70,6 +70,9 @@ const DIRECT_RETRY: Duration = Duration::from_secs(600);
 /// up once no one could.
 const AWAY_CHECK: Duration = Duration::from_secs(60);
 const AWAY_REST: Duration = Duration::from_secs(120);
+/// A link that doesn't acknowledge a message this long after a network change is gone.
+/// Phones in Wi-Fi power saving answer in well under a second.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -1582,6 +1585,45 @@ impl Node {
         self.inner.settings.lock().unwrap().stay_connected
     }
 
+    /// The networks this device is on changed (the service or the app saw it). Links that
+    /// no longer answer close at once rather than after their 30 s timeout (away ones are
+    /// iroh's to move), devices that stay connected are dialed again (away from home when
+    /// the network can't reach them), and iroh looks for its paths again.
+    pub fn network_changed(&self) {
+        let node = self.clone();
+        tokio::spawn(async move {
+            let away = node.inner.away.lock().unwrap().clone();
+            if let Some(away) = away {
+                away.network_change().await;
+            }
+            let links: Vec<(Fingerprint, quinn::Connection, bool)> = node
+                .inner
+                .peers
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(_, p)| link_of(p.conn.remote_address()) != Link::Away)
+                .map(|(id, p)| (*id, p.conn.clone(), p.peer_stays))
+                .collect();
+            for (id, conn, peer_stays) in links {
+                let node = node.clone();
+                tokio::spawn(async move {
+                    if alive(&conn).await {
+                        return;
+                    }
+                    debug!("link to {} is gone with the network", id.short());
+                    conn.close(0u32.into(), b"gone");
+                    if node.stays() || peer_stays {
+                        let _ = node.ensure_connection(&id).await;
+                    }
+                });
+            }
+            if node.stays() {
+                node.reconnect_all();
+            }
+        });
+    }
+
     fn register(&self, conn: quinn::Connection, device: DeviceInfo, dialer: Fingerprint, peer_stays: bool) {
         let id = device.id;
         {
@@ -2508,6 +2550,19 @@ impl Node {
         self.peer_info(id).ok_or(Error::Unreachable)
     }
 }
+
+/// Whether a connection still reaches the other side: it acknowledges a message that does
+/// nothing within [`PROBE_TIMEOUT`].
+async fn alive(conn: &quinn::Connection) -> bool {
+    let probe = async {
+        let mut send = conn.open_uni().await.ok()?;
+        write_msg(&mut send, &Message::Ping).await.ok()?;
+        send.finish().ok()?;
+        send.stopped().await.ok()
+    };
+    matches!(tokio::time::timeout(PROBE_TIMEOUT, probe).await, Ok(Some(_)))
+}
+
 
 /// An `http(s)` link with something after the scheme, no longer than [`MAX_URL`]: the only
 /// kind a device may ask another to open.

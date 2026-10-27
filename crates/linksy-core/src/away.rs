@@ -93,6 +93,12 @@ impl Away {
         Ok(AwayAddr { id: key.public().to_string(), relay: Some(relay.to_string()), addrs: Vec::new() })
     }
 
+    /// The networks changed: iroh looks for its paths and its relay again (it can't see
+    /// that by itself on Android).
+    pub async fn network_change(&self) {
+        self.endpoint.network_change().await;
+    }
+
     /// Whether it runs on `relay`.
     pub fn uses(&self, relay: Option<&str>) -> bool {
         self.relay == relay.and_then(|r| RelayUrl::from_str(r).ok())
