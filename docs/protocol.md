@@ -154,7 +154,7 @@ details can be checked.
 - The UDP socket asks the kernel for 8 MiB send and receive buffers (core 0.9.9; Linux
   gives about 200 KiB by default and caps the request at `net.core.rmem_max`). A burst at
   Wi-Fi speed overflows a small buffer, and QUIC reads the drops as congestion.
-- **Pairing code (core 0.9.14):** TLS exporter (RFC 8446 §7.5) with label
+- **Pairing code (core 0.9.13):** TLS exporter (RFC 8446 §7.5) with label
   `linksy pairing code v2`, context = dialer's nonce ‖ listener's nonce (32 bytes each,
   §4.4), 8 bytes output. Interpret as a big-endian `u64`, take `% 1_000_000`, format as
   6 digits with leading zeros. Display as `123 456`.
@@ -201,7 +201,7 @@ The dialer checks `welcome.device.id` equals the listener's certificate fingerpr
 For `intent: connect`, a dialer also refuses (closes) if the peer isn't in its trust
 list.
 
-Both `hello` and `welcome` carry `"pairing":2` (core 0.9.14). Older versions leave it
+Both `hello` and `welcome` carry `"pairing":2` (core 0.9.13). Older versions leave it
 out.
 
 **Commit and reveal** (after `welcome`, on the same stream, only when both sent
