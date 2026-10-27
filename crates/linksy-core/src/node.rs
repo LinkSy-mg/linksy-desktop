@@ -73,6 +73,9 @@ const AWAY_REST: Duration = Duration::from_secs(120);
 /// A link that doesn't acknowledge a message this long after a network change is gone.
 /// Phones in Wi-Fi power saving answer in well under a second.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Dialing a device seen on the network, away from home starts only this long after the
+/// network did, which answers in milliseconds when it's there.
+const AWAY_HEAD_START: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -1288,19 +1291,19 @@ impl Node {
         if let Some(live) = self.live(id) {
             return Ok(live);
         }
+        let nearby = self.inner.nearby.lock().unwrap().contains_key(id);
         let mut addrs = self.nearby_addrs(id);
         addrs.extend(last_addr.filter(|a| !addrs.contains(a) && link_of(*a) != Link::Away));
-        match self.race_connect(&addrs, id).await {
-            Ok(conn) => {
-                tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Connect, None)).await.map_err(|_| Error::Timeout)??;
+        // The network and away from home race. Away waits a moment for a device seen here,
+        // and not at all for one that isn't: its last address may be on a network it left.
+        let away = async {
+            if nearby {
+                tokio::time::sleep(AWAY_HEAD_START).await;
             }
-            // Not on this network: away from home, when it's on and allowed.
-            Err(e) => {
-                if self.connect_away(id).await.is_err() {
-                    return Err(e);
-                }
-            }
-        }
+            self.away_connection(id).await
+        };
+        let conn = first_ok(self.race_connect(&addrs, id), away).await?;
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Connect, None)).await.map_err(|_| Error::Timeout)??;
         self.live(id).ok_or(Error::Unreachable)
     }
 
@@ -2543,9 +2546,16 @@ impl Node {
     }
 
     /// Connect to a paired device away from home: through iroh, then Linksy's own
-    /// handshake with the pinned key. For [`Node::ensure_connection`] when the network
-    /// doesn't answer; public for tests.
+    /// handshake with the pinned key. [`Node::ensure_connection`] races it with the
+    /// network; public for tests.
     pub async fn connect_away(&self, id: &Fingerprint) -> Result<DeviceInfo> {
+        let conn = self.away_connection(id).await?;
+        tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Connect, None)).await.map_err(|_| Error::Timeout)??;
+        self.peer_info(id).ok_or(Error::Unreachable)
+    }
+
+    /// A connection to a paired device through iroh, ready for the handshake.
+    async fn away_connection(&self, id: &Fingerprint) -> Result<quinn::Connection> {
         let away = self.inner.away.lock().unwrap().clone().ok_or(Error::Unreachable)?;
         if !self.settings().away {
             return Err(Error::Unreachable);
@@ -2559,9 +2569,7 @@ impl Node {
             t.device.away.clone().ok_or(Error::Unreachable)?
         };
         let local = away.dial(&to).await?;
-        let conn = self.race_connect(&[local], id).await?;
-        tokio::time::timeout(HANDSHAKE_TIMEOUT, self.handshake(conn, Intent::Connect, None)).await.map_err(|_| Error::Timeout)??;
-        self.peer_info(id).ok_or(Error::Unreachable)
+        self.race_connect(&[local], id).await
     }
 }
 
@@ -2577,6 +2585,24 @@ async fn alive(conn: &quinn::Connection) -> bool {
     matches!(tokio::time::timeout(PROBE_TIMEOUT, probe).await, Ok(Some(_)))
 }
 
+/// The first of two attempts to succeed, else the first one's error.
+async fn first_ok<T>(a: impl Future<Output = Result<T>>, b: impl Future<Output = Result<T>>) -> Result<T> {
+    tokio::pin!(a, b);
+    let (mut a_done, mut b_done, mut error) = (false, false, None);
+    while !(a_done && b_done) {
+        tokio::select! {
+            r = &mut a, if !a_done => match r {
+                Ok(v) => return Ok(v),
+                Err(e) => (a_done, error) = (true, Some(e)),
+            },
+            r = &mut b, if !b_done => match r {
+                Ok(v) => return Ok(v),
+                Err(_) => b_done = true,
+            },
+        }
+    }
+    Err(error.unwrap_or(Error::Unreachable))
+}
 
 /// An `http(s)` link with something after the scheme, no longer than [`MAX_URL`]: the only
 /// kind a device may ask another to open.
@@ -2638,5 +2664,20 @@ mod tests {
         assert!(!worth_direct(Link::Lan, min - 1, min));
         assert!(worth_direct(Link::Away, min / 8, min));
         assert!(!worth_direct(Link::Usb, u64::MAX, min));
+    }
+
+    #[tokio::test]
+    async fn first_to_succeed_wins_without_waiting_for_the_other() {
+        let slow = async {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            Ok(1)
+        };
+        let fails = async { Err::<i32, _>(Error::Timeout) };
+        let quick = async { Ok(2) };
+        assert_eq!(tokio::time::timeout(Duration::from_secs(1), first_ok(fails, quick)).await.unwrap().unwrap(), 2);
+        let fails = async { Err::<i32, _>(Error::Timeout) };
+        assert!(tokio::time::timeout(Duration::from_secs(1), first_ok(slow, fails)).await.is_err());
+        let both = first_ok(async { Err::<i32, _>(Error::Timeout) }, async { Err(Error::NotPaired) }).await;
+        assert!(matches!(both, Err(Error::Timeout)));
     }
 }

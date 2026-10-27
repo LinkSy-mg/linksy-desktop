@@ -36,6 +36,9 @@ pub const AWAY_IP: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 2);
 /// Largest packet the bridge carries: QUIC's are far smaller.
 const MAX_PACKET: usize = 65_535;
 const DIAL_TIMEOUT: Duration = Duration::from_secs(15);
+/// A bridge the node sent nothing through this long is over: Linksy's connections send a
+/// keepalive every 10 s, and one that lost a race to the network never got going.
+const BRIDGE_IDLE: Duration = Duration::from_secs(60);
 
 /// How to reach a device away from home: its iroh id, its relay and the addresses it has
 /// (sent in the handshake, so only to devices it's connected to).
@@ -182,7 +185,7 @@ async fn carry(mut rx: RecvStream, mut tx: SendStream, udp: UdpSocket, node: Opt
     }
     let up = async {
         let mut buf = vec![0u8; MAX_PACKET];
-        while let Ok((len, from)) = udp.recv_from(&mut buf).await {
+        while let Ok(Ok((len, from))) = tokio::time::timeout(BRIDGE_IDLE, udp.recv_from(&mut buf)).await {
             let _ = learned.set(from);
             if tx.write_u16(len as u16).await.is_err() || tx.write_all(&buf[..len]).await.is_err() {
                 break;
