@@ -76,7 +76,7 @@
   <releases>
     <release version="0.9.13" date="2026-10-27">
       <description>
-        <p>Linux without systemd (Artix, Void, Gentoo): Linksy Camera stays after a restart, Finish Setup gives tiling compositors the line that starts Linksy at login, and Restart Now works.</p>
+        <p>Safer pairing codes: someone on the same network can no longer steer both screens to the same code. Linux without systemd (Artix, Void, Gentoo): Linksy Camera stays after a restart, Finish Setup gives tiling compositors the line that starts Linksy at login, and Restart Now works.</p>
       </description>
     </release>
     <release version="0.9.12" date="2026-10-27">

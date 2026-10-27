@@ -4,6 +4,13 @@ Linksy for Linux. Each version's section becomes its release notes.
 
 ## 0.9.13
 
+### Security
+- **Safer pairing codes.** Someone on the same network at the moment you pair could have
+  made both screens show the same 6-digit code. Devices now each lock in a random number
+  before seeing the other's, so the codes can't be steered. Devices on older versions
+  still pair as before, with a note suggesting an update. Devices already paired and QR
+  code pairing were never affected.
+
 ### Fixed
 - **Linksy Camera stays after a restart without systemd** (Artix, Void, Gentoo). Finish
   Setup had it come back at boot through a systemd service only; on other systems the
