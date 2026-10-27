@@ -38,7 +38,7 @@ pub enum Need {
     Manual(&'static str),
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Family {
     Fedora,
     Debian,
@@ -51,7 +51,13 @@ enum Family {
 fn family() -> Family {
     // Inside a Flatpak, the host's release file is under /run/host.
     let text = std::fs::read_to_string("/run/host/os-release").or_else(|_| std::fs::read_to_string("/etc/os-release")).unwrap_or_default();
-    let ids: Vec<&str> = text
+    family_of(&text, in_path)
+}
+
+/// From os-release, else from the package tool, as linksy-system-setup picks it: Artix
+/// doesn't say it's Arch (desktop#54).
+fn family_of(os_release: &str, has: impl Fn(&str) -> bool) -> Family {
+    let ids: Vec<&str> = os_release
         .lines()
         .filter_map(|l| l.strip_prefix("ID=").or_else(|| l.strip_prefix("ID_LIKE=")))
         .flat_map(|v| v.trim_matches('"').split_whitespace())
@@ -60,10 +66,18 @@ fn family() -> Family {
         Family::Fedora
     } else if ids.iter().any(|i| matches!(*i, "debian" | "ubuntu")) {
         Family::Debian
-    } else if ids.contains(&"arch") {
+    } else if ids.iter().any(|i| matches!(*i, "arch" | "artix")) {
         Family::Arch
     } else if ids.iter().any(|i| i.starts_with("opensuse") || matches!(*i, "suse" | "sles")) {
         Family::Suse
+    } else if has("dnf") {
+        Family::Fedora
+    } else if has("apt-get") {
+        Family::Debian
+    } else if has("zypper") {
+        Family::Suse
+    } else if has("pacman") {
+        Family::Arch
     } else {
         Family::Other
     }
@@ -763,6 +777,17 @@ pub fn offer_now(ui: Ui, version: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn distributions_that_hide_their_base_go_by_their_package_tool() {
+        let artix = "NAME=\"Artix Linux\"\nPRETTY_NAME=\"Artix Linux\"\nID=\"artix\"\nBUILD_ID=\"rolling\"\n";
+        assert_eq!(family_of(artix, |_| false), Family::Arch);
+        assert_eq!(family_of("ID=newdistro\n", |c| c == "pacman"), Family::Arch);
+        assert_eq!(family_of("ID=newdistro\n", |c| c == "zypper"), Family::Suse);
+        assert_eq!(family_of("ID=newdistro\n", |_| false), Family::Other);
+        assert_eq!(family_of("ID=ubuntu\nID_LIKE=debian\n", |c| c == "pacman"), Family::Debian);
+        assert_eq!(family_of("ID=\"opensuse-tumbleweed\"\nID_LIKE=\"opensuse suse\"\n", |_| false), Family::Suse);
+    }
 
     #[test]
     fn arch_headers_without_pkgbase_follow_the_name() {
