@@ -45,7 +45,8 @@ package_linksy-common() {
               'gst-plugins-ugly: H.264 encoding with x264'
               'wl-clipboard: shared clipboard while the window is not focused'
               'v4l2loopback-dkms: the phone as a webcam in every app'
-              'v4l2loopback-utils: the phone as a webcam in every app')
+              'v4l2loopback-utils: the phone as a webcam in every app'
+              'mokutil: the webcam driver with Secure Boot on')
   # Before 0.8.4, one linksy package held everything
   conflicts=('linksy<0.8.4')
   cd linksy-desktop
