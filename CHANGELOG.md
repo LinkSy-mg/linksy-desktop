@@ -8,6 +8,11 @@ Linksy for Linux. Each version's section becomes its release notes.
 - **Linksy Camera stays after a restart without systemd** (Artix, Void, Gentoo). Finish
   Setup had it come back at boot through a systemd service only; on other systems the
   driver now brings it as it loads.
+- **Finish Setup helps tiling compositors without systemd too.** On Hyprland, Sway, niri
+  or river without systemd, it now gives the line that starts Linksy at login, instead of
+  saying nothing. Desktops keep starting it on their own.
+- **Restart Now works without systemd**, through elogind, for the camera driver's approval
+  after Secure Boot.
 
 ## 0.9.12
 
