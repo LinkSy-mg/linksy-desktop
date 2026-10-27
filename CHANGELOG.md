@@ -18,6 +18,9 @@ Linksy for Linux. Each version's section becomes its release notes.
   right away rather than after its old addresses fail, and one that comes back away is no
   longer refused while its old link lingers. Phones get the same with the Linksy for
   Android update that reports network changes.
+- **Linksy Camera stays after a restart without systemd** (Artix, Void, Gentoo). Finish
+  Setup had it come back at boot through a systemd service only; on other systems the
+  driver now brings it as it loads.
 
 ### Changed
 - **The service uses about a quarter less memory at rest** (24 MB to 18 MB here): it gives
