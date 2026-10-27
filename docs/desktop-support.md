@@ -45,8 +45,10 @@ virtual input protocols, Linksy's own notifications, and the in-app file browser
 
 ### Distributions without systemd (Void, Artix, Gentoo with OpenRC)
 
-The service starts through a systemd user unit, so it doesn't start on its own. Lock When
-Away needs `elogind`.
+Desktops start the service at login from its XDG autostart entry; on a tiling compositor,
+Finish Setup gives the line for its config. Linksy Camera comes back at boot through
+`modules-load.d` instead of a systemd service (0.9.13), and Restart Now uses `loginctl`.
+Lock When Away needs `elogind`.
 
 ### Known bug
 
