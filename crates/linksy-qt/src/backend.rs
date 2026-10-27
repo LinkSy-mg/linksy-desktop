@@ -527,7 +527,8 @@ impl qobject::Backend {
     }
 
     pub fn reboot(&self) {
-        let _ = std::process::Command::new("systemctl").arg("reboot").spawn();
+        // elogind's where there's no systemd (Artix, Void)
+        let _ = std::process::Command::new("sh").args(["-c", "if [ -d /run/systemd/system ]; then systemctl reboot; else loginctl reboot; fi"]).spawn();
     }
 
     pub fn qr_code(&self, text: &QString) -> QString {
