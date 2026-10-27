@@ -881,6 +881,22 @@ carries its packets, like the USB cable (§4.11).
   a device, and stops two minutes after there's none (forgotten, or the week over).
   Without a relay it always runs. `node.away_running()` says which. Nothing to do on the
   phone beyond taking the new core.
+- **Switching networks (desktop 0.9.12).** A device that leaves a network can't say
+  goodbye on it, so its old link used to linger until the 30 s idle timeout, and the
+  other side refused its away connection as a duplicate meanwhile. Now:
+  - **`node.network_changed()`**: call it whenever the device's networks change. It checks
+    every link that isn't away (a `ping` it must acknowledge within 2 s), closes the
+    ones that don't answer, dials again those that stay connected (either side's
+    `stay_connected`), and tells iroh (`Endpoint::network_change`, which Android can't
+    do by itself). The computer calls it on its own address changes (rtnetlink).
+    **Phone to-do:** call it from a `ConnectivityManager.NetworkCallback`
+    (`onAvailable`, `onLost`, `onLinkPropertiesChanged`), at most about once a second.
+  - **Before refusing a duplicate**, a node checks that the old link still answers
+    (same 2 s check), so the device that moved gets in at once.
+  - **Dialing races the network and away**: away starts at once for a device not seen on
+    the network, and after 1 s for one that is; the first to connect wins, and the network
+    still replaces away once found.
+  - `ping` is how links are checked: keep ignoring it quietly.
 - **Links.** Away connections come from `127.0.0.2` (the bridge), USB from other loopback
   addresses, the network from anywhere else: `link_of(addr)` / `node.link(id)` →
   `Link::{Usb, Lan, Away}`. A better link replaces a worse one to the same device (both
