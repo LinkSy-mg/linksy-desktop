@@ -363,16 +363,16 @@ impl Sessions {
         Ok(path)
     }
 
-    /// Another device started showing its screen here (a second display): keep the stream
-    /// for the app, opening the app if needed.
-    fn show(&self, session: Session) -> std::io::Result<()> {
+    /// A screen to show here (another device's second display, or one the tray asked to
+    /// see): keep the stream for the app, opening the app if needed.
+    pub(crate) fn show(&self, session: Session) -> std::io::Result<()> {
         let path = socket_path("view", session.id);
         let listener = bind(&path)?;
         self.pending.lock().unwrap().insert(
             session.id,
             PendingSession { session: session.id, peer: session.peer.clone(), kind: session.kind, socket: path.clone() },
         );
-        info!("showing {}'s second display", session.peer.name);
+        info!("showing {}'s {}", session.peer.name, if session.kind == SessionKind::Display { "second display" } else { "screen" });
         self.relay_when_joined(session, listener, path);
         // A running app opens the viewer on the session event; one that isn't running
         // finds the session when it starts.

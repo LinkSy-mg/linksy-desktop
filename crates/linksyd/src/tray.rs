@@ -18,11 +18,15 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
+use crate::clipboard::Copied;
 use crate::history::History;
 use crate::lock::Away;
 use crate::mirror::Mirror;
 use crate::photos::Photos;
 use crate::sessions::Sessions;
+
+/// Bigger copied files go as a transfer, as in the apps.
+const MAX_CLIPBOARD_FILE: u64 = 10 << 20;
 
 /// What the service needs to act on the menu: the same calls the apps make.
 #[derive(Clone)]
@@ -61,9 +65,8 @@ impl PartialEq for Shown {
 enum Action {
     Open,
     SendFiles(DeviceInfo),
-    Ring(DeviceInfo),
-    Ping(DeviceInfo),
-    Locate(DeviceInfo),
+    SendClipboard(DeviceInfo),
+    ViewScreen(DeviceInfo),
     Browse(DeviceInfo),
     Start(DeviceInfo, SessionKind),
     Stop(Uuid),
@@ -138,15 +141,20 @@ async fn act(service: &Service, action: Action) {
             Some(paths) if !paths.is_empty() => (Some(d.name), service.ask(Request::Send { to: d.id.to_string(), paths }).await),
             _ => return,
         },
-        Action::Ring(d) => (Some(d.name), service.ask(Request::Ring { to: d.id.to_string(), on: true }).await),
-        Action::Ping(d) => (Some(d.name), service.ask(Request::Notify { to: d.id.to_string(), title: "Ping".into(), body: String::new() }).await),
-        Action::Locate(d) => {
-            let found = service.ask(Request::Locate { device: d.id.to_string() }).await;
-            if let Ok(at) = &found {
-                let (lat, lon) = (at["lat"].as_f64().unwrap_or(0.0), at["lon"].as_f64().unwrap_or(0.0));
-                open(&format!("https://www.openstreetmap.org/?mlat={lat:.5}&mlon={lon:.5}#map=17/{lat:.5}/{lon:.5}"));
+        Action::SendClipboard(d) => {
+            let sent = send_clipboard(service, &d).await;
+            if sent.is_ok() {
+                crate::notify::show(d.name.clone(), t!("Clipboard sent to {name}", name = d.name));
             }
-            (Some(d.name), found)
+            (Some(d.name), sent)
+        }
+        // The window opens once the device says yes, as for a second display
+        Action::ViewScreen(d) => {
+            let shown = match service.node.request_session(&d.id, SessionKind::Screen).await {
+                Ok(session) => service.sessions.show(session).map(|()| Value::Null).map_err(|e| e.to_string()),
+                Err(e) => Err(e.to_string()),
+            };
+            (Some(d.name), shown)
         }
         Action::Browse(d) => {
             let found = service.ask(Request::BrowseFiles { phone: d.id.to_string() }).await;
@@ -161,6 +169,35 @@ async fn act(service: &Service, action: Action) {
     // Nowhere else to say it went wrong: a notification
     if let Err(e) = result {
         crate::notify::show(who.unwrap_or_else(|| "Linksy".into()), e);
+    }
+}
+
+/// As the app's Send Clipboard: one small copied file or an image onto the device's
+/// clipboard, more files as a transfer, else the text.
+async fn send_clipboard(service: &Service, d: &DeviceInfo) -> Result<Value, String> {
+    let to = d.id.to_string();
+    let copied = tokio::task::spawn_blocking(crate::clipboard::read_local).await.ok().flatten();
+    match copied {
+        Some(Copied::Text(text)) => service.ask(Request::Clipboard { to, text }).await,
+        Some(Copied::Files(paths)) => {
+            let small = paths.len() == 1 && std::fs::metadata(&paths[0]).is_ok_and(|m| m.is_file() && m.len() <= MAX_CLIPBOARD_FILE);
+            if small && can(d, "clipboard_file") {
+                service.ask(Request::ClipboardFile { to, path: paths.into_iter().next().unwrap() }).await
+            } else {
+                service.ask(Request::Send { to, paths }).await
+            }
+        }
+        Some(Copied::Png(png)) => {
+            if !can(d, "clipboard_file") {
+                return Err(t!("{name} can't take images on its clipboard yet", name = d.name));
+            }
+            let cache = std::env::var_os("XDG_CACHE_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache")));
+            let path = cache.ok_or_else(|| t!("Couldn't read the image on the clipboard").to_string())?.join("linksy").join("Clipboard image.png");
+            std::fs::create_dir_all(path.parent().unwrap()).and_then(|()| std::fs::write(&path, png)).map_err(|_| t!("Couldn't read the image on the clipboard").to_string())?;
+            service.ask(Request::ClipboardFile { to, path }).await
+        }
+        None if !crate::clipboard::can_paste() => Err(t!("Install wl-clipboard.").to_string()),
+        None => Err(t!("There's nothing to send on the clipboard").to_string()),
     }
 }
 
@@ -276,14 +313,8 @@ impl ksni::Tray for Tray {
                 move || f(info.clone())
             };
             sub.push(item(t!("Send Files").to_string(), "document-send-symbolic", on, with(Action::SendFiles)));
-            if phone && can(info, "ring") {
-                sub.push(item(t!("Ring").to_string(), "audio-volume-high-symbolic", on, with(Action::Ring)));
-            } else {
-                sub.push(item(t!("Ping").to_string(), "preferences-system-notifications-symbolic", on, with(Action::Ping)));
-            }
-            if phone && can(info, "locate") {
-                sub.push(item(t!("Locate").to_string(), "find-location-symbolic", on, with(Action::Locate)));
-            }
+            sub.push(item(t!("Send Clipboard").to_string(), "edit-paste-symbolic", on, with(Action::SendClipboard)));
+            sub.push(item(t!("View Screen").to_string(), "video-display-symbolic", on, with(Action::ViewScreen)));
             if phone && can(info, "fs") {
                 sub.push(item(t!("Browse Files").to_string(), "folder-open-symbolic", on, with(Action::Browse)));
             }

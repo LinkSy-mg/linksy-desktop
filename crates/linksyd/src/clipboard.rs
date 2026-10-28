@@ -7,8 +7,8 @@
 //! the data-control protocol (KDE, wlroots), not on GNOME.
 
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -196,6 +196,73 @@ fn watch() -> Option<mpsc::UnboundedReceiver<String>> {
     Some(rx)
 }
 
+/// What's on this computer's clipboard, for Send Clipboard in the tray.
+pub enum Copied {
+    Text(String),
+    Files(Vec<PathBuf>),
+    Png(Vec<u8>),
+}
+
+/// Reads the clipboard once, as the app's Send Clipboard does. `wl-paste` can do that even
+/// on GNOME, where it can't watch; X11 through xclip.
+pub fn read_local() -> Option<Copied> {
+    let types = String::from_utf8(paste(None)?).ok()?;
+    let has = |t: &str| types.lines().any(|l| l.trim() == t);
+    if has("text/uri-list") {
+        let list = String::from_utf8(paste(Some("text/uri-list"))?).ok()?;
+        let files: Vec<PathBuf> = list.lines().filter_map(|l| l.trim().strip_prefix("file://")).map(|p| PathBuf::from(crate::media::percent_decode(p))).collect();
+        if !files.is_empty() {
+            return Some(Copied::Files(files));
+        }
+    }
+    if has("image/png") {
+        return paste(Some("image/png")).map(Copied::Png);
+    }
+    let text = String::from_utf8(paste(Some("text"))?).ok()?;
+    (!text.is_empty()).then_some(Copied::Text(text))
+}
+
+/// Whether X11 or Wayland has the tool [`paste`] reads with.
+pub fn can_paste() -> bool {
+    let tool = if std::env::var_os("WAYLAND_DISPLAY").is_some() { "wl-paste" } else { "xclip" };
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(tool).is_file()))
+}
+
+/// The clipboard as `mime` ("text" for any text), or the types it has.
+fn paste(mime: Option<&str>) -> Option<Vec<u8>> {
+    let mut cmd = if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        let mut c = Command::new("wl-paste");
+        match mime {
+            Some(m) => c.args(["--no-newline", "--type", m]),
+            None => c.arg("--list-types"),
+        };
+        c
+    } else {
+        let mut c = Command::new("xclip");
+        c.args(["-o", "-selection", "clipboard", "-t", if mime == Some("text") { "UTF8_STRING" } else { mime.unwrap_or("TARGETS") }]);
+        c
+    };
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().map_err(|e| debug!("paste: {e}")).ok()?;
+    let mut out = child.stdout.take()?;
+    let reading = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        out.read_to_end(&mut buf).map(|_| buf)
+    });
+    // An app that never answers would hold it forever
+    let until = Instant::now() + Duration::from_secs(3);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => return reading.join().ok()?.ok(),
+            Ok(None) if Instant::now() < until => std::thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+}
+
 /// "Copied from X", or, when no clipboard tool worked, a Copy button to try again.
 #[cfg(target_os = "linux")]
 fn announce(from: &str, text: &str, copied: bool) {
@@ -305,5 +372,18 @@ mod tests {
         assert_eq!(file_uri(Path::new("/home/a/My File#1.pdf")), "file:///home/a/My%20File%231.pdf");
         assert_eq!(image_type(Path::new("x.PNG")), Some("image/png"));
         assert_eq!(image_type(Path::new("x.pdf")), None);
+    }
+
+    /// What's on this session's clipboard, by kind and size only:
+    /// `cargo test -p linksyd -- --ignored --nocapture reads_the_clipboard`
+    #[test]
+    #[ignore = "needs a desktop session"]
+    fn reads_the_clipboard() {
+        match read_local() {
+            Some(Copied::Text(t)) => println!("clipboard: text, {} bytes", t.len()),
+            Some(Copied::Files(f)) => println!("clipboard: {} files, first named {:?}", f.len(), f[0].file_name()),
+            Some(Copied::Png(p)) => println!("clipboard: png, {} bytes, signature ok: {}", p.len(), p.starts_with(b"\x89PNG")),
+            None => println!("clipboard: nothing"),
+        }
     }
 }

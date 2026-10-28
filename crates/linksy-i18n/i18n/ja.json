@@ -382,6 +382,7 @@
   "See what's new and how to update.": "新機能とアップデート方法を確認できます。",
   "Send": "送信",
   "Send Files": "ファイルを送信",
+  "Send Clipboard": "クリップボードを送信",
   "Send Files to the Open Device": "開いているデバイスにファイルを送信",
   "Send to {name}": "{name} に送信",
   "Send what you copied": "コピーした内容を送信",

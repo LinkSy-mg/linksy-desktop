@@ -382,6 +382,7 @@
   "See what's new and how to update.": "查看新功能及更新方法。",
   "Send": "发送",
   "Send Files": "发送文件",
+  "Send Clipboard": "发送剪贴板",
   "Send Files to the Open Device": "向当前打开的设备发送文件",
   "Send to {name}": "发送到 {name}",
   "Send what you copied": "发送你复制的内容",
