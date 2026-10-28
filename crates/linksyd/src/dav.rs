@@ -121,7 +121,7 @@ impl Bridges {
     fn save(&self) {
         let known = self.known.lock().unwrap().clone();
         if let Ok(json) = serde_json::to_vec_pretty(&known) {
-            let _ = std::fs::write(&self.path, json);
+            let _ = linksy_core::identity::write_private(&self.path, &json);
         }
     }
 }

@@ -176,7 +176,7 @@ impl TrustStore {
         let Some(path) = &self.path else { return Ok(()) };
         let list: Vec<_> = self.devices.values().collect();
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(&list)?)?;
+        crate::identity::write_private(&tmp, &serde_json::to_vec_pretty(&list)?)?;
         std::fs::rename(tmp, path)?;
         Ok(())
     }
@@ -184,6 +184,9 @@ impl TrustStore {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     use super::*;
     use crate::identity::DeviceKind;
 
@@ -197,5 +200,16 @@ mod tests {
         store.add(device, None).unwrap();
         let name = TrustStore::load(path).unwrap().get(&id).unwrap().device.name.clone();
         assert!(name.starts_with("Evil Code 1 xxx") && name.chars().count() == crate::MAX_NAME, "{name:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_paired_list_is_saved_owner_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trusted.json");
+        let mut store = TrustStore::load(path.clone()).unwrap();
+        let device = DeviceInfo { id: Fingerprint::of(b"x"), name: "Pixel".into(), kind: DeviceKind::Phone, os: "android".into(), features: vec![], away: None };
+        store.add(device, None).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
 }
