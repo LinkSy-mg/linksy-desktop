@@ -4,6 +4,11 @@ Linksy for Linux. Each version's section becomes its release notes.
 
 ## 0.9.17
 
+### Security
+- **A device's name can't hold markup anywhere.** `<` and `>` in names from other devices
+  become `‹` and `›`, so the Qt app's pairing prompt and KDE's notifications show a
+  stranger's name as text too, not only the labels fixed in 0.9.16 (#63).
+
 ### New
 - **Send with Linksy in more file managers**: Thunar's Send To menu, and GNOME Files'
   right-click menu where nautilus-python is installed (Fedora installs it with Linksy).
