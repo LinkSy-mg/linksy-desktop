@@ -10,7 +10,13 @@ Linksy for Linux. Each version's section becomes its release notes.
   the code out of the pairing notification. Names are now cleaned as they arrive, and cut
   at 48 characters. Thanks to [@bearyjd](https://github.com/bearyjd) (#55, #56).
 
+### New
+- **View Screen and Send Clipboard in the tray menu**, in place of Ring, Ping and Locate.
+  Send Clipboard works on GNOME too, with the window closed.
+
 ### Fixed
+- **Show Linksy in the tray raises the open window** instead of opening a second one;
+  the same for a second display arriving while Linksy is open.
 - **Finish Setup installs what's missing on Artix** and other Arch-based systems that
   don't say so, instead of asking you to do it by hand.
 - **The camera setup asks for mokutil** when Secure Boot needs the driver approved and
