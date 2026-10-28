@@ -16,7 +16,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
 | 0.9 | Works on every desktop | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Private discovery · One Accept for a batch (desktop done in 0.9.0; screen control on Hyprland and Sway moves to 0.10) |
-| **0.10** | **Lighter and smoother** | Lighter at rest · Transfers in a corner panel · Choose which monitor to view · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
+| **0.10** | **Lighter and smoother** | Lighter at rest · Transfers in a corner panel · Choose which monitor to view · Screens on X11 without a portal · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
 | **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
 | **0.13** | **The cable, for real** | USB that works on every phone, end to end |
@@ -163,6 +163,14 @@ service 25 MB, the app 49 MB, the phone app about 200 MB.
   emulator (`docs/memory.md` in linksy-mobile). Still to measure on a real phone.*
 - **Done when:** idle, the service stays under 15 MB, the app under 35 MB and the phone app
   under 100 MB in the background, measured the same way each release.
+
+### Screens on X11 without a portal — S
+*Asked for by [@AndyM48](https://github.com/LinkSy-mg/linksy-desktop/issues/54) (Openbox).*
+Most X11 desktops have no ScreenCast portal, so the phone can't watch the computer's screen.
+- **Desktop:** when no portal answers, `linksy-screen` captures the X display with
+  `ximagesrc`; Finish Setup stops asking for a portal there.
+- **Phone:** nothing.
+- **Done when:** the phone watches the screen on Openbox and XFCE with no portal installed.
 
 ### A Qt 6 app for KDE Plasma — L, done early in 0.8.4
 *Shipped as `linksy-qt`, with every page the GTK app has (Finish Setup, the camera preview
