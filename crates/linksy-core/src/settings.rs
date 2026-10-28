@@ -13,10 +13,10 @@ use crate::node::Config;
 /// Longest device name; it has to fit in an mDNS instance name with the short id.
 pub const MAX_NAME: usize = 48;
 
-/// A name a peer sent, made safe to show, store and put in a prompt: control and bidi
-/// characters dropped, whitespace collapsed, capped at [`MAX_NAME`]. May come back empty.
+/// A name a peer sent, made safe to show, store and put in a prompt: control, bidi and
+/// invisible characters dropped, whitespace collapsed, capped at [`MAX_NAME`]. May come back empty.
 pub(crate) fn clean_name(name: &str) -> String {
-    let visible = name.chars().filter(|c| c.is_whitespace() || !(c.is_control() || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')));
+    let visible = name.chars().filter(|c| c.is_whitespace() || !(c.is_control() || matches!(c, '\u{061c}' | '\u{200b}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')));
     visible.collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_NAME).collect::<String>().trim_end().to_string()
 }
 
@@ -185,6 +185,8 @@ mod tests {
         assert_eq!(clean_name("Pixel 9"), "Pixel 9");
         assert_eq!(clean_name("  Living \n\t Room  "), "Living Room");
         assert_eq!(clean_name("Evil\u{202e}\u{2066}\u{200f}\u{7}\u{0}Name"), "EvilName");
+        assert_eq!(clean_name("Pixel\u{200b} 9\u{feff}\u{061c}"), "Pixel 9");
+        assert_eq!(clean_name("👩\u{200d}💻 فرزانه\u{200c}ها"), "👩\u{200d}💻 فرزانه\u{200c}ها");
         assert_eq!(clean_name(&"x".repeat(MAX_NAME * 100)).chars().count(), MAX_NAME);
         assert_eq!(clean_name("\n\u{202e} "), "");
         // Cut exactly at a space: no trailing one is left.

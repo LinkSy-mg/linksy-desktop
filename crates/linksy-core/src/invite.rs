@@ -36,7 +36,7 @@ impl Invite {
             match k {
                 "v" => v = Some(val),
                 "id" => id = Some(val.parse::<Fingerprint>().map_err(|_| bad())?),
-                "n" => name = Some(val),
+                "n" => name = Some(crate::settings::clean_name(&val)),
                 "a" => addrs = Some(val.split(',').filter(|a| !a.is_empty()).map(str::parse).collect::<Result<Vec<SocketAddr>, _>>().map_err(|_| bad())?),
                 "t" => token = Some(val),
                 _ => {} // newer fields
@@ -119,5 +119,19 @@ mod tests {
         assert!(same_token("abc", "abc"));
         assert!(!same_token("abc", "abd"));
         assert!(!same_token("abc", "abcd"));
+    }
+
+    #[test]
+    fn names_from_a_code_are_cleaned() {
+        let mut invite = Invite {
+            id: crate::identity::Identity::generate().unwrap().fingerprint,
+            name: format!("Desk\n\u{202e}{}", "x".repeat(500)),
+            addrs: vec!["192.168.1.20:47200".parse().unwrap()],
+            token: "0123456789abcdef0123456789abcdef".into(),
+        };
+        let name = Invite::parse(&invite.to_uri()).unwrap().name;
+        assert!(name.starts_with("Desk xxx") && name.chars().count() == crate::MAX_NAME, "{name:?}");
+        invite.name = "Axel's Desk".into();
+        assert_eq!(Invite::parse(&invite.to_uri()).unwrap().name, "Axel's Desk");
     }
 }
