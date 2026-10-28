@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.14" date="2026-10-28">
+      <description>
+        <p>View Screen and Send Clipboard in the tray menu, and Show Linksy raises the open window instead of opening another. Device names from other devices are cleaned, so they can't disguise a pairing prompt. On Artix and other Arch-based systems, Finish Setup installs what's missing; the camera setup asks for mokutil when Secure Boot needs it.</p>
+      </description>
+    </release>
     <release version="0.9.13" date="2026-10-27">
       <description>
         <p>Safer pairing codes: someone on the same network can no longer steer both screens to the same code. Linux without systemd (Artix, Void, Gentoo): Linksy Camera stays after a restart, Finish Setup gives tiling compositors the line that starts Linksy at login, and Restart Now works.</p>
