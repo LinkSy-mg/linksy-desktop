@@ -7,14 +7,14 @@ has() { [ -x "$here/$1" ] || command -v "$1" >/dev/null 2>&1; }
 run() { app=$1; shift; if [ -x "$here/$app" ]; then exec "$here/$app" "$@"; else exec "$app" "$@"; fi; }
 
 case "${LINKSY_UI:-}" in
-  qt) has linksy-qt && run linksy-qt ;;
+  qt) has linksy-qt && run linksy-qt "$@" ;;
   gtk) has linksy-app && run linksy-app "$@" ;;
 esac
 case ":${XDG_CURRENT_DESKTOP:-}:" in
-  *:KDE:*) has linksy-qt && run linksy-qt ;;
+  *:KDE:*) has linksy-qt && run linksy-qt "$@" ;;
 esac
 has linksy-app && run linksy-app "$@"
-has linksy-qt && run linksy-qt
+has linksy-qt && run linksy-qt "$@"
 echo "linksy-open: neither linksy-app nor linksy-qt is installed" >&2
 # Only linksy-common is here: show where to get the app rather than nothing
 command -v xdg-open >/dev/null 2>&1 && xdg-open https://linksy.diary.mg/#download
