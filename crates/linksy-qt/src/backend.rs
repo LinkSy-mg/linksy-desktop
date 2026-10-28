@@ -503,7 +503,7 @@ impl qobject::Backend {
 
     pub fn restart(self: Pin<&mut Self>) {
         // A service started by hand (LINKSY_SOCKET, development) is left running
-        let client = self.rust().client.lock().unwrap().clone().filter(|_| std::env::var_os("LINKSY_SOCKET").is_none());
+        let client = self.rust().client.lock().unwrap().clone().filter(|_| !linksy_ipc::custom_socket());
         let thread = self.qt_thread();
         self.rust().rt.spawn(async move {
             if let Some(c) = client {
@@ -582,7 +582,7 @@ async fn connect() -> Result<Client, String> {
         return Ok(c);
     }
     // Pointed at a particular service (development): that one is started by hand.
-    if std::env::var_os("LINKSY_SOCKET").is_some() {
+    if linksy_ipc::custom_socket() {
         return Err(String::new());
     }
     use std::process::{Command, Stdio};

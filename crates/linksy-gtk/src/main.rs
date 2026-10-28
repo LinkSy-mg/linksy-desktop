@@ -255,7 +255,7 @@ fn main() -> glib::ExitCode {
     let mut flags = gio::ApplicationFlags::HANDLES_OPEN;
     // Pointed at a specific service (development, or two devices on one machine): its
     // own instance, instead of handing over to the usual one.
-    if std::env::var_os("LINKSY_SOCKET").is_some() {
+    if linksy_ipc::custom_socket() {
         flags |= gio::ApplicationFlags::NON_UNIQUE;
     }
     let app = adw::Application::builder().application_id(APP_ID).flags(flags).build();

@@ -213,7 +213,16 @@ Kirigami.ApplicationWindow {
 
     // The service checks once a day; ask it now and then what it found
     function refreshUpdates() {
-        request("updates", {}, (ok, u) => { root.update = ok && u.prefs.check && u.latest ? { version: u.latest, notes: u.notes } : null });
+        request("updates", {}, (ok, u) => { root.update = ok && u.prefs.check && u.latest && newerThanThis(u.latest) ? { version: u.latest, notes: u.notes } : null });
+    }
+
+    // A service still on the version before an update knows only older ones
+    function newerThanThis(version) {
+        const a = version.split(".").map(Number), b = backend.version().split(".").map(Number);
+        for (let i = 0; i < Math.max(a.length, b.length); i++) {
+            if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+        }
+        return false;
     }
 
     Timer {

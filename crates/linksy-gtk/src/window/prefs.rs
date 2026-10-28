@@ -246,7 +246,7 @@ impl Window {
     pub(super) fn restart_app(self: &Rc<Self>) {
         let app = self.window.application();
         // A service started by hand (LINKSY_SOCKET, development) is left running.
-        let client = self.client().filter(|_| std::env::var_os("LINKSY_SOCKET").is_none());
+        let client = self.client().filter(|_| !linksy_ipc::custom_socket());
         let quit = client.map(|c| self.bridge.call(&c, |c| async move { tokio::time::timeout(std::time::Duration::from_secs(3), c.quit()).await.unwrap_or(Err(linksy_ipc::ClientError::Disconnected)) }));
         glib::spawn_future_local(async move {
             if let Some(quit) = quit {

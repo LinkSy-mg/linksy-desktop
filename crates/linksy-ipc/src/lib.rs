@@ -422,6 +422,16 @@ pub fn socket_path() -> PathBuf {
     if let Some(p) = std::env::var_os("LINKSY_SOCKET") {
         return PathBuf::from(p);
     }
+    usual_socket_path()
+}
+
+/// Pointed at another service than the usual one with `$LINKSY_SOCKET` (development, or two
+/// devices on one machine). Windows opened from the tray before 0.9.14 carry the usual path.
+pub fn custom_socket() -> bool {
+    std::env::var_os("LINKSY_SOCKET").is_some_and(|p| *p != *usual_socket_path())
+}
+
+fn usual_socket_path() -> PathBuf {
     match runtime_dir() {
         Some(dir) => dir.join("linksyd.sock"),
         None => {

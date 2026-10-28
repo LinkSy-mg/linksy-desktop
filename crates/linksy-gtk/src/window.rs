@@ -681,7 +681,7 @@ impl Window {
                 Err(_) => {
                     // Not when pointed at a particular service (development): that one is
                     // started by hand.
-                    let start = std::env::var_os("LINKSY_SOCKET").is_none() && !std::mem::replace(&mut w.state.borrow_mut().started_service, true);
+                    let start = !linksy_ipc::custom_socket() && !std::mem::replace(&mut w.state.borrow_mut().started_service, true);
                     if start {
                         w.start_service();
                     } else {
@@ -756,7 +756,7 @@ impl Window {
     /// installed one, once per window.
     fn restart_service(self: &Rc<Self>) {
         use std::process::{Command, Stdio};
-        if std::env::var_os("LINKSY_SOCKET").is_some() || std::mem::replace(&mut self.state.borrow_mut().restarted_service, true) {
+        if linksy_ipc::custom_socket() || std::mem::replace(&mut self.state.borrow_mut().restarted_service, true) {
             return;
         }
         let Some(c) = self.client() else { return };
@@ -952,7 +952,8 @@ impl Window {
         let w = self.clone();
         let call = self.bridge.call(&c, |c| async move { c.updates().await });
         glib::spawn_future_local(async move {
-            let latest = call.await.ok().filter(|u| u.prefs.check).and_then(|u| Some((u.latest?, u.notes)));
+            // A service still on the version before an update knows only older ones
+            let latest = call.await.ok().filter(|u| u.prefs.check).and_then(|u| Some((u.latest?, u.notes))).filter(|(v, _)| linksy_upgrade::newer(v, env!("CARGO_PKG_VERSION")));
             w.update_button.set_visible(latest.is_some());
             if let Some((version, notes)) = latest {
                 w.update_button.set_label(&t!("Linksy {version} Is Available", version));
