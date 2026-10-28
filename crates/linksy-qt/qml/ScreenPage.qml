@@ -18,6 +18,8 @@ Kirigami.Page {
     property string detail: ""
     // A second display another computer started here: { session, socket }
     property var display: null
+    // A screen the tray asked to see, already started: { session, socket }
+    property var started: null
     // A video part is missing: Finish Setup adds it
     property bool missingPart: false
     readonly property bool controlling: (kind === "control" || kind === "display") && phase === "playing"
@@ -159,6 +161,7 @@ Kirigami.Page {
     Component.onCompleted: {
         const test = backend.env("LINKSY_TEST_STREAM");
         if (display) { kind = "display"; play(display) }
+        else if (started) play(started);
         else if (test) play({ session: "", socket: test });
         else start("screen");
     }
