@@ -204,6 +204,11 @@ list.
 Both `hello` and `welcome` carry `"pairing":2` (core 0.9.13). Older versions leave it
 out.
 
+**Names from other devices** (core 0.9.14, desktop#55): in `hello`, `welcome`, discovery,
+QR codes and renames, the core drops control, bidi and invisible characters, collapses
+spaces and cuts the name at 48 characters. A handshake or discovery name left empty
+becomes the short id. Apps show `device.name` as it comes.
+
 **Commit and reveal** (after `welcome`, on the same stream, only when both sent
 `"pairing":2`; QR pairing does it too). Each side makes a 32-byte random nonce:
 
