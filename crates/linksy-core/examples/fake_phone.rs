@@ -8,6 +8,7 @@
 //!     [--media "TITLE" "ARTIST"] [--watch-media] [--call SECONDS] [--leave-after SECONDS]
 //!     [--import PATH] [--touchpad] [--files DIR] [--no-discovery] [--seconds N]
 //!
+//! `--accept-pairing` says yes to pairing, for scripted tests.
 //! It always answers texting requests from a small made-up inbox. `--files DIR` shares
 //! that folder as the phone's storage (for "Browse Files").
 //!
@@ -61,6 +62,7 @@ async fn main() {
     let mut picture: Option<std::path::PathBuf> = None;
     let mut location: Option<(f64, f64)> = None;
     let mut away = false;
+    let mut accept_pairing = false;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -68,6 +70,7 @@ async fn main() {
             "--port" => port = value().parse().expect("--port N"),
             "--name" => name = value(),
             "--no-discovery" => no_discovery = true,
+            "--accept-pairing" => accept_pairing = true,
             "--battery" => level = Some(value().parse::<u8>().expect("--battery PERCENT")),
             "--charging" => charging = true,
             "--seconds" => seconds = value().parse().expect("--seconds N"),
@@ -425,6 +428,10 @@ async fn main() {
                         None => node.refuse_location(&from.id, "Location is off on this phone").await,
                     };
                     println!("located by {}: {:?}", from.name, r.map_err(|e| e.to_string()));
+                }
+                Ok(Event::PairingRequest { request, device, code, .. }) if accept_pairing => {
+                    println!("pairing with {} (code {code}): accepting", device.name);
+                    node.respond(request, true);
                 }
                 Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Camera }) if camera => {
                     println!("camera requested by {}: accepting", from.name);
