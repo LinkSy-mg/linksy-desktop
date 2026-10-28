@@ -322,6 +322,7 @@ Kirigami.ScrollablePage {
                             spacing: 0
                             QQC2.Label {
                                 Layout.fillWidth: true
+                                textFormat: Text.PlainText
                                 text: fileRow.modelData.name.split("/").pop()
                                 font.bold: fileRow.going
                                 elide: Text.ElideMiddle

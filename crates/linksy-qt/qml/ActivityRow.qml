@@ -132,6 +132,7 @@ RowLayout {
         QQC2.Label {
             Layout.fillWidth: true
             text: row.detail
+            textFormat: Text.PlainText
             opacity: 0.7
             font: Kirigami.Theme.smallFont
             elide: Text.ElideRight
