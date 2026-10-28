@@ -702,7 +702,7 @@ impl Viewer {
                 // Control refused: keep watching instead of losing the screen.
                 Err(e) if kind == SessionKind::Control => {
                     let why = if e.contains("can't do this yet") { t!("{name} can't be controlled yet", name) } else { t!("{name} didn't allow control", name) };
-                    v.toasts.add_toast(adw::Toast::new(&why));
+                    v.toasts.add_toast(adw::Toast::new(&glib::markup_escape_text(&why)));
                     v.start(SessionKind::Screen);
                 }
                 Err(e) if e.contains("can't do this yet") => v.ended(&t!("{name} can't share its screen yet", name), t!("This device doesn't support it in its current version.")),

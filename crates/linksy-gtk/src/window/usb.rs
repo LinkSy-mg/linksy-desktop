@@ -157,7 +157,7 @@ impl Window {
                 match phone.filter(|p| p.state != UsbState::Accessory) {
                     Some(p) => {
                         auto_showing.set(true);
-                        auto.set_subtitle(&t!("{name} switches to Linksy as soon as it's plugged in, without asking. Off: only when you press Connect.", name = p.name));
+                        auto.set_subtitle(&glib::markup_escape_text(&t!("{name} switches to Linksy as soon as it's plugged in, without asking. Off: only when you press Connect.", name = p.name)));
                         auto.set_active(p.auto);
                         auto.set_visible(true);
                         auto_showing.set(false);
