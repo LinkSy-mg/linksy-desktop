@@ -1056,7 +1056,7 @@ impl Window {
             Event::SessionStarted { session, peer, kind, sharing } if sharing || kind.is_device() => {
                 self.sharing_started(session, &peer, kind, sharing)
             }
-            Event::SessionStarted { kind: SessionKind::Display, .. } => self.join_pending_displays(),
+            Event::SessionStarted { kind: SessionKind::Display | SessionKind::Screen, .. } => self.join_pending_displays(),
             Event::SessionStarted { .. } => {}
             Event::SessionEnded { session } => {
                 self.session_ended(session);

@@ -97,19 +97,33 @@ impl Window {
         });
     }
 
-    /// Show any second display another device started here (also right after start-up,
-    /// when the service opened the app for it).
+    /// Show any second display another device started here, or screen the tray asked to
+    /// see (also right after start-up, when the service opened the app for it).
     pub(super) fn join_pending_displays(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };
         let call = self.bridge.call(&c, |c| async move { c.pending_sessions().await });
         let w = self.clone();
         glib::spawn_future_local(async move {
             for pending in call.await.unwrap_or_default() {
-                if pending.kind == SessionKind::Display && !w.state.borrow().showing.contains(&pending.session) {
-                    w.show_display(pending);
+                if w.state.borrow().showing.contains(&pending.session) {
+                    continue;
+                }
+                match pending.kind {
+                    SessionKind::Display => w.show_display(pending),
+                    SessionKind::Screen => w.show_screen(pending),
+                    _ => {}
                 }
             }
         });
+    }
+
+    fn show_screen(self: &Rc<Self>, pending: PendingSession) {
+        self.state.borrow_mut().showing.push(pending.session);
+        let device = self.device(&pending.peer.id);
+        let viewer = Viewer::open(self, pending.peer.id, &pending.peer.name);
+        viewer.control.set_visible(device.is_none_or(|d| super::can(&d.device, "control")));
+        viewer.kind.set(SessionKind::Screen);
+        viewer.play(SessionInfo { session: pending.session, socket: Some(pending.socket) });
     }
 
     fn show_display(self: &Rc<Self>, pending: PendingSession) {
