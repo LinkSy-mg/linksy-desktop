@@ -22,6 +22,8 @@ Linksy for Linux. Each version's section becomes its release notes.
 - **The camera setup asks for mokutil** when Secure Boot needs the driver approved and
   mokutil isn't installed, instead of asking for a restart that couldn't help.
 
+## 0.9.13
+
 ### Security
 - **Safer pairing codes.** Someone on the same network at the moment you pair could have
   made both screens show the same 6-digit code. Devices now each lock in a random number
