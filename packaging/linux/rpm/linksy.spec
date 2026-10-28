@@ -58,6 +58,8 @@ Recommends:     gstreamer1-plugins-bad-free
 Recommends:     wl-clipboard
 # The phone's camera in every app (RPM Fusion); Linksy's Finish Setup offers it too
 Recommends:     v4l2loopback
+# Send with Linksy in Files' right-click menu
+Recommends:     (nautilus-python if nautilus)
 %endif
 
 %description common
@@ -131,6 +133,8 @@ fi
 /usr/share/applications/mg.diary.linksy.Linksy.desktop
 /usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
 /usr/share/kio/servicemenus/linksy-send.desktop
+/usr/share/Thunar/sendto/linksy.desktop
+/usr/share/nautilus-python/extensions/linksy.py
 /usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg
 /usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg
 /usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-symbolic.svg

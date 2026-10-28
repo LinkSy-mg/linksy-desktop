@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Linksy
+Icon=mg.diary.linksy.Linksy
+Exec=linksy-open %F

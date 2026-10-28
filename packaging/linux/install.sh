@@ -28,6 +28,9 @@ chmod 755 "$SHARE/nautilus/scripts/Send with Linksy"
 mkdir -p "$SHARE/kio/servicemenus"
 sed "s|^Exec=linksy-open|Exec=$BIN/linksy-app|" share/linksy-send.desktop > "$SHARE/kio/servicemenus/linksy-send.desktop"
 chmod 755 "$SHARE/kio/servicemenus/linksy-send.desktop"
+# Thunar: right-click → Send To → Linksy
+mkdir -p "$SHARE/Thunar/sendto"
+sed "s|^Exec=linksy-open|Exec=$BIN/linksy-app|" share/linksy-thunar.desktop > "$SHARE/Thunar/sendto/linksy.desktop"
 command -v update-desktop-database >/dev/null && update-desktop-database -q "$SHARE/applications" || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t -f "$SHARE/icons/hicolor" || true
 mkdir -p "$UNITS"

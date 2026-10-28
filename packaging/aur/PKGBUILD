@@ -46,7 +46,8 @@ package_linksy-common() {
               'wl-clipboard: shared clipboard while the window is not focused'
               'v4l2loopback-dkms: the phone as a webcam in every app'
               'v4l2loopback-utils: the phone as a webcam in every app'
-              'mokutil: the webcam driver with Secure Boot on')
+              'mokutil: the webcam driver with Secure Boot on'
+              'python-nautilus: Send with Linksy in GNOME Files')
   # Before 0.8.4, one linksy package held everything
   conflicts=('linksy<0.8.4')
   cd linksy-desktop
@@ -64,6 +65,8 @@ package_linksy-common() {
   sed 's|^Exec=linksy-app|Exec=linksy-open|' data/mg.diary.linksy.Linksy.desktop | install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/mg.diary.linksy.Linksy.desktop"
   install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml "$pkgdir/usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml"
   install -Dm644 data/linksy-send.desktop "$pkgdir/usr/share/kio/servicemenus/linksy-send.desktop"
+  install -Dm644 data/linksy-thunar.desktop "$pkgdir/usr/share/Thunar/sendto/linksy.desktop"
+  install -Dm644 data/nautilus/linksy.py "$pkgdir/usr/share/nautilus-python/extensions/linksy.py"
   install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
   install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
   install -Dm644 data/icons/mg.diary.linksy.Linksy-tray-symbolic.svg "$pkgdir/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-symbolic.svg"

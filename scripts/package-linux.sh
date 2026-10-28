@@ -43,7 +43,7 @@ fi
 rm -rf "$STAGE"; mkdir -p "$STAGE/bin" "$STAGE/share/icons"
 for b in linksyd linksy linksy-app linksy-screen; do install -m755 "target/release/$b" "$STAGE/bin/$b"; done
 install -m755 data/linksy-camera-setup data/linksy-usb-setup data/linksy-system-setup "$STAGE/bin/"
-cp data/mg.diary.linksy.Linksy.desktop data/linksyd.service data/linksyd-autostart.desktop "data/nautilus/Send with Linksy" data/linksy-send.desktop "$STAGE/share/"
+cp data/mg.diary.linksy.Linksy.desktop data/linksyd.service data/linksyd-autostart.desktop "data/nautilus/Send with Linksy" data/linksy-send.desktop data/linksy-thunar.desktop "$STAGE/share/"
 cp data/icons/*.svg "$STAGE/share/icons/"
 install -m755 packaging/linux/install.sh packaging/linux/uninstall.sh "$STAGE/"
 cp packaging/linux/README.txt LICENSE THIRD-PARTY-NOTICES "$STAGE/"
@@ -79,6 +79,8 @@ install -Dm644 data/linksyd-autostart.desktop "$ROOT/etc/xdg/autostart/linksyd.d
 sed "s|^Exec=linksy-app|Exec=linksy-open|" data/mg.diary.linksy.Linksy.desktop | install -Dm644 /dev/stdin "$ROOT/usr/share/applications/mg.diary.linksy.Linksy.desktop"
 install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml "$ROOT/usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml"
 install -Dm644 data/linksy-send.desktop "$ROOT/usr/share/kio/servicemenus/linksy-send.desktop"
+install -Dm644 data/linksy-thunar.desktop "$ROOT/usr/share/Thunar/sendto/linksy.desktop"
+install -Dm644 data/nautilus/linksy.py "$ROOT/usr/share/nautilus-python/extensions/linksy.py"
 install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$ROOT/usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
 install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
 install -Dm644 data/icons/mg.diary.linksy.Linksy-tray-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-symbolic.svg"

@@ -49,6 +49,9 @@ if [ "$WITH_APP" = 1 ]; then
   mkdir -p "$SHARE/kio/servicemenus"
   sed "s|^Exec=linksy-open|Exec=$BIN/linksy-app|" data/linksy-send.desktop > "$SHARE/kio/servicemenus/linksy-send.desktop"
   chmod 755 "$SHARE/kio/servicemenus/linksy-send.desktop"
+  # Thunar: right-click → Send To → Linksy
+  mkdir -p "$SHARE/Thunar/sendto"
+  sed "s|^Exec=linksy-open|Exec=$BIN/linksy-app|" data/linksy-thunar.desktop > "$SHARE/Thunar/sendto/linksy.desktop"
 fi
 install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$SHARE/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
 install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$SHARE/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"
