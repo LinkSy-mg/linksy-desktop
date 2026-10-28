@@ -2,6 +2,21 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.15
+
+### Security
+- **Linksy's private files are private.** The pairing key, your paired devices, the
+  history and the file sharing token were readable by other accounts on the same
+  computer. They're now yours only, and an existing install is fixed when it starts.
+  Thanks to [@bearyjd](https://github.com/bearyjd) (#60, #61).
+- **The terminal code's lockout holds** when many guesses arrive at once: each try counts
+  before it's checked, so 5 wrong codes lock as intended. Thanks to
+  [@bearyjd](https://github.com/bearyjd) (#58, #59).
+
+### Fixed
+- **The camera driver builds for custom Fedora kernels**: Finish Setup installs that
+  kernel's headers, and says what went wrong instead of "v4l2loopback isn't installed".
+
 ## 0.9.14
 
 ### Security
