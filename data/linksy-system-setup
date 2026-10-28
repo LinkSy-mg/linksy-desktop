@@ -53,8 +53,19 @@ install_packages() {
     # akmods' own key (Secure Boot approves it once).
     if command -v akmods >/dev/null && echo "$*" | grep -q v4l2loopback; then
       echo "STEP Building the camera driver (a few minutes)"
+      # akmod-v4l2loopback brings the newest kernel's headers, not always this one's (a
+      # custom kernel: releases#7)
+      [ -e "/lib/modules/$(uname -r)/build" ] || dnf install -y "kernel-devel-uname-r = $(uname -r)" >/dev/null 2>&1
       [ -f /etc/pki/akmods/certs/public_key.der ] || kmodgenca -a >/dev/null 2>&1
       akmods --force --kernels "$(uname -r)" >/dev/null 2>&1
+      if ! modinfo -k "$(uname -r)" v4l2loopback >/dev/null 2>&1; then
+        if [ -e "/lib/modules/$(uname -r)/build" ]; then
+          echo "building the camera driver failed: see /var/cache/akmods/v4l2loopback/.last.log" >&2
+        else
+          echo "the camera driver can't be built for this kernel ($(uname -r)): no kernel-devel package for it" >&2
+        fi
+        return 1
+      fi
     fi
   elif command -v apt-get >/dev/null; then
     DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=300 install -y "$@" || {
