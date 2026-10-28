@@ -54,6 +54,56 @@ struct Prefs {
     confirmed: HashMap<Fingerprint, i64>,
 }
 
+impl Prefs {
+    /// Count a code attempt before it's checked, so requests in flight together can't
+    /// outnumber the tries left. False: locked, or all the tries are already in flight.
+    fn reserve_attempt(&mut self, device: &Fingerprint) -> bool {
+        if self.locked.contains(device) {
+            return false;
+        }
+        let tries = self.failures.entry(*device).or_default();
+        if *tries >= MAX_TRIES {
+            return false;
+        }
+        *tries += 1;
+        true
+    }
+
+    /// A reserved attempt was wrong.
+    fn attempt_failed(&mut self, device: &Fingerprint) -> Failure {
+        if self.locked.contains(device) {
+            return Failure::Locked;
+        }
+        let tries = self.failures.get(device).copied().unwrap_or(0);
+        if tries >= MAX_TRIES {
+            self.failures.remove(device);
+            self.locked.push(*device);
+            return Failure::Locks;
+        }
+        Failure::Left(MAX_TRIES - tries)
+    }
+
+    /// A reserved attempt was right: the count starts over. False: it was locked meanwhile.
+    fn attempt_succeeded(&mut self, device: &Fingerprint) -> bool {
+        if self.locked.contains(device) {
+            return false;
+        }
+        self.failures.remove(device);
+        true
+    }
+}
+
+/// What a wrong code did.
+#[derive(Debug, PartialEq)]
+enum Failure {
+    /// Tries left.
+    Left(u32),
+    /// This one locked the phone.
+    Locks,
+    /// Another attempt had already locked it.
+    Locked,
+}
+
 #[derive(Clone)]
 pub struct Terminals {
     inner: Arc<Mutex<State>>,
@@ -221,34 +271,36 @@ impl Terminals {
     async fn judge(&self, call: TerminalCall) {
         let from = call.from.clone();
         let decline = |reason: &str, tries_left: Option<u32>| Verdict::Decline { reason: reason.into(), tries_left };
-        let (hash, allowed, locked) = {
-            let st = self.inner.lock().unwrap();
-            (st.prefs.code.clone(), st.prefs.allowed.contains(&from.id), st.prefs.locked.contains(&from.id))
+        let (hash, allowed, reserved) = {
+            let mut st = self.inner.lock().unwrap();
+            let (hash, allowed) = (st.prefs.code.clone(), st.prefs.allowed.contains(&from.id));
+            // Taken before the slow check below, under this lock: a burst of requests can't all pass it.
+            let reserved = hash.is_some() && allowed && st.prefs.reserve_attempt(&from.id);
+            (hash, allowed, reserved)
         };
         let Some(hash) = hash.filter(|_| allowed) else { return call.answer(decline("off", None)) };
-        if locked {
+        if !reserved {
             return call.answer(decline("locked", None));
         }
         let code = call.open.code.clone();
         let right = tokio::task::spawn_blocking(move || verify(&hash, &code)).await.unwrap_or(false);
         let mut st = self.inner.lock().unwrap();
         if !right {
-            let failures = st.prefs.failures.entry(from.id).or_default();
-            *failures += 1;
-            let failures = *failures;
-            let verdict = if failures >= MAX_TRIES {
-                st.prefs.failures.remove(&from.id);
-                st.prefs.locked.push(from.id);
-                warn!("terminal locked for {} after {MAX_TRIES} wrong codes", from.name);
-                crate::notify::show(t!("Terminal locked for {device}", device = from.name), t!("{tries} wrong codes in a row. Unlock it in Linksy on this computer if it was you.", tries = MAX_TRIES));
-                decline("locked", None)
-            } else {
-                decline("code", Some(MAX_TRIES - failures))
+            let verdict = match st.prefs.attempt_failed(&from.id) {
+                Failure::Left(left) => decline("code", Some(left)),
+                Failure::Locked => decline("locked", None),
+                Failure::Locks => {
+                    warn!("terminal locked for {} after {MAX_TRIES} wrong codes", from.name);
+                    crate::notify::show(t!("Terminal locked for {device}", device = from.name), t!("{tries} wrong codes in a row. Unlock it in Linksy on this computer if it was you.", tries = MAX_TRIES));
+                    decline("locked", None)
+                }
             };
             self.save(&st);
             return call.answer(verdict);
         }
-        st.prefs.failures.remove(&from.id);
+        if !st.prefs.attempt_succeeded(&from.id) {
+            return call.answer(decline("locked", None));
+        }
         let resume = call.open.resume.clone().filter(|id| st.running.get(id).is_some_and(|t| t.owner == from.id));
         let terminal = match resume {
             Some(id) => id,
@@ -575,5 +627,91 @@ mod tests {
         assert_eq!(window_title(b"x\x1b]0;claude \xe2\x80\x94 ~/Project\x07y").as_deref(), Some("claude — ~/Project"));
         assert_eq!(window_title(b"\x1b]2;vim\x1b\\"), Some("vim".into()));
         assert_eq!(window_title(b"plain"), None);
+    }
+
+    fn phone() -> Fingerprint {
+        Fingerprint([7; 32])
+    }
+
+    #[test]
+    fn five_wrong_codes_in_a_row_lock() {
+        let (mut prefs, id) = (Prefs::default(), phone());
+        for left in (1..MAX_TRIES).rev() {
+            assert!(prefs.reserve_attempt(&id));
+            assert_eq!(prefs.attempt_failed(&id), Failure::Left(left));
+        }
+        assert!(prefs.reserve_attempt(&id));
+        assert_eq!(prefs.attempt_failed(&id), Failure::Locks);
+        assert!(prefs.locked.contains(&id));
+        assert!(!prefs.reserve_attempt(&id));
+    }
+
+    #[test]
+    fn a_right_code_resets_the_count_and_leaves_it_unlocked() {
+        let (mut prefs, id) = (Prefs::default(), phone());
+        for _ in 0..MAX_TRIES - 1 {
+            assert!(prefs.reserve_attempt(&id));
+            prefs.attempt_failed(&id);
+        }
+        assert!(prefs.reserve_attempt(&id));
+        prefs.attempt_succeeded(&id);
+        assert!(!prefs.locked.contains(&id));
+        assert!(!prefs.failures.contains_key(&id));
+        for _ in 0..MAX_TRIES - 1 {
+            assert!(prefs.reserve_attempt(&id));
+            prefs.attempt_failed(&id);
+        }
+        assert!(!prefs.locked.contains(&id));
+    }
+
+    #[test]
+    fn attempts_in_flight_cannot_outrun_the_budget() {
+        let (mut prefs, id) = (Prefs::default(), phone());
+        // 100 requests arrive before any verdict is known.
+        let admitted = (0..100).filter(|_| prefs.reserve_attempt(&id)).count();
+        assert_eq!(admitted, MAX_TRIES as usize);
+        for _ in 0..admitted {
+            prefs.attempt_failed(&id);
+        }
+        assert!(prefs.locked.contains(&id));
+        assert!(!prefs.reserve_attempt(&id));
+    }
+
+    #[test]
+    fn a_right_code_among_attempts_in_flight_leaves_it_unlocked() {
+        let (mut prefs, id) = (Prefs::default(), phone());
+        for _ in 0..MAX_TRIES {
+            assert!(prefs.reserve_attempt(&id));
+        }
+        assert!(prefs.attempt_succeeded(&id));
+        for _ in 0..MAX_TRIES - 1 {
+            prefs.attempt_failed(&id);
+        }
+        assert!(!prefs.locked.contains(&id));
+        assert!(prefs.reserve_attempt(&id));
+    }
+
+    #[test]
+    fn failures_while_others_are_pending_lock_once() {
+        let (mut prefs, id) = (Prefs::default(), phone());
+        for _ in 0..MAX_TRIES {
+            assert!(prefs.reserve_attempt(&id));
+        }
+        assert_eq!(prefs.attempt_failed(&id), Failure::Locks);
+        for _ in 1..MAX_TRIES {
+            assert_eq!(prefs.attempt_failed(&id), Failure::Locked);
+        }
+        assert_eq!(prefs.locked.iter().filter(|d| **d == id).count(), 1);
+    }
+
+    #[test]
+    fn a_right_code_resolving_after_a_lock_is_rejected() {
+        let (mut prefs, id) = (Prefs::default(), phone());
+        for _ in 0..MAX_TRIES {
+            assert!(prefs.reserve_attempt(&id));
+        }
+        assert_eq!(prefs.attempt_failed(&id), Failure::Locks);
+        assert!(!prefs.attempt_succeeded(&id));
+        assert!(prefs.locked.contains(&id));
     }
 }
