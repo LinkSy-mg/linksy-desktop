@@ -13,7 +13,13 @@ Linksy for Linux. Each version's section becomes its release notes.
   before it's checked, so 5 wrong codes lock as intended. Thanks to
   [@bearyjd](https://github.com/bearyjd) (#58, #59).
 
+### New
+- **Send with Linksy in Dolphin's right-click menu**: pick a device and the files go.
+  Thanks to [@sispus](https://github.com/sispus) for asking (#57).
+
 ### Fixed
+- **Open With Linksy works on KDE Plasma**: the files reach the window instead of being
+  dropped.
 - **The camera driver builds for custom Fedora kernels**: Finish Setup installs that
   kernel's headers, and says what went wrong instead of "v4l2loopback isn't installed".
 
