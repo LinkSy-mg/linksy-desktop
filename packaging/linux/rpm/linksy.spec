@@ -130,6 +130,7 @@ fi
 %config(noreplace) /etc/xdg/autostart/linksyd.desktop
 /usr/share/applications/mg.diary.linksy.Linksy.desktop
 /usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
+/usr/share/kio/servicemenus/linksy-send.desktop
 /usr/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg
 /usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg
 /usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-symbolic.svg

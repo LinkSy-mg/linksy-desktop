@@ -24,6 +24,10 @@ install -Dm644 share/icons/mg.diary.linksy.Linksy-tray-idle-symbolic.svg "$SHARE
 mkdir -p "$SHARE/nautilus/scripts"
 sed "s|@BINDIR@|$BIN|" "share/Send with Linksy" > "$SHARE/nautilus/scripts/Send with Linksy"
 chmod 755 "$SHARE/nautilus/scripts/Send with Linksy"
+# Dolphin: right-click → Send with Linksy (KDE runs one in your home only if executable)
+mkdir -p "$SHARE/kio/servicemenus"
+sed "s|^Exec=linksy-open|Exec=$BIN/linksy-app|" share/linksy-send.desktop > "$SHARE/kio/servicemenus/linksy-send.desktop"
+chmod 755 "$SHARE/kio/servicemenus/linksy-send.desktop"
 command -v update-desktop-database >/dev/null && update-desktop-database -q "$SHARE/applications" || true
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t -f "$SHARE/icons/hicolor" || true
 mkdir -p "$UNITS"

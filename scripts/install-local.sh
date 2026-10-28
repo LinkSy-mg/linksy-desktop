@@ -45,6 +45,10 @@ if [ "$WITH_APP" = 1 ]; then
   mkdir -p "$SHARE/nautilus/scripts"
   sed "s|@BINDIR@|$BIN|" "data/nautilus/Send with Linksy" > "$SHARE/nautilus/scripts/Send with Linksy"
   chmod 755 "$SHARE/nautilus/scripts/Send with Linksy"
+  # Dolphin: right-click → Send with Linksy (KDE runs one in your home only if executable)
+  mkdir -p "$SHARE/kio/servicemenus"
+  sed "s|^Exec=linksy-open|Exec=$BIN/linksy-app|" data/linksy-send.desktop > "$SHARE/kio/servicemenus/linksy-send.desktop"
+  chmod 755 "$SHARE/kio/servicemenus/linksy-send.desktop"
 fi
 install -Dm644 data/icons/mg.diary.linksy.Linksy.svg "$SHARE/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg"
 install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$SHARE/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-symbolic.svg"

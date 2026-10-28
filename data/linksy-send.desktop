@@ -1,0 +1,20 @@
+[Desktop Entry]
+Type=Service
+MimeType=all/allfiles;inode/directory;
+Actions=send;
+X-KDE-Priority=TopLevel
+Icon=mg.diary.linksy.Linksy
+
+[Desktop Action send]
+Name=Send with Linksy
+Name[de]=Mit Linksy senden
+Name[es]=Enviar con Linksy
+Name[fr]=Envoyer avec Linksy
+Name[it]=Invia con Linksy
+Name[ja]=Linksy で送信
+Name[mg]=Alefaso amin'ny Linksy
+Name[pt]=Enviar com o Linksy
+Name[ru]=Отправить через Linksy
+Name[zh]=用 Linksy 发送
+Icon=mg.diary.linksy.Linksy
+Exec=linksy-open %F
