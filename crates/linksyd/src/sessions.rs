@@ -626,8 +626,13 @@ pub(crate) fn open_window(socket: &Path) {
     } else {
         tokio::process::Command::new(window_app())
     };
+    // Only for another socket: with LINKSY_SOCKET the apps start a window of their own
+    // instead of raising the one that's open
+    if socket != linksy_ipc::socket_path() {
+        cmd.env("LINKSY_SOCKET", socket);
+    }
     // Not waited for: tokio collects it once it exits
-    let _ = cmd.env("LINKSY_SOCKET", socket).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+    let _ = cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
 }
 
 pub(crate) fn helper(name: &str) -> PathBuf {
