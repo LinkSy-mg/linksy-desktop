@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.17
+
+### New
+- **Send with Linksy in more file managers**: Thunar's Send To menu, and GNOME Files'
+  right-click menu where nautilus-python is installed (Fedora installs it with Linksy).
+  Thanks to [@AndyM48](https://github.com/AndyM48) (#62) and
+  [@Lur1fa](https://github.com/Lur1fa) (#64) for asking.
+
 ## 0.9.16
 
 ### Security

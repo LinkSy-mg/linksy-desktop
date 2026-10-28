@@ -143,7 +143,7 @@ Finish Setup doesn't look: it shows the firewall as to set up until Linksy has o
 - [x] Activity history kept by the service (`linksy history`)
 - [x] Clipboard sharing (text, images and single files up to 10 MB, on demand: app ⋯ menu or `linksy clip`; received content is copied via wl-copy/xclip/xsel)
 - [x] Automatic clipboard sync, computer to phone, where the desktop allows watching the clipboard (KDE, wlroots; not GNOME)
-- [x] "Send with Linksy" in Files (right-click → Scripts), "Open With Linksy" for files and folders
+- [x] "Send with Linksy" in Files (right-click; with nautilus-python, else → Scripts), Dolphin and Thunar (Send To), "Open With Linksy" for files and folders
 - [x] Away from home: paired devices reach each other over the internet (iroh, Linksy's relay), for a week after they last met on the same network; screens, files, camera and microphone stay local unless allowed per device
 - [x] Locate a phone (`linksy locate`), asked once, never tracked
 - [x] Terminal from the phone (`linksy terminal`): a shell here behind a code set on this computer, allowed per phone
