@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.16" date="2026-10-28">
+      <description>
+        <p>Names from other devices show as plain text in the Qt app, so a device can't make Linksy fetch a picture from the internet or disguise its name. After Update Now, "Linksy X Is Available" goes away even in a window opened from an older tray.</p>
+      </description>
+    </release>
     <release version="0.9.15" date="2026-10-28">
       <description>
         <p>Linksy's private files (the pairing key, your paired devices, the history) are no longer readable by other accounts on the computer, and the terminal code's lockout holds when many guesses arrive at once. Send with Linksy in Dolphin's right-click menu, Open With Linksy works on KDE Plasma, and the camera driver builds for custom Fedora kernels.</p>

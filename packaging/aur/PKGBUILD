@@ -4,7 +4,7 @@
 # tools), linksy (the GTK app) and linksy-qt (the Qt app, for KDE Plasma).
 pkgbase=linksy
 pkgname=(linksy-common linksy linksy-qt)
-pkgver=0.9.15
+pkgver=0.9.16
 pkgrel=1
 pkgdesc='Your phone and your Linux computer, working as one: files, clipboard, screens, webcam'
 arch=('x86_64')
