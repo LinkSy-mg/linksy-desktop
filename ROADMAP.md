@@ -483,6 +483,10 @@ People who made Linksy better by reporting, testing or building:
   announcing permanent identifiers on every network (private discovery, 0.9).
 - [@bramikoko](https://github.com/LinkSy-mg/linksy-mobile/issues/13): Ring with the
   Flatpak.
+- [@AndyM48](https://github.com/LinkSy-mg/linksy-desktop/issues/54): the camera and Finish
+  Setup on Artix without systemd (0.9.13, 0.9.14).
+- [@bearyjd](https://github.com/LinkSy-mg/linksy-desktop/pull/56): device names cleaned
+  before they're shown, so they can't disguise a pairing prompt (0.9.14).
 
 ## How each feature ships
 
