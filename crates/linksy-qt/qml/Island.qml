@@ -20,6 +20,12 @@ Rectangle {
         return total > 0 ? bytes / total : 0;
     }
     property string sendTo: ""
+    readonly property var offered: app.offered
+    onOfferedChanged: offerSoon()
+    onPairedChanged: offerSoon()
+    function offerSoon() {
+        if (offered.length && !none && !card.opened) card.show("send");
+    }
 
     Kirigami.Theme.colorSet: Kirigami.Theme.View
     Kirigami.Theme.inherit: false
@@ -160,6 +166,7 @@ Rectangle {
         width: island.width
         padding: Kirigami.Units.largeSpacing
         closePolicy: QQC2.Popup.CloseOnEscape | QQC2.Popup.CloseOnPressOutside
+        onClosed: island.app.offered = []
         background: Rectangle {
             radius: 24
             color: Kirigami.Theme.backgroundColor
@@ -177,7 +184,8 @@ Rectangle {
             Kirigami.Heading {
                 level: 3
                 Layout.bottomMargin: Kirigami.Units.smallSpacing
-                text: card.sending ? island.app.t("Send Files") : island.app.t("Add Device")
+                text: !card.sending ? island.app.t("Add Device")
+                    : island.offered.length ? island.app.t("Pick a device to send to") : island.app.t("Send Files")
             }
             Repeater {
                 model: card.sending ? island.paired : []
@@ -187,7 +195,9 @@ Rectangle {
                     icon.name: island.kindIcon(modelData.device.kind)
                     text: modelData.device.name
                     onClicked: {
+                        const files = island.offered;
                         card.close();
+                        if (files.length) return island.app.sendPaths(modelData.device.id, files);
                         island.sendTo = modelData.device.id;
                         picker.open();
                     }

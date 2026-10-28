@@ -418,9 +418,19 @@ Kirigami.ApplicationWindow {
     }
 
     function sendFiles(id, urls) {
-        const paths = urls.map(u => decodeURIComponent(u.toString().replace(/^file:\/\//, "")));
+        sendPaths(id, urls.map(u => decodeURIComponent(u.toString().replace(/^file:\/\//, ""))));
+    }
+
+    function sendPaths(id, paths) {
         if (!paths.length) return;
         request("send", { to: id, paths: paths }, (ok, err) => { if (!ok) toast(err) });
+    }
+
+    // Files from the file manager (Send with Linksy, Open With): the island asks where to
+    property var offered: []
+    function offerFiles(paths) {
+        offered = paths;
+        toast(t("Pick a device to send to"));
     }
 
     function sessionTitle(s) {

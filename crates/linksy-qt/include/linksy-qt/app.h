@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDir>
+#include <QFileInfo>
 #include <QIcon>
 #include <QLocalServer>
 #include <QLocalSocket>
@@ -12,9 +13,12 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QStringList>
 #include <QUrl>
+#include <QVariant>
 
 #include "cxx-qt-lib/qstring.h"
+#include "cxx-qt-lib/qstringlist.h"
 #include "linksy-qt/video.h"
 
 // One window per service: a second start (from the menu, or the service opening it for a
@@ -29,18 +33,48 @@ inline QString instance_name()
     return runtime + QStringLiteral("/linksy-qt-%1.sock").arg(qHash(service), 0, 16);
 }
 
-inline bool show_running(const QString &name)
+// Files to send hand over too ("Send with Linksy" in Dolphin): a "file <path>" line each.
+inline bool show_running(const QString &name, const QStringList &files)
 {
     QLocalSocket other;
     other.connectToServer(name);
     if (!other.waitForConnected(500))
         return false;
-    other.write("show\n");
+    QByteArray message("show\n");
+    for (const QString &file : files)
+        message += "file " + file.toUtf8() + '\n';
+    other.write(message);
     other.waitForBytesWritten(500);
+    other.disconnectFromServer();
     return true;
 }
 
-inline int run_app()
+// Paths or file:// links as given on the command line, the ones that exist.
+inline QStringList local_files(const QStringList &args)
+{
+    QStringList files;
+    for (const QString &arg : args) {
+        const QUrl url = QUrl::fromUserInput(arg, QDir::currentPath(), QUrl::AssumeLocalFile);
+        if (url.isLocalFile() && QFileInfo::exists(url.toLocalFile()))
+            files << url.toLocalFile();
+    }
+    return files;
+}
+
+inline void show_windows(QQmlApplicationEngine &engine, const QStringList &files)
+{
+    for (QObject *root : engine.rootObjects()) {
+        if (auto *window = qobject_cast<QQuickWindow *>(root)) {
+            window->show();
+            window->raise();
+            window->requestActivate();
+        }
+        if (!files.isEmpty())
+            QMetaObject::invokeMethod(root, "offerFiles", Q_ARG(QVariant, QVariant(files)));
+    }
+}
+
+inline int run_app(const QStringList &args)
 {
     int argc = 1;
     static char name[] = "linksy-qt";
@@ -54,7 +88,8 @@ inline int run_app()
     QApplication::setDesktopFileName(QStringLiteral("mg.diary.linksy.Linksy"));
     QApplication::setWindowIcon(QIcon::fromTheme(QStringLiteral("mg.diary.linksy.Linksy")));
     const QString instance_path = instance_name();
-    if (show_running(instance_path))
+    const QStringList files = local_files(args);
+    if (show_running(instance_path, files))
         return 0;
     // Nobody answered: a socket left behind by a crash goes
     QLocalServer::removeServer(instance_path);
@@ -74,18 +109,25 @@ inline int run_app()
         qCritical("linksy-qt: the window's QML didn't load (see the errors above)");
         return 1;
     }
+    // The other start says what it has, then hangs up
     QObject::connect(&instance, &QLocalServer::newConnection, [&]() {
         while (QLocalSocket *other = instance.nextPendingConnection()) {
-            QObject::connect(other, &QLocalSocket::disconnected, other, &QObject::deleteLater);
-            for (QObject *root : engine.rootObjects()) {
-                if (auto *window = qobject_cast<QQuickWindow *>(root)) {
-                    window->show();
-                    window->raise();
-                    window->requestActivate();
-                }
-            }
+            auto *received = new QByteArray;
+            QObject::connect(other, &QLocalSocket::readyRead, other, [other, received]() { *received += other->readAll(); });
+            QObject::connect(other, &QLocalSocket::disconnected, other, [other, received, &engine]() {
+                *received += other->readAll();
+                QStringList handed;
+                for (const QByteArray &line : received->split('\n'))
+                    if (line.startsWith("file "))
+                        handed << QString::fromUtf8(line.mid(5));
+                delete received;
+                show_windows(engine, handed);
+                other->deleteLater();
+            });
         }
     });
+    if (!files.isEmpty())
+        show_windows(engine, files);
     const int code = app.exec();
     stop_stream();
     return code;
