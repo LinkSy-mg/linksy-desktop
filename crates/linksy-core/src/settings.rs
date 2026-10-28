@@ -15,8 +15,15 @@ pub const MAX_NAME: usize = 48;
 
 /// A name a peer sent, made safe to show, store and put in a prompt: control, bidi and
 /// invisible characters dropped, whitespace collapsed, capped at [`MAX_NAME`]. May come back empty.
+/// `<` and `>` become `‹` and `›`: a toolkit that guesses rich text (Qt's labels, notification
+/// servers) never sees a tag in one (desktop#63).
 pub(crate) fn clean_name(name: &str) -> String {
     let visible = name.chars().filter(|c| c.is_whitespace() || !(c.is_control() || matches!(c, '\u{061c}' | '\u{200b}' | '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}' | '\u{feff}')));
+    let visible = visible.map(|c| match c {
+        '<' => '‹',
+        '>' => '›',
+        c => c,
+    });
     visible.collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_NAME).collect::<String>().trim_end().to_string()
 }
 
@@ -189,6 +196,8 @@ mod tests {
         assert_eq!(clean_name("👩\u{200d}💻 فرزانه\u{200c}ها"), "👩\u{200d}💻 فرزانه\u{200c}ها");
         assert_eq!(clean_name(&"x".repeat(MAX_NAME * 100)).chars().count(), MAX_NAME);
         assert_eq!(clean_name("\n\u{202e} "), "");
+        assert_eq!(clean_name("<img src=http://203.0.113.9/p.png>"), "‹img src=http://203.0.113.9/p.png›");
+        assert_eq!(clean_name("Tom & Jerry"), "Tom & Jerry");
         // Cut exactly at a space: no trailing one is left.
         assert_eq!(clean_name(&format!("{} tail", "x".repeat(MAX_NAME - 1))), "x".repeat(MAX_NAME - 1));
     }

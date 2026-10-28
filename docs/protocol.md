@@ -207,7 +207,9 @@ out.
 **Names from other devices** (core 0.9.14, desktop#55): in `hello`, `welcome`, discovery,
 QR codes and renames, the core drops control, bidi and invisible characters, collapses
 spaces and cuts the name at 48 characters. A handshake or discovery name left empty
-becomes the short id. Apps show `device.name` as it comes.
+becomes the short id. Since core 0.9.17, `<` and `>` become `‹` and `›` (U+2039, U+203A),
+so no name reads as a tag where a toolkit guesses rich text (desktop#63). Apps show
+`device.name` as it comes.
 
 **Commit and reveal** (after `welcome`, on the same stream, only when both sent
 `"pairing":2`; QR pairing does it too). Each side makes a 32-byte random nonce:
