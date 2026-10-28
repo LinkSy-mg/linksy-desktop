@@ -2,7 +2,19 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## 0.9.13
+## 0.9.14
+
+### Security
+- **Device names can't disguise a pairing prompt.** A device on the network could send a
+  name with line breaks, hidden right-to-left characters or thousands of letters, and push
+  the code out of the pairing notification. Names are now cleaned as they arrive, and cut
+  at 48 characters. Thanks to [@bearyjd](https://github.com/bearyjd) (#55, #56).
+
+### Fixed
+- **Finish Setup installs what's missing on Artix** and other Arch-based systems that
+  don't say so, instead of asking you to do it by hand.
+- **The camera setup asks for mokutil** when Secure Boot needs the driver approved and
+  mokutil isn't installed, instead of asking for a restart that couldn't help.
 
 ### Security
 - **Safer pairing codes.** Someone on the same network at the moment you pair could have
