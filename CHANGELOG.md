@@ -2,6 +2,13 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.9.16
+
+### Fixed
+- **"Linksy X Is Available" goes away after Update Now.** A window opened from the tray
+  before 0.9.14 kept talking to the service from before the update, which still offered
+  the version just installed. Thanks to [@AndyM48](https://github.com/AndyM48) (#66).
+
 ## 0.9.15
 
 ### Security
