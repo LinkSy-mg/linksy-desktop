@@ -4,6 +4,12 @@ Linksy for Linux. Each version's section becomes its release notes.
 
 ## 0.9.16
 
+### Security
+- **Names from other devices show as plain text in the Qt app.** A device named like a
+  web page could make Linksy fetch a picture from the internet, telling that site you're
+  online, or style its name to look like something else. Thanks to
+  [@bearyjd](https://github.com/bearyjd) (#63, #65).
+
 ### Fixed
 - **"Linksy X Is Available" goes away after Update Now.** A window opened from the tray
   before 0.9.14 kept talking to the service from before the update, which still offered
