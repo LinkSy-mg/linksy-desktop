@@ -2671,6 +2671,7 @@ name = "linksy-upgrade"
 version = "0.9.17"
 dependencies = [
  "hex",
+ "linksy-host",
  "linksy-i18n",
  "serde",
  "serde_json",

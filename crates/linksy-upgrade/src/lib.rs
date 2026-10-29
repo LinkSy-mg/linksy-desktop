@@ -2,7 +2,8 @@
 //! newest version (the website's service information), how Linksy was installed and which
 //! apps are, download exactly those files from the release, check them against its
 //! SHA256SUMS, install them (packages as root through `linksy-system-setup`, one password;
-//! the tarball into the home folder), and restart the background service.
+//! the tarball into the home folder; the Flatpak with the computer's own flatpak), and
+//! restart the background service.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -13,7 +14,8 @@ use sha2::{Digest, Sha256};
 /// Where the newest version is announced (docs/protocol.md §4.12); LINKSY_SERVICE_URL
 /// overrides it, as for the service.
 const SERVICE_URL: &str = "https://linksy.diary.mg/linksy-relay";
-/// The releases: tagged `linux-vX.Y.Z`, with every file and SHA256SUMS.
+/// The releases: tagged `linux-vX.Y.Z`, with every file and SHA256SUMS. LINKSY_RELEASES
+/// overrides it, for tests.
 const RELEASES: &str = "https://github.com/LinkSy-mg/linksy-releases/releases/download";
 
 /// This build: version, commit and date (`linksy --revision`).
@@ -176,7 +178,6 @@ pub fn check() -> Result<Option<Plan>, String> {
 /// Why this install can't upgrade itself, and what to do instead; None when it can.
 pub fn manual(plan: &Plan) -> Option<String> {
     match plan.method {
-        Method::Flatpak => Some(t!("Download Linksy {version}'s Flatpak from linksy.diary.mg and open it; it replaces this one.", version = plan.latest)),
         Method::Arch => Some(t!("Rebuild the Linksy package from its PKGBUILD for {version}.", version = plan.latest)),
         Method::Other => Some(t!("This Linksy wasn't installed from a package. Install {version} with: curl -fsSL https://linksy.diary.mg/install.sh | sh", version = plan.latest)),
         _ => None,
@@ -232,7 +233,7 @@ pub fn run(plan: &Plan, root: Root, mut step: impl FnMut(String)) -> Result<(), 
     }
     let dir = download_dir(&plan.latest);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let base = format!("{RELEASES}/linux-v{}", plan.latest);
+    let base = format!("{}/linux-v{}", std::env::var("LINKSY_RELEASES").unwrap_or_else(|_| RELEASES.into()), plan.latest);
 
     // The release's checksums first: nothing is installed that doesn't match them
     step(t!("Checking the release").into());
@@ -263,6 +264,12 @@ pub fn run(plan: &Plan, root: Root, mut step: impl FnMut(String)) -> Result<(), 
     step(t!("Installing (your computer asks for your password)").into());
     match &plan.method {
         Method::Tarball(_) => install_tarball(&dir, &paths[0])?,
+        Method::Flatpak => {
+            install_flatpak(&paths[0])?;
+            // The apps start the new version's service when they start again
+            let _ = std::fs::remove_dir_all(&dir);
+            return Ok(());
+        }
         _ => install_packages(&paths, root)?,
     }
 
@@ -291,6 +298,21 @@ fn install_packages(paths: &[PathBuf], root: Root) -> Result<(), String> {
     }
 }
 
+/// The new Flatpak, with the computer's own flatpak, into the installation this one is in
+/// (the user's or the system's, which asks for the password). Running copies go on until
+/// they end.
+fn install_flatpak(bundle: &Path) -> Result<(), String> {
+    let info = std::fs::read_to_string("/.flatpak-info").unwrap_or_default();
+    let scope = if info.contains("/.local/share/flatpak/") { "--user" } else { "--system" };
+    let ok = linksy_host::command("flatpak", &[])
+        .args(["install", "--noninteractive", "--reinstall", scope, "--bundle"])
+        .arg(bundle)
+        .stdin(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if ok { Ok(()) } else { Err(t!("The update didn't install.").into()) }
+}
+
 fn nix_root() -> bool {
     quiet("id", &["-u"]).is_some_and(|u| u.trim() == "0")
 }
@@ -311,7 +333,14 @@ fn install_tarball(dir: &Path, tarball: &Path) -> Result<(), String> {
 /// The update replaced the program while it ran, so the kernel names it "… (deleted)":
 /// the path without that, or the program's name on PATH.
 pub fn relaunch() {
-    let exe = std::env::current_exe().ok().map(|p| p.to_string_lossy().trim_end_matches(" (deleted)").to_string());
+    // The Flatpak: started by the computer once every copy of the old one has ended (the
+    // sandbox goes with this process, so the wait can't happen inside it)
+    if let Ok(app) = std::env::var("FLATPAK_ID") {
+        let script = "for _ in $(seq 50); do flatpak ps --columns=application | grep -qx \"$0\" || break; sleep 0.2; done; exec flatpak run \"$0\"";
+        let _ = linksy_host::detached("sh", &[]).args(["-c", script]).arg(app).stdin(std::process::Stdio::null()).spawn();
+        return;
+    }
+    let exe =std::env::current_exe().ok().map(|p| p.to_string_lossy().trim_end_matches(" (deleted)").to_string());
     let name = std::env::args().next().unwrap_or_default();
     let program = exe.filter(|p| std::path::Path::new(p).is_file()).unwrap_or(name);
     // Not before this process is gone: a single-instance app would hand the start back to it
