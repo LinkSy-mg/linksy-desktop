@@ -23,8 +23,9 @@ fail() { if [ "$status" -eq 0 ]; then status=$1; fi; }
 allowed() {
   case "$1" in
     v4l2loopback|akmod-v4l2loopback|v4l2loopback-dkms|v4l2loopback-utils|v4l2loopback-kmp-*) return 0 ;;
-    # Debian's linux-headers-<version>; Arch's <kernel package>-headers (linux-cachyos-headers…)
-    linux-headers-*|linux-headers|linux-*-headers) return 0 ;;
+    # Debian's linux-headers-<version>; Arch's <kernel package>-headers (linux-cachyos-headers,
+    # Manjaro's linux73-headers…)
+    linux-headers-*|linux*-headers) return 0 ;;
     gstreamer1-plugin-openh264|gstreamer1-plugin-libav|gstreamer1-plugin-gtk4|gstreamer1-plugins-good-qt6|pipewire-gstreamer) return 0 ;;
     gstreamer1.0-libav|gstreamer1.0-plugins-ugly|gstreamer1.0-gtk4|gstreamer1.0-qt6|gstreamer1.0-pipewire) return 0 ;;
     gst-libav|gst-plugins-ugly|gst-plugin-gtk4|gst-plugin-qml6|gst-plugin-pipewire) return 0 ;;
@@ -46,6 +47,13 @@ rpmfusion() {
 }
 
 install_packages() {
+  # Arch and its derivatives: the running kernel's own headers. The Flatpak can't see which
+  # package that kernel came from and asks for linux-headers (Manjaro: releases#7)
+  base=$(cat "/usr/lib/modules/$(uname -r)/pkgbase" 2>/dev/null)
+  if command -v pacman >/dev/null && [ "${base#linux}" != "$base" ]; then
+    # shellcheck disable=SC2046
+    set -- $(for p in "$@"; do if [ "$p" = linux-headers ]; then echo "$base-headers"; else echo "$p"; fi; done)
+  fi
   echo "STEP Installing $*"
   if command -v dnf >/dev/null; then
     dnf install -y "$@" || return 1
