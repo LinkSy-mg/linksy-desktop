@@ -19,6 +19,12 @@ Linksy for Linux. Each version's section becomes its release notes.
 - **The microphone card shows what the phone hears** as a live wave, in both apps. It
   replaces Listen: no echo, no headphones needed to check the phone is picking you up.
 
+### Fixed
+- **The webcam's driver builds on Manjaro and other kernels with their own headers**, from
+  the Flatpak too: Finish Setup installs the running kernel's headers (`linux73-headers`,
+  say), not only `linux-headers`. Thanks to
+  [@AwwsmGaurav](https://github.com/AwwsmGaurav) (releases#7).
+
 ## 0.9.16
 
 ### Security
