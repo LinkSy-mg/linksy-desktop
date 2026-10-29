@@ -55,6 +55,22 @@ modules:
         url: https://github.com/bugaevc/wl-clipboard/archive/refs/tags/v2.2.1.tar.gz
         sha256: 6eb8081207fb5581d1d82c4bcd9587205a31a3d47bea3ebeb7f41aa1143783eb
 
+  # X11 screens without a portal: ximagesrc, which the runtime's GStreamer leaves out
+  # (found in /app/lib/gstreamer-1.0 with no setting)
+  - name: gst-plugins-good-ximagesrc
+    buildsystem: meson
+    config-opts:
+      - -Dauto_features=disabled
+      - -Dximagesrc=enabled
+      - -Dximagesrc-xshm=enabled
+      - -Dximagesrc-xfixes=enabled
+      - -Dximagesrc-xdamage=enabled
+      - -Dximagesrc-navigation=enabled
+    sources:
+      - type: archive
+        url: https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.6.tar.xz
+        sha256: b0c620a4b18b6ee931b4c43bbf1760d308666dc37f730a7e7f1ad327e59ce2df
+
   - name: linksy
     buildsystem: simple
     build-options:
