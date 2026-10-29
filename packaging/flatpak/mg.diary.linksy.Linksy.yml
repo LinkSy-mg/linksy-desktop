@@ -34,6 +34,11 @@ finish-args:
   - --talk-name=org.kde.StatusNotifierWatcher
   # Big transfers over a phone's Wi-Fi Direct link, joined with NetworkManager.
   - --system-talk-name=org.freedesktop.NetworkManager
+  # What the packages do outside a sandbox, through flatpak-spawn --host: the terminal for
+  # phones, Finish Setup (the camera driver, the USB cable, the firewall, with the
+  # computer's own password prompt), starting at login, Update Now, Send with Linksy in
+  # file managers, and the screen lockers and outputs of tiling desktops.
+  - --talk-name=org.freedesktop.Flatpak
 cleanup:
   - /include
   - /lib/pkgconfig
@@ -60,6 +65,8 @@ modules:
     build-commands:
       - cargo build --release --offline -p linksyd -p linksy -p linksy-app -p linksy-screen
       - install -Dm755 -t /app/bin target/release/linksyd target/release/linksy target/release/linksy-app target/release/linksy-screen
+      # Finish Setup's root helpers, run on the computer with its own pkexec
+      - install -Dm755 -t /app/libexec/linksy data/linksy-system-setup data/linksy-camera-setup data/linksy-usb-setup
       - install -Dm644 data/mg.diary.linksy.Linksy.desktop /app/share/applications/mg.diary.linksy.Linksy.desktop
       - install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml /app/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
       - install -Dm644 data/icons/mg.diary.linksy.Linksy.svg /app/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg
