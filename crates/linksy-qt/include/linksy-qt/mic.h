@@ -59,7 +59,7 @@ inline double microphone_level()
         const GstStructure *s = gst_message_get_structure(msg);
         const GValue *peaks = s && gst_structure_has_name(s, "level") ? gst_structure_get_value(s, "peak") : nullptr;
         G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-        if (peaks && G_VALUE_HOLDS(peaks, G_TYPE_VALUE_ARRAY)) {
+        if (peaks && G_VALUE_TYPE(peaks) == g_value_array_get_type()) {
             auto *array = static_cast<GValueArray *>(g_value_get_boxed(peaks));
             for (guint i = 0; array && i < array->n_values; i++) {
                 // Squared, or speech fills every bar
