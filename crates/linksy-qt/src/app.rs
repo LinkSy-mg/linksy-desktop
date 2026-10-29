@@ -22,5 +22,8 @@ pub mod ffi {
         fn stop_stream();
         fn stream_size() -> QString;
         fn send_control(json: &QString) -> bool;
+
+        fn meter_microphone(on: bool);
+        fn microphone_level() -> f64;
     }
 }

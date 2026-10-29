@@ -400,10 +400,19 @@ Kirigami.ScrollablePage {
         width: Kirigami.Units.gridUnit * 14
         banner.title: card.title
         banner.titleIcon: card.iconName
-        contentItem: QQC2.Label {
-            text: card.running ? app.t("Live now") : card.subtitle
-            wrapMode: Text.Wrap
-            opacity: 0.75
+        contentItem: ColumnLayout {
+            spacing: Kirigami.Units.largeSpacing
+            QQC2.Label {
+                Layout.fillWidth: true
+                text: card.running ? app.t("Live now") : card.subtitle
+                wrapMode: Text.Wrap
+                opacity: 0.75
+            }
+            // A microphone in use here: what it hears
+            MicWave {
+                Layout.fillWidth: true
+                visible: card.running !== null && card.kind === "microphone"
+            }
         }
         actions: [
             Kirigami.Action {
@@ -431,5 +440,55 @@ Kirigami.ScrollablePage {
                 }
             }
         ]
+    }
+
+    // The microphone's sound as it arrives: its latest levels as bars, newest on the right
+    component MicWave: Rectangle {
+        id: wave
+        property var levels: []
+        property bool metering: false
+        readonly property int bars: Math.max(0, Math.floor((width - 2 * Kirigami.Units.largeSpacing) / 6))
+        implicitHeight: Kirigami.Units.gridUnit * 2
+        radius: Kirigami.Units.cornerRadius
+        color: Qt.alpha(Kirigami.Theme.highlightColor, 0.12)
+
+        function meter(on) {
+            if (on === metering) return;
+            metering = on;
+            levels = [];
+            backend.meterMicrophone(on);
+        }
+        onVisibleChanged: meter(visible)
+        Component.onCompleted: meter(visible)
+        Component.onDestruction: meter(false)
+
+        Timer {
+            interval: 60
+            repeat: true
+            running: wave.metering
+            onTriggered: {
+                const level = backend.microphoneLevel();
+                if (level >= 0) wave.levels = wave.levels.concat([level]).slice(-160);
+            }
+        }
+        Row {
+            anchors.right: parent.right
+            anchors.rightMargin: Kirigami.Units.largeSpacing
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 3
+            Repeater {
+                model: wave.bars
+                Rectangle {
+                    required property int index
+                    readonly property real level: wave.levels[wave.levels.length - wave.bars + index] ?? 0
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 3
+                    height: 3 + level * (wave.height - 15)
+                    radius: 1.5
+                    color: Kirigami.Theme.highlightColor
+                    opacity: 0.35 + 0.65 * (index + 1) / wave.bars
+                }
+            }
+        }
     }
 }

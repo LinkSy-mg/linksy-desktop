@@ -76,6 +76,16 @@ pub mod qobject {
         #[cxx_name = "sendControl"]
         fn send_control(&self, json: &QString) -> bool;
 
+        /// Measure the phone's microphone as apps hear it, or stop.
+        #[qinvokable]
+        #[cxx_name = "meterMicrophone"]
+        fn meter_microphone(&self, on: bool);
+
+        /// How loud it got lately, 0 to 1; -1 when not measuring.
+        #[qinvokable]
+        #[cxx_name = "microphoneLevel"]
+        fn microphone_level(&self) -> f64;
+
         /// Check what Finish Setup lists; `setupChecked` answers (JSON).
         #[qinvokable]
         #[cxx_name = "checkSetup"]
@@ -362,6 +372,14 @@ impl qobject::Backend {
 
     pub fn send_control(&self, json: &QString) -> bool {
         crate::app::ffi::send_control(json)
+    }
+
+    pub fn meter_microphone(&self, on: bool) {
+        crate::app::ffi::meter_microphone(on);
+    }
+
+    pub fn microphone_level(&self) -> f64 {
+        crate::app::ffi::microphone_level()
     }
 
     pub fn check_setup(self: Pin<&mut Self>) {

@@ -19,6 +19,7 @@
 
 #include "cxx-qt-lib/qstring.h"
 #include "cxx-qt-lib/qstringlist.h"
+#include "linksy-qt/mic.h"
 #include "linksy-qt/video.h"
 
 // One window per service: a second start (from the menu, or the service opening it for a
