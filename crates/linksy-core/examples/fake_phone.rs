@@ -25,6 +25,9 @@
 //! `--watch-clipboard` asks for the computer's clipboard as it changes and prints it.
 //! `--camera` accepts "Use as Webcam": streams a test picture (with gst-launch-1.0, when
 //! it's there), sends a `camera_state` and prints the `camera_control` it gets.
+//! `--mic` accepts "Use as Microphone": sends a 440 Hz tone that swells and fades like
+//! speech, the way the phone sends its microphone (raw PCM, s16le, 48 kHz, mono, 10 ms at a
+//! time).
 //! `--picture FILE` sends that JPEG or PNG as the phone's picture.
 //! `--location LAT,LON` answers "Locate" with that position (else it says no).
 //! `--away` turns on away from home, through LINKSY_RELAY or Linksy's relay.
@@ -59,6 +62,7 @@ async fn main() {
     let (mut resume, mut close, mut watch_for) = (false, false, 3u64);
     let mut watch_clipboard = false;
     let mut camera = false;
+    let mut mic = false;
     let mut picture: Option<std::path::PathBuf> = None;
     let mut location: Option<(f64, f64)> = None;
     let mut away = false;
@@ -87,6 +91,7 @@ async fn main() {
             "--watch-terminal" => watch_for = value().parse().expect("--watch-terminal SECONDS"),
             "--watch-clipboard" => watch_clipboard = true,
             "--camera" => camera = true,
+            "--mic" => mic = true,
             "--picture" => picture = Some(value().into()),
             "--location" => location = value().split_once(',').and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?))),
             "--away" => away = true,
@@ -118,7 +123,7 @@ async fn main() {
     config.port = port;
     config.away = away;
     // What it does, like a phone that says so (Locate shows only then).
-    config.features = ["files", "clipboard", "open_url", "battery", "ring", "media_remote", "call_state", "heartbeat", "import", "fs", "input", "screen", "camera", "display", "watch", "locate"].map(String::from).to_vec();
+    config.features = ["files", "clipboard", "open_url", "battery", "ring", "media_remote", "call_state", "heartbeat", "import", "fs", "input", "screen", "camera", "display", "watch", "locate", "microphone"].map(String::from).to_vec();
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
     let node = Node::start(config).await.expect("start");
     let mut events = node.subscribe();
@@ -346,6 +351,30 @@ async fn main() {
             }
         });
     }
+    if mic {
+        let mut sessions = node.incoming_sessions().expect("sessions");
+        tokio::spawn(async move {
+            while let Some(mut s) = sessions.recv().await {
+                let mut tick = tokio::time::interval(Duration::from_millis(10));
+                let mut n = 0u64;
+                loop {
+                    tick.tick().await;
+                    let chunk: Vec<u8> = (n..n + 480)
+                        .flat_map(|i| {
+                            let (t, tau) = (i as f64 / 48_000.0, std::f64::consts::TAU);
+                            let swell = ((t * 2.3 * tau).sin() * (t * 0.45 * tau).sin()).abs();
+                            (((t * 440.0 * tau).sin() * 16_000.0 * swell) as i16).to_le_bytes()
+                        })
+                        .collect();
+                    n += 480;
+                    if s.send.write_all(&chunk).await.is_err() {
+                        break;
+                    }
+                }
+                println!("microphone for {} ended", s.peer.name);
+            }
+        });
+    }
     if let Some(path) = display.clone() {
         let mut sessions = node.incoming_sessions().expect("sessions");
         tokio::spawn(async move {
@@ -435,6 +464,10 @@ async fn main() {
                 }
                 Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Camera }) if camera => {
                     println!("camera requested by {}: accepting", from.name);
+                    node.respond(request, true);
+                }
+                Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Microphone }) if mic => {
+                    println!("microphone requested by {}: accepting", from.name);
                     node.respond(request, true);
                 }
                 Ok(Event::SessionRequest { request, from, kind }) if display.is_some() => {
