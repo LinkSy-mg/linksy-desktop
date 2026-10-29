@@ -2,6 +2,18 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.10.0
+
+### New
+- **The phone sees and controls X11 screens** (Openbox, XFCE, i3, MATE…), where no screen
+  sharing portal works: Linksy reads the screen itself and moves the pointer and types with
+  XTest. The phone as touchpad and keyboard works there too. Thanks to
+  [@AndyM48](https://github.com/AndyM48) for asking (#54).
+
+### Fixed
+- **Finish Setup no longer offers GNOME's screen sharing portal on X11 desktops**, where it
+  can't help (#67). Second Display says it needs a Wayland session there.
+
 ## 0.9.17
 
 ### Security
