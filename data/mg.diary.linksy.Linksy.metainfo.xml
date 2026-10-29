@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.9.17" date="2026-10-29">
+      <description>
+        <p>Send with Linksy in Thunar's Send To menu and GNOME Files' right-click menu. The microphone card shows what the phone hears as a live wave, in place of Listen. Device names can't hold markup anywhere, and on Manjaro Finish Setup installs the running kernel's headers for the camera driver, from the Flatpak too.</p>
+      </description>
+    </release>
     <release version="0.9.16" date="2026-10-28">
       <description>
         <p>Names from other devices show as plain text in the Qt app, so a device can't make Linksy fetch a picture from the internet or disguise its name. After Update Now, "Linksy X Is Available" goes away even in a window opened from an older tray.</p>
