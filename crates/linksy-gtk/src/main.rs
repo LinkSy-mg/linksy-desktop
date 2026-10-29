@@ -96,6 +96,7 @@ button.soft-tile:active { background-color: alpha(currentColor, 0.13); }
   background-color: alpha(currentColor, 0.05);
 }
 .feature-card.live { box-shadow: inset 0 0 0 2px @success_color; }
+.mic-wave { padding: 0 10px; border-radius: 9px; background-color: alpha(@accent_bg_color, 0.12); color: @accent_color; }
 .card-icon {
   min-width: 52px;
   min-height: 52px;

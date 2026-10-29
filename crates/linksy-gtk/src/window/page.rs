@@ -2,7 +2,7 @@
 //! everything shared with it, grouped by day, with live progress for running transfers.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -27,8 +27,6 @@ pub enum Action {
     Microphone,
     CameraPreview,
     CameraStop,
-    /// Hear the phone's microphone on this computer, or stop hearing it.
-    MicListen(bool),
     MicStop,
     /// The Connect by USB Cable guide.
     UsbCable,
@@ -107,8 +105,7 @@ pub struct DevicePage {
     mic_live: gtk::Label,
     mic_start: gtk::Button,
     mic_running: gtk::Box,
-    mic_level: gtk::LevelBar,
-    mic_listen: gtk::ToggleButton,
+    mic_wave: Wave,
     /// Settings and places, as plain rows.
     settings: gtk::ListBox,
     messages_row: adw::ActionRow,
@@ -312,20 +309,13 @@ impl DevicePage {
         buttons.append(&webcam_running);
         let (mic_card, buttons, mic_desc, mic_live) = card("audio-input-microphone-symbolic", t!("Microphone"), &t!("“{microphone}” in calls and recorders", microphone = "Linksy Microphone"));
         let mic_start = start(t!("Start Microphone"), || Action::Microphone);
-        // While it's on: how loud it is right now, Listen to hear it here, and Stop.
-        let mic_level = gtk::LevelBar::builder().min_value(0.0).max_value(1.0).visible(false).css_classes(["mic-level"]).build();
-        for offset in [gtk::LEVEL_BAR_OFFSET_LOW, gtk::LEVEL_BAR_OFFSET_HIGH, gtk::LEVEL_BAR_OFFSET_FULL] {
-            mic_level.remove_offset_value(Some(offset));
-        }
-        mic_card.insert_child_after(&mic_level, Some(&mic_desc));
-        let mic_listen = gtk::ToggleButton::builder().label(t!("Listen")).hexpand(true).tooltip_text(t!("Hear it on this computer (headphones avoid an echo)")).build();
-        let e = emit.clone();
-        mic_listen.connect_toggled(move |b| e(Action::MicListen(b.is_active())));
+        // While it's on: what it hears, and Stop.
+        let mic_wave = Wave::new();
         let mic_stop = gtk::Button::builder().label(t!("Stop")).build();
         let e = emit.clone();
         mic_stop.connect_clicked(move |_| e(Action::MicStop));
         let mic_running = gtk::Box::builder().spacing(8).hexpand(true).visible(false).build();
-        mic_running.append(&mic_listen);
+        mic_running.append(&mic_wave.area);
         mic_running.append(&mic_stop);
         buttons.append(&mic_start);
         buttons.append(&mic_running);
@@ -572,8 +562,7 @@ impl DevicePage {
             mic_live,
             mic_start,
             mic_running,
-            mic_level,
-            mic_listen,
+            mic_wave,
             webcam_desc,
             webcam_live,
             webcam_start,
@@ -699,10 +688,8 @@ impl DevicePage {
         self.mic_live.set_visible(live);
         self.mic_start.set_visible(!live);
         self.mic_running.set_visible(live);
-        self.mic_level.set_visible(live);
         if !live {
-            self.mic_level.set_value(0.0);
-            self.mic_listen.set_active(false);
+            self.mic_wave.clear();
         }
         if live {
             self.mic_card.add_css_class("live");
@@ -711,9 +698,9 @@ impl DevicePage {
         }
     }
 
-    /// The microphone's level meter (0 to 1), for whatever measures it.
-    pub fn mic_level_bar(&self) -> gtk::LevelBar {
-        self.mic_level.clone()
+    /// The microphone's wave, for whatever measures it.
+    pub fn mic_wave(&self) -> Wave {
+        self.mic_wave.clone()
     }
 
     pub fn set_drop_active(&self, on: bool) {
@@ -986,6 +973,58 @@ impl DevicePage {
             _ => {}
         }
         (row, live)
+    }
+}
+
+/// The microphone's sound as it arrives: its latest levels as bars, newest on the right.
+#[derive(Clone)]
+pub struct Wave {
+    area: gtk::DrawingArea,
+    levels: Rc<RefCell<VecDeque<f64>>>,
+}
+
+impl Wave {
+    const BAR: f64 = 3.0;
+    const STEP: f64 = 6.0;
+    const KEEP: usize = 160;
+
+    fn new() -> Self {
+        let area = gtk::DrawingArea::builder().content_height(34).hexpand(true).css_classes(["mic-wave"]).build();
+        let levels: Rc<RefCell<VecDeque<f64>>> = Rc::default();
+        let l = levels.clone();
+        area.set_draw_func(move |area, cr, w, h| {
+            let (c, levels) = (area.color(), l.borrow());
+            let (w, h) = (w as f64, h as f64);
+            let bars = (w / Self::STEP) as usize;
+            let room = h - Self::BAR - 12.0;
+            cr.set_line_width(Self::BAR);
+            cr.set_line_cap(gtk::cairo::LineCap::Round);
+            for i in 0..bars {
+                let level = (levels.len() + i).checked_sub(bars).and_then(|j| levels.get(j)).copied().unwrap_or(0.0);
+                let (x, half) = (w - (bars - i) as f64 * Self::STEP + Self::STEP / 2.0, level * room / 2.0);
+                cr.set_source_rgba(c.red() as f64, c.green() as f64, c.blue() as f64, 0.35 + 0.65 * (i + 1) as f64 / bars as f64);
+                cr.move_to(x, h / 2.0 - half);
+                cr.line_to(x, h / 2.0 + half);
+                let _ = cr.stroke();
+            }
+        });
+        Self { area, levels }
+    }
+
+    /// The latest level, 0 (silent) to 1 (full scale).
+    pub fn push(&self, level: f64) {
+        let mut levels = self.levels.borrow_mut();
+        if levels.len() == Self::KEEP {
+            levels.pop_front();
+        }
+        levels.push_back(level);
+        drop(levels);
+        self.area.queue_draw();
+    }
+
+    fn clear(&self) {
+        self.levels.borrow_mut().clear();
+        self.area.queue_draw();
     }
 }
 

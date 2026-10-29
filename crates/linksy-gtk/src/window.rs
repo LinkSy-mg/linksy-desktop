@@ -74,9 +74,8 @@ struct State {
     camera: Option<(Uuid, Fingerprint)>,
     /// The microphone session in use here (another device's microphone) and whose.
     microphone: Option<(Uuid, Fingerprint)>,
-    /// Its level meter while its page is on screen: whose, whether it plays here too, and
-    /// the pipeline with its bus watch.
-    mic_meter: Option<(Fingerprint, bool, gstreamer::Element, gstreamer::bus::BusWatchGuard)>,
+    /// Its wave's meter while its page is on screen: whose, and the pipeline with its bus watch.
+    mic_meter: Option<(Fingerprint, gstreamer::Element, gstreamer::bus::BusWatchGuard)>,
     /// The second display this computer extends onto: its session, the device and its
     /// name, so that a drop (the phone's screen went off, say) can offer to reconnect.
     second_display: Option<(Uuid, Fingerprint, String)>,
@@ -561,7 +560,6 @@ impl Window {
                         w.end_session(session);
                     }
                 }
-                page::Action::MicListen(on) => w.listen_microphone(on),
                 page::Action::UsbCable => w.show_usb_cable(),
                 page::Action::MicStop => {
                     let mic = w.state.borrow().microphone;
