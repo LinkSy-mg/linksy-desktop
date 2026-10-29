@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 # The GTK app and the screen helper need gtk4/libadwaita and GStreamer headers; build them
 # with `-p linksy-app -p linksy-screen` (see README).
-default-members = ["crates/linksy-core", "crates/linksy-ipc", "crates/linksyd", "crates/linksy-cli", "crates/linksy-news", "crates/linksy-upgrade", "crates/linksy-logs"]
+default-members = ["crates/linksy-core", "crates/linksy-ipc", "crates/linksyd", "crates/linksy-cli", "crates/linksy-news", "crates/linksy-upgrade", "crates/linksy-logs", "crates/linksy-host"]
 
 [workspace.package]
 version = "0.9.17"
