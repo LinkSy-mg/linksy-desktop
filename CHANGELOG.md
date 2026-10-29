@@ -9,10 +9,18 @@ Linksy for Linux. Each version's section becomes its release notes.
   sharing portal works: Linksy reads the screen itself and moves the pointer and types with
   XTest. The phone as touchpad and keyboard works there too. Thanks to
   [@AndyM48](https://github.com/AndyM48) for asking (#54).
+- **The Flatpak does everything the packages do.** Finish Setup sets up the webcam driver,
+  the USB cable and the firewall with one password, and turns on starting at login. The
+  terminal for phones works, Update Now installs the new version, and Send with Linksy shows
+  up in Dolphin, GNOME Files and Thunar. On Hyprland, Sway and X11 desktops, the screen
+  locker, volume, Second Display and the clipboard work from the Flatpak too. It now asks
+  for host access to do this.
 
 ### Fixed
 - **Finish Setup no longer offers GNOME's screen sharing portal on X11 desktops**, where it
   can't help (#67). Second Display says it needs a Wayland session there.
+- **Clipboard text from a phone reaches X11 desktops that also have wl-clipboard
+  installed**: the copy stopped at wl-copy before trying xclip and xsel.
 
 ## 0.9.17
 
