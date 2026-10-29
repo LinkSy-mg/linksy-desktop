@@ -127,8 +127,27 @@ fn probe_watch() -> bool {
 /// The command that prints X11's clipboard.
 fn x11_reader() -> Option<&'static [&'static str]> {
     let tools: [&'static [&'static str]; 2] = [&["xclip", "-o", "-selection", "clipboard"], &["xsel", "--clipboard", "--output"]];
-    let path = std::env::var_os("PATH")?;
-    tools.into_iter().find(|t| std::env::split_paths(&path).any(|d| d.join(t[0]).is_file()))
+    tools.into_iter().find(|t| linksy_host::installed(t[0]))
+}
+
+/// A clipboard tool: wl-clipboard comes with the Flatpak, xclip and xsel are the computer's.
+fn tool(program: &str) -> Command {
+    if program.starts_with("wl-") { Command::new(program) } else { linksy_host::command(program, &[]) }
+}
+
+/// A tool that puts something on the clipboard: on X11 it stays in the background to hand
+/// it over, so nothing may end it with Linksy.
+fn copier(program: &str) -> Command {
+    if program.starts_with("wl-") { Command::new(program) } else { linksy_host::detached(program, &[]) }
+}
+
+/// The tools that put things on this session's clipboard and are installed, in the order
+/// to try (from the Flatpak, starting one always works, so it's checked first).
+fn copiers<'a>(wayland: &'a [(&'a str, &'a [&'a str])], x11: &'a [(&'a str, &'a [&'a str])]) -> Vec<&'a (&'a str, &'a [&'a str])> {
+    if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+        return wayland.iter().collect();
+    }
+    x11.iter().filter(|(cmd, _)| linksy_host::installed(cmd)).collect()
 }
 
 /// Every new text on X11's clipboard: X11 apps own their clipboard and tell nobody when it
@@ -137,7 +156,7 @@ fn watch_x11() -> Option<mpsc::UnboundedReceiver<String>> {
     let reader = x11_reader()?;
     let (tx, rx) = mpsc::unbounded_channel();
     std::thread::spawn(move || {
-        let read = || Command::new(reader[0]).args(&reader[1..]).stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success()).map(|o| o.stdout);
+        let read = || tool(reader[0]).args(&reader[1..]).stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success()).map(|o| o.stdout);
         // What's there already isn't news
         let mut last = read();
         loop {
@@ -224,8 +243,10 @@ pub fn read_local() -> Option<Copied> {
 
 /// Whether X11 or Wayland has the tool [`paste`] reads with.
 pub fn can_paste() -> bool {
-    let tool = if std::env::var_os("WAYLAND_DISPLAY").is_some() { "wl-paste" } else { "xclip" };
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(tool).is_file()))
+    if std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        return linksy_host::installed("xclip");
+    }
+    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join("wl-paste").is_file()))
 }
 
 /// The clipboard as `mime` ("text" for any text), or the types it has.
@@ -238,7 +259,7 @@ fn paste(mime: Option<&str>) -> Option<Vec<u8>> {
         };
         c
     } else {
-        let mut c = Command::new("xclip");
+        let mut c = tool("xclip");
         c.args(["-o", "-selection", "clipboard", "-t", if mime == Some("text") { "UTF8_STRING" } else { mime.unwrap_or("TARGETS") }]);
         c
     };
@@ -287,10 +308,10 @@ fn announce(from: &str, text: &str, copied: bool) {
 }
 
 fn copy_text(text: &str) -> std::io::Result<()> {
-    let tools: &[(&str, &[&str])] = &[("wl-copy", &[]), ("xclip", &["-selection", "clipboard"]), ("xsel", &["--clipboard", "--input"])];
+    let tools = copiers(&[("wl-copy", &[])], &[("xclip", &["-selection", "clipboard"]), ("xsel", &["--clipboard", "--input"])]);
     let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, "no clipboard tool (wl-copy, xclip or xsel)");
     for (cmd, args) in tools {
-        let child = Command::new(cmd).args(*args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+        let child = copier(cmd).args(*args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
         match child {
             Ok(mut child) => {
                 child.stdin.take().expect("piped stdin").write_all(text.as_bytes())?;
@@ -315,10 +336,12 @@ fn copy_file(path: &Path) -> std::io::Result<()> {
 }
 
 fn copy_as(mime: &str, data: &[u8]) -> std::io::Result<()> {
-    let tools: &[(&str, &[&str])] = &[("wl-copy", &["--type", mime]), ("xclip", &["-selection", "clipboard", "-t", mime])];
+    let (wl, xc) = (["--type", mime], ["-selection", "clipboard", "-t", mime]);
+    let (wayland, x11) = ([("wl-copy", &wl[..])], [("xclip", &xc[..])]);
+    let tools = copiers(&wayland, &x11);
     let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, "no clipboard tool (wl-copy or xclip)");
     for (cmd, args) in tools {
-        let child = Command::new(cmd).args(*args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+        let child = copier(cmd).args(*args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
         match child {
             Ok(mut child) => {
                 child.stdin.take().expect("piped stdin").write_all(data)?;
