@@ -373,6 +373,7 @@
   "Second Display for {name}": "{name} 的第二屏幕",
   "Second Display isn't available on this desktop yet: its screen sharing can't make a virtual monitor. GNOME and KDE Plasma can.": "此桌面暂时无法使用第二屏幕：它的屏幕共享无法创建虚拟显示器。GNOME 和 KDE Plasma 可以。",
   "Second Display isn't available on {desktop} yet: its screen sharing can't make a virtual monitor. GNOME and KDE Plasma can.": "{desktop} 暂时无法使用第二屏幕：它的屏幕共享无法创建虚拟显示器。GNOME 和 KDE Plasma 可以。",
+  "Second Display needs a Wayland session: X11 can't add a monitor. GNOME, KDE Plasma, Hyprland and Sway on Wayland can.": "第二屏幕需要 Wayland 会话：X11 无法添加显示器。Wayland 下的 GNOME、KDE Plasma、Hyprland 和 Sway 可以。",
   "Second display": "第二屏幕",
   "Secure Boot asks you to approve the camera driver once.\n\n1. Restart your computer.\n2. A blue screen appears: choose Enroll MOK, then Continue, then Yes.\n3. Type this code: {code}\n4. Choose Reboot.\n\nLinksy Camera is then ready, nothing else to do. Write the code down: it's needed on that blue screen.": "安全启动要求你批准一次相机驱动。\n\n1. 重启电脑。\n2. 出现蓝色屏幕时，依次选择 Enroll MOK、Continue、Yes。\n3. 输入此代码：{code}\n4. 选择 Reboot。\n\n之后 Linksy Camera 即可使用，无需其他操作。请记下代码：在蓝色屏幕上需要输入它。",
   "See the Microphone Level": "查看麦克风音量",

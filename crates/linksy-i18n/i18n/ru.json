@@ -373,6 +373,7 @@
   "Second Display for {name}": "Второй экран для {name}",
   "Second Display isn't available on this desktop yet: its screen sharing can't make a virtual monitor. GNOME and KDE Plasma can.": "Второй экран пока недоступен в этой среде: её демонстрация экрана не умеет создавать виртуальный монитор. GNOME и KDE Plasma умеют.",
   "Second Display isn't available on {desktop} yet: its screen sharing can't make a virtual monitor. GNOME and KDE Plasma can.": "Второй экран пока недоступен в {desktop}: её демонстрация экрана не умеет создавать виртуальный монитор. GNOME и KDE Plasma умеют.",
+  "Second Display needs a Wayland session: X11 can't add a monitor. GNOME, KDE Plasma, Hyprland and Sway on Wayland can.": "Второму экрану нужен сеанс Wayland: X11 не умеет добавлять монитор. GNOME, KDE Plasma, Hyprland и Sway на Wayland умеют.",
   "Second display": "Второй экран",
   "Secure Boot asks you to approve the camera driver once.\n\n1. Restart your computer.\n2. A blue screen appears: choose Enroll MOK, then Continue, then Yes.\n3. Type this code: {code}\n4. Choose Reboot.\n\nLinksy Camera is then ready, nothing else to do. Write the code down: it's needed on that blue screen.": "Secure Boot попросит один раз одобрить драйвер камеры.\n\n1. Перезагрузите компьютер.\n2. Появится синий экран: выберите Enroll MOK, затем Continue, затем Yes.\n3. Введите этот код: {code}\n4. Выберите Reboot.\n\nПосле этого Linksy Camera готова, больше ничего делать не нужно. Запишите код: он понадобится на синем экране.",
   "See the Microphone Level": "Уровень микрофона",

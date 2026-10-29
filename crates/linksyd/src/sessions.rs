@@ -463,6 +463,12 @@ fn window_app() -> PathBuf {
     if beside.is_absolute() || in_path { beside } else { helper("linksy-app") }
 }
 
+/// An X11 session, told the way the rest of Linksy tells: no Wayland display. The screen
+/// helper reads X11 screens itself, with no portal.
+pub(crate) fn x11() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_some()
+}
+
 /// Whether this desktop's screen sharing can make a virtual monitor (a second display):
 /// GNOME's and KDE's can, Hyprland's and the wlroots one can't yet. The portal says so in
 /// its AvailableSourceTypes (4 = virtual). Unsure (no portal answer): yes, and the helper
@@ -470,6 +476,9 @@ fn window_app() -> PathBuf {
 pub(crate) async fn virtual_monitors() -> bool {
     if std::env::var_os("LINKSY_SCREEN_TEST").is_some() {
         return true;
+    }
+    if x11() {
+        return false;
     }
     // Their portals can't (#42), but Linksy makes a headless output there itself
     let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
@@ -495,6 +504,9 @@ pub(crate) async fn virtual_monitors() -> bool {
 
 /// Why there's no second display here, for the app and the notification.
 pub(crate) fn no_virtual_monitors() -> String {
+    if x11() {
+        return linksy_i18n::t!("Second Display needs a Wayland session: X11 can't add a monitor. GNOME, KDE Plasma, Hyprland and Sway on Wayland can.").into();
+    }
     let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok().and_then(|d| d.split(':').next().map(str::to_string)).filter(|d| !d.is_empty());
     match desktop {
         Some(desktop) => linksy_i18n::t!("Second Display isn't available on {desktop} yet: its screen sharing can't make a virtual monitor. GNOME and KDE Plasma can.", desktop),

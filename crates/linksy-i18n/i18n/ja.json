@@ -373,6 +373,7 @@
   "Second Display for {name}": "{name} のセカンドディスプレイ",
   "Second Display isn't available on this desktop yet: its screen sharing can't make a virtual monitor. GNOME and KDE Plasma can.": "このデスクトップではまだセカンドディスプレイを使えません。画面共有で仮想モニターを作れないためです。GNOME と KDE Plasma では使えます。",
   "Second Display isn't available on {desktop} yet: its screen sharing can't make a virtual monitor. GNOME and KDE Plasma can.": "{desktop} ではまだセカンドディスプレイを使えません。画面共有で仮想モニターを作れないためです。GNOME と KDE Plasma では使えます。",
+  "Second Display needs a Wayland session: X11 can't add a monitor. GNOME, KDE Plasma, Hyprland and Sway on Wayland can.": "セカンドディスプレイには Wayland セッションが必要です。X11 ではモニターを追加できません。Wayland の GNOME、KDE Plasma、Hyprland、Sway では使えます。",
   "Second display": "セカンドディスプレイ",
   "Secure Boot asks you to approve the camera driver once.\n\n1. Restart your computer.\n2. A blue screen appears: choose Enroll MOK, then Continue, then Yes.\n3. Type this code: {code}\n4. Choose Reboot.\n\nLinksy Camera is then ready, nothing else to do. Write the code down: it's needed on that blue screen.": "セキュアブートでは、カメラドライバーを一度だけ承認する必要があります。\n\n1. コンピュータを再起動します。\n2. 青い画面が表示されたら、Enroll MOK、Continue、Yes の順に選びます。\n3. 次のコードを入力します: {code}\n4. Reboot を選びます。\n\nこれで Linksy Camera が使えるようになり、ほかに必要な操作はありません。青い画面で必要になるので、コードを書き留めておいてください。",
   "See the Microphone Level": "マイクの音量を確認",
