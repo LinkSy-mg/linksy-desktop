@@ -982,8 +982,8 @@ A real shell on the computer, shown on the phone: Claude Code, neovim, htop, git
 in 0.7.0 exactly as below (core: `node.request_terminal(to, TerminalOpen { code, cols,
 rows, resume })` returns the `Session` and the terminal id; `node.list_terminals(to)` and
 `Event::Terminals`). Test against a computer with `fake_phone --terminal CODE` (`--type`,
-`--resume`, `--close`). Not in the desktop's Flatpak (its shell would be the sandbox's):
-those computers don't announce `terminal`.
+`--resume`, `--close`). The desktop's Flatpak runs the computer's own shell (through
+`flatpak-spawn --host`) and announces `terminal` from 0.10.0; older Flatpaks don't.
 
 **Safety, in layers (all enforced by the computer, never by the phone):**
 
@@ -1820,3 +1820,7 @@ robust against any encoder (GPU ones may slice too):
 - **2026-10-26** — Desktop: while a shared screen is still, the computer repeats its last frame
   every 100 ms (§4.8). Encoders keep one frame back until the next, so a tap's cursor used to
   show up to a second late. No protocol change; a viewer sees at least 10 frames a second.
+- **2026-10-29** — Desktop 0.10.0: `screen`, `control` and `input` work on X11 desktops with
+  no portal (the helper reads the display and drives it with XTest); `display` is refused
+  there with a reason. The Flatpak announces `terminal` (§4.15) and does everything the
+  packages do. No protocol change; a phone needs nothing new.

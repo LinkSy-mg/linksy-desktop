@@ -101,16 +101,17 @@ upgrading should be as easy, from the terminal and from the apps.
 - **Done when:** a new release reaches someone with one command or one click, restarts
   cleanly, and never installs a file whose checksum doesn't match.
 
-### The Flatpak, nearly everything — S
-The Flatpak's sandbox can't change the system, so the webcam in browsers and calls (the
-`v4l2loopback` driver) and the USB cable (a udev rule) don't set themselves up there. Both
-work once that one step is done outside it.
-- **Finish Setup in the Flatpak** shows the exact command for this system to copy (the
-  camera driver, the USB rule), instead of "a Flatpak can't add this", then checks it took.
-- **The wording** on the website, in the installer and in the release README says "need a
-  one-time setup step" instead of "no webcam in browsers and calls, no USB cable".
-- **Done when:** after one pasted command, the Flatpak has the webcam in every app and the
-  cable, like the packages.
+### The Flatpak, everything — M, desktop done in 0.10.0
+*Most people pick the Flatpak, so it does everything the packages do. It has host access
+(`org.freedesktop.Flatpak`, the `linksy-host` crate): Finish Setup checks the computer, not
+the sandbox, and sets up the webcam driver, the USB cable and the firewall with the
+computer's own password prompt; Ready When You Log In writes an autostart entry; the
+terminal is the computer's shell; Update Now installs the new .flatpak; Send with Linksy
+appears in Dolphin, GNOME Files and Thunar; lockers, volume, Hyprland and Sway outputs, iw
+and X11's clipboard tools are the computer's. Tested with a stand-in flatpak-spawn; the
+real bundle is built and installed by CI.*
+- **Still to do:** the website and the webcam blog post still say a Flatpak can't add the
+  driver; Flathub stays on hold (its rules for AI-written manifests).
 
 ### Problem logs — S, desktop done
 *Desktop: crash files in `~/.local/state/linksy/crashes/`, `logs.txt` in About (GTK:

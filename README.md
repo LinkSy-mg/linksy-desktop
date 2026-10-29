@@ -59,7 +59,10 @@ tar xzf linksy-0.5.5-linux-x86_64.tar.gz && linksy-0.5.5-linux-x86_64/install.sh
 ```
 
 The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.5+. The
-background service starts with your session; the Flatpak sets that up the first time it opens.
+background service starts with your session. The Flatpak does everything the packages do:
+it has host access (`org.freedesktop.Flatpak`), so Finish Setup turns on starting at login,
+the webcam driver and the USB cable there too, and the terminal for phones is the
+computer's own shell.
 
 To cut a release: add the version's section to `CHANGELOG.md` and the metainfo's
 `<releases>`, bump `version` in `Cargo.toml`, commit, and run `scripts/publish-release.sh`. It
