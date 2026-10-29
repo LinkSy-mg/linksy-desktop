@@ -40,12 +40,20 @@ pub enum Input {
         /// that never came (mobile#16) can't leave Shift held on this computer.
         held: std::sync::Mutex<std::collections::HashSet<u32>>,
     },
+    /// An X11 display, driven through XTest.
+    X11(Box<crate::x11::Control>),
 }
 
 static REFUSED_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl Input {
     pub async fn apply(&self, msg: &ControlMsg) {
+        if let Self::X11(display) = self {
+            if let Err(e) = display.apply(msg) {
+                eprintln!("linksy-screen: input not applied: {e}");
+            }
+            return;
+        }
         let Self::Desktop { proxy, session, node, size, allowed, held } = self else {
             eprintln!("input: {msg:?}");
             return;
@@ -110,7 +118,7 @@ impl Input {
 
 /// The X11 keysym that types `c`: Latin-1 as itself, a few controls by name, the rest
 /// through the Unicode keysym range.
-fn keysym(c: char) -> u32 {
+pub(crate) fn keysym(c: char) -> u32 {
     match c {
         '\n' | '\r' => 0xff0d,
         '\t' => 0xff09,
@@ -200,6 +208,9 @@ pub async fn screen(token: Option<String>, control: bool, virtual_monitor: bool)
 impl Input {
     /// Release the keys still held down (their releases never came).
     pub async fn release_keys(&self) {
+        if let Self::X11(display) = self {
+            return display.release_keys();
+        }
         let Self::Desktop { proxy, session, held, .. } = self else { return };
         let keys: Vec<u32> = held.lock().unwrap().drain().collect();
         for keysym in keys {

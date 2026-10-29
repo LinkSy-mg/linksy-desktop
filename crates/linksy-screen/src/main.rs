@@ -13,6 +13,8 @@
 //! streams a moving test pattern instead of the screen and logs input rather than
 //! applying it, for development and tests.
 //!
+//! On X11, where no portal works, it reads the display itself and drives it with XTest.
+//!
 //! `linksy-screen share --camera --socket PATH [--test]` shares this device's camera
 //! instead of a screen.
 //!
@@ -28,6 +30,7 @@
 mod mutter;
 mod outputs;
 mod portal;
+mod x11;
 
 use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
@@ -344,6 +347,13 @@ fn watch_bus(pipeline: &gst::Element, last_frame: Option<&std::sync::Arc<std::sy
 /// Ask the desktop for the screen (a new virtual monitor for a second display): the
 /// pipeline's source, where input goes, and the PipeWire remote to close with it.
 fn open_capture(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(String, Option<portal::Input>), String> {
+    if x11::session() {
+        if args.virtual_size.is_some() {
+            return Err("a second display needs a Wayland session".into());
+        }
+        let (source, control) = x11::capture(args.control)?;
+        return Ok((source, control.map(|c| portal::Input::X11(Box::new(c)))));
+    }
     let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     let had_token = token.is_some();
     let screen = match rt.block_on(portal::screen(token, args.control, args.virtual_size.is_some())) {
@@ -419,6 +429,8 @@ fn now_ms() -> u64 {
 fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
     let input = if args.test {
         portal::Input::Log
+    } else if x11::session() {
+        portal::Input::X11(Box::new(x11::Control::open()?))
     } else {
         let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
         let (input, new_token) = rt.block_on(portal::input_only(token))?;
