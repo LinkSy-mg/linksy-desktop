@@ -23,7 +23,8 @@
 //! `--touchpad` asks to be the computer's touchpad and keyboard, then moves, clicks, types
 //! "hello" and presses Right (next slide).
 //! `--view-screen FILE` asks to see the computer's screen and saves 4 s of its H.264.
-//! `--clip-file PATH` puts a file (an image…) on the computer's clipboard.
+//! `--clip-file PATH` puts a file (an image…) on the computer's clipboard, `--clip TEXT`
+//! some text.
 //! `--watch-clipboard` asks for the computer's clipboard as it changes and prints it.
 //! `--camera` accepts "Use as Webcam": streams a test picture (with gst-launch-1.0, when
 //! it's there), sends a `camera_state` and prints the `camera_control` it gets.
@@ -61,6 +62,7 @@ async fn main() {
     let mut no_discovery = false;
     let mut files: Option<std::path::PathBuf> = None;
     let mut clip_file: Option<std::path::PathBuf> = None;
+    let mut clip_text: Option<String> = None;
     let mut terminal: Option<String> = None;
     let mut typed = "echo linksy-$((6*7))".to_string();
     let (mut resume, mut close, mut watch_for) = (false, false, 3u64);
@@ -90,6 +92,7 @@ async fn main() {
             "--touchpad" => touchpad = true,
             "--view-screen" => view_screen = Some(value().into()),
             "--clip-file" => clip_file = Some(value().into()),
+            "--clip" => clip_text = Some(value()),
             "--terminal" => terminal = Some(value()),
             "--type" => typed = value(),
             "--resume" => resume = true,
@@ -152,7 +155,7 @@ async fn main() {
         None => false,
     };
 
-    if !connected && (level.is_some() || clip_file.is_some() || watch_clipboard || picture.is_some() || terminal.is_some()) {
+    if !connected && (level.is_some() || clip_file.is_some() || clip_text.is_some() || watch_clipboard || picture.is_some() || terminal.is_some()) {
         // These need the computer connected first.
         let _ = tokio::time::timeout(Duration::from_secs(30), async {
             while !matches!(events.recv().await, Ok(Event::Connected { .. }) | Err(_)) {}
@@ -264,6 +267,10 @@ async fn main() {
                 }
                 Err(e) => println!("terminal refused: {e:?}"),
             }
+        }
+        if let Some(text) = &clip_text {
+            let r = node.send_clipboard(&t.device.id, text).await;
+            println!("clipboard to {}: {}", t.device.name, r.map(|_| "sent".to_string()).unwrap_or_else(|e| e.to_string()));
         }
         if let Some(path) = &clip_file {
             let r = node.send_clipboard_file(&t.device.id, path.clone()).await;
