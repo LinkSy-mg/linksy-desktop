@@ -23,6 +23,8 @@ mod terminal;
 #[cfg(target_os = "linux")]
 mod dav;
 #[cfg(target_os = "linux")]
+mod file_managers;
+#[cfg(target_os = "linux")]
 mod direct;
 #[cfg(target_os = "linux")]
 mod media;
@@ -260,7 +262,12 @@ async fn run() -> ExitCode {
         let _ = terminal::TERMINALS.set(terminals.clone());
         tokio::spawn(terminals.run(node.clone()));
     }
-    let photos = photos::Photos::load(data_dir.join("photos.json"), &node);
+    // From the Flatpak: Send with Linksy in the file managers here
+    #[cfg(target_os = "linux")]
+    if linksy_host::flatpak() {
+        tokio::task::spawn_blocking(file_managers::install);
+    }
+    let photos =photos::Photos::load(data_dir.join("photos.json"), &node);
     let away = lock::Away::load(data_dir.join("lock.json"));
     tokio::spawn(away.clone().run(node.clone(), history.clone()));
     #[cfg(target_os = "linux")]
