@@ -24,6 +24,11 @@ def label():
     return "Send with Linksy"
 
 
+# What starts Linksy with the files (Linksy's Flatpak writes its own copy of this file)
+def launch(paths):
+    return ["linksy-open", *paths]
+
+
 class LinksySend(GObject.GObject, Nautilus.MenuProvider):
     # Nautilus 43 and newer pass the files; older ones the window first
     def get_file_items(self, *args):
@@ -31,5 +36,5 @@ class LinksySend(GObject.GObject, Nautilus.MenuProvider):
         if not paths or None in paths:
             return []
         item = Nautilus.MenuItem(name="Linksy::send", label=label(), icon="mg.diary.linksy.Linksy")
-        item.connect("activate", lambda _: GLib.spawn_async(["linksy-open", *paths], flags=GLib.SpawnFlags.SEARCH_PATH))
+        item.connect("activate", lambda _: GLib.spawn_async(launch(paths), flags=GLib.SpawnFlags.SEARCH_PATH))
         return [item]
