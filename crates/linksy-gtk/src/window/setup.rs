@@ -61,6 +61,10 @@ pub(super) async fn allow_usb() -> Result<(), String> {
 /// Turn on the background service at every login (no password: it's the user's own).
 async fn enable_autostart() -> Result<(), Failure> {
     let failed = || Failure::Message(t!("Couldn't turn on starting with your computer.").into());
+    // The Flatpak's service starts from an autostart entry, written outside the sandbox
+    if linksy_setup::flatpak() {
+        return gio::spawn_blocking(linksy_setup::enable_autostart).await.unwrap_or_else(|_| Err(failed()));
+    }
     let run = gio::Subprocess::newv(&["systemctl".as_ref(), "--user".as_ref(), "enable".as_ref(), "--now".as_ref(), "linksyd.service".as_ref()], gio::SubprocessFlags::STDERR_SILENCE).map_err(|_| failed())?;
     run.wait_future().await.map_err(|_| failed())?;
     if run.exit_status() == 0 { Ok(()) } else { Err(failed()) }
