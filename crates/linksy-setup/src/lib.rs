@@ -179,6 +179,11 @@ pub fn camera_name(phone: &str) -> String {
     if camera_device().is_some() { "Linksy Camera".into() } else { format!("Linksy Camera ({phone})") }
 }
 
+/// An X11 session (no Wayland display), where Linksy reads the screen without a portal.
+fn x11() -> bool {
+    std::env::var_os("WAYLAND_DISPLAY").is_none() && std::env::var_os("DISPLAY").is_some()
+}
+
 /// Whether the desktop offers screen sharing to apps (the ScreenCast portal).
 fn screencast_portal() -> bool {
     let Ok(bus) = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) else { return true };
@@ -442,7 +447,15 @@ pub fn check(ui: Ui) -> Vec<Item> {
             arch.push("gst-plugin-pipewire");
             suse.push("gstreamer-plugin-pipewire");
         }
-        if !screencast_portal() {
+        if x11() {
+            // No portal works on X11: Linksy reads the display itself (#67)
+            if !has_element(&["ximagesrc"]) {
+                fedora.push("gstreamer1-plugins-good");
+                debian.push("gstreamer1.0-plugins-good");
+                arch.push("gst-plugins-good");
+                suse.push("gstreamer-plugins-good");
+            }
+        } else if !screencast_portal() {
             for list in [&mut fedora, &mut debian, &mut arch, &mut suse] {
                 list.push(portal_package());
             }
