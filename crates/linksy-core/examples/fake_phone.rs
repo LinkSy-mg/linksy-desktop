@@ -21,6 +21,7 @@
 //! `--import PATH` imports photos (a file or folder) into the computer's pictures.
 //! `--touchpad` asks to be the computer's touchpad and keyboard, then moves, clicks, types
 //! "hello" and presses Right (next slide).
+//! `--view-screen FILE` asks to see the computer's screen and saves 4 s of its H.264.
 //! `--clip-file PATH` puts a file (an image…) on the computer's clipboard.
 //! `--watch-clipboard` asks for the computer's clipboard as it changes and prints it.
 //! `--camera` accepts "Use as Webcam": streams a test picture (with gst-launch-1.0, when
@@ -54,6 +55,7 @@ async fn main() {
     let mut leave_after: Option<u64> = None;
     let mut import: Option<std::path::PathBuf> = None;
     let mut touchpad = false;
+    let mut view_screen: Option<std::path::PathBuf> = None;
     let mut no_discovery = false;
     let mut files: Option<std::path::PathBuf> = None;
     let mut clip_file: Option<std::path::PathBuf> = None;
@@ -83,6 +85,7 @@ async fn main() {
             "--call" => call = Some(value().parse().expect("--call SECONDS")),
             "--import" => import = Some(value().into()),
             "--touchpad" => touchpad = true,
+            "--view-screen" => view_screen = Some(value().into()),
             "--clip-file" => clip_file = Some(value().into()),
             "--terminal" => terminal = Some(value()),
             "--type" => typed = value(),
@@ -274,6 +277,18 @@ async fn main() {
                     let _ = s.send.finish();
                 }
                 Err(e) => println!("touchpad on {}: {e}", t.device.name),
+            }
+        }
+        if let Some(path) = &view_screen {
+            match node.request_session(&t.device.id, linksy_core::SessionKind::Screen).await {
+                Ok(mut s) => {
+                    let mut file = tokio::fs::File::create(path).await.expect("screen file");
+                    let _ = tokio::time::timeout(Duration::from_secs(4), tokio::io::copy(&mut s.recv, &mut file)).await;
+                    let n = tokio::fs::metadata(path).await.map(|m| m.len()).unwrap_or(0);
+                    println!("screen of {}: {n} bytes saved", t.device.name);
+                    let _ = s.send.finish();
+                }
+                Err(e) => println!("screen of {}: {e}", t.device.name),
             }
         }
         if watch_media {
