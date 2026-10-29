@@ -41,7 +41,9 @@ virtual input protocols, Linksy's own notifications, and the in-app file browser
 
 - Text sent to the computer's clipboard works (`xclip` or `xsel`). Copying on the computer
   doesn't reach the phone: clipboard watching only exists for Wayland.
-- Screen watching, control and Sidecar are likely missing: the portals barely exist on X11.
+- Watching and controlling the screen work without a portal (0.10): Linksy reads the
+  primary monitor with `ximagesrc` and drives it with XTest. Sidecar needs Wayland: X11
+  can't add a monitor.
 
 ### Distributions without systemd (Void, Artix, Gentoo with OpenRC)
 
@@ -63,8 +65,8 @@ Each gap gets a fallback Linksy handles itself, rather than a package the user h
 |---|---|---|---|
 | No polkit agent | Linksy's own password dialog, handed to `pkttyagent` (ships with polkit, wherever `pkexec` is). The password only goes to polkit's helper. | everywhere | small |
 | No notification daemon | When nobody owns `org.freedesktop.Notifications`, Linksy shows its own popups with Reply and actions, as a layer-shell overlay (gtk4-layer-shell). | Hyprland, Sway, niri | medium |
-| No ScreenCast portal | Capture the X display with GStreamer's `ximagesrc` (gst-plugins-good, already a dependency). | X11 | small |
-| Screen control without RemoteDesktop | Input through the compositor's virtual pointer and keyboard protocols (`zwlr_virtual_pointer_v1`, `zwp_virtual_keyboard_v1`), as wayvnc does. XTest on X11, which needs no permission. | Hyprland, Sway, X11 | medium |
+| No ScreenCast portal | Capture the X display with GStreamer's `ximagesrc` (gst-plugins-good, already a dependency). Done in 0.10. | X11 | small |
+| Screen control without RemoteDesktop | Input through the compositor's virtual pointer and keyboard protocols (`zwlr_virtual_pointer_v1`, `zwp_virtual_keyboard_v1`), as wayvnc does. XTest on X11, which needs no permission (done in 0.10). | Hyprland, Sway, X11 | medium |
 | Sidecar without a virtual monitor | A real headless output, created for the session and removed after: `hyprctl output create headless`, `swaymsg create_output`. | Hyprland, Sway | medium |
 | Lock When Away does nothing | Run the installed locker: `hyprlock`, `swaylock`, `xflock4`, `cinnamon-screensaver-command -l`, `light-locker-command -l`, `i3lock`, `xdg-screensaver lock`. | everywhere | small |
 | No clipboard watching on X11 | Selection-change events through XFixes. | X11 | small |
