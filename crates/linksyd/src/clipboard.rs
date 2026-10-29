@@ -150,17 +150,28 @@ fn copiers<'a>(wayland: &'a [(&'a str, &'a [&'a str])], x11: &'a [(&'a str, &'a 
     x11.iter().filter(|(cmd, _)| linksy_host::installed(cmd)).collect()
 }
 
-/// Every new text on X11's clipboard: X11 apps own their clipboard and tell nobody when it
-/// changes, so it's read once a second.
+/// Every new text on X11's clipboard: read when the X server says it has a new owner
+/// (XFixes), or once a second without that extension.
 fn watch_x11() -> Option<mpsc::UnboundedReceiver<String>> {
+    use x11rb::connection::Connection as _;
     let reader = x11_reader()?;
     let (tx, rx) = mpsc::unbounded_channel();
     std::thread::spawn(move || {
         let read = || tool(reader[0]).args(&reader[1..]).stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success()).map(|o| o.stdout);
+        let owners = x11_owner_changes().map_err(|e| debug!("no XFixes ({e}): reading the clipboard every second")).ok();
         // What's there already isn't news
         let mut last = read();
         loop {
-            std::thread::sleep(Duration::from_secs(1));
+            match &owners {
+                Some(conn) => {
+                    if conn.wait_for_event().is_err() {
+                        break;
+                    }
+                    // The app taking it over may still be setting it up
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                None => std::thread::sleep(Duration::from_secs(1)),
+            }
             let now = read();
             if now == last {
                 continue;
@@ -175,6 +186,21 @@ fn watch_x11() -> Option<mpsc::UnboundedReceiver<String>> {
         debug!("clipboard watch ended");
     });
     Some(rx)
+}
+
+/// A connection to the X server that gets an event each time the clipboard changes owner.
+fn x11_owner_changes() -> Result<x11rb::rust_connection::RustConnection, String> {
+    use x11rb::connection::Connection;
+    use x11rb::protocol::xfixes::{ConnectionExt as _, SelectionEventMask};
+    use x11rb::protocol::xproto::ConnectionExt as _;
+    let (conn, n) = x11rb::connect(None).map_err(|e| e.to_string())?;
+    conn.xfixes_query_version(5, 0).map_err(|e| e.to_string())?.reply().map_err(|e| e.to_string())?;
+    let clipboard = conn.intern_atom(false, b"CLIPBOARD").map_err(|e| e.to_string())?.reply().map_err(|e| e.to_string())?.atom;
+    let root = conn.setup().roots[n].root;
+    let mask = SelectionEventMask::SET_SELECTION_OWNER | SelectionEventMask::SELECTION_WINDOW_DESTROY | SelectionEventMask::SELECTION_CLIENT_CLOSE;
+    conn.xfixes_select_selection_input(root, clipboard, mask).map_err(|e| e.to_string())?;
+    conn.flush().map_err(|e| e.to_string())?;
+    Ok(conn)
 }
 
 /// Every new text on the clipboard, from `wl-paste --watch` (X11: [`watch_x11`]). None
