@@ -529,7 +529,7 @@ struct Output {
 
 impl Compositor {
     fn here() -> Option<Self> {
-        let has = |tool: &str| std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(tool).is_file()));
+        let has = linksy_host::installed;
         if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() && has("hyprctl") {
             Some(Compositor::Hyprland)
         } else if std::env::var_os("SWAYSOCK").is_some() && has("swaymsg") {
@@ -544,7 +544,7 @@ impl Compositor {
             Compositor::Hyprland => "hyprctl",
             Compositor::Sway => "swaymsg",
         };
-        let out = tokio::process::Command::new(tool).args(args).output().await?;
+        let out = tokio::process::Command::from(linksy_host::command(tool, &[])).args(args).output().await?;
         let text = String::from_utf8_lossy(&out.stdout).into_owned();
         // hyprctl exits 0 either way, and says why not ("invalid…", "no such…", "error…")
         let refused = matches!(self, Compositor::Hyprland)

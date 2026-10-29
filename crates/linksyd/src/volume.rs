@@ -19,21 +19,23 @@ enum Tool {
     Pactl,
 }
 
-/// Whether this computer can share its volume: a tool to do it is installed (not in the
-/// Flatpak, which has neither).
+/// Whether this computer can share its volume: a tool to do it is installed (from the
+/// Flatpak, the computer's).
 pub fn available() -> bool {
     tool().is_some()
 }
 
 fn tool() -> Option<Tool> {
-    let on_path = |name: &str| std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(name).is_file()));
-    if on_path("wpctl") {
-        Some(Tool::Wpctl)
-    } else if on_path("pactl") {
-        Some(Tool::Pactl)
-    } else {
-        None
-    }
+    static TOOL: std::sync::OnceLock<Option<Tool>> = std::sync::OnceLock::new();
+    *TOOL.get_or_init(|| {
+        if linksy_host::installed("wpctl") {
+            Some(Tool::Wpctl)
+        } else if linksy_host::installed("pactl") {
+            Some(Tool::Pactl)
+        } else {
+            None
+        }
+    })
 }
 
 pub async fn run(node: Node) {
@@ -93,7 +95,7 @@ fn same(a: (f64, bool), b: (f64, bool)) -> bool {
 }
 
 async fn output(program: &str, args: &[&str]) -> Option<String> {
-    let out = Command::new(program).args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().await.ok()?;
+    let out = Command::from(linksy_host::command(program, &[])).args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().await.ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 

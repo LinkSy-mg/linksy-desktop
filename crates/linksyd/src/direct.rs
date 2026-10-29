@@ -232,7 +232,7 @@ where
 /// it, or else the Wi-Fi card's own address, which the kernel gives that device when the
 /// card has just one (the network then gets a random one, as NetworkManager does by default).
 async fn own_address(interface: &str) -> Option<String> {
-    let iw = tokio::process::Command::new("iw").arg("dev").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().await;
+    let iw = tokio::process::Command::from(linksy_host::command("iw", &[])).arg("dev").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().await;
     if let Some(address) = iw.ok().filter(|o| o.status.success()).and_then(|o| p2p_address(&String::from_utf8_lossy(&o.stdout))) {
         return Some(address);
     }

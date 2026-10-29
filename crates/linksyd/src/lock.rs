@@ -142,7 +142,7 @@ async fn lock_screen() -> bool {
     if let Some(locker) = locker() {
         return run_locker(locker).await;
     }
-    match tokio::process::Command::new("loginctl").arg("lock-session").status().await {
+    match tokio::process::Command::from(linksy_host::command("loginctl", &[])).arg("lock-session").status().await {
         Ok(s) if s.success() => true,
         other => {
             warn!("could not lock the screen: {other:?}");
@@ -171,17 +171,13 @@ fn locker() -> Option<&'static [&'static str]> {
             &["xdg-screensaver", "lock"],
         ]
     };
-    lockers.iter().copied().find(|l| which(l[0]))
+    lockers.iter().copied().find(|l| linksy_host::installed(l[0]))
 }
 
-fn which(cmd: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|p| std::env::split_paths(&p).any(|d| d.join(cmd).is_file()))
-}
-
-/// Start the locker. Some stay running until unlocked (hyprlock, i3lock): still there after
-/// a moment, or done without an error, it locked.
+/// Start the locker (the computer's, from the Flatpak). Some stay running until unlocked
+/// (hyprlock, i3lock): still there after a moment, or done without an error, it locked.
 async fn run_locker(locker: &[&str]) -> bool {
-    let mut child = match tokio::process::Command::new(locker[0]).args(&locker[1..]).kill_on_drop(false).spawn() {
+    let mut child = match tokio::process::Command::from(linksy_host::detached(locker[0], &[])).args(&locker[1..]).kill_on_drop(false).spawn() {
         Ok(c) => c,
         Err(e) => {
             warn!("could not run {}: {e}", locker[0]);

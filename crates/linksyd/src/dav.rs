@@ -130,16 +130,11 @@ fn uri(port: u16, token: &str) -> String {
     format!("dav://127.0.0.1:{port}/{token}/")
 }
 
-/// Add the phone to the Files sidebar under its own name (GTK's bookmarks file). A
-/// Flatpak can't reach that file; there the phone is in the sidebar while it's mounted.
+/// Add the phone to the Files sidebar under its own name (GTK's bookmarks file, the
+/// computer's from the Flatpak).
 fn bookmark(uri: &str, name: &str) {
-    if std::env::var_os("FLATPAK_ID").is_some() {
-        return;
-    }
-    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
-    let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).unwrap_or_else(|| home.join(".config"));
-    let path = config.join("gtk-3.0").join("bookmarks");
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let path = linksy_host::config_dir().join("gtk-3.0").join("bookmarks");
+    let text = linksy_host::read(&path).unwrap_or_default();
     if text.lines().any(|l| l.split(' ').next() == Some(uri)) {
         return;
     }
@@ -148,8 +143,7 @@ fn bookmark(uri: &str, name: &str) {
         text.push('\n');
     }
     text.push_str(&format!("{uri} {name}\n"));
-    let _ = std::fs::create_dir_all(path.parent().unwrap_or(&config));
-    if let Err(e) = std::fs::write(&path, text) {
+    if let Err(e) = linksy_host::write(&path, text.as_bytes()) {
         debug!("bookmark: {e}");
     }
 }
