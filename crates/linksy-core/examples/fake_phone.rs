@@ -8,7 +8,8 @@
 //!     [--media "TITLE" "ARTIST"] [--watch-media] [--call SECONDS] [--leave-after SECONDS]
 //!     [--import PATH] [--touchpad] [--files DIR] [--no-discovery] [--seconds N]
 //!
-//! `--accept-pairing` says yes to pairing, for scripted tests.
+//! `--accept-pairing` says yes to pairing, for scripted tests. `--connect HOST:PORT`
+//! connects to a computer by address (no discovery needed).
 //! It always answers texting requests from a small made-up inbox. `--files DIR` shares
 //! that folder as the phone's storage (for "Browse Files").
 //!
@@ -56,6 +57,7 @@ async fn main() {
     let mut import: Option<std::path::PathBuf> = None;
     let mut touchpad = false;
     let mut view_screen: Option<std::path::PathBuf> = None;
+    let mut connect: Option<std::net::SocketAddr> = None;
     let mut no_discovery = false;
     let mut files: Option<std::path::PathBuf> = None;
     let mut clip_file: Option<std::path::PathBuf> = None;
@@ -76,6 +78,7 @@ async fn main() {
             "--port" => port = value().parse().expect("--port N"),
             "--name" => name = value(),
             "--no-discovery" => no_discovery = true,
+            "--connect" => connect = Some(value().parse().expect("--connect HOST:PORT")),
             "--accept-pairing" => accept_pairing = true,
             "--battery" => level = Some(value().parse::<u8>().expect("--battery PERCENT")),
             "--charging" => charging = true,
@@ -131,8 +134,25 @@ async fn main() {
     let node = Node::start(config).await.expect("start");
     let mut events = node.subscribe();
     println!("{} ({}) up", node.info().name, node.info().id.short());
+    let connected = match connect {
+        Some(addr) => match tokio::time::timeout(Duration::from_secs(10), node.connect(addr)).await {
+            Ok(Ok(d)) => {
+                println!("connected to {}", d.name);
+                true
+            }
+            Ok(Err(e)) => {
+                println!("connect {addr}: {e}");
+                false
+            }
+            Err(_) => {
+                println!("connect {addr}: timed out");
+                false
+            }
+        },
+        None => false,
+    };
 
-    if level.is_some() || clip_file.is_some() || watch_clipboard || picture.is_some() || terminal.is_some() {
+    if !connected && (level.is_some() || clip_file.is_some() || watch_clipboard || picture.is_some() || terminal.is_some()) {
         // These need the computer connected first.
         let _ = tokio::time::timeout(Duration::from_secs(30), async {
             while !matches!(events.recv().await, Ok(Event::Connected { .. }) | Err(_)) {}
