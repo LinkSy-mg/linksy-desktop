@@ -492,24 +492,28 @@ fn spawn_shell((cols, rows): (u16, u16)) -> std::io::Result<(OwnedFd, std::proce
     unsafe {
         libc::fcntl(master.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC);
     }
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-    let name = shell.rsplit('/').next().unwrap_or("sh").to_string();
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
-    let mut cmd = std::process::Command::new(&shell);
-    // A login shell: "-bash" reads the profile, as a terminal window's would.
-    cmd.arg0(format!("-{name}"))
-        .stdin(Stdio::from(slave.try_clone()?))
-        .stdout(Stdio::from(slave.try_clone()?))
-        .stderr(Stdio::from(slave))
-        .current_dir(home)
-        .env("TERM", "xterm-256color")
-        .env("COLORTERM", "truecolor")
-        .env("LINKSY_TERMINAL", "1");
+    let env = [("TERM", "xterm-256color"), ("COLORTERM", "truecolor"), ("LINKSY_TERMINAL", "1")];
+    let flatpak = linksy_host::flatpak();
+    let mut cmd = if flatpak {
+        // The computer's own login shell, started outside the sandbox on this terminal
+        let mut c = linksy_host::command("sh", &env);
+        c.args(["-c", "cd; shell=$(getent passwd \"$(id -un)\" | cut -d: -f7); exec \"${shell:-/bin/sh}\" -l"]);
+        c
+    } else {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        let name = shell.rsplit('/').next().unwrap_or("sh").to_string();
+        let mut c = std::process::Command::new(&shell);
+        // A login shell: "-bash" reads the profile, as a terminal window's would.
+        c.arg0(format!("-{name}")).current_dir(std::env::var("HOME").unwrap_or_else(|_| "/".into())).envs(env);
+        c
+    };
+    cmd.stdin(Stdio::from(slave.try_clone()?)).stdout(Stdio::from(slave.try_clone()?)).stderr(Stdio::from(slave));
     unsafe {
-        cmd.pre_exec(|| {
+        cmd.pre_exec(move || {
             // Its own session, with the terminal as its controlling one (job control,
-            // Ctrl+C, window size changes).
-            if libc::setsid() < 0 || libc::ioctl(0, libc::TIOCSCTTY, 0) < 0 {
+            // Ctrl+C, window size changes). From the Flatpak, the computer's side makes it
+            // the shell's instead.
+            if libc::setsid() < 0 || (!flatpak && libc::ioctl(0, libc::TIOCSCTTY, 0) < 0) {
                 return Err(std::io::Error::last_os_error());
             }
             Ok(())

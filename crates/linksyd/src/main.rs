@@ -72,7 +72,7 @@ fn parse_args() -> Result<Args, String> {
     if clipboard::can_watch() {
         config.features.push("clipboard_watch".into());
     }
-    if cfg!(target_os = "linux") && std::env::var_os("FLATPAK_ID").is_none() {
+    if cfg!(target_os = "linux") {
         config.features.push("terminal".into());
     }
     #[cfg(target_os = "linux")]
@@ -253,9 +253,9 @@ async fn run() -> ExitCode {
         let _ = usb::USB.set(usb.clone());
         tokio::spawn(usb.run());
     }
-    // Terminals for phones; not from a Flatpak, whose shell would be the sandbox's.
+    // Terminals for phones (from the Flatpak, the computer's own shell: linksy-host)
     #[cfg(target_os = "linux")]
-    if std::env::var_os("FLATPAK_ID").is_none() {
+    {
         let terminals = terminal::Terminals::load(&data_dir);
         let _ = terminal::TERMINALS.set(terminals.clone());
         tokio::spawn(terminals.run(node.clone()));
