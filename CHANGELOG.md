@@ -15,6 +15,10 @@ Linksy for Linux. Each version's section becomes its release notes.
   Thanks to [@AndyM48](https://github.com/AndyM48) (#62) and
   [@Lur1fa](https://github.com/Lur1fa) (#64) for asking.
 
+### Changed
+- **The microphone card shows what the phone hears** as a live wave, in both apps. It
+  replaces Listen: no echo, no headphones needed to check the phone is picking you up.
+
 ## 0.9.16
 
 ### Security
