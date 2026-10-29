@@ -31,10 +31,16 @@ fn spawn_command(program: impl AsRef<OsStr>, env: &[(&str, &str)], watch: bool) 
         c.envs(env.iter().copied());
         return c;
     }
+    // The session's display and desktop, which programs started from the computer's
+    // background don't always have (Hyprland, Sway). Not DISPLAY: the sandbox renumbers it.
+    let session: Vec<(&str, String)> = SESSION.iter().filter_map(|k| std::env::var(k).ok().filter(|_| !env.iter().any(|(e, _)| e == k)).map(|v| (*k, v))).collect();
+    let all: Vec<(&str, &str)> = session.iter().map(|(k, v)| (*k, v.as_str())).chain(env.iter().copied()).collect();
     let mut c = Command::new("flatpak-spawn");
-    c.args(spawn_args(env, watch)).arg(program);
+    c.args(spawn_args(&all, watch)).arg(program);
     c
 }
+
+const SESSION: [&str; 6] = ["WAYLAND_DISPLAY", "XDG_CURRENT_DESKTOP", "XDG_SESSION_TYPE", "HYPRLAND_INSTANCE_SIGNATURE", "SWAYSOCK", "NIRI_SOCKET"];
 
 fn spawn_args(env: &[(&str, &str)], watch: bool) -> Vec<String> {
     let mut args = vec!["--host".to_string()];
