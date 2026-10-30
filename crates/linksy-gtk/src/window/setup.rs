@@ -19,34 +19,15 @@ fn check() -> Vec<Item> {
 
 /// Run `linksy-system-setup` as root (one password for all of it), showing each step.
 async fn run_as_root(args: &[String], progress: &gtk::Label) -> Result<(), Failure> {
-    let (status, read) = attempt_as_root(args, progress).await?;
-    // Hyprland, Sway and others start no password prompt: start an installed one, then ask again
-    if read.no_agent {
-        if !gio::spawn_blocking(linksy_setup::start_polkit_agent).await.unwrap_or(false) {
-            return Err(linksy_setup::no_agent());
-        }
-        let (status, read) = attempt_as_root(args, progress).await?;
-        return read.finish(status);
-    }
-    read.finish(status)
-}
-
-async fn attempt_as_root(args: &[String], progress: &gtk::Label) -> Result<(i32, linksy_setup::Progress), Failure> {
-    let argv = linksy_setup::root_command(args)?;
-    let argv: Vec<&std::ffi::OsStr> = argv.iter().map(|a| a.as_os_str()).collect();
-    let run = gio::Subprocess::newv(&argv, gio::SubprocessFlags::STDOUT_PIPE | gio::SubprocessFlags::STDERR_MERGE).map_err(|e| Failure::Message(e.to_string()))?;
-    let lines = gio::DataInputStream::new(&run.stdout_pipe().expect("stdout pipe"));
-    let mut read = linksy_setup::Progress::default();
-    progress.set_label(t!("Waiting for your password…"));
+    let (tx, rx) = async_channel::unbounded::<String>();
+    let args = args.to_vec();
+    let job = gio::spawn_blocking(move || linksy_setup::run_as_root(&args, |step| drop(tx.send_blocking(step))));
     progress.set_visible(true);
-    while let Ok(Some(line)) = lines.read_line_utf8_future(glib::Priority::DEFAULT).await {
-        if let Some(step) = read.line(&line) {
-            progress.set_label(&step);
-        }
+    while let Ok(step) = rx.recv().await {
+        progress.set_label(&step);
     }
-    let _ = run.wait_future().await;
     progress.set_visible(false);
-    Ok((run.exit_status(), read))
+    job.await.unwrap_or_else(|_| Err(Failure::Message(t!("Setup didn't finish: {details}", details = "-"))))
 }
 
 /// Let Linksy use phones by cable (the udev rule), as root.
@@ -203,7 +184,11 @@ impl Window {
             }
             match result {
                 Ok(()) => v.toasts.add_toast(adw::Toast::new(t!("All set"))),
-                Err(Failure::Message(err)) => v.toasts.add_toast(adw::Toast::builder().title(glib::markup_escape_text(&err)).timeout(10).build()),
+                // In the dialog: a toast cuts long messages short
+            Err(Failure::Message(err)) => {
+                v.progress.set_label(&err);
+                v.progress.set_visible(true);
+            }
                 Err(Failure::Restart(code)) => self.ask_restart(&v.dialog, code.as_deref()),
             }
             self.fill_setup(&v);
