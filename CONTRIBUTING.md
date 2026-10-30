@@ -52,6 +52,9 @@ the service.
 - `crates/linksy-qt`: the Qt app for KDE Plasma (`linksy-qt`), the same window in Qt
   Quick and Kirigami.
 - `crates/linksy-setup`: Finish Setup's checks, shared by both apps.
+- `crates/linksy-host`: programs and files on the computer, from the Flatpak too, and
+  pkexec with Linksy's own password prompt.
+- `crates/linksy-upgrade`: Update Now and `linksy upgrade`.
 - `crates/linksy-i18n`: the translations, shared by the apps and the service.
 - `crates/linksy-screen`: screen, camera and microphone pipelines (GStreamer).
 - `crates/linksy-ipc`: how the app talks to the service.
