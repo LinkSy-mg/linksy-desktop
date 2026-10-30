@@ -16,13 +16,18 @@ directly over the local network, with no account, cloud or server.
 | `crates/linksy-ipc` | The local socket protocol between the service and its front ends. |
 | `crates/linksy-cli` | `linksy`, the command-line front end. |
 | `crates/linksy-gtk` | `linksy-app`, the GTK4/libadwaita app for Linux. |
-| `crates/linksy-screen` | Screen capture and H.264 encoding (GStreamer, ScreenCast portal), started only while sharing. |
+| `crates/linksy-qt` | `linksy-qt`, the Qt 6/Kirigami app for KDE Plasma. |
+| `crates/linksy-screen` | Screens, cameras and microphones, started only while sharing: capture and H.264 encoding (GStreamer: the ScreenCast portal, or the X display on X11), and input (the RemoteDesktop portal, XTest on X11, the virtual pointer and keyboard on Hyprland and Sway). |
+| `crates/linksy-setup` | Finish Setup: what each feature needs, and adding it with one password. Shared by both apps. |
+| `crates/linksy-host` | Programs and files on the computer, from the Flatpak too, and pkexec with Linksy's own password prompt. |
+| `crates/linksy-upgrade` | Update Now and `linksy upgrade`. |
+| `crates/linksy-i18n`, `linksy-news`, `linksy-logs` | Translations, What's New, and `logs.txt` for bug reports. |
 | `brand/` | Logo and brand assets. |
 | `data/` | Desktop entry, icons, systemd user unit. |
 | `docs/protocol.md` | Handoff for the Android app: product, feature status and the exact wire protocol. |
 
 Front ends come and go; the service does the work. With no window open, Linksy is one
-small process (about 6 MB on disk, 7 MB of memory, no CPU when idle).
+small process (about 20 MB of memory, no CPU when idle).
 
 ## How it works
 
@@ -46,20 +51,19 @@ small process (about 6 MB on disk, 7 MB of memory, no CPU when idle).
 
 ## Install
 
-Download the latest Linux release from
-[LinkSy-mg/linksy-releases](https://github.com/LinkSy-mg/linksy-releases/releases)
-(`linux-v…` tags), in the format that suits your system:
-
 ```sh
-flatpak install --user linksy-0.5.5.flatpak          # any distribution
-sudo apt install ./linksy_0.5.5_amd64.deb             # Ubuntu 24.04+, Debian 13+ (the Qt app: Ubuntu 25.04+)
-sudo dnf install ./linksy-0.5.5-1.x86_64.rpm          # Fedora 41+
-sudo zypper install --allow-unsigned-rpm ./linksy-0.5.5-1.suse.x86_64.rpm   # openSUSE Tumbleweed
-tar xzf linksy-0.5.5-linux-x86_64.tar.gz && linksy-0.5.5-linux-x86_64/install.sh  # into ~/.local
+# Finds your system and desktop, asks which app (GNOME or KDE Plasma), installs it with one password
+curl -fsSL https://linksy.diary.mg/install.sh | sh
 ```
 
-The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.5+. The
-background service starts with your session. The Flatpak does everything the packages do:
+Or by hand, from [LinkSy-mg/linksy-releases](https://github.com/LinkSy-mg/linksy-releases)
+(`linux-v…` releases; its README has the commands for each distribution): two packages,
+`linksy-common` (the background service) and the app, `linksy` (GTK, for GNOME and most
+desktops) or `linksy-qt` (Qt, for KDE Plasma). There's also a Flatpak for any distribution,
+a tarball for no root, and the AUR's `linksy` and `linksy-qt` on Arch.
+
+The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.5+; the
+Qt app, Qt 6.8+ and KDE Frameworks 6.13+. The background service starts with your session. The Flatpak does everything the packages do:
 it has host access (`org.freedesktop.Flatpak`), so Finish Setup turns on starting at login,
 the webcam driver and the USB cable there too, and the terminal for phones is the
 computer's own shell. [docs/dependencies.md](docs/dependencies.md) lists everything Linksy
@@ -154,7 +158,11 @@ Finish Setup doesn't look: it shows the firewall as to set up until Linksy has o
 - [x] Finish Setup: everything a feature needs (packages, camera device, USB, firewall, autostart) in one go
 - [x] QR-code pairing
 - [x] Android app (Flutter, separate repository; see `docs/protocol.md`)
-- [ ] Tray icon (GNOME has none by default)
+- [x] Tray icon, from the service (GNOME shows it with the AppIndicator extension)
+- [x] Qt 6 app for KDE Plasma
+- [x] Every desktop: X11 (screens and control without a portal), Hyprland and Sway (control through the compositor's virtual pointer and keyboard), niri, and Linksy's own password prompt where no polkit agent runs ([docs/desktop-support.md](docs/desktop-support.md))
+- [x] A Flatpak that does everything the packages do
+- [x] Update Now and `linksy upgrade`: the new version checked against the release's checksums and installed with one password
 - [x] Screen mirroring between computers (View Screen; the sharer always approves)
 - [x] Remote control of a mirrored screen (Take Control; asked for separately)
 - [x] Sidecar: another device as a second display (virtual monitor, driven from that device)
