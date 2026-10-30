@@ -111,8 +111,8 @@ terminal is the computer's shell; Update Now installs the new .flatpak; Send wit
 appears in Dolphin, GNOME Files and Thunar; lockers, volume, Hyprland and Sway outputs, iw
 and X11's clipboard tools are the computer's. Tested with a stand-in flatpak-spawn; the
 real bundle is built and installed by CI.*
-- **Still to do:** the website and the webcam blog post still say a Flatpak can't add the
-  driver; Flathub stays on hold (its rules for AI-written manifests).
+- **Still to do:** Flathub stays on hold (its rules for AI-written manifests). The website
+  and the webcam blog post say what the Flatpak does since 0.10.0.
 
 ### Problem logs — S, desktop done
 *Desktop: crash files in `~/.local/state/linksy/crashes/`, `logs.txt` in About (GTK:
