@@ -198,6 +198,18 @@ pub mod qobject {
         #[cxx_name = "setupFinished"]
         fn setup_finished(self: Pin<&mut Backend>, json: QString);
 
+        /// Linksy's own password prompt, where no polkit agent runs: whose password (as
+        /// polkit names them, maybe empty), and whether the last one didn't work. Answer
+        /// with answerPassword.
+        #[qsignal]
+        #[cxx_name = "passwordWanted"]
+        fn password_wanted(self: Pin<&mut Backend>, who: QString, again: bool);
+
+        /// The password passwordWanted asked for; `given` false: cancelled.
+        #[qinvokable]
+        #[cxx_name = "answerPassword"]
+        fn answer_password(&self, text: &QString, given: bool);
+
         #[qsignal]
         fn reply(self: Pin<&mut Backend>, id: i32, ok: bool, json: QString);
 
@@ -233,6 +245,21 @@ pub struct BackendRust {
     next: AtomicI32,
     /// What checkUpgrade found, for runUpgrade
     upgrade: Arc<Mutex<Option<linksy_upgrade::Plan>>>,
+    /// Where answerPassword sends the password to
+    password: PasswordSlot,
+}
+
+type PasswordSlot = Arc<Mutex<Option<std::sync::mpsc::Sender<Option<String>>>>>;
+
+/// For the thread that runs pkexec: passwordWanted, then waits for answerPassword.
+fn asker(thread: cxx_qt::CxxQtThread<qobject::Backend>, slot: PasswordSlot) -> impl FnMut(&linksy_setup::Prompt) -> Option<String> + Send + 'static {
+    move |prompt: &linksy_setup::Prompt| {
+        let (answer, reply) = std::sync::mpsc::channel();
+        *slot.lock().unwrap() = Some(answer);
+        let (who, again) = (prompt.who.clone(), prompt.again);
+        thread.queue(move |b| b.password_wanted(QString::from(&who), again)).ok()?;
+        reply.recv().ok().flatten()
+    }
 }
 
 impl Default for BackendRust {
@@ -243,7 +270,7 @@ impl Default for BackendRust {
             .enable_all()
             .build()
             .expect("tokio runtime");
-        Self { connected: false, starting: false, rt, client: Arc::default(), next: AtomicI32::new(1), upgrade: Arc::default() }
+        Self { connected: false, starting: false, rt, client: Arc::default(), next: AtomicI32::new(1), upgrade: Arc::default(), password: Arc::default() }
     }
 }
 
@@ -394,13 +421,14 @@ impl qobject::Backend {
     pub fn run_setup(self: Pin<&mut Self>, ids: &QString) {
         let thread = self.qt_thread();
         let ids: Vec<String> = serde_json::from_str(&ids.to_string()).unwrap_or_default();
+        let ask = asker(thread.clone(), self.rust().password.clone());
         self.rust().rt.spawn_blocking(move || {
             let items: Vec<_> = linksy_setup::actionable(&linksy_setup::check(Ui::Qt)).into_iter().filter(|i| ids.is_empty() || ids.iter().any(|id| id == i.id)).collect();
             let args = linksy_setup::root_args(&items);
             let step = |text: String| {
                 let _ = thread.queue(move |b| b.setup_step(QString::from(&text)));
             };
-            let mut result = if args.is_empty() { Ok(()) } else { linksy_setup::run_as_root(&args, step) };
+            let mut result = if args.is_empty() { Ok(()) } else { linksy_setup::run_as_root(&args, ask, step) };
             if result.is_ok() && linksy_setup::wants_autostart(&items) {
                 result = linksy_setup::enable_autostart();
             }
@@ -478,17 +506,24 @@ impl qobject::Backend {
     pub fn run_upgrade(self: Pin<&mut Self>) {
         let thread = self.qt_thread();
         let Some(plan) = self.rust().upgrade.lock().unwrap().clone() else { return };
+        let ask = asker(thread.clone(), self.rust().password.clone());
         self.rust().rt.spawn_blocking(move || {
             let step = |text: String| {
                 let _ = thread.queue(move |b| b.upgrade_step(QString::from(&text)));
             };
-            let json = match linksy_upgrade::run(&plan, linksy_upgrade::Root::Pkexec, step) {
+            let json = match linksy_upgrade::run(&plan, linksy_upgrade::Root::Pkexec(Box::new(ask)), step) {
                 Ok(()) => serde_json::json!({ "ok": true }),
                 Err(e) => serde_json::json!({ "error": e }),
             }
             .to_string();
             let _ = thread.queue(move |b| b.upgrade_finished(QString::from(&json)));
         });
+    }
+
+    pub fn answer_password(&self, text: &QString, given: bool) {
+        if let Some(answer) = self.rust().password.lock().unwrap().take() {
+            let _ = answer.send(given.then(|| text.to_string()));
+        }
     }
 
     pub fn languages(&self) -> QString {

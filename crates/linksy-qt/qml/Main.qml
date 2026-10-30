@@ -642,6 +642,58 @@ Kirigami.ApplicationWindow {
         ]
     }
 
+    // Linksy's own password prompt, where no polkit agent runs: the password goes to pkexec
+    // on its terminal, nowhere else. Every question gets exactly one answer.
+    Kirigami.PromptDialog {
+        id: passwordDialog
+        property bool answered: true
+        property bool again: false
+        property string who: ""
+        function ask(w, a) {
+            who = w; again = a; answered = false;
+            passwordField.text = "";
+            root.present();
+            open();
+            passwordField.forceActiveFocus();
+        }
+        function answer(given) {
+            if (answered) return;
+            answered = true;
+            backend.answerPassword(given ? passwordField.text : "", given);
+            passwordField.text = "";
+            close();
+        }
+        title: root.t("Password")
+        subtitle: again ? root.t("That password didn't work. Try again.")
+                        : who ? root.t("Linksy needs the password of {who} to make changes to this computer.", { who: who })
+                              : root.t("Linksy needs your password to make changes to this computer.")
+        standardButtons: Kirigami.Dialog.NoButton
+        onClosed: answer(false)
+        customFooterActions: [
+            Kirigami.Action {
+                text: root.t("Continue")
+                icon.name: "dialog-ok"
+                onTriggered: passwordDialog.answer(true)
+            },
+            Kirigami.Action {
+                text: root.t("Cancel")
+                icon.name: "dialog-cancel"
+                onTriggered: passwordDialog.answer(false)
+            }
+        ]
+        ColumnLayout {
+            Kirigami.PasswordField {
+                id: passwordField
+                Layout.fillWidth: true
+                onAccepted: passwordDialog.answer(true)
+            }
+        }
+    }
+    Connections {
+        target: backend
+        function onPasswordWanted(who, again) { passwordDialog.ask(who, again) }
+    }
+
     InviteDialog {
         id: inviteDialog
         app: root
