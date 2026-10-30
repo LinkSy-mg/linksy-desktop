@@ -9,6 +9,10 @@ Linksy for Linux. Each version's section becomes its release notes.
   sharing portal works: Linksy reads the screen itself and moves the pointer and types with
   XTest. The phone as touchpad and keyboard works there too. Thanks to
   [@AndyM48](https://github.com/AndyM48) for asking (#54).
+- **The phone controls the screen on Hyprland and Sway**, types into apps and works as a
+  touchpad there, and a second display takes its taps: Linksy uses the compositor's
+  virtual pointer and keyboard, since their portals can only share the screen (#11). Sway
+  keeps these from sandboxed apps, so there it needs the packages, not the Flatpak.
 - **The Flatpak does everything the packages do.** Finish Setup sets up the webcam driver,
   the USB cable and the firewall with one password, and turns on starting at login. The
   terminal for phones works, Update Now installs the new version, and Send with Linksy shows
