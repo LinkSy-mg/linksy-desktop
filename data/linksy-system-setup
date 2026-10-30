@@ -15,6 +15,9 @@
 # Exit codes: 0 done, 4 the camera driver waits for a restart to be approved (Secure Boot:
 # a line "ENROLL <code>" gives the code to type then), else the first failure's.
 set -u
+# Linksy starts pkexec on a terminal of its own, where pkexec asks for the password: nothing
+# after that may wait there for an answer
+[ -t 0 ] && exec </dev/null
 HERE=$(dirname "$(readlink -f "$0")")
 status=0
 fail() { if [ "$status" -eq 0 ]; then status=$1; fi; }

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use gio::prelude::*;
 use linksy_i18n::t;
+pub use linksy_host::pkexec::Prompt;
 
 /// Which window asks: they show video with different GStreamer sinks.
 #[derive(Clone, Copy, PartialEq)]
@@ -624,9 +625,10 @@ pub fn step_text(step: &str) -> String {
 pub struct Progress {
     enroll: Option<String>,
     last: std::collections::VecDeque<String>,
-    /// pkexec found no polkit agent to ask for the password.
-    pub no_agent: bool,
+    /// pkexec had nobody to ask for the password, not even on its terminal.
+    no_agent: bool,
     timed_out: bool,
+    wrong: bool,
 }
 
 impl Progress {
@@ -635,7 +637,7 @@ impl Progress {
         if let Some(step) = line.strip_prefix("STEP ") {
             return Some(t!("{step}…", step = step_text(step)));
         }
-        if line.contains("No authentication agent found") {
+        if line.contains("No authentication agent found") || line.contains("Error creating textual authentication agent") {
             self.no_agent = true;
         }
         if let Some(code) = line.strip_prefix("ENROLL ") {
@@ -654,6 +656,8 @@ impl Progress {
         match status {
             0 => Ok(()),
             _ if self.timed_out => Err(Failure::Message(t!("Linksy stopped waiting for the password after two minutes. If no password window came up, run the command under Prefer a Terminal? instead.").into())),
+            _ if self.wrong => Err(Failure::Message(t!("Not set up: the password didn't work.").into())),
+            _ if self.no_agent => Err(no_agent()),
             4 => Err(Failure::Restart(self.enroll)),
             126 | 127 => Err(Failure::Message(t!("Not set up: the password wasn't given.").into())),
             _ => Err(Failure::Message(t!("Setup didn't finish: {details}", details = self.last.into_iter().collect::<Vec<_>>().join(" ")))),
@@ -663,126 +667,43 @@ impl Progress {
 
 /// pkexec and the helper, with `args`: the command line to run (as root, one password).
 pub fn root_command(args: &[String]) -> Result<Vec<std::ffi::OsString>, Failure> {
-    let script = setup_script("linksy-system-setup").ok_or_else(|| Failure::Message(t!("Linksy's setup helper is missing; reinstall Linksy.").into()))?;
-    // In the Flatpak: the computer's own pkexec, on the helper where the computer sees it
     let pkexec = linksy_host::command("pkexec", &[]);
     let mut argv: Vec<std::ffi::OsString> = std::iter::once(pkexec.get_program()).chain(pkexec.get_args()).map(|a| a.to_os_string()).collect();
-    argv.push(linksy_host::path(&script).into_os_string());
-    argv.extend(args.iter().map(Into::into));
+    argv.extend(helper(args)?);
     Ok(argv)
 }
 
-/// Run `linksy-system-setup` as root and wait, telling `step` what it does as it goes. For
-/// a thread of its own: it blocks until the helper ends.
-pub fn run_as_root(args: &[String], mut step: impl FnMut(String)) -> Result<(), Failure> {
-    let (status, progress) = attempt_as_root(args, &mut step)?;
-    // Hyprland, Sway and others start no password prompt (polkit agent): start an installed
-    // one for this run, then ask again
-    if progress.no_agent {
-        let Some(agent) = start_polkit_agent() else { return Err(no_agent()) };
-        let (status, progress) = attempt_as_root(args, &mut step)?;
-        drop(agent);
-        return progress.finish(status);
-    }
-    progress.finish(status)
+/// The helper with `args`, where the computer sees it (the Flatpak's is under its install
+/// folder there).
+fn helper(args: &[String]) -> Result<Vec<std::ffi::OsString>, Failure> {
+    let script = setup_script("linksy-system-setup").ok_or_else(|| Failure::Message(t!("Linksy's setup helper is missing; reinstall Linksy.").into()))?;
+    Ok(std::iter::once(linksy_host::path(&script).into_os_string()).chain(args.iter().map(Into::into)).collect())
 }
 
-/// How long to wait for the password: a prompt that never shows up mustn't leave Finish
-/// Setup, or the desktop, waiting (desktop#67).
-const PASSWORD_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
-
-fn attempt_as_root(args: &[String], step: &mut impl FnMut(String)) -> Result<(i32, Progress), Failure> {
-    use std::io::BufRead;
-    let argv = root_command(args)?;
-    // stderr into the same pipe as stdout, as the GTK app reads it
-    let (read, write) = std::io::pipe().map_err(|e| Failure::Message(e.to_string()))?;
-    let write_err = write.try_clone().map_err(|e| Failure::Message(e.to_string()))?;
-    let mut child = std::process::Command::new(&argv[0]).args(&argv[1..]).stdout(write).stderr(write_err).spawn().map_err(|e| Failure::Message(e.to_string()))?;
+/// Run `linksy-system-setup` as root and wait, telling `step` what it does as it goes. Where
+/// no polkit agent runs, `ask` gets the password (Linksy's own prompt). For a thread of its
+/// own: it blocks until the helper ends.
+pub fn run_as_root(args: &[String], ask: impl FnMut(&Prompt) -> Option<String>, mut step: impl FnMut(String)) -> Result<(), Failure> {
+    let argv = helper(args)?;
     let mut progress = Progress::default();
     step(t!("Waiting for your password…").into());
-    // Nothing comes out until the password is given
-    let (answered, waiting) = std::sync::mpsc::channel::<()>();
-    let pid = child.id() as libc::pid_t;
-    let watch = std::thread::spawn(move || {
-        let gave_up = waiting.recv_timeout(PASSWORD_WAIT) == Err(std::sync::mpsc::RecvTimeoutError::Timeout);
-        if gave_up {
-            // SIGTERM: flatpak-spawn passes it on. Not reaped yet, so still pkexec's pid
-            unsafe { libc::kill(pid, libc::SIGTERM) };
-        }
-        gave_up
-    });
-    let mut answered = Some(answered);
-    for line in std::io::BufReader::new(read).lines().map_while(Result::ok) {
-        answered = None;
-        if let Some(s) = progress.line(&line) {
+    let outcome = linksy_host::pkexec::run(&argv, ask, |line| {
+        if let Some(s) = progress.line(line) {
             step(s);
         }
-    }
-    drop(answered);
-    progress.timed_out = watch.join().unwrap_or(false);
-    let status = child.wait().map_err(|e| Failure::Message(e.to_string()))?;
-    Ok((status.code().unwrap_or(1), progress))
+    })
+    .map_err(|e| Failure::Message(e.to_string()))?;
+    progress.timed_out = outcome.timed_out;
+    progress.wrong = outcome.wrong;
+    progress.finish(outcome.code)
 }
 
 /// Everything Linksy relies on, for installing it by hand (desktop#35).
 pub const BY_HAND: &str = "https://github.com/LinkSy-mg/linksy-desktop/blob/main/docs/dependencies.md";
 
-/// No polkit agent runs and none is installed.
-pub fn no_agent() -> Failure {
+/// pkexec had nobody to ask for the password, not even on its terminal.
+fn no_agent() -> Failure {
     Failure::Message(t!("This desktop has no password prompt running (a polkit agent, like hyprpolkitagent or polkit-gnome). Run the command under Prefer a Terminal? instead, or install and start one.").into())
-}
-
-/// A polkit agent Linksy started: it stops when dropped, or when Linksy ends first.
-pub struct Agent(std::process::Child);
-
-impl Drop for Agent {
-    fn drop(&mut self) {
-        unsafe { libc::kill(self.0.id() as libc::pid_t, libc::SIGTERM) };
-        for _ in 0..20 {
-            if self.0.try_wait().is_ok_and(|s| s.is_some()) {
-                return;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-/// Start the first polkit agent installed here, for one run of the helper. Blocks for a
-/// moment while it registers.
-pub fn start_polkit_agent() -> Option<Agent> {
-    const AGENTS: [&str; 14] = [
-        "/usr/libexec/hyprpolkitagent",
-        "/usr/lib/hyprpolkitagent/hyprpolkitagent",
-        "/usr/libexec/polkit-gnome-authentication-agent-1",
-        "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
-        "/usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1",
-        "/usr/libexec/polkit-kde-authentication-agent-1",
-        "/usr/lib/x86_64-linux-gnu/libexec/polkit-kde-authentication-agent-1",
-        "/usr/lib/polkit-kde-authentication-agent-1",
-        "/usr/libexec/polkit-mate-authentication-agent-1",
-        "/usr/lib/mate-polkit/polkit-mate-authentication-agent-1",
-        "/usr/libexec/xfce-polkit",
-        "/usr/lib/xfce-polkit/xfce-polkit",
-        "/usr/bin/lxpolkit",
-        "/usr/bin/soteria",
-    ];
-    use std::os::unix::process::CommandExt;
-    let agent = AGENTS.iter().find(|p| linksy_host::exists(Path::new(p)))?;
-    let mut command = linksy_host::command(agent, &[]);
-    command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-    // Ends with Linksy too, rather than staying behind in the session (desktop#67)
-    unsafe {
-        command.pre_exec(|| {
-            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
-            Ok(())
-        });
-    }
-    let agent = Agent(command.spawn().ok()?);
-    // It registers with polkit in a moment
-    std::thread::sleep(std::time::Duration::from_millis(1500));
-    Some(agent)
 }
 
 /// Turn on the background service at every login (no password: it's the user's own).

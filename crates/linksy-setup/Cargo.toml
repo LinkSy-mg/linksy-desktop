@@ -7,6 +7,5 @@ license.workspace = true
 [dependencies]
 gio = "0.22.10"
 gstreamer = "0.25.4"
-libc = "0.2.191"
 linksy-i18n = { path = "../linksy-i18n" }
 linksy-host = { path = "../linksy-host" }
