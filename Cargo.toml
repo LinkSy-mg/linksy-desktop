@@ -6,7 +6,7 @@ members = ["crates/*"]
 default-members = ["crates/linksy-core", "crates/linksy-ipc", "crates/linksyd", "crates/linksy-cli", "crates/linksy-news", "crates/linksy-upgrade", "crates/linksy-logs", "crates/linksy-host"]
 
 [workspace.package]
-version = "0.10.0"
+version = "0.10.1"
 edition = "2024"
 license = "AGPL-3.0-or-later"
 

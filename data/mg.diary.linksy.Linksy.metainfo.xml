@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.10.1" date="2026-10-30">
+      <description>
+        <p>Where no password prompt runs (Openbox, Hyprland, Sway and other desktops without a polkit agent), Linksy asks for the password itself, for Finish Setup and Update Now, instead of starting another program's prompt in the session. A wrong password can be typed again.</p>
+      </description>
+    </release>
     <release version="0.10.0" date="2026-10-30">
       <description>
         <p>The phone sees and controls X11 screens (Openbox, XFCE, i3, MATE) without a screen sharing portal, and controls the screen on Hyprland and Sway through their virtual pointer and keyboard. The Flatpak now does everything the packages do: Finish Setup, the terminal for phones, Update Now and Send with Linksy. A new page lists everything Linksy needs for installing it by hand, and Finish Setup stops waiting for a password after two minutes.</p>
