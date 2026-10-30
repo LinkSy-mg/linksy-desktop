@@ -39,8 +39,8 @@ virtual input protocols, Linksy's own notifications, and the in-app file browser
 
 ### X11 desktops (XFCE, Cinnamon, MATE, i3)
 
-- Text sent to the computer's clipboard works (`xclip` or `xsel`). Copying on the computer
-  doesn't reach the phone: clipboard watching only exists for Wayland.
+- The clipboard works both ways with `xclip` or `xsel`: copies on the computer reach the
+  phone when the clipboard changes (XFixes).
 - Watching and controlling the screen work without a portal (0.10): Linksy reads the
   primary monitor with `ximagesrc` and drives it with XTest. Sidecar needs Wayland: X11
   can't add a monitor.
@@ -51,11 +51,6 @@ Desktops start the service at login from its XDG autostart entry; on a tiling co
 Finish Setup gives the line for its config. Linksy Camera comes back at boot through
 `modules-load.d` instead of a systemd service (0.9.13), and Restart Now uses `loginctl`.
 Lock When Away needs `elogind`.
-
-### Known bug
-
-Finish Setup suggests `xdg-desktop-portal-wlr` on niri; niri uses
-`xdg-desktop-portal-gnome` for screen sharing.
 
 ## Plan
 
