@@ -1824,3 +1824,6 @@ robust against any encoder (GPU ones may slice too):
   no portal (the helper reads the display and drives it with XTest); `display` is refused
   there with a reason. The Flatpak announces `terminal` (§4.15) and does everything the
   packages do. No protocol change; a phone needs nothing new.
+- **2026-10-30** — Desktop 0.10.0: on Hyprland and Sway, `control`, `input` and `display`
+  apply the phone's input through the compositor's virtual pointer and keyboard (their
+  portals have no RemoteDesktop). A second display there now takes taps. No protocol change.
