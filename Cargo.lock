@@ -2665,6 +2665,7 @@ version = "0.9.17"
 dependencies = [
  "gio",
  "gstreamer",
+ "libc",
  "linksy-host",
  "linksy-i18n",
 ]

@@ -626,6 +626,7 @@ pub struct Progress {
     last: std::collections::VecDeque<String>,
     /// pkexec found no polkit agent to ask for the password.
     pub no_agent: bool,
+    timed_out: bool,
 }
 
 impl Progress {
@@ -652,6 +653,7 @@ impl Progress {
     pub fn finish(self, status: i32) -> Result<(), Failure> {
         match status {
             0 => Ok(()),
+            _ if self.timed_out => Err(Failure::Message(t!("Linksy stopped waiting for the password after two minutes. If no password window came up, run the command under Prefer a Terminal? instead.").into())),
             4 => Err(Failure::Restart(self.enroll)),
             126 | 127 => Err(Failure::Message(t!("Not set up: the password wasn't given.").into())),
             _ => Err(Failure::Message(t!("Setup didn't finish: {details}", details = self.last.into_iter().collect::<Vec<_>>().join(" ")))),
@@ -675,16 +677,19 @@ pub fn root_command(args: &[String]) -> Result<Vec<std::ffi::OsString>, Failure>
 pub fn run_as_root(args: &[String], mut step: impl FnMut(String)) -> Result<(), Failure> {
     let (status, progress) = attempt_as_root(args, &mut step)?;
     // Hyprland, Sway and others start no password prompt (polkit agent): start an installed
-    // one, then ask again
+    // one for this run, then ask again
     if progress.no_agent {
-        if !start_polkit_agent() {
-            return Err(no_agent());
-        }
+        let Some(agent) = start_polkit_agent() else { return Err(no_agent()) };
         let (status, progress) = attempt_as_root(args, &mut step)?;
+        drop(agent);
         return progress.finish(status);
     }
     progress.finish(status)
 }
+
+/// How long to wait for the password: a prompt that never shows up mustn't leave Finish
+/// Setup, or the desktop, waiting (desktop#67).
+const PASSWORD_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
 
 fn attempt_as_root(args: &[String], step: &mut impl FnMut(String)) -> Result<(i32, Progress), Failure> {
     use std::io::BufRead;
@@ -695,11 +700,26 @@ fn attempt_as_root(args: &[String], step: &mut impl FnMut(String)) -> Result<(i3
     let mut child = std::process::Command::new(&argv[0]).args(&argv[1..]).stdout(write).stderr(write_err).spawn().map_err(|e| Failure::Message(e.to_string()))?;
     let mut progress = Progress::default();
     step(t!("Waiting for your password…").into());
+    // Nothing comes out until the password is given
+    let (answered, waiting) = std::sync::mpsc::channel::<()>();
+    let pid = child.id() as libc::pid_t;
+    let watch = std::thread::spawn(move || {
+        let gave_up = waiting.recv_timeout(PASSWORD_WAIT) == Err(std::sync::mpsc::RecvTimeoutError::Timeout);
+        if gave_up {
+            // SIGTERM: flatpak-spawn passes it on. Not reaped yet, so still pkexec's pid
+            unsafe { libc::kill(pid, libc::SIGTERM) };
+        }
+        gave_up
+    });
+    let mut answered = Some(answered);
     for line in std::io::BufReader::new(read).lines().map_while(Result::ok) {
+        answered = None;
         if let Some(s) = progress.line(&line) {
             step(s);
         }
     }
+    drop(answered);
+    progress.timed_out = watch.join().unwrap_or(false);
     let status = child.wait().map_err(|e| Failure::Message(e.to_string()))?;
     Ok((status.code().unwrap_or(1), progress))
 }
@@ -712,9 +732,26 @@ pub fn no_agent() -> Failure {
     Failure::Message(t!("This desktop has no password prompt running (a polkit agent, like hyprpolkitagent or polkit-gnome). Run the command under Prefer a Terminal? instead, or install and start one.").into())
 }
 
-/// Start the first polkit agent installed here, for this session. Whether one started.
-/// Blocks for a moment while it registers.
-pub fn start_polkit_agent() -> bool {
+/// A polkit agent Linksy started: it stops when dropped, or when Linksy ends first.
+pub struct Agent(std::process::Child);
+
+impl Drop for Agent {
+    fn drop(&mut self) {
+        unsafe { libc::kill(self.0.id() as libc::pid_t, libc::SIGTERM) };
+        for _ in 0..20 {
+            if self.0.try_wait().is_ok_and(|s| s.is_some()) {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+/// Start the first polkit agent installed here, for one run of the helper. Blocks for a
+/// moment while it registers.
+pub fn start_polkit_agent() -> Option<Agent> {
     const AGENTS: [&str; 14] = [
         "/usr/libexec/hyprpolkitagent",
         "/usr/lib/hyprpolkitagent/hyprpolkitagent",
@@ -731,16 +768,21 @@ pub fn start_polkit_agent() -> bool {
         "/usr/bin/lxpolkit",
         "/usr/bin/soteria",
     ];
-    let Some(agent) = AGENTS.iter().find(|p| linksy_host::exists(Path::new(p))) else { return false };
-    let started = linksy_host::detached(agent, &[])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .is_ok();
+    use std::os::unix::process::CommandExt;
+    let agent = AGENTS.iter().find(|p| linksy_host::exists(Path::new(p)))?;
+    let mut command = linksy_host::command(agent, &[]);
+    command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    // Ends with Linksy too, rather than staying behind in the session (desktop#67)
+    unsafe {
+        command.pre_exec(|| {
+            libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
+            Ok(())
+        });
+    }
+    let agent = Agent(command.spawn().ok()?);
     // It registers with polkit in a moment
     std::thread::sleep(std::time::Duration::from_millis(1500));
-    started
+    Some(agent)
 }
 
 /// Turn on the background service at every login (no password: it's the user's own).
