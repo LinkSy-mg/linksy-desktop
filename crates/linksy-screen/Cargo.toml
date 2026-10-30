@@ -16,5 +16,9 @@ zbus = { version = "5.19.0", default-features = false, features = ["tokio"] }
 # KDE's second display: its size on the desktop when it's scaled
 wayland-client = "0.31.15"
 wayland-protocols = { version = "0.32.12", features = ["client", "unstable"] }
+# Hyprland and Sway: the viewer's input through the virtual pointer and keyboard
+wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
+wayland-scanner = "0.31.11"
+wayland-backend = "0.3.17"
 # X11 desktops: the monitor to share (RandR) and the viewer's input (XTest)
 x11rb = { version = "0.13.2", features = ["randr", "xtest"] }

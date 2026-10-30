@@ -101,7 +101,7 @@ pub fn follow_kde_display(name: Option<String>, pixels: (f64, f64), size: Size) 
 
 /// The desktop's Wayland: a service started before the desktop said where it is looks in
 /// the usual place.
-fn connect() -> Result<Connection, String> {
+pub(crate) fn connect() -> Result<Connection, String> {
     Connection::connect_to_env().or_else(|e| {
         let dir = std::env::var_os("XDG_RUNTIME_DIR").ok_or_else(|| e.to_string())?;
         let socket = std::os::unix::net::UnixStream::connect(std::path::Path::new(&dir).join("wayland-0")).map_err(|_| e.to_string())?;

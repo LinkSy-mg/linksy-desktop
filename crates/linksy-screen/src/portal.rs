@@ -16,6 +16,9 @@ pub struct Screen {
     pub node: u32,
     pub restore_token: Option<String>,
     pub input: Option<Input>,
+    /// Where the shared monitor is on the desktop, and its size, when the portal says.
+    pub position: Option<(i32, i32)>,
+    pub size: Option<(i32, i32)>,
 }
 
 /// What the user allowed in the desktop's dialog: without pointer and keyboard ("Allow
@@ -42,14 +45,21 @@ pub enum Input {
     },
     /// An X11 display, driven through XTest.
     X11(Box<crate::x11::Control>),
+    /// Hyprland, Sway: the compositor's virtual pointer and keyboard.
+    Wlr(Box<crate::wlr::Control>),
 }
 
 static REFUSED_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 impl Input {
     pub async fn apply(&self, msg: &ControlMsg) {
-        if let Self::X11(display) = self {
-            if let Err(e) = display.apply(msg) {
+        let applied = match self {
+            Self::X11(display) => Some(display.apply(msg)),
+            Self::Wlr(desktop) => Some(desktop.apply(msg)),
+            _ => None,
+        };
+        if let Some(applied) = applied {
+            if let Err(e) = applied {
                 eprintln!("linksy-screen: input not applied: {e}");
             }
             return;
@@ -168,12 +178,13 @@ pub async fn screen(token: Option<String>, control: bool, virtual_monitor: bool)
             .map_err(|e| e.to_string())?
             .response()
             .map_err(|_| "screen sharing was cancelled".to_string())?;
-        let node = first(streams.streams())?.pipe_wire_node_id();
+        let stream = first(streams.streams())?;
+        let (node, position, size) = (stream.pipe_wire_node_id(), stream.position(), stream.size());
         let fd = screencast.open_pipe_wire_remote(&session, Default::default()).await.map_err(|e| e.to_string())?;
         let restore_token = streams.restore_token().map(str::to_string);
         // The session lives as long as this process.
         std::mem::forget(session);
-        return Ok(Screen { fd, node, restore_token, input: None });
+        return Ok(Screen { fd, node, restore_token, input: None, position, size });
     }
 
     let remote = RemoteDesktop::new().await.map_err(|e| format!("remote control isn't available: {e}"))?;
@@ -202,14 +213,17 @@ pub async fn screen(token: Option<String>, control: bool, virtual_monitor: bool)
     let fd =screencast.open_pipe_wire_remote(&session, Default::default()).await.map_err(|e| e.to_string())?;
     let allowed = input_allowed(selected.devices());
     let restore_token = if allowed { selected.restore_token().map(str::to_string) } else { None };
-    Ok(Screen { fd, node, restore_token, input: Some(Input::Desktop { proxy: remote, session, node, size, allowed, held: Default::default() }) })
+    let input = Some(Input::Desktop { proxy: remote, session, node, size, allowed, held: Default::default() });
+    Ok(Screen { fd, node, restore_token, input, position: stream.position(), size: stream.size() })
 }
 
 impl Input {
     /// Release the keys still held down (their releases never came).
     pub async fn release_keys(&self) {
-        if let Self::X11(display) = self {
-            return display.release_keys();
+        match self {
+            Self::X11(display) => return display.release_keys(),
+            Self::Wlr(desktop) => return desktop.release_keys(),
+            _ => {}
         }
         let Self::Desktop { proxy, session, held, .. } = self else { return };
         let keys: Vec<u32> = held.lock().unwrap().drain().collect();

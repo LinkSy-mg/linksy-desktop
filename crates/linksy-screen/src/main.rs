@@ -13,7 +13,10 @@
 //! streams a moving test pattern instead of the screen and logs input rather than
 //! applying it, for development and tests.
 //!
-//! On X11, where no portal works, it reads the display itself and drives it with XTest.
+//! On X11, where no portal works, it reads the display itself and drives it with XTest. On
+//! Hyprland and Sway, whose portals can't drive a screen, it shares one through ScreenCast
+//! and applies the input with their virtual pointer and keyboard; `--output NAME` says which
+//! output is shared (a headless one made for a second display).
 //!
 //! `linksy-screen share --camera --socket PATH [--test]` shares this device's camera
 //! instead of a screen.
@@ -30,6 +33,7 @@
 mod mutter;
 mod outputs;
 mod portal;
+mod wlr;
 mod x11;
 
 use std::os::fd::AsRawFd;
@@ -57,6 +61,8 @@ struct Args {
     /// Pointer and keyboard only, no screen (`input` sessions).
     input_only: bool,
     virtual_size: Option<(u32, u32)>,
+    /// The output shared, by name, where the input goes (Hyprland, Sway).
+    output: Option<String>,
     test: bool,
 }
 
@@ -67,14 +73,14 @@ fn parse_args() -> Result<Args, String> {
         Some("webcam") => (Some("Linksy Camera".to_string()), None),
         Some("mic") => (None, Some("Linksy Microphone".to_string())),
         _ => {
-            return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --mic | --control | --input-only] [--virtual [--size WxH]] [--test]\n       \
+            return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --mic | --control | --input-only] [--virtual [--size WxH]] [--output NAME] [--test]\n       \
                         linksy-screen webcam --socket PATH [--name NAME] [--fps 30|60]\n       \
                         linksy-screen mic --socket PATH [--name NAME]"
                 .into());
         }
     };
     let (mut socket, mut token_file, mut control, mut test, mut camera, mut mic) = (None, None, false, false, false, false);
-    let mut input_only = false;
+    let (mut input_only, mut output) = (false, None);
     let mut fps = 30;
     let (mut is_virtual, mut size) = (false, (1920, 1080));
     while let Some(a) = args.next() {
@@ -88,6 +94,7 @@ fn parse_args() -> Result<Args, String> {
                 let v = args.next().unwrap_or_default();
                 size = v.split_once('x').and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?))).ok_or("--size takes WxH")?;
             }
+            "--output" => output = args.next(),
             "--test" => test = true,
             "--camera" => camera = true,
             "--mic" => mic = true,
@@ -97,7 +104,7 @@ fn parse_args() -> Result<Args, String> {
             other => return Err(format!("unknown option {other}")),
         }
     }
-    Ok(Args { webcam, fps, microphone, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), test })
+    Ok(Args { webcam, fps, microphone, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), output, test })
 }
 
 fn main() -> ExitCode {
@@ -354,15 +361,21 @@ fn open_capture(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(String, Op
         let (source, control) = x11::capture(args.control)?;
         return Ok((source, control.map(|c| portal::Input::X11(Box::new(c)))));
     }
+    // Hyprland, Sway: the portal shares the screen, the compositor takes the input
+    let virtual_input = if args.control && args.virtual_size.is_none() { wlr::desktop() } else { None };
+    if args.control && args.output.is_some() && virtual_input.is_none() {
+        eprintln!("linksy-screen: this desktop takes no input from other devices; the second display only shows");
+    }
+    let remote = args.control && virtual_input.is_none() && args.output.is_none();
     let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     let had_token = token.is_some();
-    let screen = match rt.block_on(portal::screen(token, args.control, args.virtual_size.is_some())) {
+    let screen = match rt.block_on(portal::screen(token, remote, args.virtual_size.is_some())) {
         Ok(screen) => screen,
         // A remembered choice can go stale (its monitor gone, say) and then restore no
         // screen at all, every time: forget it and show the dialog.
         Err(e) if had_token && !e.ends_with("cancelled") => {
             eprintln!("linksy-screen: the remembered screen didn't restore ({e}), asking again");
-            rt.block_on(portal::screen(None, args.control, args.virtual_size.is_some()))?
+            rt.block_on(portal::screen(None, remote, args.virtual_size.is_some()))?
         }
         Err(e) => return Err(e),
     };
@@ -370,17 +383,21 @@ fn open_capture(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(String, Op
     if let Some(path) = &args.token_file {
         let _ = match &screen.restore_token {
             Some(new) => std::fs::write(path, new),
-            None if args.control => std::fs::remove_file(path),
+            None if remote => std::fs::remove_file(path),
             None => Ok(()),
         };
     }
+    let input = match virtual_input {
+        Some(desktop) => Some(portal::Input::Wlr(Box::new(desktop.control(&wlr::Want { name: args.output.clone(), position: screen.position, size: screen.size })?))),
+        None => screen.input,
+    };
     // The PipeWire remote stays open for the life of the pipeline (pipewiresrc closes it).
     // The memory the frames come in, and a virtual monitor's size, are chosen by the chain
     // The last frame again every 100 ms while the screen is still: encoders hold one back until
     // the next comes, which left a tap's cursor a second late
     let source = format!("pipewiresrc fd={} path={} do-timestamp=true keepalive-time=100", screen.fd.as_raw_fd(), screen.node);
     std::mem::forget(screen.fd);
-    Ok((source, screen.input))
+    Ok((source, input))
 }
 
 /// Every 10 seconds, how many frames the screen gave and how many were encoded (the
@@ -431,6 +448,8 @@ fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
         portal::Input::Log
     } else if x11::session() {
         portal::Input::X11(Box::new(x11::Control::open()?))
+    } else if let Some(desktop) = wlr::desktop() {
+        portal::Input::Wlr(Box::new(desktop.control(&wlr::Want::default())?))
     } else {
         let token = args.token_file.as_deref().and_then(|p| std::fs::read_to_string(p).ok()).map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
         let (input, new_token) = rt.block_on(portal::input_only(token))?;
