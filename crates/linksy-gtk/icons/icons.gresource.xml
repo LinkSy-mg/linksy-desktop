@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Icons a few desktops' themes don't have (KDE's Breeze, for one): bundled so the app
+     looks the same everywhere. See icons/README.md for where they come from. -->
+<gresources>
+  <gresource prefix="/mg/diary/linksy/icons">
+    <file>scalable/status/camera-switch-symbolic.svg</file>
+    <file>scalable/status/chat-message-new-symbolic.svg</file>
+    <file>scalable/status/dialog-information-symbolic.svg</file>
+    <file>scalable/status/display-brightness-symbolic.svg</file>
+    <file>scalable/status/image-x-generic-symbolic.svg</file>
+    <file>scalable/status/network-transmit-receive-symbolic.svg</file>
+    <file>scalable/status/preferences-system-notifications-symbolic.svg</file>
+    <file>scalable/status/thunderbolt-symbolic.svg</file>
+    <file>scalable/status/video-display-symbolic.svg</file>
+    <file>scalable/status/video-joined-displays-symbolic.svg</file>
+    <file>scalable/status/web-browser-symbolic.svg</file>
+  </gresource>
+</gresources>

@@ -242,6 +242,46 @@ pub(crate) fn load_css() {
     gtk::style_context_add_provider_for_display(&gdk::Display::default().expect("display"), &css, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
+/// Icons bundled into the binary (see `icons/README.md`): they join the icon theme's
+/// resource path as part of hicolor, so a desktop whose theme lacks one of the names gets
+/// these instead of GTK's broken-image placeholder. KDE's Breeze has none of the eleven.
+const BUNDLED_ICONS: &str = "/mg/diary/linksy/icons";
+
+fn bundle_icons() {
+    let _ = gio::resources_register_include!("icons.gresource");
+    if let Some(display) = gdk::Display::default() {
+        gtk::IconTheme::for_display(&display).add_resource_path(BUNDLED_ICONS);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The gresource lists its files by hand, so one added to `icons/` and not to the list
+    /// (or the other way round) would be a broken icon again, on some desktops only.
+    #[test]
+    fn every_bundled_icon_is_registered() {
+        let _ = gio::resources_register_include!("icons.gresource");
+        for name in [
+            "camera-switch",
+            "chat-message-new",
+            "dialog-information",
+            "display-brightness",
+            "image-x-generic",
+            "network-transmit-receive",
+            "preferences-system-notifications",
+            "thunderbolt",
+            "video-display",
+            "video-joined-displays",
+            "web-browser",
+        ] {
+            let path = format!("{BUNDLED_ICONS}/scalable/status/{name}-symbolic.svg");
+            assert!(gio::resources_lookup_data(&path, gio::ResourceLookupFlags::NONE).is_ok(), "not bundled: {path}");
+        }
+    }
+}
+
 fn main() -> glib::ExitCode {
     linksy_logs::catch_crashes("linksy-app", env!("CARGO_PKG_VERSION"));
     // A phone notification's Reply button: just the reply window.
@@ -263,6 +303,7 @@ fn main() -> glib::ExitCode {
     let window: Rc<RefCell<Option<Rc<window::Window>>>> = Rc::default();
 
     app.connect_startup(|app| {
+        bundle_icons();
         load_css();
         app.set_accels_for_action("win.choose-files", &["<Control>o"]);
         app.set_accels_for_action("win.preferences", &["<Control>comma"]);
