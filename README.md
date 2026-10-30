@@ -4,7 +4,7 @@ Your devices, connected. Share files, notifications and more between nearby devi
 directly over the local network, with no account, cloud or server.
 
 <p align="center">
-  <img src="docs/screenshots/device-page.png" width="640" alt="A device's page: actions and a timeline with a transfer in progress">
+  <img src="docs/screenshots/device-page.png" width="640" alt="A phone's page: Send Files, Clipboard, View Screen, Ring and Locate, using it as a second display, webcam or microphone, and the terminal">
 </p>
 
 ## Layout
