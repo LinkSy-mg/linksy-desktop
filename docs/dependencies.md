@@ -27,7 +27,7 @@ adds.
 | Phones by USB cable | Linksy's udev rule (below). The .deb and .rpm install it. |
 | Found by nearby devices | UDP 47200 and mDNS (UDP 5353) open in the firewall, if one runs (below). |
 | Notifications, with their buttons | A notification daemon. Most desktops have one; on tiling compositors install mako, dunst or swaync. |
-| Finish Setup's password | A polkit agent. Most desktops have one; on Hyprland hyprpolkitagent, elsewhere polkit-gnome, lxpolkit or another. Linksy starts an installed one when none runs. |
+| Finish Setup's password | pkexec (polkit). The desktop's polkit agent asks for the password; where none runs, Linksy asks itself (0.10.1). |
 | Ready when you log in | systemd's user service (`linksyd.service`), or the XDG autostart entry on desktops without it. On tiling compositors, a line in their config (Finish Setup shows it). |
 | Lock When Away | systemd-logind or elogind, or a screen locker Linksy knows (hyprlock, swaylock, gtklock, waylock, i3lock, xflock4, and others). |
 | Volume from the phone | `wpctl` (PipeWire) or `pactl`. |

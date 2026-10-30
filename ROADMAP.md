@@ -39,8 +39,9 @@ Unlocking the computer from the phone.
 ### Hyprland, Sway, niri, X11 and no systemd — L
 Everything in [docs/desktop-support.md](docs/desktop-support.md): where a desktop lacks
 something Linksy relies on, Linksy brings its own fallback instead of asking for a package.
-- **First:** Linksy's own password dialog when no polkit agent runs, the installed screen
-  locker for Lock When Away, the right portal on niri, clipboard watching on X11.
+- **First:** Linksy's own password dialog when no polkit agent runs (desktop done in
+  0.10.1), the installed screen locker for Lock When Away, the right portal on niri,
+  clipboard watching on X11.
 - **Then:** autostart without systemd, Linksy's own notifications when no notification
   daemon runs.
 - **Then:** screen control and Sidecar on Hyprland and Sway (virtual input, headless

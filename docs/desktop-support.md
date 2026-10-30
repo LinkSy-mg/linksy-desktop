@@ -22,8 +22,9 @@ when none runs, a notification daemon suggested where none runs, the line that s
 Linksy at login on tiling compositors, an XDG autostart entry for desktops without
 systemd's session, X11 clipboard watching, and GNOME's portal suggested on niri. 0.10 adds
 screen control on Hyprland and Sway, through their virtual pointer and keyboard, and X11
-screens without a portal. The tables below describe 0.8; the plan's remaining steps are
-Linksy's own notifications and the in-app file browser.*
+screens without a portal. 0.10.1 asks for the password itself where no polkit agent runs,
+rather than starting an installed one. The tables below describe 0.8; the plan's remaining
+steps are Linksy's own notifications and the in-app file browser.*
 
 ### Hyprland, Sway, niri and other tiling compositors
 
@@ -59,7 +60,7 @@ Each gap gets a fallback Linksy handles itself, rather than a package the user h
 
 | Gap | Fallback | Covers | Effort |
 |---|---|---|---|
-| No polkit agent | Linksy's own password dialog, handed to `pkttyagent` (ships with polkit, wherever `pkexec` is). The password only goes to polkit's helper. | everywhere | small |
+| No polkit agent | Linksy's own password dialog: pkexec runs on a private terminal, where polkit's own text prompt asks, and Linksy answers it with what the person typed. The password only goes to pkexec. Done in 0.10.1. | everywhere | small |
 | No notification daemon | When nobody owns `org.freedesktop.Notifications`, Linksy shows its own popups with Reply and actions, as a layer-shell overlay (gtk4-layer-shell). | Hyprland, Sway, niri | medium |
 | No ScreenCast portal | Capture the X display with GStreamer's `ximagesrc` (gst-plugins-good, already a dependency). Done in 0.10. | X11 | small |
 | Screen control without RemoteDesktop | Input through the compositor's virtual pointer and keyboard protocols (`zwlr_virtual_pointer_v1`, `zwp_virtual_keyboard_v1`), as wayvnc does; XTest on X11, which needs no permission. Done in 0.10. Sway keeps these protocols from sandboxed apps, so the Flatpak can't use them there. | Hyprland, Sway, X11 | medium |
