@@ -22,4 +22,7 @@ Firewall: allow UDP 47200 (Linksy) and mDNS (UDP 5353). On Fedora and openSUSE (
     sudo firewall-cmd --permanent --add-service=mdns
     sudo firewall-cmd --reload
 
+Everything Linksy relies on, per distribution:
+    https://github.com/LinkSy-mg/linksy-desktop/blob/main/docs/dependencies.md
+
 More: https://github.com/LinkSy-mg/linksy-releases
