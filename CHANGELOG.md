@@ -15,6 +15,9 @@ Linksy for Linux. Each version's section becomes its release notes.
   up in Dolphin, GNOME Files and Thunar. On Hyprland, Sway and X11 desktops, the screen
   locker, volume, Second Display and the clipboard work from the Flatpak too. It now asks
   for host access to do this.
+- **Everything Linksy needs, in one page**, for installing it by hand: each feature, the
+  packages per distribution, and the camera, cable and firewall steps without Finish Setup.
+  Finish Setup links to it (#35).
 
 ### Fixed
 - **Finish Setup no longer offers GNOME's screen sharing portal on X11 desktops**, where it
