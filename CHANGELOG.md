@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.10.1
+
+### Fixed
+- **Linksy asks for the password itself where no password prompt runs** (Openbox, Hyprland,
+  Sway and other desktops without a polkit agent), for Finish Setup and Update Now. It no
+  longer starts another program's prompt in your session, which could take over the
+  desktop on Openbox without showing up (#67). A wrong password can be typed again.
+
 ## 0.10.0
 
 ### New
