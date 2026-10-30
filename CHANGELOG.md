@@ -26,6 +26,10 @@ Linksy for Linux. Each version's section becomes its release notes.
 ### Fixed
 - **Finish Setup no longer offers GNOME's screen sharing portal on X11 desktops**, where it
   can't help (#67). Second Display says it needs a Wayland session there.
+- **Finish Setup stops waiting for a password after two minutes** and says what to do
+  instead, and the password prompt it starts on desktops without one now stops when setup
+  is done, or when Linksy is closed, rather than staying behind in the session (#67).
+  Thanks to [@AndyM48](https://github.com/AndyM48) for the idea.
 - **Clipboard text from a phone reaches X11 desktops that also have wl-clipboard
   installed**: the copy stopped at wl-copy before trying xclip and xsel.
 
