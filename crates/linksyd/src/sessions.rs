@@ -202,14 +202,14 @@ impl Sessions {
                 linksy_i18n::t!("{output} is the second display for {device}. Choose it in the next window; Linksy remembers the choice.", output = output.name, device = session.peer.name),
             );
         }
-        let result = self.run_helper_on(session, device, headless.is_some()).await;
+        let result = self.run_helper_on(session, device, headless.as_ref().map(|o| o.name.clone())).await;
         if let Some(output) = headless {
             output.remove().await;
         }
         result
     }
 
-    async fn run_helper_on(&self, mut session: Session, device: bool, headless: bool) -> std::io::Result<()> {
+    async fn run_helper_on(&self, mut session: Session, device: bool, headless: Option<String>) -> std::io::Result<()> {
         let role = match session.kind {
             _ if !device => "share",
             SessionKind::Microphone => "mic",
@@ -228,9 +228,10 @@ impl Sessions {
             }
             SessionKind::Screen => {}
             // The headless output, picked in the portal's dialog (the first time) like a
-            // screen. Input from the phone needs the RemoteDesktop portal, which these
-            // compositors lack: the computer's own mouse and keyboard work on it.
-            SessionKind::Display if headless => {}
+            // screen; the phone's taps go to it through the compositor's virtual pointer.
+            SessionKind::Display if headless.is_some() => {
+                cmd.arg("--control").arg("--output").arg(headless.as_deref().unwrap_or_default());
+            }
             SessionKind::Camera => {
                 cmd.arg("--camera");
             }
