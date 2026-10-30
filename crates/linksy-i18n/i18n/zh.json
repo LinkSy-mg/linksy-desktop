@@ -508,6 +508,7 @@
   "What's New Since Your Last Update": "自上次更新以来的新功能",
   "What's New in Linksy {version}": "Linksy {version} 新功能",
   "What's New, Right Here": "新功能就在这里",
+  "What Linksy Needs": "Linksy 需要什么",
   "When a new version is out, Update Now installs it, checked and with one password, and starts Linksy again. In a terminal: linksy upgrade.": "有新版本时，“立即更新”会以一次密码安装经过校验的更新，并重新启动 Linksy。在终端中：linksy upgrade。",
   "When it left": "离开时",
   "While a phone's microphone is on, its card shows how loud it is, and Listen plays it here.": "手机麦克风开启时，其卡片会显示音量，“收听”可在这里播放。",

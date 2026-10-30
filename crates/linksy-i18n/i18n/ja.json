@@ -508,6 +508,7 @@
   "What's New Since Your Last Update": "前回のアップデート以降の新機能",
   "What's New in Linksy {version}": "Linksy {version} の新機能",
   "What's New, Right Here": "新機能をここで",
+  "What Linksy Needs": "Linksy に必要なもの",
   "When a new version is out, Update Now installs it, checked and with one password, and starts Linksy again. In a terminal: linksy upgrade.": "新しいバージョンが出たら、「今すぐ更新」で検証済みのアップデートをパスワード 1 回でインストールし、Linksy を再起動します。ターミナルでは: linksy upgrade。",
   "When it left": "離れたとき",
   "While a phone's microphone is on, its card shows how loud it is, and Listen plays it here.": "スマホのマイクがオンの間、カードに音量が表示され、「聴く」でここで再生できます。",

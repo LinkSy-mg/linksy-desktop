@@ -704,6 +704,9 @@ fn attempt_as_root(args: &[String], step: &mut impl FnMut(String)) -> Result<(i3
     Ok((status.code().unwrap_or(1), progress))
 }
 
+/// Everything Linksy relies on, for installing it by hand (desktop#35).
+pub const BY_HAND: &str = "https://github.com/LinkSy-mg/linksy-desktop/blob/main/docs/dependencies.md";
+
 /// No polkit agent runs and none is installed.
 pub fn no_agent() -> Failure {
     Failure::Message(t!("This desktop has no password prompt running (a polkit agent, like hyprpolkitagent or polkit-gnome). Run the command under Prefer a Terminal? instead, or install and start one.").into())

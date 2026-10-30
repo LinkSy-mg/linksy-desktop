@@ -508,6 +508,7 @@
   "What's New Since Your Last Update": "Новое с последнего обновления",
   "What's New in Linksy {version}": "Что нового в Linksy {version}",
   "What's New, Right Here": "Новое — прямо здесь",
+  "What Linksy Needs": "Что нужно Linksy",
   "When a new version is out, Update Now installs it, checked and with one password, and starts Linksy again. In a terminal: linksy upgrade.": "Когда выходит новая версия, «Обновить сейчас» устанавливает её — с проверкой и одним паролем — и перезапускает Linksy. В терминале: linksy upgrade.",
   "When it left": "При уходе устройства",
   "While a phone's microphone is on, its card shows how loud it is, and Listen plays it here.": "Пока микрофон телефона включён, его карточка показывает громкость, а «Слушать» воспроизводит его здесь.",

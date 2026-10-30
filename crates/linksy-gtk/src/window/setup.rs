@@ -125,6 +125,7 @@ impl Window {
         body.append(&progress);
         body.append(&list);
         body.append(&terminal_list);
+        body.append(&gtk::LinkButton::builder().uri(linksy_setup::BY_HAND).label(t!("What Linksy Needs")).halign(gtk::Align::Center).build());
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).child(&body).build();
         let view = adw::ToolbarView::new();
         view.add_top_bar(&adw::HeaderBar::new());
