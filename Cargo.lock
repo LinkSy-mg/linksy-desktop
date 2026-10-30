@@ -2588,6 +2588,9 @@ dependencies = [
 [[package]]
 name = "linksy-host"
 version = "0.10.0"
+dependencies = [
+ "libc",
+]
 
 [[package]]
 name = "linksy-i18n"
@@ -2665,7 +2668,6 @@ version = "0.10.0"
 dependencies = [
  "gio",
  "gstreamer",
- "libc",
  "linksy-host",
  "linksy-i18n",
 ]

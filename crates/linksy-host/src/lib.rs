@@ -3,6 +3,8 @@
 //! `flatpak-spawn --host`, and files in the home folder are read and written by them.
 //! Elsewhere everything simply runs here.
 
+pub mod pkexec;
+
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
