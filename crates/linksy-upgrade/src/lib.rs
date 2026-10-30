@@ -184,11 +184,11 @@ pub fn manual(plan: &Plan) -> Option<String> {
     }
 }
 
-/// How the root step asks for the password: sudo in a terminal, pkexec in the apps.
-#[derive(Clone, Copy)]
+/// How the root step asks for the password: sudo in a terminal, pkexec in the apps (with
+/// the app's own prompt where no polkit agent runs).
 pub enum Root {
     Sudo,
-    Pkexec,
+    Pkexec(linksy_host::pkexec::Ask),
 }
 
 /// Where downloads wait before installing.
@@ -287,13 +287,22 @@ fn install_packages(paths: &[PathBuf], root: Root) -> Result<(), String> {
     let (cmd, mut argv) = match root {
         Root::Sudo if nix_root() => (script.display().to_string(), Vec::new()),
         Root::Sudo => ("sudo".to_string(), vec![script.display().to_string()]),
-        Root::Pkexec => ("pkexec".to_string(), vec![script.display().to_string()]),
+        Root::Pkexec(ask) => {
+            let argv: Vec<std::ffi::OsString> = std::iter::once(script.into_os_string()).chain(args.into_iter().map(Into::into)).collect();
+            let outcome = linksy_host::pkexec::run(&argv, ask, |_| {}).map_err(|e| e.to_string())?;
+            return match outcome.code {
+                0 => Ok(()),
+                _ if outcome.timed_out => Err(t!("Linksy stopped waiting for the password after two minutes. If no password window came up, update in a terminal: linksy upgrade").into()),
+                _ if outcome.wrong => Err(t!("Not updated: the password didn't work.").into()),
+                126 | 127 => Err(t!("Not updated: the password wasn't given.").into()),
+                _ => Err(t!("The update didn't install.").into()),
+            };
+        }
     };
     argv.append(&mut args);
     let status = std::process::Command::new(&cmd).args(&argv).status().map_err(|e| e.to_string())?;
     match status.code() {
         Some(0) => Ok(()),
-        Some(126 | 127) if matches!(root, Root::Pkexec) => Err(t!("Not updated: the password wasn't given.").into()),
         _ => Err(t!("The update didn't install.").into()),
     }
 }
