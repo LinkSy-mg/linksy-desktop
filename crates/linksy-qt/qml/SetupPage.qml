@@ -150,6 +150,13 @@ Kirigami.ScrollablePage {
                 }
             }
         }
+
+        Kirigami.UrlButton {
+            Layout.alignment: Qt.AlignHCenter
+            visible: !!page.setup?.byHand
+            url: page.setup?.byHand ?? ""
+            text: app.t("What Linksy Needs")
+        }
     }
 
     // Secure Boot holds the new camera driver until it's approved at the next restart

@@ -590,6 +590,7 @@ fn setup_json() -> serde_json::Value {
         "missing": linksy_setup::missing(&items),
         "everything": linksy_setup::actionable(&items).len(),
         "command": linksy_setup::terminal_command(&items),
+        "byHand": linksy_setup::BY_HAND,
     })
 }
 
