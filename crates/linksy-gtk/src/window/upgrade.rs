@@ -72,7 +72,8 @@ impl Window {
         dialog.present(Some(&self.window));
 
         let (tx, rx) = async_channel::unbounded::<String>();
-        let job = gio::spawn_blocking(move || linksy_upgrade::run(&plan, linksy_upgrade::Root::Pkexec, |step| drop(tx.send_blocking(step))));
+        let ask = super::password::asker(self.window.upcast_ref());
+        let job = gio::spawn_blocking(move || linksy_upgrade::run(&plan, linksy_upgrade::Root::Pkexec(Box::new(ask)), |step| drop(tx.send_blocking(step))));
         let w = self.clone();
         glib::spawn_future_local(async move {
             while let Ok(step) = rx.recv().await {

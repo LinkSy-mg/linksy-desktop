@@ -17,11 +17,13 @@ fn check() -> Vec<Item> {
     check_for(Ui::Gtk)
 }
 
-/// Run `linksy-system-setup` as root (one password for all of it), showing each step.
-async fn run_as_root(args: &[String], progress: &gtk::Label) -> Result<(), Failure> {
+/// Run `linksy-system-setup` as root (one password for all of it), showing each step;
+/// Linksy's own password prompt shows over `parent`.
+async fn run_as_root(args: &[String], progress: &gtk::Label, parent: &gtk::Widget) -> Result<(), Failure> {
     let (tx, rx) = async_channel::unbounded::<String>();
     let args = args.to_vec();
-    let job = gio::spawn_blocking(move || linksy_setup::run_as_root(&args, |step| drop(tx.send_blocking(step))));
+    let ask = super::password::asker(parent);
+    let job = gio::spawn_blocking(move || linksy_setup::run_as_root(&args, ask, |step| drop(tx.send_blocking(step))));
     progress.set_visible(true);
     while let Ok(step) = rx.recv().await {
         progress.set_label(&step);
@@ -31,8 +33,8 @@ async fn run_as_root(args: &[String], progress: &gtk::Label) -> Result<(), Failu
 }
 
 /// Let Linksy use phones by cable (the udev rule), as root.
-pub(super) async fn allow_usb() -> Result<(), String> {
-    match run_as_root(&["usb".to_string()], &gtk::Label::new(None)).await {
+pub(super) async fn allow_usb(parent: &gtk::Widget) -> Result<(), String> {
+    match run_as_root(&["usb".to_string()], &gtk::Label::new(None), parent).await {
         Ok(()) => Ok(()),
         Err(Failure::Message(m)) => Err(m),
         Err(Failure::Restart(_)) => Err(t!("Restart your computer, then try again.").into()),
@@ -178,7 +180,7 @@ impl Window {
         v.everything.set_child(Some(&super::spinner()));
         glib::spawn_future_local(async move {
             let args = root_args(&items);
-            let mut result = if args.is_empty() { Ok(()) } else { run_as_root(&args, &v.progress).await };
+            let mut result = if args.is_empty() { Ok(()) } else { run_as_root(&args, &v.progress, v.dialog.upcast_ref()).await };
             if result.is_ok() && linksy_setup::wants_autostart(&items) {
                 result = enable_autostart().await;
             }

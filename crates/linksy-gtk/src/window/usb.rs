@@ -117,7 +117,7 @@ impl Window {
             b.set_child(Some(&spinner()));
             let (b, t) = (b.clone(), t.clone());
             glib::spawn_future_local(async move {
-                if let Err(e) = super::setup::allow_usb().await {
+                if let Err(e) = super::setup::allow_usb(b.upcast_ref()).await {
                     t.add_toast(adw::Toast::builder().title(glib::markup_escape_text(&e)).timeout(8).build());
                 }
                 b.set_label(t!("Allow"));

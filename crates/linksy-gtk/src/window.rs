@@ -11,6 +11,7 @@ mod messages;
 mod news;
 mod upgrade;
 mod page;
+mod password;
 mod prefs;
 mod screen;
 mod setup;
