@@ -62,7 +62,8 @@ The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwait
 background service starts with your session. The Flatpak does everything the packages do:
 it has host access (`org.freedesktop.Flatpak`), so Finish Setup turns on starting at login,
 the webcam driver and the USB cable there too, and the terminal for phones is the
-computer's own shell.
+computer's own shell. [docs/dependencies.md](docs/dependencies.md) lists everything Linksy
+relies on, with the packages for each distribution, for installing it by hand.
 
 To cut a release: add the version's section to `CHANGELOG.md` and the metainfo's
 `<releases>`, bump `version` in `Cargo.toml`, commit, and run `scripts/publish-release.sh`. It
