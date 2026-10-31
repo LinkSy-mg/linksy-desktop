@@ -401,18 +401,27 @@ Kirigami.ScrollablePage {
         width: Kirigami.Units.gridUnit * 14
         banner.title: card.title
         banner.titleIcon: card.iconName
-        contentItem: ColumnLayout {
-            spacing: Kirigami.Units.largeSpacing
-            QQC2.Label {
-                Layout.fillWidth: true
-                text: card.running ? app.t("Live now") : card.subtitle
-                wrapMode: Text.Wrap
-                opacity: 0.75
-            }
-            // A microphone in use here: what it hears
-            MicWave {
-                Layout.fillWidth: true
-                visible: card.running !== null && card.kind === "microphone"
+        // Kirigami stretches a card's contentItem to the card's full height when the card moves (as
+        // the Flow rewraps on a resize), and a stretched ColumnLayout centres its rows onto the
+        // actions: the column inside keeps its own height
+        contentItem: Item {
+            implicitWidth: column.implicitWidth
+            implicitHeight: column.implicitHeight
+            ColumnLayout {
+                id: column
+                width: parent.width
+                spacing: Kirigami.Units.largeSpacing
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    text: card.running ? app.t("Live now") : card.subtitle
+                    wrapMode: Text.Wrap
+                    opacity: 0.75
+                }
+                // A microphone in use here: what it hears
+                MicWave {
+                    Layout.fillWidth: true
+                    visible: card.running !== null && card.kind === "microphone"
+                }
             }
         }
         actions: [
