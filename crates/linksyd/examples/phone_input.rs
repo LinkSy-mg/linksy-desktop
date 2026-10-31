@@ -54,6 +54,11 @@ async fn main() {
     if opt("--swipe").is_some() {
         steps.extend([ControlMsg::Pointer { x: 0.5, y: 0.6 }, ControlMsg::Scroll { dx: 0.0, dy: 3.0, discrete: true }]);
     }
+    // A touchpad's stream of small scrolls, as the viewer sends them
+    if opt("--scroll").is_some() {
+        steps.push(ControlMsg::Pointer { x: 0.5, y: 0.6 });
+        steps.extend((0..40).map(|_| ControlMsg::Scroll { dx: 0.0, dy: 6.0, discrete: false }));
+    }
     if args.is_empty() {
         steps.extend([
             ControlMsg::Pointer { x: 0.5, y: 0.5 },
@@ -62,14 +67,22 @@ async fn main() {
             ControlMsg::Text { text: "hello".into() },
         ]);
     }
+    let (mut sent, mut failed) = (0, 0);
+    let pace = if opt("--scroll").is_some() { 16 } else { 120 };
     for step in &steps {
         match hid.apply(step).await {
-            Ok(()) => println!("sent {step:?}"),
-            Err(e) => println!("failed {step:?}: {e}"),
+            Ok(()) => sent += 1,
+            Err(e) => {
+                failed += 1;
+                println!("failed {step:?}: {e}");
+            }
         }
-        tokio::time::sleep(Duration::from_millis(120)).await;
+        tokio::time::sleep(Duration::from_millis(pace)).await;
     }
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let _ = hid.settle().await;
+    println!("{sent} sent, {failed} failed");
+    tokio::time::sleep(Duration::from_millis(300)).await;
     hid.unregister().await;
     println!("unplugged the virtual devices");
 }

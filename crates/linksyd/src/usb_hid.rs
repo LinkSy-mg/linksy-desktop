@@ -37,6 +37,9 @@ pub struct Hid {
     dev: nusb::Device,
     at: (u16, u16),
     touching: bool,
+    /// Scrolling is a finger dragging: where it is (0..1 of the height) and when it last
+    /// moved; lifted once scrolling stops (`settle`).
+    scroll: Option<(f64, std::time::Instant)>,
     modifiers: u8,
     keys: Vec<u8>,
 }
@@ -51,7 +54,7 @@ impl Hid {
         }
         // The phone makes the devices a moment later; input sent before then is refused
         tokio::time::sleep(Duration::from_secs(1)).await;
-        Ok(Hid { dev, at: (16_384, 16_384), touching: false, modifiers: 0, keys: Vec::new() })
+        Ok(Hid { dev, at: (16_384, 16_384), touching: false, scroll: None, modifiers: 0, keys: Vec::new() })
     }
 
     pub async fn unregister(self) {
@@ -62,6 +65,9 @@ impl Hid {
 
     /// One of the viewer's messages, as the phone should feel it.
     pub async fn apply(&mut self, msg: &ControlMsg) -> Result<(), String> {
+        if !matches!(msg, ControlMsg::Scroll { .. } | ControlMsg::Pointer { .. }) {
+            self.lift_scroll().await?;
+        }
         match *msg {
             ControlMsg::Pointer { x, y } => {
                 self.at = (scale(x), scale(y));
@@ -75,7 +81,7 @@ impl Hid {
             }
             // Android goes back on Escape
             ControlMsg::Button { button: MouseButton::Right | MouseButton::Back, pressed: true } => self.tap_key(0x29).await?,
-            ControlMsg::Scroll { dy, discrete, .. } => self.swipe(if discrete { dy * 0.08 } else { dy / 800.0 }).await?,
+            ControlMsg::Scroll { dy, discrete, .. } => self.scroll_by(if discrete { dy * 0.06 } else { dy / 500.0 }).await?,
             ControlMsg::Key { keysym, pressed, code } => self.key(keysym, code, pressed).await?,
             ControlMsg::Text { ref text } => {
                 for c in text.chars() {
@@ -91,27 +97,51 @@ impl Hid {
     }
 
     async fn touch(&self) -> Result<(), String> {
-        let (x, y) = self.at;
+        self.report(self.at, self.touching).await
+    }
+
+    /// The finger at `(x, y)`, touching the screen or not.
+    async fn report(&self, (x, y): (u16, u16), down: bool) -> Result<(), String> {
         // Tip switch and in range while touching, nothing (and no contact) otherwise
-        let (flags, contacts) = if self.touching { (0b11, 1) } else { (0, 0) };
+        let (flags, contacts) = if down { (0b11, 1) } else { (0, 0) };
         let report = [flags, 0, x as u8, (x >> 8) as u8, y as u8, (y >> 8) as u8, contacts];
         out(&self.dev, SEND_EVENT, TOUCH, 0, &report).await
     }
 
-    /// A wheel turn as a short finger drag, `fraction` of the screen's height.
-    async fn swipe(&mut self, fraction: f64) -> Result<(), String> {
-        let start = self.at;
-        let distance = (fraction.clamp(-0.4, 0.4) * 32_767.0) as i32;
-        self.touching = true;
-        for step in 0..=6 {
-            let y = (start.1 as i32 - distance * step / 6).clamp(0, 32_767) as u16;
-            self.at = (start.0, y);
-            self.touch().await?;
-            tokio::time::sleep(Duration::from_millis(8)).await;
+    /// Scrolling by `fraction` of the screen's height: the finger goes down where the
+    /// pointer is, then each turn moves it; at an edge it lifts, and the next turn starts
+    /// again from the pointer.
+    async fn scroll_by(&mut self, fraction: f64) -> Result<(), String> {
+        let x = self.at.0;
+        let y = match self.scroll {
+            Some((y, _)) => y,
+            None => {
+                let y = self.at.1 as f64 / 32_767.0;
+                self.report((x, scale(y)), true).await?;
+                y
+            }
+        };
+        let to = y - fraction;
+        if !(0.02..=0.98).contains(&to) {
+            return self.lift_scroll().await;
         }
-        self.touching = false;
-        self.touch().await?;
-        self.at = start;
+        self.report((x, scale(to)), true).await?;
+        self.scroll = Some((to, std::time::Instant::now()));
+        Ok(())
+    }
+
+    async fn lift_scroll(&mut self) -> Result<(), String> {
+        match self.scroll.take() {
+            Some((y, _)) => self.report((self.at.0, scale(y)), false).await,
+            None => Ok(()),
+        }
+    }
+
+    /// Called now and then while driving: a scroll that stopped lifts its finger.
+    pub async fn settle(&mut self) -> Result<(), String> {
+        if self.scroll.is_some_and(|(_, at)| at.elapsed() > Duration::from_millis(150)) {
+            self.lift_scroll().await?;
+        }
         Ok(())
     }
 
@@ -134,6 +164,13 @@ impl Hid {
         }
         let keys = self.keys.clone();
         self.send_keys(self.modifiers, &keys).await
+    }
+
+    /// Shift pressed and let go: counts as using the phone, so its screen stays on, and types
+    /// nothing.
+    pub async fn nudge(&self) -> Result<(), String> {
+        self.send_keys(self.modifiers | 0x02, &self.keys).await?;
+        self.send_keys(self.modifiers, &self.keys).await
     }
 
     /// Ctrl+V: what the phone's clipboard holds goes where its cursor is.

@@ -20,6 +20,9 @@ use tracing::{info, warn};
 const PICK_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long the app has to open the viewer.
 const VIEW_TIMEOUT: Duration = Duration::from_secs(60);
+/// How long a driven phone may go without input before it's nudged awake: below Android's
+/// shortest screen timeout (15 s is the least most phones offer).
+const KEEP_AWAKE: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct Sessions {
@@ -478,9 +481,37 @@ async fn drive(session: &mut Session, local: UnixStream, hid: crate::usb_hid::Hi
     let input = async {
         let mut frames = crate::terminal::Frames::default();
         let mut buf = vec![0u8; 4096];
-        while let Ok(n @ 1..) = local_rx.read(&mut buf).await {
+        // A phone can be slow to take one report: skip it, and give up only on many in a row
+        let mut failed = 0;
+        // Quiet for a while: a nudge keeps the phone's screen from turning off
+        let mut awake = tokio::time::interval_at(tokio::time::Instant::now() + KEEP_AWAKE, KEEP_AWAKE);
+        // A scroll that stopped lifts its finger
+        let mut settle = tokio::time::interval(Duration::from_millis(100));
+        loop {
+            let n = tokio::select! {
+                got = local_rx.read(&mut buf) => match got {
+                    Ok(n @ 1..) => n,
+                    _ => return,
+                },
+                _ = awake.tick() => {
+                    if let Some(hid) = hid.0.as_ref() {
+                        let _ = hid.nudge().await;
+                    }
+                    continue;
+                }
+                _ = settle.tick() => {
+                    if let Some(hid) = hid.0.as_mut() {
+                        let _ = hid.settle().await;
+                    }
+                    continue;
+                }
+            };
             for msg in frames.push(&buf[..n]) {
                 let Some(hid) = hid.0.as_mut() else { return };
+                // Hovering reaches nothing on the phone; taps, keys and scrolls do
+                if !matches!(msg, linksy_core::ControlMsg::Pointer { .. }) {
+                    awake.reset();
+                }
                 let done = match &msg {
                     linksy_core::ControlMsg::Text { text } => match node.send_clipboard(&phone, text).await {
                         Ok(()) => hid.paste().await,
@@ -488,9 +519,16 @@ async fn drive(session: &mut Session, local: UnixStream, hid: crate::usb_hid::Hi
                     },
                     msg => hid.apply(msg).await,
                 };
-                if let Err(e) = done {
-                    warn!("driving the phone: {e}");
-                    return;
+                match done {
+                    Ok(()) => failed = 0,
+                    Err(e) => {
+                        failed += 1;
+                        warn!("driving the phone: {msg:?}: {e}");
+                        if failed >= 8 {
+                            warn!("driving the phone: it stopped taking input");
+                            return;
+                        }
+                    }
                 }
             }
         }
