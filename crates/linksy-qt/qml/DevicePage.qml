@@ -205,7 +205,8 @@ Kirigami.ScrollablePage {
             id: useAs
             Layout.fillWidth: true
             spacing: Kirigami.Units.largeSpacing
-            visible: (page.view?.trusted ?? false) && (display.visible || webcam.visible || mic.visible)
+            // Not the cards' own visible: it goes false while a layer covers the page, and stays false
+            visible: (page.view?.trusted ?? false) && page.info !== null && ["display", "camera", "microphone"].some(f => app.can(page.info, f))
 
             UseCard {
                 id: display
