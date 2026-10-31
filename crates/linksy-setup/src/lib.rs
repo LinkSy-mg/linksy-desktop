@@ -365,8 +365,11 @@ fn loopback_installed() -> bool {
     linksy_host::exists(Path::new("/sys/module/v4l2loopback")) || output(&["modinfo", "v4l2loopback"]).is_some()
 }
 
+/// Linksy's udev rule, as of version 2 (phones in charging-only mode too).
 fn usb_rule() -> bool {
-    ["/usr/lib/udev/rules.d/70-linksy-usb.rules", "/etc/udev/rules.d/70-linksy-usb.rules"].iter().any(|p| linksy_host::exists(Path::new(p)))
+    ["/usr/lib/udev/rules.d/70-linksy-usb.rules", "/etc/udev/rules.d/70-linksy-usb.rules"]
+        .iter()
+        .any(|p| linksy_host::read(Path::new(p)).is_some_and(|rule| rule.contains("Rule version 2")))
 }
 
 /// The Flatpak's autostart entry, in the computer's own config folder.

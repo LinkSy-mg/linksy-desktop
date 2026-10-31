@@ -7,7 +7,8 @@ RULE=/etc/udev/rules.d/70-linksy-usb.rules
 cat > "$RULE" <<'RULES'
 # Linksy: let the person at this computer connect Android phones by USB cable. Linksy
 # switches a phone into Android Open Accessory mode (needs access to the phone as it is
-# plugged in: file transfer or ADB) and then talks to it in that mode (Google's ids).
+# plugged in: file transfer, ADB, or a phone maker's charging-only mode) and then talks to
+# it in that mode (Google's ids). Rule version 2.
 ACTION=="remove", GOTO="linksy_usb_end"
 SUBSYSTEM!="usb", GOTO="linksy_usb_end"
 ENV{DEVTYPE}!="usb_device", GOTO="linksy_usb_end"
@@ -15,6 +16,7 @@ ATTR{idVendor}=="18d1", ATTR{idProduct}=="2d0[0-5]", TAG+="uaccess", GOTO="links
 IMPORT{builtin}="usb_id"
 ENV{ID_USB_INTERFACES}=="*:060101:*", TAG+="uaccess"
 ENV{ID_USB_INTERFACES}=="*:ff4201:*", TAG+="uaccess"
+ENV{ID_USB_INTERFACES}!="*:08*", ATTR{idVendor}=="18d1|04e8|2717|2a70|22b8|1004|12d1|0fce|22d9|2d95|0bb4|19d2|17ef|0b05|2a45|2e04|339b|04dd|0482|1bbb|2ae5|2b4c|1ebf", TAG+="uaccess"
 LABEL="linksy_usb_end"
 RULES
 udevadm control --reload-rules
