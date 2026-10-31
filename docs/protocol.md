@@ -886,9 +886,12 @@ phone for a plain `screen` session and drives it through those devices; it never
 `control`. Taps land where clicked (a multitouch digitizer, 0–32767 in the display's
 natural orientation), the wheel is a short drag, Escape (and the right button) is Back,
 keys are sent by position (`ControlMsg::Key.code`), so the phone types with its own
-layout, and text goes through `clipboard` then Ctrl+V. Tried on a realme 15 Pro (keyboard
-and absolute pointing). Switching into accessory mode removes the devices; the computer
-adds them once the phone is back. Phone side, please:
+layout, and text goes through `clipboard` then Ctrl+V. Scrolling is one finger dragging
+(down when scrolling starts, lifted when it stops). With no input for 10 s the computer taps
+Shift, which keeps the phone's screen on and types nothing. A phone that can be driven
+opens in control on the computer, unless the person turned it off for that phone. Works
+on a realme 15 Pro. Switching into accessory mode removes the devices; the computer adds
+them once the phone is back. Phone side, please:
 
 - [ ] While a computer drives the phone (a `screen` session to it, and an input device
       named for the accessory appears in `InputManager`), show a lasting "Controlled from

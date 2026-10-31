@@ -8,8 +8,12 @@ Linksy for Linux. Each version's section becomes its release notes.
 - **Control a phone from the computer over the cable, with no developer options.** Take
   Control on a phone's screen while it's plugged in: the computer plugs a virtual
   touchscreen and keyboard into the phone (Android Open Accessory 2.0), so clicks land where
-  you click, the wheel scrolls, Escape goes back, and keys type with the phone's own
-  layout. Text goes through the phone's clipboard, so any language works.
+  you click, the wheel and touchpad scroll, Escape goes back, and keys type with the phone's
+  own layout. Text goes through the phone's clipboard, so any language works. A plugged-in
+  phone opens straight in control (turn it off once and that phone opens to watch), and
+  its screen stays on while you use it.
+- **The screen viewer fits a phone:** in a narrow window, Take Control and the other buttons
+  sit on their own row under the phone's name.
 - **Linksy Cable:** the USB cable checks itself and lets go of a stalled phone in seconds,
   ends each batch so the phone reads it at once, tries again when a phone doesn't switch in
   Android's 10 seconds, and recognises phones from more makers in charging-only mode (ZTE,
