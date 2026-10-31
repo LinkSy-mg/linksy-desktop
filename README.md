@@ -1,33 +1,122 @@
-# Linksy
+<img width="1800" height="900" alt="Linksy: your phone and your Linux computer, working as one. The Linux app showing a phone's page next to the Android app showing the computer." src="docs/banner.png" />
 
-Your devices, connected. Share files, notifications and more between nearby devices,
-directly over the local network, with no account, cloud or server.
+<div align="center">
+
+  <sub>Files, clipboard, screens, webcam, microphone and terminal between your Android phone and your Linux computer. Over Wi-Fi or a USB cable, with no account, no cloud and no server.</sub>
+  <br/><br/>
 
 <p align="center">
-  <img src="docs/screenshots/device-page.png" width="640" alt="A phone's page: Send Files, Clipboard, View Screen, Ring and Locate, using it as a second display, webcam or microphone, and the terminal">
+  <a href="https://github.com/LinkSy-mg/linksy-releases/releases">
+    <img src="https://shieldcn.dev/github/downloads/LinkSy-mg/linksy-releases.svg?mode=dark&radius=999&font=geist&split=true&height=28&fontSize=13&labelColor=141821&labelTextColor=ffffff&color=1e2a4a&valueColor=ffffff" alt="Downloads"></a>
+  <a href="https://github.com/LinkSy-mg/linksy-desktop/releases/latest">
+    <img src="https://shieldcn.dev/github/release/LinkSy-mg/linksy-desktop.svg?mode=dark&radius=999&font=geist&split=true&height=28&fontSize=13&labelColor=141821&labelTextColor=ffffff&color=1e2a4a&valueColor=ffffff" alt="Release"></a>
+  <a href="#install">
+    <img src="https://shieldcn.dev/badge/Linux-GNOME%20%C2%B7%20Plasma%20%C2%B7%20more-1e2a4a.svg?mode=dark&radius=999&font=geist&split=true&height=28&fontSize=13&labelColor=141821&labelTextColor=ffffff&color=1e2a4a&valueColor=ffffff&logo=linux&logoColor=22c3e6" alt="Linux: GNOME, Plasma and more"></a>
+  <a href="https://github.com/LinkSy-mg/linksy-releases/releases/latest">
+    <img src="https://shieldcn.dev/badge/Android-phone%20app-1e2a4a.svg?mode=dark&radius=999&font=geist&split=true&height=28&fontSize=13&labelColor=141821&labelTextColor=ffffff&color=1e2a4a&valueColor=ffffff&logo=android&logoColor=22c3e6" alt="Android phone app"></a>
+  <br/>
+  <a href="https://github.com/LinkSy-mg/linksy-desktop/stargazers">
+    <img src="https://shieldcn.dev/github/stars/LinkSy-mg/linksy-desktop.svg?mode=dark&radius=999&font=geist&split=true&height=28&fontSize=13&labelColor=141821&labelTextColor=ffffff&color=1e2a4a&valueColor=ffffff" alt="Stars"></a>
+  <a href="https://github.com/LinkSy-mg/linksy-desktop/issues">
+    <img src="https://shieldcn.dev/github/issues/LinkSy-mg/linksy-desktop.svg?mode=dark&radius=999&font=geist&split=true&height=28&fontSize=13&labelColor=141821&labelTextColor=ffffff&color=1e2a4a&valueColor=ffffff" alt="Issues"></a>
+  <a href="LICENSE">
+    <img src="https://shieldcn.dev/github/license/LinkSy-mg/linksy-desktop.svg?mode=dark&radius=999&font=geist&split=true&height=28&fontSize=13&labelColor=141821&labelTextColor=ffffff&color=1e2a4a&valueColor=ffffff" alt="License"></a>
+  <a href="ROADMAP.md">
+    <img src="https://shieldcn.dev/badge/Roadmap-View-1e2a4a.svg?mode=dark&radius=999&font=geist&split=true&height=28&fontSize=13&labelColor=141821&labelTextColor=ffffff&color=1e2a4a&valueColor=ffffff" alt="Roadmap"></a>
+  <a href="https://linksy.diary.mg">
+    <img src="https://shieldcn.dev/badge/Website-linksy.diary.mg-1e2a4a.svg?mode=dark&radius=999&font=geist&split=true&height=28&fontSize=13&labelColor=141821&labelTextColor=ffffff&color=1e2a4a&valueColor=ffffff" alt="Website"></a>
 </p>
 
-## Layout
+**[Install](#install)** &nbsp;·&nbsp; **[What it does](#what-it-does)** &nbsp;·&nbsp; **[Screenshots](#screenshots)** &nbsp;·&nbsp; **[How it works](#how-it-works)** &nbsp;·&nbsp; **[Build](#build-it-yourself)** &nbsp;·&nbsp; **[Contributing](CONTRIBUTING.md)**
 
-| Path | What it is |
+</div>
+
+> [!NOTE]
+> This repository is the Linux side: the background service, the GTK app (GNOME and most desktops) and the Qt app (KDE Plasma). The phone needs Linksy for Android, from [linksy-releases](https://github.com/LinkSy-mg/linksy-releases/releases/latest).
+
+---
+
+## Install
+
+**On the computer**, one line finds your system and desktop, asks which app you want, and installs it with one password:
+
+```sh
+curl -fsSL https://linksy.diary.mg/install.sh | sh
+```
+
+Or by hand, from [linksy-releases](https://github.com/LinkSy-mg/linksy-releases) (`linux-v…` releases; its README has the commands for each distribution):
+
+| System | What to get |
 |---|---|
-| `crates/linksy-core` | Device identity, discovery (mDNS), pairing, QUIC transport, file transfer. No UI. |
-| `crates/linksyd` | The always-on background service. Knows which devices are nearby, receives files, shows desktop notifications. |
-| `crates/linksy-ipc` | The local socket protocol between the service and its front ends. |
-| `crates/linksy-cli` | `linksy`, the command-line front end. |
-| `crates/linksy-gtk` | `linksy-app`, the GTK4/libadwaita app for Linux. |
-| `crates/linksy-qt` | `linksy-qt`, the Qt 6/Kirigami app for KDE Plasma. |
-| `crates/linksy-screen` | Screens, cameras and microphones, started only while sharing: capture and H.264 encoding (GStreamer: the ScreenCast portal, or the X display on X11), and input (the RemoteDesktop portal, XTest on X11, the virtual pointer and keyboard on Hyprland and Sway). |
-| `crates/linksy-setup` | Finish Setup: what each feature needs, and adding it with one password. Shared by both apps. |
-| `crates/linksy-host` | Programs and files on the computer, from the Flatpak too, and pkexec with Linksy's own password prompt. |
-| `crates/linksy-upgrade` | Update Now and `linksy upgrade`. |
-| `crates/linksy-i18n`, `linksy-news`, `linksy-logs` | Translations, What's New, and `logs.txt` for bug reports. |
-| `brand/` | Logo and brand assets. |
-| `data/` | Desktop entry, icons, systemd user unit. |
-| `docs/protocol.md` | Handoff for the Android app: product, feature status and the exact wire protocol. |
+| Ubuntu 24.04+, Mint 22+, Debian 13+ | `.deb`: `linksy-common` plus `linksy` (GTK) or `linksy-qt` (Plasma) |
+| Fedora 41+, openSUSE Tumbleweed | `.rpm`: the same two packages |
+| Arch | the AUR's `linksy` or `linksy-qt` |
+| Anything else, or older | the Flatpak, or the tarball without root |
 
-Front ends come and go; the service does the work. With no window open, Linksy is one
-small process (about 20 MB of memory, no CPU when idle).
+**On the phone**, install the latest `.apk` from [linksy-releases](https://github.com/LinkSy-mg/linksy-releases/releases/latest), open Linksy on both, and pair: both screens show the same code.
+
+> [!TIP]
+> Only download Linksy from these repositories, [linksy.diary.mg](https://linksy.diary.mg) or the AUR. A copy from anywhere else could be modified.
+
+<details>
+<summary>Requirements and the Flatpak</summary>
+
+The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.5+; the
+Qt app, Qt 6.8+ and KDE Frameworks 6.13+. The background service starts with your session.
+The Flatpak does everything the packages do: it has host access (`org.freedesktop.Flatpak`),
+so Finish Setup turns on starting at login, the webcam driver and the USB cable there too,
+and the terminal for phones is the computer's own shell.
+[docs/dependencies.md](docs/dependencies.md) lists everything Linksy relies on, with the
+packages for each distribution, for installing it by hand.
+
+Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). Finish Setup does it for you; by hand
+on Fedora and openSUSE (firewalld): `sudo firewall-cmd --permanent --add-port=47200/udp`,
+`sudo firewall-cmd --permanent --add-service=mdns`, then `sudo firewall-cmd --reload`.
+On openSUSE, reading the firewall's zone needs the administrator's password (polkit), so
+Finish Setup doesn't look: it shows the firewall as to set up until Linksy has opened it once.
+
+</details>
+
+---
+
+## What it does
+
+- **Share.** Files and folders both ways, resumable and checked; the clipboard (text, images,
+  small files), automatically where the desktop allows; notifications. "Send with Linksy" in
+  Files, Dolphin and Thunar.
+- **Use the phone as** a second display for the computer, a webcam ("Linksy Camera" in every
+  app, with the phone's camera controls) or a microphone ("Linksy Microphone").
+- **Screens.** Watch another device's screen and take control of it, each asked for
+  separately. A phone on the USB cable can be controlled from the computer with no developer
+  options.
+- **Terminal.** The computer's shell on the phone, behind a code set on the computer, allowed
+  per phone.
+- **Find your phone.** Ring it, loud even on silent, or locate it on a map: asked once, never
+  tracked.
+- **Away from home.** Paired devices still reach each other over the internet for a week after
+  they last met on the same network. Screens, files, camera and microphone stay local unless
+  allowed per device.
+- **Every desktop.** GNOME, KDE Plasma, Hyprland, Sway, niri, X11 desktops and more
+  ([docs/desktop-support.md](docs/desktop-support.md)), a tray icon, Update Now.
+
+With no window open, Linksy is one small process (about 20 MB of memory, no CPU when idle).
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/device-page.png" alt="A phone's page in the light theme"></td>
+    <td><img src="docs/screenshots/device-page-dark.png" alt="A phone's page in the dark theme"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/pairing-code.png" width="300" alt="Pairing: both screens show the same code"></td>
+    <td align="center"><img src="docs/screenshots/incoming-files.png" width="300" alt="Incoming files, asked first"></td>
+  </tr>
+</table>
+
+---
 
 ## How it works
 
@@ -49,36 +138,14 @@ small process (about 20 MB of memory, no CPU when idle).
   through a desktop notification with Accept/Decline buttons, unless "Accept From Paired
   Devices" is on.
 
-## Install
+Front ends come and go; the service does the work. `docs/protocol.md` is the exact wire
+protocol, and the handoff for the Android app.
 
-```sh
-# Finds your system and desktop, asks which app (GNOME or KDE Plasma), installs it with one password
-curl -fsSL https://linksy.diary.mg/install.sh | sh
-```
+---
 
-Or by hand, from [LinkSy-mg/linksy-releases](https://github.com/LinkSy-mg/linksy-releases)
-(`linux-v…` releases; its README has the commands for each distribution): two packages,
-`linksy-common` (the background service) and the app, `linksy` (GTK, for GNOME and most
-desktops) or `linksy-qt` (Qt, for KDE Plasma). There's also a Flatpak for any distribution,
-a tarball for no root, and the AUR's `linksy` and `linksy-qt` on Arch.
+## Build it yourself
 
-The .deb, .rpm and tarball need x86_64 with glibc 2.39+, GTK 4.14+ and libadwaita 1.5+; the
-Qt app, Qt 6.8+ and KDE Frameworks 6.13+. The background service starts with your session. The Flatpak does everything the packages do:
-it has host access (`org.freedesktop.Flatpak`), so Finish Setup turns on starting at login,
-the webcam driver and the USB cable there too, and the terminal for phones is the
-computer's own shell. [docs/dependencies.md](docs/dependencies.md) lists everything Linksy
-relies on, with the packages for each distribution, for installing it by hand.
-
-To cut a release: add the version's section to `CHANGELOG.md` and the metainfo's
-`<releases>`, bump `version` in `Cargo.toml`, commit, and run `scripts/publish-release.sh`. It
-tags `vX.Y.Z` and pushes it; GitHub (the Packages workflow) builds every package and the
-Flatpak, installs the packages on every supported distribution, and when all of that passes
-publishes the release here and, as `linux-vX.Y.Z` (not marked latest, which belongs to the
-Android APKs), on linksy-releases. Flathub builds from the tag with
-`packaging/flatpak/mg.diary.linksy.Linksy.yml`. `scripts/package-linux.sh` and
-`scripts/package-flatpak.sh` still build everything locally, to try a package.
-
-## Build
+You only need this to change the code. To use Linksy, see [Install](#install).
 
 Rust stable (edition 2024). The service, CLI and core build anywhere:
 
@@ -119,7 +186,7 @@ QMAKE=qmake6 cargo build -p linksy-qt
 Without root, `packaging/qt/Containerfile` is that environment in a container (its header
 says how), and `scripts/qt-shot.sh` renders the app in it against two test services.
 
-## Run
+### Run
 
 ```sh
 scripts/install-local.sh   # installs to ~/.local and enables the user service
@@ -134,13 +201,54 @@ linksy settings auto-accept on
 Or run without installing: `cargo run -p linksyd` in one terminal, then
 `cargo run -p linksy -- devices`.
 
-Firewall: allow UDP 47200 (Linksy) and UDP 5353 (mDNS). On Fedora and openSUSE (firewalld):
-`sudo firewall-cmd --permanent --add-port=47200/udp`, `sudo firewall-cmd --permanent --add-service=mdns`,
-then `sudo firewall-cmd --reload`.
-On openSUSE, reading the firewall's zone needs the administrator's password (polkit), so
-Finish Setup doesn't look: it shows the firewall as to set up until Linksy has opened it once.
+### Development aids
+
+- `scripts/ui-scene.sh <dir>` starts two local services ("This Laptop" and "Studio Desktop")
+  and pairs them. Point the app or CLI at one with `LINKSY_SOCKET=<dir>/a.sock`.
+- `scripts/ui-shot.sh <socket> <out.png> [delay-ms] [light|dark] [files…]` renders the app
+  on a headless Wayland compositor (weston, inside the toolbox) and saves a screenshot.
+  Nothing appears on screen.
+
+Screenshots are in `docs/screenshots/`.
+
+### Layout
+
+| Path | What it is |
+|---|---|
+| `crates/linksy-core` | Device identity, discovery (mDNS), pairing, QUIC transport, file transfer. No UI. |
+| `crates/linksyd` | The always-on background service. Knows which devices are nearby, receives files, shows desktop notifications. |
+| `crates/linksy-ipc` | The local socket protocol between the service and its front ends. |
+| `crates/linksy-cli` | `linksy`, the command-line front end. |
+| `crates/linksy-gtk` | `linksy-app`, the GTK4/libadwaita app for Linux. |
+| `crates/linksy-qt` | `linksy-qt`, the Qt 6/Kirigami app for KDE Plasma. |
+| `crates/linksy-screen` | Screens, cameras and microphones, started only while sharing: capture and H.264 encoding (GStreamer: the ScreenCast portal, or the X display on X11), and input (the RemoteDesktop portal, XTest on X11, the virtual pointer and keyboard on Hyprland and Sway). |
+| `crates/linksy-setup` | Finish Setup: what each feature needs, and adding it with one password. Shared by both apps. |
+| `crates/linksy-host` | Programs and files on the computer, from the Flatpak too, and pkexec with Linksy's own password prompt. |
+| `crates/linksy-upgrade` | Update Now and `linksy upgrade`. |
+| `crates/linksy-i18n`, `linksy-news`, `linksy-logs` | Translations, What's New, and `logs.txt` for bug reports. |
+| `brand/` | Logo and brand assets. |
+| `data/` | Desktop entry, icons, systemd user unit. |
+| `docs/protocol.md` | Handoff for the Android app: product, feature status and the exact wire protocol. |
+
+### Releasing
+
+Add the version's section to `CHANGELOG.md` and the metainfo's `<releases>`, bump `version`
+in `Cargo.toml`, commit, and run `scripts/publish-release.sh`. It tags `vX.Y.Z` and pushes
+it; GitHub (the Packages workflow) builds every package and the Flatpak, installs the
+packages on every supported distribution, and when all of that passes publishes the release
+here and, as `linux-vX.Y.Z` (not marked latest, which belongs to the Android APKs), on
+linksy-releases. Flathub builds from the tag with
+`packaging/flatpak/mg.diary.linksy.Linksy.yml`. `scripts/package-linux.sh` and
+`scripts/package-flatpak.sh` still build everything locally, to try a package.
+
+---
 
 ## Roadmap
+
+What's next is in [ROADMAP.md](ROADMAP.md).
+
+<details>
+<summary>Done so far</summary>
 
 - [x] Discovery, presence, pairing (code or by address), persistent identities
 - [x] Connect on demand with idle close; optional stay-connected
@@ -170,15 +278,14 @@ Finish Setup doesn't look: it shows the firewall as to set up until Linksy has o
 - [x] Another device's microphone as a microphone ("Linksy Microphone", `linksy mic`)
 - [x] Phones over a USB cable (Android Open Accessory, no developer options): lower latency, no network needed
 
-## Development aids
+</details>
 
-- `scripts/ui-scene.sh <dir>` starts two local services ("This Laptop" and "Studio Desktop")
-  and pairs them. Point the app or CLI at one with `LINKSY_SOCKET=<dir>/a.sock`.
-- `scripts/ui-shot.sh <socket> <out.png> [delay-ms] [light|dark] [files…]` renders the app
-  on a headless Wayland compositor (weston, inside the toolbox) and saves a screenshot.
-  Nothing appears on screen.
+---
 
-Screenshots are in `docs/screenshots/`.
+## Contributing
+
+Bug reports, translations and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md).
+If Linksy helps you, a star or telling a friend helps it reach more people.
 
 ## License
 
