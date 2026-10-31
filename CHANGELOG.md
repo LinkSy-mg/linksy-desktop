@@ -2,6 +2,20 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.11.0
+
+### New
+- **Control a phone from the computer over the cable, with no developer options.** Take
+  Control on a phone's screen while it's plugged in: the computer plugs a virtual
+  touchscreen and keyboard into the phone (Android Open Accessory 2.0), so clicks land where
+  you click, the wheel scrolls, Escape goes back, and keys type with the phone's own
+  layout. Text goes through the phone's clipboard, so any language works.
+- **Linksy Cable:** the USB cable checks itself and lets go of a stalled phone in seconds,
+  ends each batch so the phone reads it at once, tries again when a phone doesn't switch in
+  Android's 10 seconds, and recognises phones from more makers in charging-only mode (ZTE,
+  Honor, Nokia and others; the permission rule is updated by the packages, Finish Setup
+  elsewhere).
+
 ## 0.10.1
 
 ### Fixed
