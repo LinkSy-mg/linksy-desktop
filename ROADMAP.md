@@ -296,29 +296,18 @@ The 0.5.7 cable (Android Open Accessory) depends on each phone maker: a realme 1
 Samsung A05 switch fine, then the app never takes the cable (0 packets; releases#8). It
 also needs a udev rule (a password), a list of phone makers to spot phones (a ZTE was
 missed, desktop#67), stops file transfer by cable and asks which app should open it.
-The cable becomes one more link among several, tried in turn, the first that works kept:
-- **ADB, the reliable one (as DroidCam, Iriun and scrcpy do):** the person turns on USB
-  debugging once and allows the computer once; after that, nothing per plug-in, on
-  essentially every phone. ADB only forwards TCP, so the computer pushes a small static
-  helper to the phone (`/data/local/tmp`) that turns the forwarded stream back into
-  Linksy's own QUIC datagrams, sent to the phone app's port (47200) on the phone's
-  loopback: the app sees a loopback connection, which its core already treats as the
-  cable. **Desktop only**: no phone release needed (to confirm on a real phone). The
-  computer can also start the phone app over ADB when it isn't running.
-- **USB tethering, the no-setup one:** the phone's own USB networking, one switch per
-  plug-in; no driver to install on the computer (`cdc_ncm`, `rndis_host`). The computer
-  never takes the phone as its internet: a NetworkManager profile owned by the user (no
-  password) keeps the default route and DNS where they were (tested 2026-10-31). Tested on
-  the realme (RNDIS): about 10 s of 0.8 ms pings, then the link stalls ("transmit queue
-  timed out"), so it can't be the only path. Phone side: a button opening the tethering
-  setting, and saying when the toggle is greyed out (carrier: turn mobile data off; Data
-  Saver; a VPN not excluding Linksy).
-- **Accessory mode:** kept only for phone apps too old for the others, removed at 1.0.
-- **Every link checked:** a link that stalls drops back to Wi-Fi within seconds and says
-  why; links are named by the interface they use, not by the address (desktop and phone
-  core).
-- **Done when:** plugging in gives "Connected by USB" on a realme, a Samsung, a Pixel, a
-  Xiaomi and a Motorola, every time, and never moves the computer's internet.
+**Linksy Cable** keeps accessory mode, fixed, and nothing else: no developer options (ADB is
+out: Linksy shouldn't need them), no toggle on each plug-in (USB tethering is out, and it
+stalled on the realme anyway). Android Auto's wired mode runs on accessory mode, so every
+phone has it; the failures were ours, as Android's source shows (docs/protocol.md §4.11).
+- **Desktop (done, 0.11):** framing version 2 shared with the phone (`linksy_core::cable`:
+  hello, keepalives, a stalled cable let go in 5 s), batches ending on a short USB packet,
+  the switch tried again around Android's 10 s window, phones in charging-only mode
+  recognised by maker (udev rule version 2).
+- **Phone:** the accessory's file handed to Rust (`phone_bridge`, 16 KB reads, since Android
+  drops what a smaller read can't hold), and the activation fixes in §4.11.
+- **Done when:** plugging in and pressing Connect gives "Connected by USB" on a realme, a
+  Samsung, a Pixel, a Xiaomi and a Motorola, every time.
 
 ## 0.14 — Your relay, or none
 
@@ -349,21 +338,19 @@ The cable becomes one more link among several, tried in turn, the first that wor
 
 ### Control the phone's screen from the computer — M
 The phone's screen already shows on the computer. This adds the mouse and keyboard driving
-it, like scrcpy, over any of Linksy's links (Wi-Fi Direct, the network, the cable).
-- **The key, not the road:** Android blocks the accessibility service for sideloaded apps,
-  so input goes through a helper running as Android's shell user, which may inject taps
-  and keys and capture the screen without the recording prompt. ADB only starts it: from
-  the computer over the cable (built on the ADB cable above), or on the phone alone by
-  pairing wireless debugging with itself (Android 11+, as Shizuku does). It keeps running
-  until the phone restarts, and talks over Linksy's encrypted connection on whatever link
-  is best, Wi-Fi Direct included, not over ADB.
-- **Phone:** the helper (or scrcpy's, Apache-2.0, with its notice), a lasting "controlled
-  from <computer>" notice with Stop, and orders taken from paired computers only. Some
-  makers add a switch for input (Xiaomi, some OPPO and realme).
-- **Desktop:** clicks, scrolls and keys on the phone's screen window sent as input; the
-  lock screen shows and can be unlocked.
+it, like scrcpy, with no developer options.
+- **Over the cable (desktop done early, in 0.11):** Android Open Accessory 2.0 plugs a
+  virtual touchscreen and keyboard into the phone, as scrcpy's OTG mode does; no phone
+  change needed. Taps land where clicked, keys go by position so the phone's own layout
+  applies, text goes through the clipboard. Works on a realme 15 Pro; reported working by
+  scrcpy users on Samsung, Xiaomi, Pixel, Motorola, Huawei, vivo and Sony, failing on a
+  few older phones (Galaxy J7 Pro, Mi 5s).
+- **Without the cable (phone):** an accessibility service gives the same over any link.
+  Sideloaded installs need "Allow restricted settings" in Linksy's App info once.
+- **Phone:** a lasting "controlled from <computer>" notice with Stop; the rotation for
+  landscape.
 - **Done when:** a phone app can be used from the computer without touching the phone,
-  over Wi-Fi Direct with no router.
+  by cable on every phone tested, and over Wi-Fi with the accessibility service.
 
 ### Automatic clipboard sync — M
 Today, sending the clipboard is a button.
