@@ -842,6 +842,66 @@ computer or on the phone.
   (switches that phone). Core: `Node::usb_plugged`, `Node::usb_connect`, `Event::UsbPlugged`,
   `Event::UsbConnect`. The phone's button is still to do.
 
+**Desktop 0.11: Linksy Cable (framing version 2), and why the cable stayed silent.**
+Android's own source explains the realme and Samsung A05 failures (releases#8): the phone
+side never handed the accessory over. Accessory mode stays: Android Auto's wired mode runs
+on it, so every phone has it, and it needs no developer options. What changes:
+
+- **Framing version 2** (`linksy_core::cable`, shared by both ends). Data frames are as
+  before (2-byte length + QUIC packet). Control frames start with a zero length, then a
+  kind byte and a 2-byte length: `1` hello (`[version]`), `2` ping and `3` pong (an 8-byte
+  stamp), `4` close, `5` pad (nothing). The computer announces version `2` in the
+  accessory's version string (`UsbAccessory.getVersion()`); the phone sends a hello only
+  then, and the computer sends control frames only after the phone's hello, so version 1
+  on either side keeps working. The computer pings every second; a side that hears
+  nothing for 5 s lets go.
+- **Phone, please: use `linksy_core::cable::phone_bridge`** instead of `UsbBridge.kt`'s
+  streams. Kotlin keeps Android's part: the `USB_ACCESSORY_ATTACHED` activity (it's only
+  ever delivered to an activity), `hasPermission`/`requestPermission`, `openAccessory`.
+  Then `pfd.detachFd()` goes to Rust (`File::from_raw_fd`), with `accessory.version`;
+  `phone_bridge` returns the port to dial (`node.connect(127.0.0.1:P)`). It reads 16 KB at
+  a time: Android gives each read one USB request, and **a smaller read drops the rest of
+  that request** (`DataInputStream.readUnsignedShort()` over the accessory does exactly
+  that). It also pads writes that would end on a full USB packet and answers keepalives.
+- [ ] **Phone: why the realme never got the accessory.** Android leaves accessory mode if
+      the link isn't configured within **10 s** of the switch, and on some builds waits for
+      the first unlock after boot; the realme came back after about 17 s with no prompt,
+      which fits. Check on a test phone with `logcat -s UsbDeviceManager` ("entering USB
+      accessory mode", "exited USB accessory mode") and `dumpsys usb`. The computer now
+      switches again (3 tries) when a phone comes back as it was, then says to unlock it.
+- [ ] **Phone: the Samsung A05 showed "the computer will show a pairing code"** over the
+      cable while already paired over Wi-Fi: the cable should dial the paired computer
+      first and offer pairing only when nobody answers (above).
+- **Computer side:** each batch to the phone ends on a short or empty USB packet
+  (`submit_end`), endpoints aren't reset on open (that breaks bulk transfers on some
+  Samsungs), and phones in charging-only mode are recognised by maker too (udev rule
+  version 2).
+
+**Desktop 0.11: controlling a phone over the cable, no developer options.** Android Open
+Accessory 2.0 lets the computer plug a **virtual touchscreen and keyboard** into the phone
+over USB (requests 54–57, ids 1 and 2), as scrcpy's OTG mode does. It works in accessory
+mode or not, and needs nothing from the app: the phone's kernel makes the input devices.
+When someone takes control of a phone's screen on the computer, the computer asks the
+phone for a plain `screen` session and drives it through those devices; it never sends
+`control`. Taps land where clicked (a multitouch digitizer, 0–32767 in the display's
+natural orientation), the wheel is a short drag, Escape (and the right button) is Back,
+keys are sent by position (`ControlMsg::Key.code`), so the phone types with its own
+layout, and text goes through `clipboard` then Ctrl+V. Tried on a realme 15 Pro (keyboard
+and absolute pointing). Switching into accessory mode removes the devices; the computer
+adds them once the phone is back. Phone side, please:
+
+- [ ] While a computer drives the phone (a `screen` session to it, and an input device
+      named for the accessory appears in `InputManager`), show a lasting "Controlled from
+      <computer>" notification with Stop.
+- [ ] Rotation: the touchscreen uses the natural orientation; in landscape the computer
+      would need the rotation. Send it with the screen (to be specified) or keep control
+      to portrait for now.
+- [ ] **Without the cable:** an accessibility service (`dispatchGesture` for taps and
+      swipes, global actions for Back/Home/Recents, `ACTION_SET_TEXT` for typing) gives
+      the same control over any link. Sideloaded installs need "Allow restricted settings"
+      in Linksy's App info once, then Accessibility, Linksy, On. Announce `control` in
+      `features` when it's on, and take `control` sessions as computers do.
+
 ### 4.12 Service information (planned for 0.6)
 
 `https://linksy.diary.mg/linksy-relay` is a small JSON file the apps read: **information
@@ -1827,3 +1887,9 @@ robust against any encoder (GPU ones may slice too):
 - **2026-10-30** — Desktop 0.10.0: on Hyprland and Sway, `control`, `input` and `display`
   apply the phone's input through the compositor's virtual pointer and keyboard (their
   portals have no RemoteDesktop). A second display there now takes taps. No protocol change.
+- **2026-10-31** — Desktop 0.11 (in progress): the cable's framing version 2 (§4.11:
+  hello, keepalives, close; `linksy_core::cable::phone_bridge` for the phone, reading 16 KB
+  at a time), the accessory's version string `2`, and controlling a phone over the cable
+  through Android Open Accessory 2.0's virtual touchscreen and keyboard, with no phone
+  change. `ControlMsg::Key` gains an optional `code` (the physical key, evdev); older
+  devices ignore it.
