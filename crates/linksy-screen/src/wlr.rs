@@ -241,7 +241,7 @@ impl Control {
                 }
                 p.frame();
             }
-            ControlMsg::Key { keysym, pressed } => self.key(keysym, pressed)?,
+            ControlMsg::Key { keysym, pressed, .. } => self.key(keysym, pressed)?,
             ControlMsg::Text { ref text } => {
                 for keysym in text.chars().map(crate::portal::keysym) {
                     self.key(keysym, true)?;
@@ -405,9 +405,9 @@ mod compositor_tests {
             ControlMsg::Button { button: linksy_core::protocol::MouseButton::Left, pressed: true },
             ControlMsg::Button { button: linksy_core::protocol::MouseButton::Left, pressed: false },
             ControlMsg::Text { text: "Hi, ñ€ç ÑÉ!".into() },
-            ControlMsg::Key { keysym: 0xffe1, pressed: true },
+            ControlMsg::Key { keysym: 0xffe1, pressed: true, code: None },
             ControlMsg::Text { text: "a".into() },
-            ControlMsg::Key { keysym: 0xffe1, pressed: false },
+            ControlMsg::Key { keysym: 0xffe1, pressed: false, code: None },
             ControlMsg::Scroll { dx: 0.0, dy: 2.0, discrete: true },
             ControlMsg::Scroll { dx: 0.0, dy: 30.0, discrete: false },
             ControlMsg::PointerBy { dx: 10.0, dy: -5.0 },

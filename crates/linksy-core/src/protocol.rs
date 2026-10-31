@@ -160,7 +160,14 @@ pub enum ControlMsg {
     Button { button: MouseButton, pressed: bool },
     /// `discrete`: wheel clicks (dx/dy are steps); otherwise smooth scrolling in pixels.
     Scroll { dx: f64, dy: f64, discrete: bool },
-    Key { keysym: u32, pressed: bool },
+    /// `code`: the physical key (Linux evdev code), for a phone driven over the cable, which
+    /// reads key positions with its own layout. Optional: older devices send keysyms only.
+    Key {
+        keysym: u32,
+        pressed: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<u32>,
+    },
     /// Move the pointer by this many pixels (a touchpad); for `input` sessions.
     PointerBy { dx: f64, dy: f64 },
     /// Type this text, as if on a keyboard.
@@ -812,7 +819,7 @@ mod tests {
             ControlMsg::Pointer { x: 0.25, y: 0.75 },
             ControlMsg::Button { button: MouseButton::Right, pressed: true },
             ControlMsg::Scroll { dx: 0.0, dy: -2.0, discrete: true },
-            ControlMsg::Key { keysym: 0xff0d, pressed: false },
+            ControlMsg::Key { keysym: 0xff0d, pressed: false, code: None },
         ];
         let mut bytes = Vec::new();
         for (i, m) in msgs.iter().enumerate() {

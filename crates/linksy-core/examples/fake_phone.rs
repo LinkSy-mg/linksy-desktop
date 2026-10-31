@@ -294,8 +294,8 @@ async fn main() {
                         ControlMsg::Button { button: MouseButton::Left, pressed: true },
                         ControlMsg::Button { button: MouseButton::Left, pressed: false },
                         ControlMsg::Text { text: "hello".into() },
-                        ControlMsg::Key { keysym: 0xff53, pressed: true },
-                        ControlMsg::Key { keysym: 0xff53, pressed: false },
+                        ControlMsg::Key { keysym: 0xff53, pressed: true, code: None },
+                        ControlMsg::Key { keysym: 0xff53, pressed: false, code: None },
                     ];
                     for m in &msgs {
                         let _ = s.send.write_all(&control_frame(m)).await;

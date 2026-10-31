@@ -128,7 +128,7 @@ impl Control {
                 };
                 self.wheel(cx as i32, cy as i32)?;
             }
-            ControlMsg::Key { keysym, pressed } => self.key(keysym, pressed)?,
+            ControlMsg::Key { keysym, pressed, .. } => self.key(keysym, pressed)?,
             ControlMsg::Text { ref text } => {
                 for c in text.chars() {
                     let keysym = crate::portal::keysym(c);

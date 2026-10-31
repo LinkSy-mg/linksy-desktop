@@ -1354,6 +1354,12 @@ impl Node {
         self.inner.peers.lock().unwrap().get(id).map(|p| p.device.clone())
     }
 
+    /// Where a connected device's connection comes from now (over the USB cable, the
+    /// bridge's local port).
+    pub fn peer_address(&self, id: &Fingerprint) -> Option<SocketAddr> {
+        self.inner.peers.lock().unwrap().get(id).map(|p| p.conn.remote_address())
+    }
+
     fn nearby_addrs(&self, id: &Fingerprint) -> Vec<SocketAddr> {
         self.inner.nearby.lock().unwrap().get(id).map(|(_, a)| a.clone()).unwrap_or_default()
     }

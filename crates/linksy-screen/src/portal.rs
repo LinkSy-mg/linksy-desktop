@@ -96,7 +96,7 @@ impl Input {
                 r
             }
             ControlMsg::Scroll { dx, dy, discrete: false } => proxy.notify_pointer_axis(session, dx, dy, Default::default()).await,
-            ControlMsg::Key { keysym, pressed } => {
+            ControlMsg::Key { keysym, pressed, .. } => {
                 {
                     let mut down = held.lock().unwrap();
                     if pressed { down.insert(keysym) } else { down.remove(&keysym) };
