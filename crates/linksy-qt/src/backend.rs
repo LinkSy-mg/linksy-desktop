@@ -210,6 +210,16 @@ pub mod qobject {
         #[cxx_name = "answerPassword"]
         fn answer_password(&self, text: &QString, given: bool);
 
+        /// Whether the person chose to watch this phone rather than control it over the cable
+        /// (shared with the GTK app).
+        #[qinvokable]
+        #[cxx_name = "watchesOnly"]
+        fn watches_only(&self, device: &QString) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "setWatchesOnly"]
+        fn set_watches_only(&self, device: &QString, on: bool);
+
         #[qsignal]
         fn reply(self: Pin<&mut Backend>, id: i32, ok: bool, json: QString);
 
@@ -518,6 +528,14 @@ impl qobject::Backend {
             .to_string();
             let _ = thread.queue(move |b| b.upgrade_finished(QString::from(&json)));
         });
+    }
+
+    pub fn watches_only(&self, device: &QString) -> bool {
+        linksy_setup::watches_only(&device.to_string())
+    }
+
+    pub fn set_watches_only(&self, device: &QString, on: bool) {
+        linksy_setup::set_watches_only(&device.to_string(), on);
     }
 
     pub fn answer_password(&self, text: &QString, given: bool) {

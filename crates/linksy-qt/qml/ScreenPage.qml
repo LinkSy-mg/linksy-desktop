@@ -40,7 +40,11 @@ Kirigami.Page {
             visible: page.kind !== "display" && page.app.devices.every(d => d.device.id !== page.device || page.app.can(d.device, "control"))
             enabled: page.phase === "playing"
             tooltip: app.t("Use your mouse and keyboard on this screen")
-            onTriggered: page.restart(checked ? "control" : "screen")
+            onTriggered: {
+                // A phone remembers the person's choice for next time
+                if (page.phone()) backend.setWatchesOnly(page.device, !checked);
+                page.restart(checked ? "control" : "screen");
+            }
         },
         Kirigami.Action {
             icon.name: "view-fullscreen"
@@ -164,7 +168,13 @@ Kirigami.Page {
         if (display) { kind = "display"; play(display) }
         else if (started) play(started);
         else if (test) play({ session: "", socket: test });
-        else start("screen");
+        // A phone that can be driven over the cable opens in control, unless the person chose
+        // to watch that one
+        else start(phone() && app.devices.some(d => d.device.id === device && app.can(d.device, "control")) && !backend.watchesOnly(device) ? "control" : "screen");
+    }
+
+    function phone() {
+        return app.devices.some(d => d.device.id === device && d.device.os === "android");
     }
     Component.onDestruction: stop()
 
