@@ -35,6 +35,7 @@ mod system;
 mod tray;
 #[cfg(target_os = "linux")]
 mod usb;
+mod usb_hid;
 #[cfg(target_os = "linux")]
 mod volume;
 

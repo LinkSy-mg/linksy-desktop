@@ -549,12 +549,12 @@ fn window_title(bytes: &[u8]) -> Option<String> {
 
 /// Framed control messages (u32 BE length + JSON), from a stream read in pieces.
 #[derive(Default)]
-struct Frames {
+pub(crate) struct Frames {
     buf: Vec<u8>,
 }
 
 impl Frames {
-    fn push(&mut self, bytes: &[u8]) -> Vec<ControlMsg> {
+    pub(crate) fn push(&mut self, bytes: &[u8]) -> Vec<ControlMsg> {
         self.buf.extend_from_slice(bytes);
         let mut out = Vec::new();
         while self.buf.len() >= 4 {

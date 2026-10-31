@@ -364,6 +364,35 @@ impl Sessions {
         Ok(path)
     }
 
+    /// A phone's screen to show here while this computer drives it over the cable: the
+    /// video as usual, while the viewer's clicks and keys go to the phone's virtual
+    /// touchscreen and keyboard (`usb_hid`), not to its app.
+    pub fn view_driven(&self, session: Session, dev: nusb::Device, node: Node) -> std::io::Result<PathBuf> {
+        let path = socket_path("view", session.id);
+        let listener = bind(&path)?;
+        let id = session.id;
+        let info = active(&session);
+        let running = self.running.clone();
+        let socket = path.clone();
+        let task = tokio::spawn(async move {
+            let mut session = session;
+            let accepted = tokio::time::timeout(VIEW_TIMEOUT, listener.accept()).await;
+            let _ = std::fs::remove_file(&socket);
+            if let Ok(Ok((stream, _))) = accepted {
+                match crate::usb_hid::Hid::register(dev).await {
+                    Ok(hid) => drive(&mut session, stream, hid, &node).await,
+                    Err(e) => {
+                        warn!("driving {}: {e}", session.peer.name);
+                        relay(&mut session, stream).await;
+                    }
+                }
+            }
+            running.lock().unwrap().remove(&id);
+        });
+        self.running.lock().unwrap().insert(id, (task.abort_handle(), info));
+        Ok(path)
+    }
+
     /// A screen to show here (another device's second display, or one the tray asked to
     /// see): keep the stream for the app, opening the app if needed.
     pub(crate) fn show(&self, session: Session) -> std::io::Result<()> {
@@ -436,6 +465,53 @@ async fn relay(session: &mut Session, local: UnixStream) {
         _ = tokio::io::copy(recv, &mut local_tx) => {}
     }
     let _ = session.send.shutdown().await;
+}
+
+/// The phone's video to the viewer, and the viewer's input to the phone's virtual devices.
+/// Text goes through the phone's clipboard and a paste, whatever its keyboard layout.
+async fn drive(session: &mut Session, local: UnixStream, hid: crate::usb_hid::Hid, node: &Node) {
+    use tokio::io::AsyncReadExt;
+    let mut hid = Unplug(Some(hid));
+    let (mut local_rx, mut local_tx) = local.into_split();
+    let phone = session.peer.id;
+    info!("driving {} over the cable", session.peer.name);
+    let input = async {
+        let mut frames = crate::terminal::Frames::default();
+        let mut buf = vec![0u8; 4096];
+        while let Ok(n @ 1..) = local_rx.read(&mut buf).await {
+            for msg in frames.push(&buf[..n]) {
+                let Some(hid) = hid.0.as_mut() else { return };
+                let done = match &msg {
+                    linksy_core::ControlMsg::Text { text } => match node.send_clipboard(&phone, text).await {
+                        Ok(()) => hid.paste().await,
+                        Err(e) => Err(e.to_string()),
+                    },
+                    msg => hid.apply(msg).await,
+                };
+                if let Err(e) = done {
+                    warn!("driving the phone: {e}");
+                    return;
+                }
+            }
+        }
+    };
+    tokio::select! {
+        _ = input => {}
+        _ = tokio::io::copy(&mut session.recv, &mut local_tx) => {}
+    }
+    let _ = session.send.shutdown().await;
+}
+
+/// Unplugs a phone's virtual devices when driving stops, however it stops (an ended
+/// session aborts its task): a keyboard left plugged in would hide the phone's own.
+struct Unplug(Option<crate::usb_hid::Hid>);
+
+impl Drop for Unplug {
+    fn drop(&mut self) {
+        if let Some(hid) = self.0.take() {
+            tokio::spawn(hid.unregister());
+        }
+    }
 }
 
 fn active(session: &Session) -> ActiveSession {

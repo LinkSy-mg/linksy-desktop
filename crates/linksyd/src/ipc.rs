@@ -114,7 +114,18 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             download_dir: node.settings().download_dir,
             version: env!("CARGO_PKG_VERSION").into(),
         })),
-        Request::Devices => json(serde_json::to_value(node.devices())),
+        Request::Devices => {
+            let mut devices = node.devices();
+            // Phones that can be driven over the cable say they can be controlled
+            if let Some(usb) = crate::usb::USB.get() {
+                for d in devices.iter_mut().filter(|d| d.device.os == "android" && !d.device.features.is_empty()) {
+                    if !d.device.features.iter().any(|f| f == "control") && usb.can_drive(&d.device.id, &d.device.name) {
+                        d.device.features.push("control".into());
+                    }
+                }
+            }
+            json(serde_json::to_value(devices))
+        }
         Request::Pair { target } => {
             let device = if target.starts_with(linksy_core::invite::SCHEME) {
                 node.pair_with_invite(&target).await
@@ -348,6 +359,18 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             // A second display needs a virtual monitor: say so before asking the other device
             if kind == linksy_core::SessionKind::Display && !crate::sessions::virtual_monitors().await {
                 return Err(crate::sessions::no_virtual_monitors());
+            }
+            // A phone on the cable is driven from here, through its virtual touchscreen and
+            // keyboard: its app only shows its screen
+            if kind == linksy_core::SessionKind::Control
+                && let Some(view) = node.devices().into_iter().find(|d| d.device.id == id && d.device.os == "android")
+                && let Some(usb) = crate::usb::USB.get()
+                && let Some(dev) = usb.drive(&id, &view.device.name).await
+            {
+                let session = node.request_session(&id, linksy_core::SessionKind::Screen).await.map_err(|e| e.to_string())?;
+                let session_id = session.id;
+                let socket = sessions.view_driven(session, dev, node.clone()).map_err(|e| e.to_string())?;
+                return json(serde_json::to_value(SessionInfo { session: session_id, socket: Some(socket) }));
             }
             let session = node.request_session(&id, kind).await.map_err(|e| e.to_string())?;
             let id = session.id;

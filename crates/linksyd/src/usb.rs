@@ -68,6 +68,11 @@ pub struct Usb {
     watching: Arc<std::sync::atomic::AtomicBool>,
     /// What connected phones were last told is plugged in (`usb_plugged`, §4.11).
     told: Arc<Mutex<Vec<PluggedPhone>>>,
+    /// Phones' accessory protocol versions by key: 2 and up take virtual input.
+    versions: Arc<Mutex<HashMap<String, u16>>>,
+    /// Each cable bridge's local port → its phone's key: the phone's connection comes from
+    /// there.
+    cables: Arc<Mutex<HashMap<u16, String>>>,
 }
 
 struct Choices {
@@ -103,7 +108,49 @@ impl Usb {
             unanswered: Arc::default(),
             watching: Arc::default(),
             told: Arc::default(),
+            versions: Arc::default(),
+            cables: Arc::default(),
         }
+    }
+
+    /// The plugged-in phone that is `phone` and takes virtual input (accessory protocol 2):
+    /// the one its cable connection comes through, else the one named like it, else the
+    /// only one. Its key and USB device.
+    fn input_phone(&self, phone: &linksy_core::Fingerprint, name: &str) -> Option<(String, DeviceInfo)> {
+        let plugged = self.plugged.lock().unwrap();
+        let versions = self.versions.lock().unwrap();
+        let able: Vec<(&UsbPhone, &DeviceInfo)> = plugged.values().filter(|(_, p)| versions.get(&p.key).is_some_and(|v| *v >= 2)).map(|(d, p)| (p, d)).collect();
+        let on_cable = self.node.peer_address(phone).filter(|a| a.ip().is_loopback()).and_then(|a| self.cables.lock().unwrap().get(&a.port()).cloned());
+        let found = match on_cable {
+            Some(key) => able.iter().find(|(p, _)| p.key == key),
+            None => able.iter().find(|(p, _)| p.name == name).or(if able.len() == 1 { able.first() } else { None }),
+        };
+        found.map(|(p, d)| (p.key.clone(), (*d).clone()))
+    }
+
+    /// Whether `phone` (named `name`) can be driven from here over the cable.
+    pub fn can_drive(&self, phone: &linksy_core::Fingerprint, name: &str) -> bool {
+        self.input_phone(phone, name).is_some()
+    }
+
+    /// The USB device to drive `phone` through, opened.
+    pub async fn drive(&self, phone: &linksy_core::Fingerprint, name: &str) -> Option<nusb::Device> {
+        let (_, d) = self.input_phone(phone, name)?;
+        d.open().await.ok()
+    }
+
+    /// Ask a phone which accessory protocol it speaks, once it's plugged in.
+    fn probe(&self, key: String, d: DeviceInfo) {
+        let versions = self.versions.clone();
+        tokio::spawn(async move {
+            let Ok(dev) = d.open().await else { return };
+            let asked = dev.control_in(ControlIn { control_type: ControlType::Vendor, recipient: Recipient::Device, request: 51, value: 0, index: 0, length: 2 }, TIMEOUT).await;
+            if let Ok(v) = asked
+                && v.len() == 2
+            {
+                versions.lock().unwrap().insert(key, u16::from_le_bytes([v[0], v[1]]));
+            }
+        });
     }
 
     pub async fn run(self) {
@@ -274,8 +321,9 @@ impl Usb {
             let id = d.id();
             self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name, state: UsbState::Accessory, error: None, auto: false }));
             self.tell_phones();
+            self.probe(key.clone(), d.clone());
             tokio::spawn(async move {
-                match bridge(&d, self.node.local_addr().map(|a| a.port()).unwrap_or(0)).await {
+                match bridge(&d, self.node.local_addr().map(|a| a.port()).unwrap_or(0), &self.cables, &key).await {
                     Ok(0) => {
                         info!("USB link ended: the phone app never answered");
                         self.unanswered.lock().unwrap().insert(key);
@@ -304,6 +352,7 @@ impl Usb {
         let id = d.id();
         self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name, state, error, auto }));
         self.tell_phones();
+        self.probe(key.clone(), d.clone());
         // Nothing asked: on its own only for a phone set to use the cable automatically
         // (once an Android phone is paired), and not again after its app didn't answer
         let always = std::env::var("LINKSY_USB").is_ok_and(|v| v == "always");
@@ -374,7 +423,7 @@ fn denied(e: nusb::Error) -> String {
 /// Carry the phone's packets to this node and back until the cable is pulled, framed as
 /// `linksy_core::cable` says. Ends with how many packets came from the phone (none: its app
 /// never opened the cable).
-async fn bridge(d: &DeviceInfo, port: u16) -> Result<u64, String> {
+async fn bridge(d: &DeviceInfo, port: u16, cables: &Mutex<HashMap<u16, String>>, key: &str) -> Result<u64, String> {
     let dev = d.open().await.map_err(denied)?;
     let intf = dev.detach_and_claim_interface(0).await.map_err(|e| e.to_string())?;
     let desc = intf.descriptor().ok_or("no accessory interface")?;
@@ -387,7 +436,11 @@ async fn bridge(d: &DeviceInfo, port: u16) -> Result<u64, String> {
     let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.map_err(|e| e.to_string())?;
     udp.connect(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await.map_err(|e| e.to_string())?;
     info!("Linksy over USB: {}", d.product_string().unwrap_or("a phone"));
-    Ok(carry(usb_rx, usb_tx, &udp).await)
+    let local = udp.local_addr().map_err(|e| e.to_string())?.port();
+    cables.lock().unwrap().insert(local, key.to_string());
+    let carried = carry(usb_rx, usb_tx, &udp).await;
+    cables.lock().unwrap().remove(&local);
+    Ok(carried)
 }
 
 /// The cable towards the phone: writes are buffered into USB transfers, and each batch ends
