@@ -1,5 +1,6 @@
 // Linksy for KDE Plasma: the window, what it knows about the service, and the questions
 // the service asks (pairing, files, sessions).
+import QtCore
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
@@ -459,6 +460,26 @@ Kirigami.ApplicationWindow {
 
     pageStack.initialPage: DevicesPage { app: root }
     pageStack.globalToolBar.style: Kirigami.ApplicationHeaderStyle.ToolBar
+    // Kirigami 6.16 and later: each column its own width, so the devices column can be dragged
+    // wider or narrower. Before, the columns stay fixed, as Kirigami has them.
+    readonly property bool columnsResize: pageStack.columnView.savedState !== undefined
+    pageStack.columnView.columnResizeMode: !pageStack.wideMode ? Kirigami.ColumnView.SingleColumn
+        : columnsResize ? Kirigami.ColumnView.DynamicColumns : Kirigami.ColumnView.FixedColumns
+
+    // The devices column's width, as last dragged (Kirigami says when a drag ends). Restored
+    // once DevicesPage has made its column resizable, which Kirigami needs to apply it.
+    Settings {
+        id: layout
+        location: StandardPaths.writableLocation(StandardPaths.GenericConfigLocation) + "/linksy/qt.conf"
+        property string columns: ""
+        Component.onCompleted: if (columns && root.columnsResize) Qt.callLater(() => root.pageStack.columnView.savedState = columns)
+    }
+    Connections {
+        target: root.pageStack.columnView
+        enabled: root.columnsResize
+        ignoreUnknownSignals: true
+        function onSavedStateChanged() { layout.columns = root.pageStack.columnView.savedState }
+    }
 
     // What's being shared right now, with Stop
     header: ColumnLayout {
