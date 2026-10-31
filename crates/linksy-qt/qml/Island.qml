@@ -29,6 +29,7 @@ Rectangle {
 
     Kirigami.Theme.colorSet: Kirigami.Theme.View
     Kirigami.Theme.inherit: false
+    implicitWidth: pill.implicitWidth + 8
     implicitHeight: pill.implicitHeight + 8
     radius: height / 2
     color: Kirigami.Theme.backgroundColor

@@ -10,6 +10,18 @@ Kirigami.ScrollablePage {
     required property var app
     title: "Linksy"
 
+    // As wide as it's dragged (Main.qml remembers it), never so narrow that the island clips
+    // or the title runs into Add Device. Set here, not as bindings: before Kirigami 6.16 these
+    // don't exist, and the column keeps its fixed width.
+    Component.onCompleted: {
+        const column = page.Kirigami.ColumnView;
+        if (column.interactiveResizeEnabled === undefined) return;
+        column.minimumWidth = Qt.binding(() => Math.max(Kirigami.Units.gridUnit * 13, island.implicitWidth + island.Layout.leftMargin + island.Layout.rightMargin + footer.leftPadding + footer.rightPadding));
+        column.preferredWidth = Qt.binding(() => Kirigami.Units.gridUnit * 20);
+        column.maximumWidth = Qt.binding(() => Kirigami.Units.gridUnit * 30);
+        column.interactiveResizeEnabled = true;
+    }
+
     actions: [
         Kirigami.Action {
             icon.name: "list-add"
@@ -172,6 +184,7 @@ Kirigami.ScrollablePage {
     footer: QQC2.ToolBar {
         contentItem: ColumnLayout {
             Island {
+                id: island
                 Layout.fillWidth: true
                 Layout.margins: Kirigami.Units.smallSpacing
                 visible: backend.connected
