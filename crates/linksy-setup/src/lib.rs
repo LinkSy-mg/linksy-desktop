@@ -737,8 +737,30 @@ pub fn restart_steps(code: Option<&str>) -> String {
 
 /// Where Linksy notes which version last offered Finish Setup by itself.
 fn offered_file() -> PathBuf {
+    config_file("setup-offered")
+}
+
+fn config_file(name: &str) -> PathBuf {
     let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"))).unwrap_or_default();
-    config.join("linksy").join("setup-offered")
+    config.join("linksy").join(name)
+}
+
+/// Phones someone watches rather than controls over the cable: they turned Take Control
+/// off. One device id per line, shared by both apps.
+pub fn watches_only(device: &str) -> bool {
+    std::fs::read_to_string(config_file("watch-only")).is_ok_and(|ids| ids.lines().any(|l| l == device))
+}
+
+pub fn set_watches_only(device: &str, on: bool) {
+    let path = config_file("watch-only");
+    let mut ids: Vec<String> = std::fs::read_to_string(&path).unwrap_or_default().lines().filter(|l| *l != device && !l.is_empty()).map(String::from).collect();
+    if on {
+        ids.push(device.to_string());
+    }
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(&path, ids.join("\n"));
 }
 
 /// The first time each `version` starts with something to set up: true once, to offer it.

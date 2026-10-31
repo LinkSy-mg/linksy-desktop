@@ -26,9 +26,13 @@ impl Window {
         let device = self.device(&id);
         let name = device.as_ref().map(|d| d.device.name.clone()).unwrap_or_default();
         let viewer = Viewer::open(self, id, &name);
-        // Android phones can't be controlled (no input injection for apps outside the store).
-        viewer.control.set_visible(device.is_none_or(|d| super::can(&d.device, "control")));
-        viewer.start(SessionKind::Screen);
+        // Android phones can be controlled when plugged in (the service drives them over the
+        // cable): then that's how they open, unless the person chose to watch that one.
+        let can_control = device.as_ref().is_none_or(|d| super::can(&d.device, "control"));
+        viewer.control.set_visible(can_control);
+        let phone = device.as_ref().is_some_and(|d| d.device.os == "android");
+        let drive = phone && can_control && !linksy_setup::watches_only(&id.to_string());
+        viewer.start(if drive { SessionKind::Control } else { SessionKind::Screen });
     }
 
     /// Use a device as a second display: this computer gets a new virtual monitor that
@@ -465,7 +469,7 @@ impl Viewer {
         header.pack_end(&fullscreen);
         // Android 15 can black out a phone's status bar and notification shade in a share;
         // only the phone's user can turn that off.
-        if owner.device(&device).is_some_and(|d| d.device.os == "android") {
+        let hint = owner.device(&device).is_some_and(|d| d.device.os == "android").then(|| {
             let tip = gtk::Label::builder()
                 .label(t!("Top bar black? Android hides it from screen sharing on some phones. On the phone: Developer options › Disable screen share protections, then share again."))
                 .wrap(true)
@@ -475,17 +479,22 @@ impl Viewer {
                 .margin_start(8)
                 .margin_end(8)
                 .build();
-            let hint = gtk::MenuButton::builder()
+            gtk::MenuButton::builder()
                 .icon_name("dialog-information-symbolic")
                 .tooltip_text(t!("Top Bar Black?"))
                 .popover(&gtk::Popover::builder().child(&tip).build())
-                .build();
-            header.pack_end(&hint);
+                .build()
+        });
+        if let Some(hint) = &hint {
+            header.pack_end(hint);
         }
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&stack));
         let toolbar = adw::ToolbarView::builder().content(&toasts).build();
         toolbar.add_top_bar(&header);
+        // Where the buttons go in a narrow window, under the name
+        let actions = gtk::Box::builder().spacing(6).halign(gtk::Align::Center).margin_top(4).margin_bottom(6).visible(false).build();
+        toolbar.add_top_bar(&actions);
         let window = adw::Window::builder()
             .title(t!("{name}'s Screen", name))
             .default_width(1100)
@@ -498,9 +507,32 @@ impl Viewer {
         if let Some(app) = owner.window.application() {
             window.set_application(Some(&app));
         }
-        // Narrow windows (a phone's screen): the button keeps just its icon, so the title fits.
+        // Narrow windows (a phone's screen): the header keeps the name and the window's
+        // buttons; Take Control and the others move to a row of their own below it.
         let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 520sp").expect("breakpoint"));
-        narrow.add_setter(&control_content, "label", Some(&"".to_value()));
+        let start: Vec<gtk::Widget> = vec![control.clone().upcast(), disconnect.clone().upcast()];
+        let end: Vec<gtk::Widget> = hint.iter().map(|h| h.clone().upcast()).chain([fullscreen.clone().upcast()]).collect();
+        let (h, a, s, e) = (header.clone(), actions.clone(), start.clone(), end.clone());
+        narrow.connect_apply(move |_| {
+            for w in s.iter().chain(e.iter()) {
+                h.remove(w);
+                a.append(w);
+            }
+            a.set_visible(true);
+        });
+        let (h, a) = (header.clone(), actions.clone());
+        narrow.connect_unapply(move |_| {
+            for w in start.iter().chain(end.iter()) {
+                a.remove(w);
+            }
+            for w in &start {
+                h.pack_start(w);
+            }
+            for w in end.iter().rev() {
+                h.pack_end(w);
+            }
+            a.set_visible(false);
+        });
         window.add_breakpoint(narrow);
 
         let viewer = Self {
@@ -535,6 +567,13 @@ impl Viewer {
                 v.restart(SessionKind::Control);
             } else if b.is_active() {
                 v.picture.grab_focus();
+            }
+        });
+        // A phone remembers the person's own choice (clicks only, not the app's own changes)
+        let v = viewer.clone();
+        control.connect_clicked(move |b| {
+            if v.owner.upgrade().and_then(|o| o.device(&v.device)).is_some_and(|d| d.device.os == "android") {
+                linksy_setup::set_watches_only(&v.device.to_string(), !b.is_active());
             }
         });
 
