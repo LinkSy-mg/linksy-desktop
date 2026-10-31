@@ -214,7 +214,7 @@
   "Linksy in Your Tray": "托盘中的 Linksy",
   "Linksy is free and open source. A star on GitHub helps others find it.": "Linksy 是自由开源软件。在 GitHub 上点个星，能帮助更多人发现它。",
   "Linksy isn't running": "Linksy 未运行",
-  "Linksy needs the password of {who} to make changes to this computer.": "Linksy 需要 {who} 的密码才能更改此计算机。",
+  "Linksy needs the password for {who} to make changes to this computer.": "Linksy 需要 {who} 的密码才能更改此计算机。",
   "Linksy needs your password to make changes to this computer.": "Linksy 需要你的密码才能更改此计算机。",
   "Linksy no longer tells everyone on the network this computer's name. Your devices still find it; others see a code that changes every 15 minutes.": "Linksy 不再向整个网络公布这台电脑的名称。你的设备仍能找到它；其他人只会看到每 15 分钟变化一次的代码。",
   "Linksy remembers the screen you picked when a device first asked to see or control this computer. Choose again to pick another monitor the next time one asks.": "Linksy 会记住设备第一次请求查看或控制这台电脑时你选择的屏幕。重新选择后，下次有设备请求时可以选另一台显示器。",

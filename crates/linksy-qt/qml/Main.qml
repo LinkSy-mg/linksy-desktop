@@ -654,7 +654,6 @@ Kirigami.ApplicationWindow {
             passwordField.text = "";
             root.present();
             open();
-            passwordField.forceActiveFocus();
         }
         function answer(given) {
             if (answered) return;
@@ -665,9 +664,10 @@ Kirigami.ApplicationWindow {
         }
         title: root.t("Password")
         subtitle: again ? root.t("That password didn't work. Try again.")
-                        : who ? root.t("Linksy needs the password of {who} to make changes to this computer.", { who: who })
+                        : who ? root.t("Linksy needs the password for {who} to make changes to this computer.", { who: who })
                               : root.t("Linksy needs your password to make changes to this computer.")
         standardButtons: Kirigami.Dialog.NoButton
+        onOpened: passwordField.forceActiveFocus()
         onClosed: answer(false)
         customFooterActions: [
             Kirigami.Action {

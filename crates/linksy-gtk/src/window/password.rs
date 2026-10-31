@@ -32,7 +32,7 @@ fn ask(parent: &gtk::Widget, prompt: &Prompt, answer: Answer) {
     let body = match (prompt.again, prompt.who.is_empty()) {
         (true, _) => t!("That password didn't work. Try again.").to_string(),
         (false, true) => t!("Linksy needs your password to make changes to this computer.").to_string(),
-        (false, false) => t!("Linksy needs the password of {who} to make changes to this computer.", who = prompt.who),
+        (false, false) => t!("Linksy needs the password for {who} to make changes to this computer.", who = prompt.who),
     };
     let dialog = adw::AlertDialog::builder().heading(t!("Password")).body(body).extra_child(&list).build();
     dialog.add_response("cancel", t!("Cancel"));
@@ -41,11 +41,13 @@ fn ask(parent: &gtk::Widget, prompt: &Prompt, answer: Answer) {
     dialog.set_default_response(Some("continue"));
     dialog.set_close_response("cancel");
     let answer = std::cell::Cell::new(Some(answer));
+    let field = entry.clone();
     dialog.connect_response(None, move |_, response| {
         if let Some(answer) = answer.take() {
-            let _ = answer.send((response == "continue").then(|| entry.text().to_string()));
+            let _ = answer.send((response == "continue").then(|| field.text().to_string()));
         }
-        entry.set_text("");
+        field.set_text("");
     });
     dialog.present(Some(parent));
+    dialog.set_focus(Some(&entry));
 }

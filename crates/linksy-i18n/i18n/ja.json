@@ -214,7 +214,7 @@
   "Linksy in Your Tray": "トレイに Linksy",
   "Linksy is free and open source. A star on GitHub helps others find it.": "Linksy は自由なオープンソースです。GitHub でスターを付けると、ほかの人が見つけやすくなります。",
   "Linksy isn't running": "Linksy が実行されていません",
-  "Linksy needs the password of {who} to make changes to this computer.": "このコンピューターを変更するため、Linksy に {who} のパスワードが必要です。",
+  "Linksy needs the password for {who} to make changes to this computer.": "このコンピューターを変更するため、Linksy に {who} のパスワードが必要です。",
   "Linksy needs your password to make changes to this computer.": "このコンピューターを変更するため、Linksy にあなたのパスワードが必要です。",
   "Linksy no longer tells everyone on the network this computer's name. Your devices still find it; others see a code that changes every 15 minutes.": "Linksy はネットワーク全体にこのコンピューターの名前を知らせなくなりました。あなたのデバイスは引き続き見つけられ、他の人には 15 分ごとに変わるコードしか見えません。",
   "Linksy remembers the screen you picked when a device first asked to see or control this computer. Choose again to pick another monitor the next time one asks.": "デバイスが初めてこのコンピューターの表示・操作を求めたときに選んだ画面を、Linksy は記憶しています。もう一度選ぶと、次に求められたときに別のモニターを選べます。",

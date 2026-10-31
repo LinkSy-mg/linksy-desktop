@@ -214,7 +214,7 @@
   "Linksy in Your Tray": "Linksy en la bandeja",
   "Linksy is free and open source. A star on GitHub helps others find it.": "Linksy es libre y de código abierto. Una estrella en GitHub ayuda a que otros lo encuentren.",
   "Linksy isn't running": "Linksy no se está ejecutando",
-  "Linksy needs the password of {who} to make changes to this computer.": "Linksy necesita la contraseña de {who} para hacer cambios en este equipo.",
+  "Linksy needs the password for {who} to make changes to this computer.": "Linksy necesita la contraseña de {who} para hacer cambios en este equipo.",
   "Linksy needs your password to make changes to this computer.": "Linksy necesita tu contraseña para hacer cambios en este equipo.",
   "Linksy no longer tells everyone on the network this computer's name. Your devices still find it; others see a code that changes every 15 minutes.": "Linksy ya no anuncia el nombre de este ordenador a toda la red. Tus dispositivos lo siguen encontrando; los demás ven un código que cambia cada 15 minutos.",
   "Linksy remembers the screen you picked when a device first asked to see or control this computer. Choose again to pick another monitor the next time one asks.": "Linksy recuerda la pantalla que elegiste cuando un dispositivo pidió por primera vez ver o controlar este ordenador. Elige de nuevo para escoger otro monitor la próxima vez que uno lo pida.",
