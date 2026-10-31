@@ -67,7 +67,7 @@ tags `vX.Y.Z` and pushes it; GitHub (the Packages workflow) builds every package
 Flatpak, installs the packages on every supported distribution, and when all of that passes
 publishes the release here and, as `linux-vX.Y.Z` (not marked latest, which belongs to the
 Android APKs), on linksy-releases. Flathub builds from the tag with
-`packaging/flatpak/mg.diary.linksy.Linksy.yml`. `scripts/package-linux.sh` and
+`packaging/flatpak/mg.diary.linksy.Linksy.yml` (submitting it: `docs/flathub.md`). `scripts/package-linux.sh` and
 `scripts/package-flatpak.sh` still build everything locally, to try a package.
 
 ## Build
