@@ -2,6 +2,7 @@
 //! UI-independent; the daemon and every native front end build on [`Node`].
 
 pub mod away;
+pub mod cable;
 mod discovery;
 pub mod invite;
 pub mod error;
