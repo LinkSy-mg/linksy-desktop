@@ -36,7 +36,8 @@ Kirigami.Page {
             text: app.t("Take Control")
             checkable: true
             checked: page.controlling
-            visible: page.kind !== "display"
+            // A phone takes control only when it can be driven over the cable, as in the GTK app
+            visible: page.kind !== "display" && page.app.devices.every(d => d.device.id !== page.device || page.app.can(d.device, "control"))
             enabled: page.phase === "playing"
             tooltip: app.t("Use your mouse and keyboard on this screen")
             onTriggered: page.restart(checked ? "control" : "screen")
@@ -214,8 +215,9 @@ Kirigami.Page {
                 const d = discrete ? Qt.point(wheel.angleDelta.x / 120, wheel.angleDelta.y / 120) : wheel.pixelDelta;
                 send({ type: "scroll", dx: -d.x, dy: -d.y, discrete: discrete });
             }
-            Keys.onPressed: event => { const k = page.keysym(event); if (k) { send({ type: "key", keysym: k, pressed: true }); event.accepted = true } }
-            Keys.onReleased: event => { const k = page.keysym(event); if (k) { send({ type: "key", keysym: k, pressed: false }); event.accepted = true } }
+            // nativeScanCode is evdev's code plus 8 (X11 and Wayland): the physical key
+            Keys.onPressed: event => { const k = page.keysym(event); if (k) { send({ type: "key", keysym: k, pressed: true, code: event.nativeScanCode > 8 ? event.nativeScanCode - 8 : undefined }); event.accepted = true } }
+            Keys.onReleased: event => { const k = page.keysym(event); if (k) { send({ type: "key", keysym: k, pressed: false, code: event.nativeScanCode > 8 ? event.nativeScanCode - 8 : undefined }); event.accepted = true } }
         }
 
         Kirigami.PlaceholderMessage {
