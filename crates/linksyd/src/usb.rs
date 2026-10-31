@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use linksy_core::cable::{self, Frame};
 use linksy_core::{Event, Node, PluggedPhone};
 use linksy_ipc::{UsbPhone, UsbState, UsbStatus};
 use nusb::hotplug::HotplugEvent;
@@ -34,14 +35,22 @@ use tracing::{debug, info, warn};
 /// Google's ids for a device in accessory mode (with or without ADB and audio).
 const AOA_VENDOR: u16 = 0x18d1;
 const AOA_PRODUCTS: std::ops::RangeInclusive<u16> = 0x2d00..=0x2d05;
-/// What the phone app's accessory filter matches, and the version of the framing below.
-const ACCESSORY: [&str; 4] = ["Linksy", "Linksy", "Linksy over USB", "1"];
+/// What the phone app's accessory filter matches, and the version of the framing
+/// (`linksy_core::cable`).
+const ACCESSORY: [&str; 4] = ["Linksy", "Linksy", "Linksy over USB", cable::ACCESSORY_VERSION];
 const URI: &str = "https://linksy.diary.mg";
-/// Phone makers whose phones may show no MTP or ADB interface (charging-only mode).
-const PHONE_VENDORS: &[u16] = &[0x18d1, 0x04e8, 0x2717, 0x2a70, 0x22b8, 0x1004, 0x12d1, 0x0fce, 0x22d9, 0x2d95, 0x0bb4, 0x2b4c, 0x1ebf];
+/// Phone makers whose phones may show no MTP or ADB interface (charging-only mode): Google,
+/// Samsung, Xiaomi, OnePlus, Motorola, LG, Huawei, Sony, OPPO/realme, vivo, HTC, ZTE, Lenovo,
+/// ASUS, Meizu, HMD/Nokia, Honor, Sharp, Kyocera, TCL/Alcatel, Fairphone, and two more.
+const PHONE_VENDORS: &[u16] = &[
+    0x18d1, 0x04e8, 0x2717, 0x2a70, 0x22b8, 0x1004, 0x12d1, 0x0fce, 0x22d9, 0x2d95, 0x0bb4, 0x19d2, 0x17ef, 0x0b05, 0x2a45, 0x2e04, 0x339b, 0x04dd, 0x0482, 0x1bbb, 0x2ae5, 0x2b4c, 0x1ebf,
+];
 /// Largest packet the bridge carries: QUIC's are far smaller.
 const MAX_PACKET: usize = 65_535;
 const TIMEOUT: Duration = Duration::from_secs(1);
+/// Android gives a switched phone 10 s to come back as an accessory, and some wait for the
+/// first unlock: one that came back as it was gets asked again, this many times.
+const SWITCH_TRIES: u8 = 3;
 
 pub static USB: OnceLock<Usb> = OnceLock::new();
 
@@ -222,15 +231,43 @@ impl Usb {
     async fn switch(&self, id: DeviceId, d: &DeviceInfo) -> Result<(), String> {
         self.set_state(id, UsbState::Switching, None);
         let result = switch(d).await;
-        if let Err(e) = &result {
-            warn!("could not switch {} to Linksy over USB: {e}", d.product_string().unwrap_or("the phone"));
-            self.set_state(id, UsbState::Failed, Some(e.clone()));
+        match &result {
+            Ok(()) => self.check_switched(key_of(d), 1),
+            Err(e) => {
+                warn!("could not switch {} to Linksy over USB: {e}", d.product_string().unwrap_or("the phone"));
+                self.set_state(id, UsbState::Failed, Some(e.clone()));
+            }
         }
         result
     }
 
+    /// A few seconds after a switch: the phone should be an accessory by now. One that came
+    /// back as it was (Android's window passed, or it waited for an unlock) is asked again.
+    fn check_switched(&self, key: String, tries: u8) {
+        let usb = self.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(8)).await;
+            let back = usb.plugged.lock().unwrap().iter().find(|(_, (_, p))| p.key == key).map(|(id, (d, p))| (*id, d.clone(), p.state));
+            let Some((id, d, state)) = back else { return };
+            // An accessory came: whatever happened next isn't Android's window
+            if state == UsbState::Accessory || usb.unanswered.lock().unwrap().contains(&key) {
+                return;
+            }
+            if tries >= SWITCH_TRIES {
+                warn!("{} never came back as an accessory", d.product_string().unwrap_or("the phone"));
+                usb.set_state(id, UsbState::Failed, Some("The phone didn't switch to Linksy. Unlock it, then try again".into()));
+                return;
+            }
+            info!("switching {} again (try {})", d.product_string().unwrap_or("the phone"), tries + 1);
+            match switch(&d).await {
+                Ok(()) => usb.check_switched(key, tries + 1),
+                Err(e) => usb.set_state(id, UsbState::Failed, Some(e)),
+            }
+        });
+    }
+
     fn plugged(self, d: DeviceInfo) {
-        let key = d.serial_number().map(str::to_string).unwrap_or_else(|| format!("{:04x}:{:04x}", d.vendor_id(), d.product_id()));
+        let key = key_of(&d);
         if d.vendor_id() == AOA_VENDOR && AOA_PRODUCTS.contains(&d.product_id()) {
             // Most phones keep their serial in accessory mode: name it as before.
             let name = self.names.lock().unwrap().get(&key).cloned().unwrap_or_else(|| "Your phone".into());
@@ -284,6 +321,11 @@ impl Usb {
     }
 }
 
+/// A phone's key: its USB serial, which most phones keep in accessory mode.
+fn key_of(d: &DeviceInfo) -> String {
+    d.serial_number().map(str::to_string).unwrap_or_else(|| format!("{:04x}:{:04x}", d.vendor_id(), d.product_id()))
+}
+
 /// An Android phone: it shows a file-transfer (MTP/PTP) or ADB interface, or it's from a
 /// phone maker and isn't a disk, keyboard, camera or sound card.
 fn looks_like_phone(d: &DeviceInfo) -> bool {
@@ -329,17 +371,18 @@ fn denied(e: nusb::Error) -> String {
     }
 }
 
-/// Carry the phone's packets to this node and back until the cable is pulled. Each
-/// packet crosses the cable as a 2-byte big-endian length and the packet.
-/// Ends with how many packets came from the phone (none: its app never opened the cable).
+/// Carry the phone's packets to this node and back until the cable is pulled, framed as
+/// `linksy_core::cable` says. Ends with how many packets came from the phone (none: its app
+/// never opened the cable).
 async fn bridge(d: &DeviceInfo, port: u16) -> Result<u64, String> {
     let dev = d.open().await.map_err(denied)?;
     let intf = dev.detach_and_claim_interface(0).await.map_err(|e| e.to_string())?;
     let desc = intf.descriptor().ok_or("no accessory interface")?;
     let bulk = |dir_in: bool| desc.endpoints().find(|e| e.transfer_type() == nusb::descriptors::TransferType::Bulk && (e.address() & 0x80 != 0) == dir_in).map(|e| e.address());
     let (ep_in, ep_out) = (bulk(true).ok_or("no bulk IN endpoint")?, bulk(false).ok_or("no bulk OUT endpoint")?);
-    let usb_rx = intf.endpoint::<Bulk, In>(ep_in).map_err(|e| e.to_string())?.reader(16_384).with_num_transfers(4);
-    let usb_tx = intf.endpoint::<Bulk, Out>(ep_out).map_err(|e| e.to_string())?.writer(16_384).with_num_transfers(4);
+    // Endpoints as they are: clearing a halt here breaks bulk transfers on some Samsungs
+    let usb_rx = intf.endpoint::<Bulk, In>(ep_in).map_err(|e| e.to_string())?.reader(cable::READ).with_num_transfers(4);
+    let usb_tx = intf.endpoint::<Bulk, Out>(ep_out).map_err(|e| e.to_string())?.writer(cable::READ).with_num_transfers(4);
 
     let udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.map_err(|e| e.to_string())?;
     udp.connect(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await.map_err(|e| e.to_string())?;
@@ -347,39 +390,92 @@ async fn bridge(d: &DeviceInfo, port: u16) -> Result<u64, String> {
     Ok(carry(usb_rx, usb_tx, &udp).await)
 }
 
+/// The cable towards the phone: writes are buffered into USB transfers, and each batch ends
+/// on a short or empty packet so the phone's read returns at once.
+trait CableOut: AsyncWrite + Unpin {
+    fn end(&mut self);
+}
+
+impl CableOut for nusb::io::EndpointWrite<Bulk> {
+    fn end(&mut self) {
+        self.submit_end();
+    }
+}
+
 /// Move packets between the cable and `udp` (connected to this node) until either side
-/// stops.
-async fn carry(mut usb_rx: impl AsyncRead + Unpin, mut usb_tx: impl AsyncWrite + Unpin, udp: &UdpSocket) -> u64 {
+/// stops, or a phone that speaks version 2 goes quiet.
+async fn carry(mut usb_rx: impl AsyncRead + Unpin, mut usb_tx: impl CableOut, udp: &UdpSocket) -> u64 {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
     // How much crossed each way, for the log: a cable where nothing comes back from the
     // phone means the phone app never opened its side.
-    let (from_phone, to_phone) = (std::sync::atomic::AtomicU64::new(0), std::sync::atomic::AtomicU64::new(0));
+    let (from_phone, to_phone) = (AtomicU64::new(0), AtomicU64::new(0));
+    let v2 = AtomicBool::new(false);
+    let heard = Mutex::new(std::time::Instant::now());
+    let (answer, mut answers) = tokio::sync::mpsc::unbounded_channel::<Frame>();
     let phone_to_node = async {
-        let mut buf = vec![0u8; MAX_PACKET];
+        let mut buf = vec![0u8; cable::READ];
+        let mut frames = cable::Decoder::default();
         loop {
-            let len = usb_rx.read_u16().await? as usize;
-            usb_rx.read_exact(&mut buf[..len]).await?;
-            if from_phone.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
-                info!("USB link: first packet from the phone");
+            let n = usb_rx.read(&mut buf).await?;
+            if n == 0 {
+                return Err(std::io::ErrorKind::UnexpectedEof.into());
             }
-            // The node may be busy; a lost packet is QUIC's to resend.
-            let _ = udp.send(&buf[..len]).await;
+            *heard.lock().unwrap() = std::time::Instant::now();
+            frames.push(&buf[..n]);
+            while let Some(frame) = frames.next_frame() {
+                match frame {
+                    Frame::Data(packet) => {
+                        if from_phone.fetch_add(1, Relaxed) == 0 {
+                            info!("USB link: first packet from the phone");
+                        }
+                        // The node may be busy; a lost packet is QUIC's to resend.
+                        let _ = udp.send(&packet).await;
+                    }
+                    Frame::Hello { version } => {
+                        info!("USB link: the phone speaks version {version}");
+                        v2.store(true, Relaxed);
+                    }
+                    Frame::Ping(t) => {
+                        let _ = answer.send(Frame::Pong(t));
+                    }
+                    Frame::Close => return Ok(()),
+                    _ => {}
+                }
+            }
         }
     };
     let node_to_phone = async {
         let mut buf = vec![0u8; MAX_PACKET];
+        let mut tick = tokio::time::interval(cable::PING_EVERY);
+        let started = std::time::Instant::now();
         loop {
-            let len = udp.recv(&mut buf).await?;
-            if to_phone.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0 {
-                info!("USB link: first packet to the phone");
+            let mut bytes = Vec::with_capacity(cable::READ);
+            tokio::select! {
+                got = udp.recv(&mut buf) => {
+                    let len = got?;
+                    if to_phone.fetch_add(1, Relaxed) == 0 {
+                        info!("USB link: first packet to the phone");
+                    }
+                    cable::encode(&Frame::Data(buf[..len].to_vec()), &mut bytes);
+                    // What's already waiting goes in the same batch
+                    while bytes.len() < cable::READ && let Ok(len) = udp.try_recv(&mut buf) {
+                        cable::encode(&Frame::Data(buf[..len].to_vec()), &mut bytes);
+                    }
+                }
+                Some(frame) = answers.recv() => cable::encode(&frame, &mut bytes),
+                _ = tick.tick() => {
+                    if !v2.load(Relaxed) {
+                        continue;
+                    }
+                    if heard.lock().unwrap().elapsed() > cable::SILENT_FOR {
+                        warn!("USB link: the phone went quiet");
+                        return Err(std::io::ErrorKind::TimedOut.into());
+                    }
+                    cable::encode(&Frame::Ping(started.elapsed().as_millis() as u64), &mut bytes);
+                }
             }
-            usb_tx.write_u16(len as u16).await?;
-            usb_tx.write_all(&buf[..len]).await?;
-            // Batch what's already waiting into the same transfer, then send it off.
-            while let Ok(len) = udp.try_recv(&mut buf) {
-                usb_tx.write_u16(len as u16).await?;
-                usb_tx.write_all(&buf[..len]).await?;
-            }
-            usb_tx.flush().await?;
+            usb_tx.write_all(&bytes).await?;
+            usb_tx.end();
         }
     };
     let ended: std::io::Result<()> = tokio::select! {
@@ -401,6 +497,14 @@ async fn carry(mut usb_rx: impl AsyncRead + Unpin, mut usb_tx: impl AsyncWrite +
 mod tests {
     use super::*;
     use linksy_core::{Config, Event};
+
+    impl CableOut for tokio::io::WriteHalf<tokio::io::DuplexStream> {
+        fn end(&mut self) {}
+    }
+
+    impl CableOut for tokio::net::unix::OwnedWriteHalf {
+        fn end(&mut self) {}
+    }
 
     /// This computer's address on its network, if it has one (the "Wi-Fi" path).
     fn lan_ip() -> Option<std::net::IpAddr> {
@@ -513,5 +617,72 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(got, "over the cable");
+    }
+
+    /// The phone app's own bridge (`linksy_core::cable::phone_bridge`, version 2) over a real
+    /// two-way pipe: the hello, keepalives and QUIC all cross, and the computer sees the cable.
+    #[tokio::test]
+    async fn version_two_phone_bridge() {
+        let Some(ip) = lan_ip() else { return eprintln!("no network address: skipped") };
+        let dir = tempfile::tempdir().unwrap();
+        let (pc, phone) = (node(dir.path(), "pc").await, node(dir.path(), "phone").await);
+        answer_yes(&pc);
+        answer_yes(&phone);
+        let port = pc.local_addr().unwrap().port();
+        phone.pair(SocketAddr::new(ip, port)).await.unwrap();
+
+        let (pc_end, phone_end) = std::os::unix::net::UnixStream::pair().unwrap();
+        pc_end.set_nonblocking(true).unwrap();
+        let (rx, tx) = tokio::net::UnixStream::from_std(pc_end).unwrap().into_split();
+        let pc_udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        pc_udp.connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
+        tokio::spawn(async move { carry(rx, tx, &pc_udp).await });
+        let accessory = std::fs::File::from(std::os::fd::OwnedFd::from(phone_end));
+        let bridge_port = cable::phone_bridge(accessory, cable::ACCESSORY_VERSION).unwrap();
+
+        let mut events = phone.subscribe();
+        phone.connect(SocketAddr::from((Ipv4Addr::LOCALHOST, bridge_port))).await.unwrap();
+        let id = phone.info().id;
+        let on_cable = tokio::time::timeout(Duration::from_secs(5), async {
+            while !pc.devices().iter().any(|d| d.device.id == id && d.connected && d.usb) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+        assert!(on_cable.await.is_ok(), "the computer never saw the cable");
+        // Past a few keepalives: still up, still carrying
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        let pc_id = pc.info().id;
+        pc.send_clipboard(&id, "version two").await.unwrap();
+        let got = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(Event::Clipboard { from, text }) = events.recv().await
+                    && from.id == pc_id
+                {
+                    return text;
+                }
+            }
+        });
+        assert_eq!(got.await.unwrap(), "version two");
+    }
+
+    /// A phone that said hello in version 2 and then goes silent is let go within seconds.
+    #[tokio::test]
+    async fn a_silent_phone_is_let_go() {
+        let (pc_end, mut phone_end) = tokio::io::duplex(1 << 16);
+        let pc_udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        pc_udp.connect((Ipv4Addr::LOCALHOST, 9)).await.unwrap();
+        let mut hello = Vec::new();
+        cable::encode(&Frame::Hello { version: cable::VERSION }, &mut hello);
+        phone_end.write_all(&hello).await.unwrap();
+        let (rx, tx) = tokio::io::split(pc_end);
+        let started = std::time::Instant::now();
+        // Read and drop the computer's pings, never answering
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 4096];
+            while phone_end.read(&mut buf).await.is_ok_and(|n| n > 0) {}
+        });
+        let ended = tokio::time::timeout(Duration::from_secs(10), carry(rx, tx, &pc_udp)).await;
+        assert!(ended.is_ok(), "still waiting after 10 s");
+        assert!(started.elapsed() >= cable::SILENT_FOR, "let go too early");
     }
 }
