@@ -642,13 +642,14 @@ impl Viewer {
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
         let v = self.clone();
-        keys.connect_key_pressed(move |_, key, _, _| {
+        // The hardware keycode is evdev's plus 8
+        keys.connect_key_pressed(move |_, key, keycode, _| {
             if key == gdk::Key::F11 {
                 if v.window.is_fullscreen() { v.window.unfullscreen() } else { v.window.fullscreen() }
                 return glib::Propagation::Stop;
             }
             if v.controlling() {
-                v.send(ControlMsg::Key { keysym: key.into_glib(), pressed: true });
+                v.send(ControlMsg::Key { keysym: key.into_glib(), pressed: true, code: keycode.checked_sub(8) });
                 return glib::Propagation::Stop;
             }
             if key == gdk::Key::Escape && v.window.is_fullscreen() {
@@ -658,9 +659,9 @@ impl Viewer {
             glib::Propagation::Proceed
         });
         let v = self.clone();
-        keys.connect_key_released(move |_, key, _, _| {
+        keys.connect_key_released(move |_, key, keycode, _| {
             if v.controlling() && key != gdk::Key::F11 {
-                v.send(ControlMsg::Key { keysym: key.into_glib(), pressed: false });
+                v.send(ControlMsg::Key { keysym: key.into_glib(), pressed: false, code: keycode.checked_sub(8) });
             }
         });
         self.window.add_controller(keys);
