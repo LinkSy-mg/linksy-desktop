@@ -32,6 +32,11 @@ if mpl:
     out.write("Components under the Mozilla Public License 2.0 (" + ", ".join(p["name"] for p in mpl) + ") are used\n")
     out.write("unmodified; their source code is available from crates.io and the repositories\n")
     out.write("listed with them below.\n\n")
+out.write("The GTK app also builds in eleven symbolic icons from GNOME's adwaita-icon-theme\n")
+out.write("(version 51, unmodified), used under LGPL-3.0-only (they are CC-BY-SA-3.0 OR\n")
+out.write("LGPL-3.0-only). Source: https://gitlab.gnome.org/GNOME/adwaita-icon-theme; the list is\n")
+out.write("in crates/linksy-gtk/icons/README.md, and the license at\n")
+out.write("https://www.gnu.org/licenses/lgpl-3.0.txt.\n\n")
 out.write("\n".join(f"- {p['name']} {p['version']}: {p.get('license') or 'see its license file'}" for p in packages))
 out.write("\n")
 for p in packages:

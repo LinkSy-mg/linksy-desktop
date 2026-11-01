@@ -7,6 +7,12 @@ Components under the Mozilla Public License 2.0 (attohttpc) are used
 unmodified; their source code is available from crates.io and the repositories
 listed with them below.
 
+The GTK app also builds in eleven symbolic icons from GNOME's adwaita-icon-theme
+(version 51, unmodified), used under LGPL-3.0-only (they are CC-BY-SA-3.0 OR
+LGPL-3.0-only). Source: https://gitlab.gnome.org/GNOME/adwaita-icon-theme; the list is
+in crates/linksy-gtk/icons/README.md, and the license at
+https://www.gnu.org/licenses/lgpl-3.0.txt.
+
 - adler2 2.0.1: 0BSD OR MIT OR Apache-2.0
 - aead 0.5.2: MIT OR Apache-2.0
 - aes 0.8.4: MIT OR Apache-2.0
