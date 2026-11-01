@@ -254,34 +254,6 @@ fn bundle_icons() {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// The gresource lists its files by hand, so one added to `icons/` and not to the list
-    /// (or the other way round) would be a broken icon again, on some desktops only.
-    #[test]
-    fn every_bundled_icon_is_registered() {
-        let _ = gio::resources_register_include!("icons.gresource");
-        for name in [
-            "camera-switch",
-            "chat-message-new",
-            "dialog-information",
-            "display-brightness",
-            "image-x-generic",
-            "network-transmit-receive",
-            "preferences-system-notifications",
-            "thunderbolt",
-            "video-display",
-            "video-joined-displays",
-            "web-browser",
-        ] {
-            let path = format!("{BUNDLED_ICONS}/scalable/status/{name}-symbolic.svg");
-            assert!(gio::resources_lookup_data(&path, gio::ResourceLookupFlags::NONE).is_ok(), "not bundled: {path}");
-        }
-    }
-}
-
 fn main() -> glib::ExitCode {
     linksy_logs::catch_crashes("linksy-app", env!("CARGO_PKG_VERSION"));
     // A phone notification's Reply button: just the reply window.
@@ -465,4 +437,32 @@ fn main_window(app: &adw::Application, slot: &Rc<RefCell<Option<Rc<window::Windo
         w.crash_toast();
     }
     w
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The gresource lists its files by hand, so one added to `icons/` and not to the list
+    /// (or the other way round) would be a broken icon again, on some desktops only.
+    #[test]
+    fn every_bundled_icon_is_registered() {
+        let _ = gio::resources_register_include!("icons.gresource");
+        for name in [
+            "camera-switch",
+            "chat-message-new",
+            "dialog-information",
+            "display-brightness",
+            "image-x-generic",
+            "network-transmit-receive",
+            "preferences-system-notifications",
+            "thunderbolt",
+            "video-display",
+            "video-joined-displays",
+            "web-browser",
+        ] {
+            let path = format!("{BUNDLED_ICONS}/scalable/status/{name}-symbolic.svg");
+            assert!(gio::resources_lookup_data(&path, gio::ResourceLookupFlags::NONE).is_ok(), "not bundled: {path}");
+        }
+    }
 }
