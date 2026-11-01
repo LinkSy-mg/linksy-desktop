@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.11.3" date="2026-11-01">
+      <description>
+        <p>A lighter window: with a phone's page open, the app uses about a fifth less memory, and a device's page opens faster. Away From Home turned off now closes the connection to the relay at once, and distributions can build Linksy without it.</p>
+      </description>
+    </release>
     <release version="0.11.2" date="2026-11-01">
       <description>
         <p>Lighter in the background: Linksy is built for size, with file transfers, encryption and checksums kept at full speed, so the background service uses about a fifth less memory at rest. In the Qt app, the devices column can be dragged wider or narrower and keeps its width.</p>
