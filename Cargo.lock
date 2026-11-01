@@ -2639,6 +2639,7 @@ dependencies = [
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
+ "libc",
  "linksy-i18n",
  "linksy-ipc",
  "linksy-logs",

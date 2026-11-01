@@ -13,6 +13,7 @@ linksy-logs = { path = "../linksy-logs" }
 cxx = "1.0.205"
 cxx-qt = "0.10.0"
 cxx-qt-lib = { version = "0.10.0", features = ["qt_gui", "qt_qml"] }
+libc = "0.2.191"
 linksy-ipc = { path = "../linksy-ipc" }
 linksy-i18n = { path = "../linksy-i18n" }
 linksy-news = { path = "../linksy-news" }
