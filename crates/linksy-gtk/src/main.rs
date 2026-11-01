@@ -247,6 +247,25 @@ pub(crate) fn load_css() {
 /// these instead of GTK's broken-image placeholder. KDE's Breeze has none of the eleven.
 const BUNDLED_ICONS: &str = "/mg/diary/linksy/icons";
 
+/// Light at rest (desktop#26): what the allocator keeps after pages and timelines are
+/// rebuilt, up to 10 MB, goes back to the system soon after start, then every minute.
+fn rest() {
+    fn trim() {
+        // SAFETY: only hands the allocator's free memory back
+        #[cfg(target_env = "gnu")]
+        unsafe {
+            libc::malloc_trim(0);
+        }
+    }
+    glib::timeout_add_seconds_local_once(10, || {
+        trim();
+        glib::timeout_add_seconds_local(60, || {
+            trim();
+            glib::ControlFlow::Continue
+        });
+    });
+}
+
 fn bundle_icons() {
     let _ = gio::resources_register_include!("icons.gresource");
     if let Some(display) = gdk::Display::default() {
@@ -277,6 +296,7 @@ fn main() -> glib::ExitCode {
     app.connect_startup(|app| {
         bundle_icons();
         load_css();
+        rest();
         app.set_accels_for_action("win.choose-files", &["<Control>o"]);
         app.set_accels_for_action("win.preferences", &["<Control>comma"]);
         app.set_accels_for_action("win.add-device", &["<Control>n"]);

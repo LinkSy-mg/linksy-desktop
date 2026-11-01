@@ -2557,6 +2557,7 @@ dependencies = [
  "gstreamer",
  "gtk4",
  "libadwaita",
+ "libc",
  "linksy-i18n",
  "linksy-ipc",
  "linksy-logs",
