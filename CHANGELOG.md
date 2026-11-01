@@ -2,6 +2,21 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.11.3
+
+### Improved
+- **A lighter window:** with a phone's page open, the app settles at about 41 MB instead of
+  44 to 53. The activity timeline builds its newest 20 entries and more as you scroll, so a
+  device's page also opens faster, and memory the app is done with goes back to the system
+  every minute (in the Plasma app too) (#26).
+
+### New
+- **Away From Home, fully off:** turning it off in Preferences, or with
+  `linksy settings away off`, closes the connection to the relay at once. With Check for
+  Updates off too, Linksy never reaches past your network.
+- **For distributions:** `cargo build -p linksyd --no-default-features` builds the service
+  without away from home at all, with no relay code.
+
 ## 0.11.2
 
 ### Improved
