@@ -16,10 +16,10 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
 | 0.9 | Works on every desktop | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Private discovery · One Accept for a batch (desktop done in 0.9.0; screen control on Hyprland and Sway moves to 0.10) |
-| **0.10** | **Lighter and smoother** | Lighter at rest · Transfers in a corner panel · Choose which monitor to view · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
-| **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply |
+| **0.10** | **Lighter and smoother** | Lighter at rest (service done in 0.11.2; the app next) · Transfers in a corner panel · Choose which monitor to view · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
+| **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
-| **0.13** | **The cable, for real** | USB that works on every phone, end to end |
+| **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) |
 | **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (your own relay done in desktop 0.8.4 and Android 0.2.3) |
 | **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth |
 | **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync |
@@ -149,7 +149,12 @@ Receiving 20 photos asks once, or not at all ([#32](https://github.com/LinkSy-mg
 ## 0.10 — Lighter and smoother
 
 ### Lighter at rest — M
-Linksy runs all day, so what it holds while idle matters more than its speed. Today: the
+*Service done in 0.11.2: built for size (fat LTO, `opt-level = "s"`, QUIC, TLS and hashing
+kept at full speed), it averages 14.2 MB at rest with away from home on, sampled every 10 s
+for 15 minutes, from 17.7 MB; transfers as fast as before. About 5 MB of it is its own
+memory, the rest its program code. Away from home keeps its network checks every 20 s on
+purpose, for the reactivity. Next: the app.*
+Linksy runs all day, so what it holds while idle matters more than its speed. Before: the
 service 25 MB, the app 49 MB, the phone app about 200 MB.
 - **Service:** a smaller binary (12 MB of the 25 is the 20 MB program itself): trim unused
   dependency features, and weigh `opt-level = "s"` for code that isn't hot. Fewer malloc
