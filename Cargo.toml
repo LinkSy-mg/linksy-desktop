@@ -11,8 +11,34 @@ edition = "2024"
 license = "AGPL-3.0-or-later"
 
 [profile.release]
-lto = "thin"
+lto = "fat"
 codegen-units = 1
 strip = true
 panic = "abort"
+# Small by default: the service mostly waits, and less code means less memory. The hot paths
+# below (QUIC, TLS, hashing) stay fast.
+opt-level = "s"
+
+[profile.release.package.ring]
+opt-level = 3
+
+[profile.release.package.rustls]
+opt-level = 3
+
+[profile.release.package.blake3]
+opt-level = 3
+
+[profile.release.package.quinn-proto]
+opt-level = 3
+
+[profile.release.package.quinn-udp]
+opt-level = 3
+
+[profile.release.package.noq-proto]
+opt-level = 3
+
+[profile.release.package.noq-udp]
+opt-level = 3
+
+[profile.release.package.aes-gcm]
 opt-level = 3
