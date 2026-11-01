@@ -39,6 +39,7 @@ Usage:
   linksy forget <device>             unpair a device
   linksy settings [key value]        show or change: name, download-dir,
                                      auto-accept on|off, stay-connected on|off,
+                                     away on|off (off: no relay at all),
                                      relay https://…|default (your own relay)
   linksy watch                       follow activity and answer requests
   linksy status                      this device
@@ -441,6 +442,7 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             println!("download-dir    {}", s.download_dir.display());
             println!("auto-accept     {}", on_off(s.auto_accept));
             println!("stay-connected  {}", on_off(s.stay_connected));
+            println!("away            {}", on_off(s.away));
             println!("relay           {}", s.relay.as_deref().unwrap_or("default"));
         }
         ("settings", [key, value @ ..]) if !value.is_empty() => {
@@ -458,6 +460,8 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                 }
                 "auto-accept" => s.auto_accept = flag()?,
                 "stay-connected" => s.stay_connected = flag()?,
+                // Off: no contact with the relay at all
+                "away" => s.away = flag()?,
                 // Away from home goes through this relay instead of Linksy's own.
                 "relay" => s.relay = (value != "default").then(|| value.clone()),
                 other => return Err(format!("Unknown setting {other}. Run `linksy help`.")),
