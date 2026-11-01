@@ -153,7 +153,10 @@ Receiving 20 photos asks once, or not at all ([#32](https://github.com/LinkSy-mg
 kept at full speed), it averages 14.2 MB at rest with away from home on, sampled every 10 s
 for 15 minutes, from 17.7 MB; transfers as fast as before. About 5 MB of it is its own
 memory, the rest its program code. Away from home keeps its network checks every 20 s on
-purpose, for the reactivity. Next: the app.*
+purpose, for the reactivity. App, after 0.11.2: the timeline builds its newest 20 entries
+and more as it scrolls (19.3 to 13.5 MB of live heap with 150 entries), and the allocator's
+free memory goes back every minute, so the window settles at about 41 MB instead of 44 to
+53. A blank GTK window takes about 31 MB of that on an AMD laptop (GTK and the Vulkan driver).*
 Linksy runs all day, so what it holds while idle matters more than its speed. Before: the
 service 25 MB, the app 49 MB, the phone app about 200 MB.
 - **Service:** a smaller binary (12 MB of the 25 is the 20 MB program itself): trim unused
