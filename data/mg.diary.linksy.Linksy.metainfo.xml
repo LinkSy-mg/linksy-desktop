@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.11.1" date="2026-11-01">
+      <description>
+        <p>The GTK app brings the few icons that KDE's Breeze and some other icon themes lack, so no button shows a broken image. In the Qt app, the "Use as" cards come back after a camera preview and keep their text clear of the Start button after a resize. Linksy's own password prompt starts with the cursor in the password field.</p>
+      </description>
+    </release>
     <release version="0.11.0" date="2026-10-31">
       <description>
         <p>Control a phone from the computer over the USB cable, with no developer options: Take Control on a plugged-in phone's screen plugs a virtual touchscreen and keyboard into it, so clicks, scrolling, keys (in the phone's own layout) and text work, and the phone stays awake while you use it. The cable itself checks its connection, retries when a phone is slow to switch, and recognises phones from more makers.</p>
