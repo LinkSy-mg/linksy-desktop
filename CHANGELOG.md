@@ -2,6 +2,17 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.11.1
+
+### Fixed
+- **Icons on KDE Plasma and other themes:** the GTK app brings the few icons that Breeze and
+  some other icon themes don't have, so no button shows a broken image any more (#70, thanks
+  chethan62).
+- **The Qt app's "Use as" cards** come back after you close a camera preview (#72), and keep
+  their text above the Start button after the window is resized (thanks pwnflakes).
+- **Linksy's own password prompt** starts with the cursor in the password field, and asks for
+  "the password for" an account (#67).
+
 ## 0.11.0
 
 ### New
