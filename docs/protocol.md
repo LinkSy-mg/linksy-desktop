@@ -1008,7 +1008,12 @@ carries its packets, like the USB cable (§4.11).
   files sent (asked as usual), ring, battery, notifications, media controls, locate.
 - **Lock When Away** must ignore heartbeats that arrive from away (`node.link(id) ==
   Some(Link::Away)`): far away is not nearby. The computer does.
-- **Settings:** `Settings.away` (default on) turns it off entirely.
+- **Settings:** `Settings.away` (default on) turns it off entirely. *Desktop 0.11.3:* off
+  closes the endpoint at once, so the relay hears nothing more (it used to wait the two
+  minutes an unneeded endpoint gets); `linksy settings away off` sets it too. `linksy-core`
+  has a default feature `away`: built with `--no-default-features`, iroh isn't compiled
+  in, `Settings.away` reads off and turning it on fails with "this Linksy was built
+  without away from home". The phone app can do the same for builds that want no relay.
 
 **Phone to-do:** turn it on in `Config` (above); a Settings switch "Away from home"
 (`Settings.away`) and, per computer, "Allow everything from away" (`set_away_all`);
@@ -1896,3 +1901,6 @@ robust against any encoder (GPU ones may slice too):
   through Android Open Accessory 2.0's virtual touchscreen and keyboard, with no phone
   change. `ControlMsg::Key` gains an optional `code` (the physical key, evdev); older
   devices ignore it.
+- **2026-11-01** — Desktop 0.11.3: Away From Home turned off closes the endpoint at once,
+  and `linksy-core`'s new default feature `away` can leave iroh out of a build (§4.13). No
+  protocol change.

@@ -16,11 +16,11 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
 | 0.9 | Works on every desktop | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Private discovery · One Accept for a batch (desktop done in 0.9.0; screen control on Hyprland and Sway moves to 0.10) |
-| **0.10** | **Lighter and smoother** | Lighter at rest (service done in 0.11.2; the app next) · Transfers in a corner panel · Choose which monitor to view · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
+| **0.10** | **Lighter and smoother** | Lighter at rest (desktop done in 0.11.3) · Transfers in a corner panel (desktop done) · Choose which monitor to view (desktop done) · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
 | **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
 | **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) |
-| **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (your own relay done in desktop 0.8.4 and Android 0.2.3) |
+| **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (desktop done in 0.11.3; your own relay in Android 0.2.3) |
 | **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth |
 | **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync |
 | **1.0** | **Feature freeze** | No new features: fixes, performance, polish, stores · Onboarding |
@@ -171,8 +171,9 @@ service 25 MB, the app 49 MB, the phone app about 200 MB.
   dropped when Android asks. *First step in Android 0.2.3: the image cache capped at 24 MB
   and emptied when hidden, pictures decoded at their shown size; about 95 MB PSS idle on an
   emulator (`docs/memory.md` in linksy-mobile). Still to measure on a real phone.*
-- **Done when:** idle, the service stays under 15 MB, the app under 35 MB and the phone app
-  under 100 MB in the background, measured the same way each release.
+- **Done when:** idle, the service stays under 15 MB, the app under 45 MB (35 MB isn't
+  reachable: a blank GTK window takes about 31 MB on an AMD laptop) and the phone app under
+  100 MB in the background, measured the same way each release.
 
 ### Screens on X11 without a portal — S, desktop done
 *Asked for by [@AndyM48](https://github.com/LinkSy-mg/linksy-desktop/issues/54) (Openbox).
@@ -319,8 +320,13 @@ phone has it; the failures were ours, as Android's source shows (docs/protocol.m
 
 ## 0.14 — Your relay, or none
 
-### Away from home becomes optional — S
-*Your own relay is built by [@yurividal](https://github.com/yurividal) and shipped in desktop 0.8.4 and Android 0.2.3 ([desktop#31](https://github.com/LinkSy-mg/linksy-desktop/pull/31), [mobile#7](https://github.com/LinkSy-mg/linksy-mobile/pull/7)); the hosting guide is [server#2](https://github.com/LinkSy-mg/linksy-server/pull/2). Off and Removed remain.*
+### Away from home becomes optional — S, desktop done in 0.11.3
+*Your own relay is built by [@yurividal](https://github.com/yurividal) and shipped in desktop 0.8.4 and Android 0.2.3 ([desktop#31](https://github.com/LinkSy-mg/linksy-desktop/pull/31), [mobile#7](https://github.com/LinkSy-mg/linksy-mobile/pull/7)); the hosting guide is [server#2](https://github.com/LinkSy-mg/linksy-server/pull/2).
+Desktop 0.11.3: Away From Home off (Preferences, or `linksy settings away off`) closes the
+relay connection at once and opens none after a restart; with Check for Updates off too,
+nothing leaves the local network. `cargo build -p linksyd --no-default-features` leaves
+iroh out (the service is 8.5 MB instead of 14). Tested on two services on loopback; the
+phone side remains.*
 - **Off:** a setting that turns Away from home off completely: no contact with the relay at
   all, not even to register.
 - **Removed:** a build option that leaves the relay code out, for distributions and people
