@@ -2,6 +2,16 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.11.2
+
+### Improved
+- **Lighter in the background:** Linksy is built for size now, with file transfers,
+  encryption and checksums kept at full speed. The background service averages about 14 MB
+  at rest instead of 18 (with away from home on), its program is 14 MB instead of 23, and
+  transfers are as fast as before (#26).
+- **The devices column can be dragged wider or narrower** in the Qt app, and keeps its width
+  (with Kirigami 6.16 or newer; thanks pwnflakes).
+
 ## 0.11.1
 
 ### Fixed
