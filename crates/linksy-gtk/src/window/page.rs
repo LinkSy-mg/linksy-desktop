@@ -52,6 +52,8 @@ pub enum Action {
     BrowseFiles,
     /// The timeline's filter changed.
     FilterActivity,
+    /// The page reached the end of the timeline: older entries.
+    MoreActivity,
     /// Let this phone open terminals here (with the code), or stop it.
     AllowTerminal(bool),
     /// No code yet: choose one, then allow this phone.
@@ -65,6 +67,9 @@ type Handler = Rc<RefCell<Option<Rc<dyn Fn(Action)>>>>;
 
 /// Most entries shown at once; older ones are still in `linksy history`.
 const SHOWN: usize = 150;
+/// Entries built at first, and added each time the page scrolls to the end: each row is a
+/// dozen widgets, about 200 KB with their styles and text (desktop#26).
+const FIRST: usize = 20;
 
 pub struct DevicePage {
     /// Lays itself out by its own width (not the window's), so it fits beside the sidebar.
@@ -137,6 +142,11 @@ pub struct DevicePage {
     filter: Rc<std::cell::Cell<Filter>>,
     /// One heading and timeline per day.
     activity: gtk::Box,
+    /// How many entries are built, and whether older ones are left to build.
+    shown: Rc<std::cell::Cell<usize>>,
+    more: Rc<std::cell::Cell<bool>>,
+    grow: Rc<dyn Fn()>,
+    scroller: gtk::ScrolledWindow,
     /// Opens a finished incoming row's files.
     on_activate: Rc<dyn Fn(&gtk::ListBoxRow)>,
     empty: gtk::Box,
@@ -498,6 +508,29 @@ impl DevicePage {
         column.append(&staged);
         column.append(&clamp);
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&column).build();
+        let (shown, more) = (Rc::new(std::cell::Cell::new(FIRST)), Rc::new(std::cell::Cell::new(false)));
+        let (e, s, m) = (emit.clone(), shown.clone(), more.clone());
+        let grow: Rc<dyn Fn()> = Rc::new(move || {
+            if m.replace(false) {
+                s.set((s.get() + FIRST).min(SHOWN));
+                let e = e.clone();
+                glib::idle_add_local_once(move || e(Action::MoreActivity));
+            }
+        });
+        let g = grow.clone();
+        scroller.connect_edge_reached(move |_, pos| {
+            if pos == gtk::PositionType::Bottom {
+                g();
+            }
+        });
+        // A window taller than the entries built never scrolls to their end: more once it's
+        // laid out, and after each batch (`show_history`)
+        let g = grow.clone();
+        scroller.vadjustment().connect_changed(move |a| {
+            if a.page_size() > 0.0 && a.upper() <= a.page_size() {
+                g();
+            }
+        });
         let root = adw::BreakpointBin::builder().width_request(300).height_request(300).child(&scroller).build();
         // Narrower and narrower: stack Send Files over the tiles, then the cards, then the
         // header, the "Use as" heading and the timeline's filters, then the tiles. (Only
@@ -589,6 +622,10 @@ impl DevicePage {
             activity_box,
             filter,
             activity,
+            shown,
+            more,
+            grow,
+            scroller,
             on_activate,
             empty,
             handler,
@@ -793,6 +830,11 @@ impl DevicePage {
         self.staged.set_revealed(ready);
     }
 
+    /// Another device: its timeline starts again from the newest entries.
+    pub(super) fn first_entries(&self) {
+        self.shown.set(FIRST);
+    }
+
     /// Rebuild the timeline. Returns the widgets of running transfers, for progress.
     pub(super) fn show_history(&self, history: &[HistoryEntry], progress: &HashMap<Uuid, Progress>) -> HashMap<Uuid, LiveRow> {
         while let Some(child) = self.activity.first_child() {
@@ -801,7 +843,9 @@ impl DevicePage {
         self.received.borrow_mut().clear();
         let filter = self.filter.get();
         let mut days: Vec<(String, Vec<&HistoryEntry>)> = Vec::new();
-        for e in history.iter().take(SHOWN).filter(|e| filter.shows(&e.what)) {
+        let matching: Vec<&HistoryEntry> = history.iter().take(SHOWN).filter(|e| filter.shows(&e.what)).collect();
+        self.more.set(matching.len() > self.shown.get());
+        for e in matching.into_iter().take(self.shown.get()) {
             let day = day_label(e.at);
             match days.last_mut() {
                 Some((d, entries)) if *d == day => entries.push(e),
@@ -827,6 +871,16 @@ impl DevicePage {
         let empty = days.is_empty();
         self.activity.set_visible(!empty);
         self.empty.set_visible(empty);
+        if self.more.get() {
+            let (scroller, grow) = (self.scroller.clone(), self.grow.clone());
+            glib::idle_add_local_full(glib::Priority::LOW, move || {
+                let a = scroller.vadjustment();
+                if a.page_size() > 0.0 && a.upper() <= a.page_size() {
+                    grow();
+                }
+                glib::ControlFlow::Break
+            });
+        }
         live
     }
 

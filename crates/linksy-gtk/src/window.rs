@@ -579,7 +579,7 @@ impl Window {
                     w.confirm_forget(id, &name);
                 }
                 page::Action::ClearHistory => w.clear_history(id),
-                page::Action::FilterActivity => w.render_activity(),
+                page::Action::FilterActivity | page::Action::MoreActivity => w.render_activity(),
                 page::Action::AllowTerminal(on) => w.terminal_call(move |c| async move { c.allow_terminal(&id.to_string(), on).await }),
                 page::Action::SetUpTerminal => {
                     // A code first; then this phone may use it.
@@ -1376,6 +1376,7 @@ impl Window {
             changed
         };
         if changed {
+            self.page.first_entries();
             let mut child = self.rail_list.first_child();
             while let Some(b) = child {
                 if id.is_some_and(|id| b.widget_name() == id.to_string().as_str()) {
