@@ -2443,6 +2443,11 @@ impl Node {
                     self.start_away().await;
                 }
                 Some(_) if needed => unneeded = None,
+                // Turned off: no contact with the relay from now on
+                Some(_) if !self.settings().away => {
+                    self.stop_away().await;
+                    unneeded = None;
+                }
                 Some(_) => {
                     if unneeded.get_or_insert_with(Instant::now).elapsed() >= AWAY_REST {
                         self.stop_away().await;
