@@ -154,6 +154,9 @@ cargo build --release      # linksyd + linksy
 cargo test                 # unit + end-to-end tests
 ```
 
+To leave away from home out entirely (no relay code, nothing past the local network and
+the cable), build the service with `cargo build --release -p linksyd --no-default-features`.
+
 The GTK app and the screen helper need GTK ≥ 4.14, libadwaita ≥ 1.5 and GStreamer ≥ 1.22
 headers:
 

@@ -1199,6 +1199,7 @@ async fn unsupported_sessions_say_so() {
 /// Away from home (docs/protocol.md §4.13): after the direct connection goes, the two reach each
 /// other through iroh, Linksy's own handshake runs inside, both see the link as away, and
 /// screens are refused until allowed for that device.
+#[cfg(feature = "away")]
 #[tokio::test]
 async fn away_from_home_connects_and_keeps_screens_local() {
     use linksy_core::Link;
@@ -1245,6 +1246,7 @@ async fn away_from_home_connects_and_keeps_screens_local() {
 
 /// With a relay, the away endpoint runs only once a paired device could use it (desktop#26),
 /// and the handshake says how to reach it through the relay meanwhile.
+#[cfg(feature = "away")]
 #[tokio::test]
 async fn away_waits_for_a_device_that_can_use_it() {
     let tweak = |c: &mut Config| {

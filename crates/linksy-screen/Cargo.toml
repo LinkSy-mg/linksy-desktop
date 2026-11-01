@@ -8,7 +8,7 @@ license.workspace = true
 linksy-logs = { path = "../linksy-logs" }
 ashpd = { version = "0.13.13", default-features = false, features = ["tokio", "screencast", "remote_desktop"] }
 gstreamer = "0.25.4"
-linksy-core = { path = "../linksy-core" }
+linksy-core = { path = "../linksy-core", default-features = false }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "time"] }
 libc = "0.2.191"
 # GNOME's display layout, to keep a second display in it

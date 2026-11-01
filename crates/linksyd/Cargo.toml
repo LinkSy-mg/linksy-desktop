@@ -6,7 +6,7 @@ license.workspace = true
 
 [dependencies]
 linksy-logs = { path = "../linksy-logs" }
-linksy-core = { path = "../linksy-core" }
+linksy-core = { path = "../linksy-core", default-features = false }
 linksy-ipc = { path = "../linksy-ipc" }
 linksy-i18n = { path = "../linksy-i18n" }
 linksy-host = { path = "../linksy-host" }
@@ -30,6 +30,12 @@ nusb = { version = "0.2.8", features = ["tokio"] }
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg"] }
 ksni = { version = "0.3.7", default-features = false, features = ["async-io"] }
 if-addrs = "0.15.0"
+
+[features]
+default = ["away"]
+# `--no-default-features`: a service with no relay code, that never reaches past the local
+# network and the cable (ROADMAP 0.14)
+away = ["linksy-core/away"]
 
 [dev-dependencies]
 tempfile = "3.27.0"

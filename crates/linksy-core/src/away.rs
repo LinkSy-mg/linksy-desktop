@@ -13,15 +13,21 @@
 
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
+#[cfg(feature = "away")]
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "away")]
 use iroh::endpoint::{RecvStream, SendStream, presets};
+#[cfg(feature = "away")]
 use iroh::{Endpoint, EndpointAddr, EndpointId, RelayMap, RelayMode, RelayUrl, SecretKey, TransportAddr};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "away")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+#[cfg(feature = "away")]
 use tokio::net::UdpSocket;
+#[cfg(feature = "away")]
 use tracing::{debug, info};
 
 use crate::error::{Error, Result};
@@ -34,10 +40,13 @@ pub const LEASE: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 /// The address away bridges use, so the node tells them from the cable (127.0.0.1).
 pub const AWAY_IP: Ipv4Addr = Ipv4Addr::new(127, 0, 0, 2);
 /// Largest packet the bridge carries: QUIC's are far smaller.
+#[cfg(feature = "away")]
 const MAX_PACKET: usize = 65_535;
+#[cfg(feature = "away")]
 const DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 /// A bridge the node sent nothing through this long is over: Linksy's connections send a
 /// keepalive every 10 s, and one that lost a race to the network never got going.
+#[cfg(feature = "away")]
 const BRIDGE_IDLE: Duration = Duration::from_secs(60);
 
 /// How to reach a device away from home: its iroh id, its relay and the addresses it has
@@ -51,11 +60,48 @@ pub struct AwayAddr {
     pub addrs: Vec<SocketAddr>,
 }
 
+#[cfg(feature = "away")]
 pub(crate) struct Away {
     endpoint: Endpoint,
     relay: Option<RelayUrl>,
 }
 
+/// Built without away from home: it never starts, so nothing here is ever reached.
+#[cfg(not(feature = "away"))]
+pub(crate) enum Away {}
+
+#[cfg(not(feature = "away"))]
+impl Away {
+    pub async fn start(_: &Path, _: Option<&str>) -> Result<Arc<Self>> {
+        Err(Error::Protocol(BUILT_WITHOUT.into()))
+    }
+    pub fn addr(&self) -> AwayAddr {
+        match *self {}
+    }
+    pub fn resting_addr(_: &Path, _: &str) -> Result<AwayAddr> {
+        Err(Error::Protocol(BUILT_WITHOUT.into()))
+    }
+    pub async fn network_change(&self) {
+        match *self {}
+    }
+    pub fn uses(&self, _: Option<&str>) -> bool {
+        match *self {}
+    }
+    pub async fn dial(&self, _: &AwayAddr) -> Result<SocketAddr> {
+        match *self {}
+    }
+    pub async fn accept_loop(self: Arc<Self>, _: u16, _: impl Fn(&str) -> bool + Send + Sync + 'static) {
+        match *self {}
+    }
+    pub async fn close(&self) {
+        match *self {}
+    }
+}
+
+/// Why away from home can't be turned on in a build without it.
+pub const BUILT_WITHOUT: &str = "this Linksy was built without away from home";
+
+#[cfg(feature = "away")]
 impl Away {
     /// Start the iroh endpoint with this device's away key (`away.key`, made once), using
     /// `relay` (none: direct paths only).
@@ -158,6 +204,7 @@ impl Away {
     }
 }
 
+#[cfg(feature = "away")]
 fn load_or_create_key(path: &Path) -> Result<SecretKey> {
     if let Ok(bytes) = std::fs::read(path)
         && let Ok(raw) = <[u8; 32]>::try_from(bytes.as_slice())
@@ -173,6 +220,7 @@ fn load_or_create_key(path: &Path) -> Result<SecretKey> {
 /// the node listens (the accepting side); else it's learned from the node's first packet
 /// (the dialing side, whose node sends first). Each direction runs whole in its own loop,
 /// so a length prefix is never read halfway.
+#[cfg(feature = "away")]
 async fn carry(mut rx: RecvStream, mut tx: SendStream, udp: UdpSocket, node: Option<SocketAddr>) {
     let learned = std::sync::OnceLock::new();
     if let Some(n) = node {
@@ -214,7 +262,7 @@ mod tests {
     use crate::node::{Link, link_of};
     use crate::trust::TrustedDevice;
 
-    #[cfg(unix)]
+    #[cfg(all(unix, feature = "away"))]
     #[test]
     fn the_away_key_is_owner_only_from_creation() {
         use std::os::unix::fs::PermissionsExt;

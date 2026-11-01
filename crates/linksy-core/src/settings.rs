@@ -84,7 +84,7 @@ impl Settings {
             download_dir: config.download_dir.clone(),
             stay_connected: config.stay_connected,
             auto_accept: false,
-            away: true,
+            away: cfg!(feature = "away"),
             relay: None,
         }
     }
@@ -101,7 +101,7 @@ impl Settings {
             download_dir: stored.download_dir.unwrap_or(d.download_dir),
             stay_connected: stored.stay_connected.unwrap_or(d.stay_connected),
             auto_accept: stored.auto_accept.unwrap_or(d.auto_accept),
-            away: stored.away.unwrap_or(d.away),
+            away: stored.away.unwrap_or(d.away) && cfg!(feature = "away"),
             relay: stored.relay.or(d.relay),
         })
     }
@@ -135,10 +135,16 @@ impl Settings {
             return Err(invalid("the download folder must be an absolute path"));
         }
         std::fs::create_dir_all(&self.download_dir)?;
+        if self.away && !cfg!(feature = "away") {
+            return Err(invalid(crate::away::BUILT_WITHOUT));
+        }
         // The relay: an https URL, as iroh reads it; plain http only for a relay on this
         // machine (localhost, 127.0.0.1, ::1), in development. Blank means Linksy's own.
         self.relay = match self.relay.as_deref().map(str::trim).filter(|r| !r.is_empty()) {
             None => None,
+            #[cfg(not(feature = "away"))]
+            Some(r) => Some(r.to_string()),
+            #[cfg(feature = "away")]
             Some(r) => {
                 let url: iroh::RelayUrl = r.parse().map_err(|e| invalid(format!("the relay address doesn't look right: {e}")))?;
                 let on_this_machine = url.host_str().is_some_and(|h| h == "localhost" || h.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| ip.is_loopback()));
@@ -202,6 +208,7 @@ mod tests {
         assert_eq!(clean_name(&format!("{} tail", "x".repeat(MAX_NAME - 1))), "x".repeat(MAX_NAME - 1));
     }
 
+    #[cfg(feature = "away")]
     #[test]
     fn relay_is_checked_and_tidied() {
         let dir = tempfile::tempdir().unwrap();
