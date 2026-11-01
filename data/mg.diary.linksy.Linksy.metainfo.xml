@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.11.2" date="2026-11-01">
+      <description>
+        <p>Lighter in the background: Linksy is built for size, with file transfers, encryption and checksums kept at full speed, so the background service uses about a fifth less memory at rest. In the Qt app, the devices column can be dragged wider or narrower and keeps its width.</p>
+      </description>
+    </release>
     <release version="0.11.1" date="2026-11-01">
       <description>
         <p>The GTK app brings the few icons that KDE's Breeze and some other icon themes lack, so no button shows a broken image. In the Qt app, the "Use as" cards come back after a camera preview and keep their text clear of the Start button after a resize. Linksy's own password prompt starts with the cursor in the password field.</p>
