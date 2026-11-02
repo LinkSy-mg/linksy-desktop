@@ -4,6 +4,7 @@
 
 mod camera;
 mod corner;
+mod deck;
 mod files;
 mod gallery;
 mod island;
@@ -574,6 +575,7 @@ impl Window {
                     }
                 }
                 page::Action::UsbCable => w.show_usb_cable(),
+                page::Action::Deck => w.show_deck(id),
                 page::Action::MicStop => {
                     let mic = w.state.borrow().microphone;
                     if let Some((session, _)) = mic {

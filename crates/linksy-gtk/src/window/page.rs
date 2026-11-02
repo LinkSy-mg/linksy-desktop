@@ -30,6 +30,8 @@ pub enum Action {
     CameraPreview,
     CameraStop,
     MicStop,
+    /// What this phone's deck may do here.
+    Deck,
     /// The Connect by USB Cable guide.
     UsbCable,
     Pair,
@@ -127,7 +129,7 @@ pub struct DevicePage {
     ring_tile: gtk::Widget,
     locate_tile: gtk::Widget,
     ping_tile: gtk::Widget,
-    /// "Use the phone as": a card per feature, side by side.
+    /// "Use the phone as": a card per feature, two by two.
     use_as: gtk::Box,
     use_as_title: gtk::Label,
     /// Connect by USB Cable (faster for all of these), or that it is.
@@ -136,6 +138,8 @@ pub struct DevicePage {
     display_card: gtk::Box,
     webcam_card: gtk::Box,
     mic_card: gtk::Box,
+    deck_card: gtk::Box,
+    deck_desc: gtk::Label,
     webcam_desc: gtk::Label,
     webcam_live: gtk::Label,
     webcam_start: gtk::Button,
@@ -395,10 +399,24 @@ impl DevicePage {
         mic_running.append(&mic_stop);
         buttons.append(&mic_start);
         buttons.append(&mic_running);
-        let cards = gtk::Box::builder().spacing(10).homogeneous(true).vexpand(false).build();
-        cards.append(&display_card);
-        cards.append(&webcam_card);
-        cards.append(&mic_card);
+        let (deck_card, buttons, deck_desc, _) = card("view-grid-symbolic", t!("Deck"), "");
+        buttons.append(&start(t!("Choose Actions…"), || Action::Deck));
+        let cards = gtk::FlowBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .homogeneous(true)
+            .min_children_per_line(2)
+            .max_children_per_line(2)
+            .column_spacing(10)
+            .row_spacing(10)
+            .vexpand(false)
+            .css_classes(["tiles"])
+            .build();
+        for card in [&display_card, &webcam_card, &mic_card, &deck_card] {
+            let child = gtk::FlowBoxChild::builder().child(card).focusable(false).build();
+            // A hidden card leaves no gap
+            card.bind_property("visible", &child, "visible").sync_create().build();
+            cards.append(&child);
+        }
         let use_as_title = gtk::Label::builder().xalign(0.0).hexpand(true).wrap(true).css_classes(["title-4"]).build();
         let use_as_hint_content = adw::ButtonContent::builder().icon_name("media-removable-symbolic").label(t!("Faster by USB Cable")).build();
         let use_as_hint = gtk::Button::builder().child(&use_as_hint_content).tooltip_text(t!("Connect by USB Cable")).valign(gtk::Align::Center).css_classes(["flat", "usb-cable"]).build();
@@ -711,9 +729,10 @@ impl DevicePage {
         // Responsive design, written by hand, in Rust. Be gentle with it.
         let vertical = gtk::Orientation::Vertical.to_value();
         let one = 1u32.to_value();
-        let changes: [(&gtk::Widget, &str, &glib::Value); 7] = [
+        let changes: [(&gtk::Widget, &str, &glib::Value); 8] = [
             (actions.upcast_ref(), "orientation", &vertical),
-            (cards.upcast_ref(), "orientation", &vertical),
+            (cards.upcast_ref(), "min-children-per-line", &one),
+            (cards.upcast_ref(), "max-children-per-line", &one),
             (hero.upcast_ref(), "orientation", &vertical),
             (use_as_head.upcast_ref(), "orientation", &vertical),
             (activity_header.upcast_ref(), "orientation", &vertical),
@@ -721,7 +740,7 @@ impl DevicePage {
             (small.upcast_ref(), "max-children-per-line", &one),
         ];
         let mut narrow = Vec::new();
-        for (width, count) in [("760sp", 1), ("680sp", 2), ("540sp", 5), ("400sp", 7)] {
+        for (width, count) in [("760sp", 1), ("680sp", 3), ("540sp", 6), ("400sp", 8)] {
             let b = adw::Breakpoint::new(adw::BreakpointCondition::parse(&format!("max-width: {width}")).expect("breakpoint"));
             for (widget, property, value) in &changes[..count] {
                 b.add_setter(*widget, property, Some(value));
@@ -783,6 +802,8 @@ impl DevicePage {
             display_card,
             webcam_card,
             mic_card,
+            deck_card,
+            deck_desc,
             mic_desc,
             mic_live,
             mic_start,
@@ -858,10 +879,14 @@ impl DevicePage {
         }
     }
 
+    fn any_card(&self) -> bool {
+        [&self.display_card, &self.webcam_card, &self.mic_card, &self.deck_card].iter().any(|c| c.is_visible())
+    }
+
     /// Show the tabs this device has, and one of them.
     fn update_tabs(&self, d: &DeviceView) {
         let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
-        let any_use = self.display_card.is_visible() || self.webcam_card.is_visible() || self.mic_card.is_visible() || self.terminal_box.is_visible() || self.terminals.is_visible();
+        let any_use = self.any_card() || self.terminal_box.is_visible() || self.terminals.is_visible();
         let has = |t: Tab| match t {
             Tab::Use => any_use,
             Tab::Inbox => d.device.kind == DeviceKind::Phone && (super::can(&d.device, "notifications") || super::can(&d.device, "sms")),
@@ -1067,7 +1092,10 @@ impl DevicePage {
         self.display_card.set_visible(super::can(&d.device, "display"));
         self.webcam_card.set_visible(super::can(&d.device, "camera"));
         self.mic_card.set_visible(super::can(&d.device, "microphone"));
-        self.use_as.set_visible(d.trusted && (self.display_card.is_visible() || self.webcam_card.is_visible() || self.mic_card.is_visible()));
+        // Whatever the phone says it can do: the deck is this computer's side
+        self.deck_card.set_visible(phone);
+        self.deck_desc.set_label(&t!("Buttons for this computer on {device}", device = d.device.name));
+        self.use_as.set_visible(d.trusted && self.any_card());
         self.use_as_title.set_label(&t!("Use {device} as", device = d.device.name));
         self.use_as_hint.set_visible(d.device.os == "android");
         self.use_as_hint_content.set_label(if d.connected && d.usb { t!("Connected by USB") } else { t!("Faster by USB Cable") });
