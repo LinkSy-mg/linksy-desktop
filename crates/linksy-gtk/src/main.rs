@@ -122,6 +122,11 @@ gridview.gallery-grid > child:selected { background-color: alpha(@accent_bg_colo
 .selection-bar { padding: 6px 6px 6px 16px; border-radius: 99px; background-color: @card_bg_color; box-shadow: 0 0 0 1px alpha(currentColor, 0.08), 0 6px 20px alpha(black, 0.1); }
 listview.files-list { background: none; }
 listview.files-list > row { border-bottom: 1px solid alpha(currentColor, 0.07); }
+listview.files-list > row:selected { background-color: alpha(@accent_bg_color, 0.14); color: inherit; }
+.files-area { border-radius: 14px; transition: box-shadow 150ms ease, background-color 150ms ease; }
+.files-area.drop-active { box-shadow: inset 0 0 0 2px @accent_color; background-color: alpha(@accent_bg_color, 0.08); }
+.files-picked { padding: 4px 6px; border-radius: 12px; background-color: alpha(@accent_bg_color, 0.1); }
+.files-copies { padding: 12px 14px; border-radius: 14px; background-color: alpha(currentColor, 0.05); }
 button.send-tile {
   padding: 20px 22px;
   min-height: 150px;
