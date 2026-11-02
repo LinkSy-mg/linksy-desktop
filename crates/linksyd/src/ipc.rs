@@ -389,7 +389,8 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             Ok(Value::Null)
         }
         Request::SetDeckCommands { commands } => json(serde_json::to_value(deck()?.set_commands(commands)?)),
-        Request::DeckLayouts { .. } | Request::SetDeckLayouts { .. } => Err("deck layouts aren't kept here yet".into()),
+        Request::DeckLayouts { phone } => json(serde_json::to_value(deck()?.layouts(&paired(node, &phone)?))),
+        Request::SetDeckLayouts { phone, layouts } => json(serde_json::to_value(deck()?.set_layouts(&paired(node, &phone)?, layouts)?)),
         Request::ForgetScreen => Ok(Value::Bool(sessions.forget_screen())),
         Request::Locate { device } => {
             let id = resolve(node, &device)?;

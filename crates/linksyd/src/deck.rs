@@ -1,7 +1,7 @@
-//! Phones' decks (docs/protocol.md §4.19): the phone lays its tiles out, this computer says
-//! what each phone may do and does it. Every action is on or off per phone (media and sound
-//! on until the user says otherwise, locking and the user's own commands off), kept in
-//! `deck.json` with the commands. Whatever else a phone runs is ignored.
+//! Phones' decks (docs/protocol.md §4.19): this computer says what each phone may do and
+//! does it. Every action is on or off per phone (media and sound on until the user says
+//! otherwise, locking and the user's own commands off), kept in `deck.json` with the
+//! commands and each phone's layouts (§4.20). Whatever else a phone runs is ignored.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
@@ -10,7 +10,8 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-use linksy_core::{DeckAction, DeckKind, DeckState, Event, Fingerprint, MediaCommand, Node, Uuid};
+use linksy_core::deck_layout::{self, MAX_BYTES};
+use linksy_core::{DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckState, DeckTheme, DeckTile, Event, Fingerprint, MediaCommand, Node, Uuid};
 use linksy_i18n::t;
 use linksy_ipc::{DeckCommand, DeckOption, DeckPrefs};
 use serde::{Deserialize, Serialize};
@@ -117,6 +118,8 @@ struct Saved {
     /// What the user turned on or off for each phone; the rest is as by default.
     phones: HashMap<Fingerprint, BTreeMap<String, bool>>,
     commands: Vec<DeckCommand>,
+    /// Each phone's layouts as the user saved them.
+    layouts: HashMap<Fingerprint, DeckLayouts>,
 }
 
 impl Saved {
@@ -232,7 +235,7 @@ impl<D: Desktop> Deck<D> {
             list.push(DeckCommand { id, name: name.into(), command: command.into() });
         }
         let ids: HashSet<String> = list.iter().map(|c| format!("command.{}", c.id)).collect();
-        let mut next = Saved { phones: saved.phones.clone(), commands: list };
+        let mut next = Saved { phones: saved.phones.clone(), commands: list, layouts: saved.layouts.clone() };
         for choices in next.phones.values_mut() {
             choices.retain(|id, _| !id.starts_with("command.") || ids.contains(id));
         }
@@ -242,6 +245,85 @@ impl<D: Desktop> Deck<D> {
         drop(saved);
         let _ = self.inner.jobs.send(Job::Actions(None));
         Ok(list)
+    }
+
+    /// `phone`'s layouts as saved; until then a first one, from what this computer offers.
+    pub fn layouts(&self, phone: &Fingerprint) -> DeckLayouts {
+        let saved = self.inner.saved.lock().unwrap();
+        match saved.layouts.get(phone) {
+            Some(layouts) => layouts.clone(),
+            None => self.first_layouts(&saved),
+        }
+    }
+
+    /// Save `phone`'s layouts, one version on from the last. Placing a tile allows its
+    /// action: each one a tile runs is turned on for that phone.
+    pub fn set_layouts(&self, phone: &Fingerprint, mut layouts: DeckLayouts) -> Result<DeckLayouts, String> {
+        if !layouts.layouts.iter().any(|l| l.id == layouts.active) {
+            layouts.active = layouts.layouts.first().map(|l| l.id.clone()).unwrap_or_default();
+        }
+        let mut saved = self.inner.saved.lock().unwrap();
+        let offered: HashSet<String> = self.offered(&saved).into_iter().map(|a| a.id).collect();
+        layouts.check(|a| offered.contains(a))?;
+        layouts.version = saved.layouts.get(phone).map_or(0, |l| l.version) + 1;
+        let size = serde_json::to_vec(&layouts).map_err(|e| e.to_string())?.len();
+        if size > MAX_BYTES {
+            return Err(format!("these layouts are too big to send to the phone ({} KiB, at most {} KiB)", size.div_ceil(1024), MAX_BYTES / 1024));
+        }
+        let mut next = saved.clone();
+        let choices = next.phones.entry(*phone).or_default();
+        for action in runs(&layouts) {
+            choices.insert(action.into(), true);
+        }
+        next.layouts.insert(*phone, layouts.clone());
+        self.save(&next)?;
+        *saved = next;
+        Ok(layouts)
+    }
+
+    /// The layout a deck has until the user saves one: the clock, the player, the volume,
+    /// and buttons for the rest, wherever there's room.
+    fn first_layouts(&self, saved: &Saved) -> DeckLayouts {
+        let offered: HashSet<String> = self.offered(saved).into_iter().map(|a| a.id).collect();
+        let buttons: Vec<&str> = ["media.play_pause", "media.next", "sound.mute", "sound.mic_mute"].into_iter().filter(|a| offered.contains(*a)).collect();
+        let volume = offered.contains("sound.volume");
+        let tile = |kind: &str, (x, y): (u8, u8), (w, h): (u8, u8), action: Option<&str>| DeckTile {
+            id: action.unwrap_or(kind).into(),
+            kind: kind.into(),
+            x,
+            y,
+            w,
+            h,
+            action: action.map(Into::into),
+            ..Default::default()
+        };
+        let face = |mut face: DeckFace, clock: (u8, u8), music: (u8, u8), sound: (u8, u8)| {
+            let page = &mut face.pages[0];
+            page.push(tile("clock", clock, (2, 1), None));
+            page.push(tile("music", music, (4, 2), None));
+            if volume {
+                page.push(tile("volume", sound, (4, 1), Some("sound.volume")));
+            }
+            for action in &buttons {
+                let (page, (x, y)) = match (0..face.pages.len()).find_map(|p| Some((p, face.free_spot(p, 1, 1)?))) {
+                    Some(spot) => spot,
+                    None => {
+                        face.pages.push(Vec::new());
+                        (face.pages.len() - 1, (0, 0))
+                    }
+                };
+                face.pages[page].push(tile("button", (x, y), (1, 1), Some(action)));
+            }
+            face
+        };
+        let layout = DeckLayout {
+            id: "standard".into(),
+            name: t!("Standard").into(),
+            theme: DeckTheme::default(),
+            portrait: face(DeckFace::portrait(), (0, 0), (0, 1), (0, 3)),
+            landscape: face(DeckFace::landscape(), (4, 0), (0, 0), (0, 2)),
+        };
+        DeckLayouts { version: 0, active: layout.id.clone(), layouts: vec![layout] }
     }
 
     fn save(&self, saved: &Saved) -> Result<(), String> {
@@ -409,6 +491,17 @@ impl<D: Desktop> Deck<D> {
     }
 }
 
+/// The actions `layouts`' tiles run: only kinds that run one (a clock's action is ignored).
+fn runs(layouts: &DeckLayouts) -> impl Iterator<Item = &str> {
+    layouts
+        .layouts
+        .iter()
+        .flat_map(|l| [&l.portrait, &l.landscape])
+        .flat_map(|face| face.pages.iter().flatten())
+        .filter(|t| deck_layout::kind(&t.kind).is_some_and(|k| k.runs))
+        .filter_map(|t| t.action.as_deref())
+}
+
 /// The tiles' state for these actions: the ones that have one.
 fn states(actions: &[DeckAction], sound: &Sound) -> Vec<DeckState> {
     actions
@@ -574,5 +667,122 @@ mod tests {
         assert_eq!(now, [DeckState { id: "sound.volume".into(), on: None, value: Some(0.42) }, DeckState { id: "sound.mute".into(), on: Some(false), value: None }]);
         d.set_action(&phone(1), "sound.volume", false).unwrap();
         assert_eq!(states(&d.enabled(&phone(1)), &sound).len(), 1);
+    }
+
+    fn tile(id: &str, kind: &str, (x, y): (u8, u8), (w, h): (u8, u8), action: Option<&str>) -> DeckTile {
+        DeckTile { id: id.into(), kind: kind.into(), x, y, w, h, action: action.map(Into::into), ..Default::default() }
+    }
+
+    fn layouts(active: &str, tiles: Vec<DeckTile>) -> DeckLayouts {
+        let mut portrait = DeckFace::portrait();
+        portrait.pages[0] = tiles;
+        let work = DeckLayout { id: "work".into(), name: "Work".into(), theme: DeckTheme::default(), portrait, landscape: DeckFace::landscape() };
+        let games = DeckLayout { id: "games".into(), name: "Games".into(), ..work.clone() };
+        DeckLayouts { version: 99, active: active.into(), layouts: vec![work, games] }
+    }
+
+    fn kinds(face: &DeckFace) -> Vec<(&str, Option<&str>)> {
+        face.pages.iter().flatten().map(|t| (t.kind.as_str(), t.action.as_deref())).collect()
+    }
+
+    #[test]
+    fn a_first_layout_of_what_is_offered_until_one_is_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let first = d.layouts(&phone(1));
+        assert_eq!((first.version, first.active.as_str(), first.layouts.len()), (0, "standard", 1));
+        let all = HashSet::from(["media.play_pause", "media.next", "sound.volume", "sound.mute", "sound.mic_mute"]);
+        assert_eq!(first.check(|a| all.contains(a)), Ok(()));
+        let buttons = [("button", Some("media.play_pause")), ("button", Some("media.next")), ("button", Some("sound.mute")), ("button", Some("sound.mic_mute"))];
+        for face in [&first.layouts[0].portrait, &first.layouts[0].landscape] {
+            let mut want = vec![("clock", None), ("music", None), ("volume", Some("sound.volume"))];
+            want.extend(buttons);
+            assert_eq!(kinds(face), want);
+        }
+        assert_eq!(first.layouts[0].theme.id, "stock");
+        assert!(!dir.path().join("deck.json").exists(), "not saved");
+
+        let quiet = Deck::load(dir.path().join("quiet.json"), Fake { no_sound: true, ..Default::default() });
+        assert_eq!(kinds(&quiet.layouts(&phone(1)).layouts[0].portrait), [("clock", None), ("music", None), ("button", Some("media.play_pause")), ("button", Some("media.next"))]);
+    }
+
+    #[test]
+    fn saving_counts_versions_and_allows_what_the_tiles_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        d.set_action(&p, "media.next", false).unwrap();
+        assert_eq!(d.act(&p, "system.lock", None), None);
+        let mine = layouts("games", vec![tile("a", "button", (0, 0), (1, 1), Some("system.lock")), tile("b", "music", (0, 1), (4, 2), None)]);
+        let saved = d.set_layouts(&p, mine.clone()).unwrap();
+        assert_eq!((saved.version, saved.active.as_str()), (1, "games"), "the version is counted here");
+        assert_eq!(saved.layouts, mine.layouts);
+        assert_eq!(d.act(&p, "system.lock", None), Some(Act::Lock), "placing the tile allowed it");
+        assert_eq!(d.act(&p, "media.next", None), None, "the rest is as it was");
+        assert_eq!(d.act(&phone(2), "system.lock", None), None);
+        assert_eq!(d.set_layouts(&p, mine).unwrap().version, 2);
+
+        let again = deck(&dir);
+        assert_eq!(again.layouts(&p).version, 2);
+        assert_eq!(again.act(&p, "system.lock", None), Some(Act::Lock));
+        assert_eq!(again.layouts(&phone(2)).version, 0, "another phone still has the first layout");
+
+        // Only a kind that runs its action allows it
+        d.set_action(&p, "system.lock", false).unwrap();
+        d.set_layouts(&p, layouts("work", vec![tile("c", "clock", (0, 0), (2, 1), Some("system.lock"))])).unwrap();
+        assert_eq!(d.act(&p, "system.lock", None), None);
+    }
+
+    #[test]
+    fn layouts_that_fail_the_check_change_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        let good = d.set_layouts(&p, layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("media.next"))])).unwrap();
+        let file = std::fs::read(dir.path().join("deck.json")).unwrap();
+        let mut big = layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("media.next"))]);
+        big.layouts[0].portrait.pages[0][0].props.insert("note".into(), "x".repeat(MAX_BYTES));
+        for bad in [
+            layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("system.screen_off"))]),
+            layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("command.nope"))]),
+            layouts("work", vec![tile("a", "music", (0, 0), (4, 2), None), tile("b", "clock", (1, 1), (2, 1), None)]),
+            layouts("work", vec![tile("a", "volume", (0, 0), (3, 1), Some("sound.volume"))]),
+            layouts("work", vec![tile("a", "weather", (0, 0), (1, 1), None)]),
+        ] {
+            assert!(d.set_layouts(&p, bad).is_err());
+        }
+        let refused = d.set_layouts(&p, big).unwrap_err();
+        assert!(refused.contains("too big"), "{refused}");
+        assert_eq!(d.layouts(&p), good);
+        assert_eq!(std::fs::read(dir.path().join("deck.json")).unwrap(), file);
+        assert_eq!(d.act(&p, "system.screen_off", None), None);
+    }
+
+    #[test]
+    fn an_empty_or_unknown_active_layout_becomes_the_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        for active in ["", "gone"] {
+            assert_eq!(d.set_layouts(&phone(1), layouts(active, vec![])).unwrap().active, "work");
+        }
+        let none = d.set_layouts(&phone(1), DeckLayouts::default()).unwrap();
+        assert_eq!((none.active.as_str(), none.layouts.len()), ("", 0));
+    }
+
+    #[test]
+    fn an_older_deck_json_without_layouts_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = serde_json::json!({
+            "phones": { phone(1).to_string(): { "system.lock": true, "media.next": false } },
+            "commands": [{ "id": "c1", "name": "Backup", "command": "true" }],
+        });
+        std::fs::write(dir.path().join("deck.json"), old.to_string()).unwrap();
+        let d = deck(&dir);
+        assert_eq!(d.act(&phone(1), "system.lock", None), Some(Act::Lock));
+        assert_eq!(d.act(&phone(1), "media.next", None), None);
+        assert_eq!(d.prefs(&phone(1)).commands.len(), 1);
+        assert_eq!(d.layouts(&phone(1)).version, 0);
+        assert_eq!(d.set_layouts(&phone(1), layouts("work", vec![])).unwrap().version, 1);
+        assert_eq!(deck(&dir).prefs(&phone(1)).commands.len(), 1, "kept beside the layouts");
     }
 }
