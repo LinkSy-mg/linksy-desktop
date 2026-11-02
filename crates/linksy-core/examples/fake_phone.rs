@@ -50,6 +50,7 @@ async fn main() {
     let (mut data_dir, mut port, mut name) = (None, 0, "Test Phone".to_string());
     let (mut level, mut charging, mut seconds) = (None, false, 60);
     let mut notify = None;
+    let mut chats = false;
     let mut display: Option<std::path::PathBuf> = None;
     let (mut media, mut watch_media) = (None, false);
     let mut press: Option<linksy_core::MediaCommand> = None;
@@ -121,6 +122,7 @@ async fn main() {
                 let title = value();
                 notify = Some((title, value()));
             }
+            "--chats" => chats = true,
             other => panic!("unknown option {other}"),
         }
     }
@@ -132,7 +134,7 @@ async fn main() {
     config.port = port;
     config.away = away;
     // What it does, like a phone that says so (Locate shows only then).
-    config.features = ["files", "clipboard", "open_url", "battery", "ring", "media_remote", "call_state", "heartbeat", "import", "fs", "input", "screen", "camera", "display", "watch", "locate", "microphone"].map(String::from).to_vec();
+    config.features = ["files", "clipboard", "open_url", "battery", "ring", "media_remote", "call_state", "heartbeat", "import", "fs", "input", "screen", "camera", "display", "watch", "locate", "microphone", "notifications"].map(String::from).to_vec();
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
     let node = Node::start(config).await.expect("start");
     let mut events = node.subscribe();
@@ -179,12 +181,45 @@ async fn main() {
             body,
             can_reply: true,
             actions: vec![NotificationButton { id: "read".into(), label: "Mark as Read".into() }],
-            icon: None,
+            ..Default::default()
         };
         for t in node.trusted() {
             match node.post_notification(&t.device.id, n.clone()).await {
                 Ok(()) => println!("notification sent to {}", t.device.name),
                 Err(e) => println!("notification to {}: {e}", t.device.name),
+            }
+        }
+    }
+    if chats {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        let read = || vec![NotificationButton { id: "read".into(), label: "Mark as read".into() }];
+        let chat = |key: &str, app: &str, app_name: &str, title: &str, body: &str| RemoteNotification {
+            key: key.into(),
+            app: app.into(),
+            app_name: app_name.into(),
+            title: title.into(),
+            body: body.into(),
+            can_reply: true,
+            actions: read(),
+            category: Some("msg".into()),
+            time: Some(now),
+            ..Default::default()
+        };
+        let list = [
+            RemoteNotification { conversation: Some("Alice".into()), ..chat("0|com.whatsapp|1|alice", "com.whatsapp", "WhatsApp", "Alice", "Are we still on for lunch?") },
+            RemoteNotification { conversation: Some("Family".into()), sender: Some("Bob".into()), group: true, ..chat("0|com.whatsapp|1|family", "com.whatsapp", "WhatsApp", "Family", "Bob: Photos from Sunday are up") },
+            RemoteNotification { can_reply: false, ..chat("0|com.google.android.apps.messaging|1|bank", "com.google.android.apps.messaging", "Messages", "BNI", "Your verification code is 482913. It expires in 5 minutes. Never share it.") },
+            RemoteNotification { category: Some("email".into()), can_reply: false, ..chat("0|com.google.android.gm|1|mail", "com.google.android.gm", "Gmail", "GitHub", "[LinkSy-mg/linksy-desktop] New issue: Extended screen taps") },
+            RemoteNotification { conversation: Some("#general".into()), sender: Some("ana".into()), group: true, ..chat("0|com.discord|1|general", "com.discord", "Discord", "Linksy · #general", "ana: the new release works on my Steam Deck") },
+            // An older phone: no messaging details, the desktop has to read the title
+            RemoteNotification { category: None, time: None, ..chat("0|com.facebook.orca|1|carol", "com.facebook.orca", "Messenger", "Carol (2 messages)", "See you tomorrow!") },
+        ];
+        for t in node.trusted() {
+            for n in &list {
+                match node.post_notification(&t.device.id, n.clone()).await {
+                    Ok(()) => println!("{} from {} sent to {}", n.app_name, n.title, t.device.name),
+                    Err(e) => println!("{}: {e}", n.app_name),
+                }
             }
         }
     }
