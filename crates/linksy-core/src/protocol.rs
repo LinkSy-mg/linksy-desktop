@@ -429,10 +429,10 @@ pub enum Message {
     /// A conversation's messages older than `before_ms`, from what the phone kept (§4.5).
     InboxHistory { app: String, conversation: String, before_ms: u64, limit: u32 },
     InboxHistoryPage { app: String, conversation: String, messages: Vec<ConversationMessage>, more: bool },
-    /// The phone's photos changed: one added, deleted… (§4.19)
+    /// The phone's photos changed: one added, deleted… (§4.18)
     GalleryChanged,
     /// The phone's deck shows (the computer sends `deck_actions`, then `deck_state` as it
-    /// changes), or stopped showing (§4.20).
+    /// changes), or stopped showing (§4.19).
     DeckOpen,
     DeckClose,
     DeckRun {
@@ -739,7 +739,7 @@ pub struct ConversationMessage {
     pub mine: bool,
 }
 
-/// What a phone's gallery is asked, one request per bidirectional stream (§4.19).
+/// What a phone's gallery is asked, one request per bidirectional stream (§4.18).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum GalleryRequest {
@@ -798,7 +798,7 @@ pub enum GalleryReply {
     GalleryError { message: String },
 }
 
-/// Something the computer lets a phone's deck do (§4.20).
+/// Something the computer lets a phone's deck do (§4.19).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeckAction {
     pub id: String,

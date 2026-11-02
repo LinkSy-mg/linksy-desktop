@@ -265,9 +265,9 @@ pub enum Event {
     InboxHistory { from: DeviceInfo, app: String, conversation: String, before_ms: u64, limit: u32 },
     /// …and the phone's answer.
     InboxHistoryPage { from: DeviceInfo, app: String, conversation: String, messages: Vec<ConversationMessage>, more: bool },
-    /// A phone's photos changed (§4.19).
+    /// A phone's photos changed (§4.18).
     GalleryChanged { from: DeviceInfo },
-    /// A phone's deck (§4.20): it shows or stopped, an action to run; and what a computer
+    /// A phone's deck (§4.19): it shows or stopped, an action to run; and what a computer
     /// offers it, with their state.
     DeckOpen { from: DeviceInfo },
     DeckClose { from: DeviceInfo },
@@ -955,12 +955,12 @@ impl Node {
         self.send_message(to, &Message::InboxHistoryPage { app: app.into(), conversation: conversation.into(), messages, more }).await
     }
 
-    /// This phone's photos changed (§4.19).
+    /// This phone's photos changed (§4.18).
     pub async fn gallery_changed(&self, to: &Fingerprint) -> Result<()> {
         self.send_message(to, &Message::GalleryChanged).await
     }
 
-    /// This phone's deck shows (`open`) or stopped (§4.20).
+    /// This phone's deck shows (`open`) or stopped (§4.19).
     pub async fn deck_open(&self, to: &Fingerprint, open: bool) -> Result<()> {
         self.send_message(to, if open { &Message::DeckOpen } else { &Message::DeckClose }).await
     }

@@ -1,4 +1,4 @@
-//! A phone's photos and videos, browsed from a computer (docs/protocol.md §4.19), one
+//! A phone's photos and videos, browsed from a computer (docs/protocol.md §4.18), one
 //! request per bidirectional stream (see [`GalleryRequest`]). The computer calls
 //! [`Node::gallery`]; the phone takes requests from [`Node::incoming_gallery`] and answers
 //! each [`GalleryCall`].
