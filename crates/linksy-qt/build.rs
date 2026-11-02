@@ -18,7 +18,6 @@ fn main() {
         "qml/UsbPage.qml",
         "qml/WhatsNew.qml",
         "qml/UpgradeDialog.qml",
-        "qml/MessagesPage.qml",
         "qml/PhoneFiles.qml",
         "qml/FilesTab.qml",
         "qml/Inbox.qml",

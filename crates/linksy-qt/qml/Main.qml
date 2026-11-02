@@ -176,8 +176,10 @@ Kirigami.ApplicationWindow {
         pageStack.layers.push(Qt.resolvedUrl("CameraPage.qml"), { app: root, session: session, name: backend.cameraName(name) });
     }
 
+    // A phone's inbox, in its page
     function openMessages(id) {
-        pageStack.layers.push(Qt.resolvedUrl("MessagesPage.qml"), { app: root, phone: id, name: deviceName(id) });
+        select(id);
+        pageStack.get(1)?.showTab("inbox");
     }
 
     function openUsb() {
