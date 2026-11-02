@@ -504,6 +504,8 @@ impl Editor {
             (_, true, false) => (t!("Saved"), true),
         };
         self.ui.chip.set_label(text);
+        // Narrow windows hide the chip; the button still says it
+        self.ui.save.set_tooltip_text(Some(text));
         if done {
             self.ui.chip.remove_css_class("dirty");
         } else {
@@ -1295,7 +1297,7 @@ impl Editor {
                 Ok((saved, prefs)) => {
                     {
                         let mut st = e.st.borrow_mut();
-                        if st.layouts == sent {
+                        if st.layouts == sent && !saved.layouts.is_empty() {
                             st.layouts = saved.clone();
                         } else {
                             st.layouts.version = saved.version;

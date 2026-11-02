@@ -1492,6 +1492,10 @@ impl Window {
         }
         let deck = self.state.borrow().deck;
         if deck.is_some() && deck != selected {
+            let editor = self.state.borrow().deck_editor.clone();
+            if let Some(e) = editor.filter(|e| e.dirty()) {
+                self.toast(&t!("The deck for {device} had changes that weren't saved.", device = e.device()));
+            }
             self.close_deck();
         }
         match self.selected_device() {
