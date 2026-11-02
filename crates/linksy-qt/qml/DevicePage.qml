@@ -594,11 +594,12 @@ Kirigami.Page {
                     onClicked: app.openUsb()
                 }
             }
-            // Two by two, one per line on a narrow page; a hidden card leaves no gap
+            // Four a line on a wide page (760sp), two on a medium one (540sp), else one; a hidden
+            // card leaves no gap
             GridLayout {
                 id: useAs
                 Layout.fillWidth: true
-                columns: page.narrow ? 1 : 2
+                columns: page.width > Kirigami.Units.gridUnit * 42 ? 4 : page.width >= Kirigami.Units.gridUnit * 30 ? 2 : 1
                 columnSpacing: Kirigami.Units.largeSpacing
                 rowSpacing: Kirigami.Units.largeSpacing
                 // Not the cards' own visible: it goes false while a layer covers the page, and stays false
