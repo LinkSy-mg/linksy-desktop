@@ -201,6 +201,11 @@ Kirigami.ApplicationWindow {
         pageStack.pushDialogLayer(Qt.resolvedUrl("UsbPage.qml"), { app: root });
     }
 
+    // What a phone's deck may do here
+    function openDeck(id) {
+        pageStack.pushDialogLayer(Qt.resolvedUrl("DeckPage.qml"), { app: root, phone: id, name: deviceName(id) });
+    }
+
     function openSetup() {
         pageStack.pushDialogLayer(Qt.resolvedUrl("SetupPage.qml"), { app: root });
     }

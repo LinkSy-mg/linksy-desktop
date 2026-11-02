@@ -16,6 +16,7 @@ fn main() {
         "qml/SetupPage.qml",
         "qml/CameraPage.qml",
         "qml/UsbPage.qml",
+        "qml/DeckPage.qml",
         "qml/WhatsNew.qml",
         "qml/UpgradeDialog.qml",
         "qml/PhoneFiles.qml",

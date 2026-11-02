@@ -37,7 +37,7 @@ Kirigami.Page {
     readonly property string tabsKey: {
         if (!trusted || !info) return "";
         const shown = [];
-        if (phone || ["display", "camera", "microphone"].some(f => app.can(info, f))) shown.push("use");
+        if (handheld || ["display", "camera", "microphone"].some(f => app.can(info, f))) shown.push("use");
         if (phone && (app.can(info, "notifications") || app.can(info, "sms"))) shown.push("inbox");
         if (handheld && app.can(info, "gallery")) shown.push("gallery");
         if (handheld && app.can(info, "fs")) shown.push("files");
@@ -601,7 +601,7 @@ Kirigami.Page {
                 columnSpacing: Kirigami.Units.largeSpacing
                 rowSpacing: Kirigami.Units.largeSpacing
                 // Not the cards' own visible: it goes false while a layer covers the page, and stays false
-                visible: page.info !== null && ["display", "camera", "microphone"].some(f => app.can(page.info, f))
+                visible: page.info !== null && (page.handheld || ["display", "camera", "microphone"].some(f => app.can(page.info, f)))
 
                 UseCard {
                     visible: page.info !== null && app.can(page.info, "display")
@@ -626,6 +626,32 @@ Kirigami.Page {
                     subtitle: app.t("“{microphone}” in calls and recorders", { microphone: `Linksy Microphone (${page.name})` })
                     button: app.t("Start Microphone")
                     kind: "microphone"
+                }
+                // Whatever the phone says it can do: the deck is this computer's side
+                Kirigami.Card {
+                    visible: page.handheld
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.preferredWidth: Kirigami.Units.gridUnit * 14
+                    banner.title: app.t("Deck")
+                    banner.titleIcon: "view-grid"
+                    contentItem: Item {
+                        implicitWidth: deckText.implicitWidth
+                        implicitHeight: deckText.implicitHeight
+                        QQC2.Label {
+                            id: deckText
+                            width: parent.width
+                            wrapMode: Text.Wrap
+                            opacity: 0.75
+                            textFormat: Text.PlainText
+                            text: app.t("Buttons for this computer on {device}", { device: page.name })
+                        }
+                    }
+                    actions: Kirigami.Action {
+                        text: app.t("Choose Actions…")
+                        icon.name: "configure"
+                        onTriggered: app.openDeck(page.info.id)
+                    }
                 }
             }
 
