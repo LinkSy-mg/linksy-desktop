@@ -152,12 +152,14 @@ pub struct Editor {
 /// Development aids for screenshots, read once: LINKSY_SCREENSHOT_DECK_THEME=<id> shows a
 /// theme, LINKSY_SCREENSHOT_DECK_PICK=<n> picks the nth tile (1 is the first) and
 /// LINKSY_SCREENSHOT_DECK_LANDSCAPE=1 shows landscape, reflowed from portrait if empty;
-/// LINKSY_SCREENSHOT_DECK_DRAG=move,80,60 (or resize,…) shows the picked tile mid-drag.
+/// LINKSY_SCREENSHOT_DECK_DRAG=move,80,60 (or resize,…) shows the picked tile mid-drag;
+/// LINKSY_SCREENSHOT_DECK_ON=1 shows the toggles on.
 struct Aids {
     theme: Option<String>,
     pick: Option<usize>,
     landscape: bool,
     drag: Option<(bool, f64, f64)>,
+    on: bool,
 }
 
 fn aids() -> &'static Aids {
@@ -169,7 +171,7 @@ fn aids() -> &'static Aids {
             let resize = parts.next()? == "resize";
             Some((resize, parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
         });
-        Aids { theme: var("LINKSY_SCREENSHOT_DECK_THEME"), pick: var("LINKSY_SCREENSHOT_DECK_PICK").and_then(|n| n.parse().ok()), landscape: var("LINKSY_SCREENSHOT_DECK_LANDSCAPE").is_some(), drag }
+        Aids { theme: var("LINKSY_SCREENSHOT_DECK_THEME"), pick: var("LINKSY_SCREENSHOT_DECK_PICK").and_then(|n| n.parse().ok()), landscape: var("LINKSY_SCREENSHOT_DECK_LANDSCAPE").is_some(), drag, on: var("LINKSY_SCREENSHOT_DECK_ON").is_some() }
     })
 }
 
@@ -393,7 +395,9 @@ impl Editor {
 
     fn build_tile(&self, st: &St, t: &DeckTile, now: &glib::DateTime) -> gtk::Widget {
         let offered = |a: &str| st.offered(a);
-        let look = Look { theme: st.theme(), accent: &st.current().theme.accent, m: st.metrics(), now, offered: &offered, on: &|_| false, confirm: &|_| false };
+        // The deck's live states don't reach the editor: toggles show off
+        let on = |a: &str| aids().on && st.prefs.actions.iter().any(|o| o.action.id == a && o.action.kind == DeckKind::Toggle);
+        let look = Look { theme: st.theme(), accent: &st.current().theme.accent, m: st.metrics(), now, offered: &offered, on: &on, confirm: &|_| false };
         face::tile(t, &look)
     }
 

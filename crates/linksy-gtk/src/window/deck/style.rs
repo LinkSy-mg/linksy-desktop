@@ -107,7 +107,6 @@ const CSS: &str = r#"
 .theme-pixel .deck-tile { border-radius: 0; color: #fff1e8; box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.28), inset 0 -3px 0 rgba(0, 0, 0, 0.3), inset 3px 0 0 rgba(255, 255, 255, 0.12), inset -3px 0 0 rgba(0, 0, 0, 0.18), 3px 3px 0 #000; }
 .theme-pixel .deck-tile.lifted { box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.28), inset 0 -3px 0 rgba(0, 0, 0, 0.3), inset 3px 0 0 rgba(255, 255, 255, 0.12), inset -3px 0 0 rgba(0, 0, 0, 0.18), 6px 6px 0 #000; }
 .theme-pixel .deck-tile.ink-dark { color: #1d2b53; }
-.theme-pixel .deck-tile.on { background-color: #ff004d; color: #fff1e8; }
 .theme-pixel .deck-tile.picked { outline-style: dashed; }
 .theme-pixel .deck-play { border-radius: 0; background-color: #ff004d; color: #fff1e8; box-shadow: 2px 2px 0 #000; }
 .theme-pixel .deck-dots button { border-radius: 0; }
@@ -151,6 +150,8 @@ pub fn load(accent: &str) {
             for (i, c) in PICO.iter().enumerate() {
                 css.push_str(&format!(".theme-pixel .deck-tile.px{i} {{ background-color: {c}; }}\n"));
             }
+            // After the palette, so it wins
+            css.push_str(".theme-pixel .deck-tile.on { background-color: #ff004d; color: #fff1e8; }\n");
             for c in COLORS.iter().chain(ACCENTS.iter()) {
                 css.push_str(&format!(".deck-swatch.c{} {{ background-color: {c}; }}\n", &c[1..]));
             }

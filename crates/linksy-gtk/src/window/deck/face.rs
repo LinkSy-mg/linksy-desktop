@@ -44,7 +44,7 @@ impl Look<'_> {
 
     /// Text: in glyphs where the theme draws them and has them all, else in its font.
     fn text(&self, s: &str, class: &str, width: f64, lines: usize, pitches: &[f32], center: bool) -> gtk::Widget {
-        let s = if self.theme == Theme::Term && class == "t-label" { format!("> {s}") } else { s.to_string() };
+        let s = if self.theme == Theme::Term && class == "t-label" { format!(">\u{a0}{s}") } else { s.to_string() };
         if self.theme.glyphs() && model::has_glyphs(&s) {
             let pitches: Vec<f32> = pitches.iter().map(|p| if self.theme == Theme::Pixel { (p * self.scale() as f32).round().max(1.0) } else { p * self.scale() as f32 }).collect();
             let (lines, pitch) = fit(&s, width, lines, &pitches);
@@ -145,7 +145,8 @@ pub fn tile(t: &DeckTile, look: &Look) -> gtk::Widget {
             face.set_spacing(3);
             face.append(&look.icon(model::icon_for(action, PLAYING), icon_size));
             // One size for every one-cell label, so neighbours match
-            face.append(&look.text(label, "t-label", inner, 2, &[1.0], true));
+            let lines = if look.theme == Theme::Term { 1 } else { 2 };
+            face.append(&look.text(label, "t-label", inner, lines, &[1.0], true));
         }
         "button" => {
             face.append(&look.icon(model::icon_for(action, PLAYING), icon_size));
