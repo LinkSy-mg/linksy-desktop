@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.11.4" date="2026-11-02">
+      <description>
+        <p>Messages: a phone's chats, texts and mail in one place, made from its notifications, with answers from the computer when the app allows it. Verification codes that arrive in messages go straight to the clipboard (this can be turned off), and the Qt app gets Phone Notifications in Preferences.</p>
+      </description>
+    </release>
     <release version="0.11.3" date="2026-11-01">
       <description>
         <p>A lighter window: with a phone's page open, the app uses about a fifth less memory, and a device's page opens faster. Away From Home turned off now closes the connection to the relay at once, and distributions can build Linksy without it.</p>
