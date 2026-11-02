@@ -668,8 +668,9 @@ impl Window {
                     w.refresh_corner();
                     while let Ok(update) = updates.recv().await {
                         match update {
-                            Update::Event(ev) => w.handle_event(ev),
+                            Update::Event(ev) => w.handle_event(*ev),
                             Update::History(h) => w.history_changed(h),
+                            Update::Inbox(c) => w.inbox_changed(c),
                         }
                     }
                     // Service went away.
@@ -1111,9 +1112,9 @@ impl Window {
             Event::UsbPlugged { .. } | Event::UsbConnect { .. } => {}
             // Locate is answered through the service (it waits for the reply).
             Event::LocateRequest { .. } | Event::Location { .. } | Event::LocationRefused { .. } | Event::TerminalListRequest { .. } | Event::Terminals { .. } => {}
-            Event::SmsMessage { from, thread, message } => self.sms_arrived(from.id, thread, message),
             // Answers go to whoever asked (the service waits for them); requests are a phone's.
-            Event::SmsThreads { .. }
+            Event::SmsMessage { .. }
+            | Event::SmsThreads { .. }
             | Event::SmsMessages { .. }
             | Event::SmsSent { .. }
             | Event::SmsListThreads { .. }

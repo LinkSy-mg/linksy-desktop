@@ -791,10 +791,10 @@ impl DevicePage {
         self.use_as_hint_content.set_label(if d.connected && d.usb { t!("Connected by USB") } else { t!("Faster by USB Cable") });
 
         self.lock_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "heartbeat"));
-        self.messages_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "sms"));
+        self.messages_row.set_visible(d.device.kind == DeviceKind::Phone && (super::can(&d.device, "notifications") || super::can(&d.device, "sms")));
         self.files_row.set_visible(phone && super::can(&d.device, "fs"));
         self.files_row.set_subtitle(&glib::markup_escape_text(&t!("Open the folder {device} shares in Files, like a USB drive", device = d.device.name)));
-        self.messages_row.set_subtitle(&glib::markup_escape_text(&t!("Read and send {device}'s texts here", device = d.device.name)));
+        self.messages_row.set_subtitle(&glib::markup_escape_text(&t!("Read and answer {device}'s messages here", device = d.device.name)));
         self.lock_row.set_subtitle(&glib::markup_escape_text(&t!("Lock this computer when {device} leaves. It never unlocks it.", device = d.device.name)));
         // Away from home: only for devices that told this one how to reach them.
         self.away_row.set_visible(d.trusted && d.away_until.is_some());

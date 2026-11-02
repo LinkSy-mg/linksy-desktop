@@ -6,12 +6,13 @@ use std::future::Future;
 use std::sync::Arc;
 
 use linksy_ipc::linksy_core::Event;
-use linksy_ipc::{Client, ClientError, HistoryEntry};
+use linksy_ipc::{Client, ClientError, Conversation, HistoryEntry};
 
-/// What the service pushes: live events and history changes.
+/// What the service pushes: live events, history changes and conversations.
 pub enum Update {
-    Event(Event),
+    Event(Box<Event>),
     History(HistoryEntry),
+    Inbox(Conversation),
 }
 
 pub struct Bridge {
@@ -35,18 +36,23 @@ impl Bridge {
         let handle = self.rt.spawn(async {
             let client = Arc::new(Client::connect().await.map_err(|e| e.to_string())?);
             let (tx, rx) = async_channel::unbounded();
-            let (mut events, mut history) = (client.events(), client.history_updates());
+            let (mut events, mut history, mut inbox) = (client.events(), client.history_updates(), client.inbox_updates());
             tokio::spawn(async move {
                 use tokio::sync::broadcast::error::RecvError;
                 loop {
                     let update = tokio::select! {
                         e = events.recv() => match e {
-                            Ok(e) => Update::Event(e),
+                            Ok(e) => Update::Event(Box::new(e)),
                             Err(RecvError::Lagged(_)) => continue,
                             Err(RecvError::Closed) => break,
                         },
                         h = history.recv() => match h {
                             Ok(h) => Update::History(h),
+                            Err(RecvError::Lagged(_)) => continue,
+                            Err(RecvError::Closed) => break,
+                        },
+                        c = inbox.recv() => match c {
+                            Ok(c) => Update::Inbox(c),
                             Err(RecvError::Lagged(_)) => continue,
                             Err(RecvError::Closed) => break,
                         },

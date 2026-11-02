@@ -1,13 +1,13 @@
-//! Texting through a phone, on a page of its own: conversations on the left, the open
-//! one on the right with a field to answer, one pane at a time in narrow windows.
-//! Everything is asked of the phone when shown; nothing is kept on this computer.
+//! A phone's conversations, made from its message notifications: the list on the left,
+//! the open one on the right with a field to answer, one pane at a time in narrow windows.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use adw::prelude::*;
-use gtk::glib;
-use linksy_ipc::linksy_core::{Fingerprint, SmsMessage, SmsThread};
+use gtk::{gdk, glib};
+use linksy_ipc::linksy_core::Fingerprint;
+use linksy_ipc::{Conversation, InboxMessage};
 use linksy_i18n::t;
 
 use super::Window;
@@ -15,64 +15,67 @@ use crate::fmt;
 
 pub struct MessagesView {
     pub root: adw::NavigationSplitView,
-    threads: gtk::ListBox,
-    threads_stack: gtk::Stack,
-    threads_status: adw::StatusPage,
+    list: gtk::ListBox,
+    list_stack: gtk::Stack,
+    list_status: adw::StatusPage,
     title: adw::WindowTitle,
     bubbles: gtk::Box,
     scroller: gtk::ScrolledWindow,
-    earlier: gtk::Button,
     entry: gtk::Entry,
     send: gtk::Button,
     compose: gtk::Box,
+    no_reply: gtk::Label,
     conversation_stack: gtk::Stack,
-    new_message: gtk::Button,
     state: RefCell<ViewState>,
 }
 
 #[derive(Default)]
 struct ViewState {
     phone: Option<Fingerprint>,
-    threads: Vec<SmsThread>,
-    /// The open conversation (`None` with `to` set: a new one).
-    thread: Option<String>,
-    to: Vec<String>,
-    messages: Vec<SmsMessage>,
+    /// Newest first, like the rows.
+    conversations: Vec<Conversation>,
+    open: Option<String>,
 }
 
 impl MessagesView {
     pub fn new() -> Rc<Self> {
-        let threads = gtk::ListBox::builder().css_classes(["navigation-sidebar"]).build();
-        let threads_status = adw::StatusPage::builder().icon_name("chat-message-new-symbolic").build();
-        let threads_stack = gtk::Stack::new();
-        threads_stack.add_named(&gtk::ScrolledWindow::builder().child(&threads).vexpand(true).build(), Some("list"));
-        threads_stack.add_named(&threads_status, Some("status"));
-        let new_message = gtk::Button::builder().icon_name("list-add-symbolic").tooltip_text(t!("New Message")).build();
+        let list = gtk::ListBox::builder().css_classes(["navigation-sidebar"]).build();
+        let list_status = adw::StatusPage::builder().icon_name("chat-message-new-symbolic").build();
+        let list_stack = gtk::Stack::new();
+        list_stack.add_named(&gtk::ScrolledWindow::builder().child(&list).vexpand(true).build(), Some("list"));
+        list_stack.add_named(&list_status, Some("status"));
         let side_header = adw::HeaderBar::builder().show_end_title_buttons(false).show_start_title_buttons(false).build();
-        side_header.pack_start(&new_message);
         let side_view = adw::ToolbarView::new();
         side_view.add_top_bar(&side_header);
-        side_view.set_content(Some(&threads_stack));
+        side_view.set_content(Some(&list_stack));
         let sidebar = adw::NavigationPage::builder().title(t!("Conversations")).child(&side_view).build();
 
         let title = adw::WindowTitle::new("", "");
         let content_header = adw::HeaderBar::builder().show_end_title_buttons(false).show_start_title_buttons(false).title_widget(&title).build();
-        let earlier = gtk::Button::builder().label(t!("Earlier Messages")).halign(gtk::Align::Center).css_classes(["flat"]).visible(false).build();
         let bubbles = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(12).margin_bottom(12).margin_start(16).margin_end(16).valign(gtk::Align::End).build();
-        let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
-        column.append(&earlier);
-        column.append(&bubbles);
-        let clamp = adw::Clamp::builder().maximum_size(720).child(&column).build();
+        let clamp = adw::Clamp::builder().maximum_size(720).child(&bubbles).build();
         let scroller = gtk::ScrolledWindow::builder().child(&clamp).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
-        let entry = gtk::Entry::builder().placeholder_text(t!("Text Message")).hexpand(true).build();
+        let entry = gtk::Entry::builder().placeholder_text(t!("Reply")).hexpand(true).build();
         let send = gtk::Button::builder().icon_name("mail-send-symbolic").tooltip_text(t!("Send")).css_classes(["circular", "suggested-action"]).sensitive(false).build();
         let compose = gtk::Box::builder().spacing(8).margin_top(8).margin_bottom(10).margin_start(12).margin_end(12).build();
         compose.append(&entry);
         compose.append(&send);
+        let no_reply = gtk::Label::builder()
+            .label(t!("This one can't be answered from here. Answer it on the phone."))
+            .wrap(true)
+            .justify(gtk::Justification::Center)
+            .css_classes(["dim-label"])
+            .margin_top(12)
+            .margin_bottom(14)
+            .margin_start(12)
+            .margin_end(12)
+            .visible(false)
+            .build();
         let conversation = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         conversation.append(&scroller);
         conversation.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
         conversation.append(&compose);
+        conversation.append(&no_reply);
         let conversation_stack = gtk::Stack::new();
         conversation_stack.add_named(&adw::StatusPage::builder().icon_name("chat-message-new-symbolic").title(t!("No Conversation Selected")).build(), Some("empty"));
         conversation_stack.add_named(&conversation, Some("open"));
@@ -81,105 +84,76 @@ impl MessagesView {
         content_view.set_content(Some(&conversation_stack));
         let content = adw::NavigationPage::builder().title(t!("Messages")).child(&content_view).build();
 
-        let root = adw::NavigationSplitView::builder().sidebar(&sidebar).content(&content).min_sidebar_width(240.0).build();
+        let root = adw::NavigationSplitView::builder().sidebar(&sidebar).content(&content).min_sidebar_width(260.0).build();
         let s = send.clone();
         entry.connect_changed(move |e| s.set_sensitive(!e.text().trim().is_empty()));
-        Rc::new(Self {
-            root,
-            threads,
-            threads_stack,
-            threads_status,
-            title,
-            bubbles,
-            scroller,
-            earlier,
-            entry,
-            send,
-            compose,
-            conversation_stack,
-            new_message,
-            state: RefCell::default(),
-        })
+        Rc::new(Self { root, list, list_stack, list_status, title, bubbles, scroller, entry, send, compose, no_reply, conversation_stack, state: RefCell::default() })
     }
 
     fn status(&self, title: &str, description: &str) {
-        self.threads_status.set_title(title);
-        self.threads_status.set_description(Some(description));
-        self.threads_stack.set_visible_child_name("status");
+        self.list_status.set_title(title);
+        self.list_status.set_description(Some(description));
+        self.list_stack.set_visible_child_name("status");
     }
 
-    fn show_threads(&self, threads: Vec<SmsThread>) {
-        while let Some(row) = self.threads.first_child() {
-            self.threads.remove(&row);
+    fn show_list(&self, conversations: Vec<Conversation>, phone_name: &str) {
+        while let Some(row) = self.list.first_child() {
+            self.list.remove(&row);
         }
-        if threads.is_empty() {
-            self.status(t!("No Messages"), t!("Texts on the phone show up here."));
+        for c in &conversations {
+            self.list.append(&row(c));
+        }
+        self.state.borrow_mut().conversations = conversations;
+        self.select_open();
+        self.empty_or_list(phone_name);
+    }
+
+    fn empty_or_list(&self, phone_name: &str) {
+        if self.state.borrow().conversations.is_empty() {
+            self.status(t!("No Messages"), &t!("New messages from {device}'s chats, texts and mail show up here.", device = phone_name));
         } else {
-            self.threads_stack.set_visible_child_name("list");
+            self.list_stack.set_visible_child_name("list");
         }
-        let open = self.state.borrow().thread.clone();
-        for t in &threads {
-            let row = adw::ActionRow::builder().title(glib::markup_escape_text(&who(t))).subtitle(glib::markup_escape_text(&one_line(&t.snippet))).subtitle_lines(1).activatable(true).build();
-            row.add_prefix(&adw::Avatar::builder().size(36).text(who(t)).show_initials(true).build());
-            let when = gtk::Label::builder().label(fmt_when(t.date_ms)).css_classes(["caption", "dim-label"]).valign(gtk::Align::Start).margin_top(10).build();
-            row.add_suffix(&when);
-            if t.unread {
-                row.add_css_class("unread");
-            }
-            row.set_widget_name(&t.id);
-            self.threads.append(&row);
-            if open.as_deref() == Some(t.id.as_str()) {
-                self.threads.select_row(Some(&row));
-            }
-        }
-        self.state.borrow_mut().threads = threads;
     }
 
-    /// Replace (or with `older`, extend) the open conversation's messages.
-    fn show_messages(&self, page: Vec<SmsMessage>, more: bool, older: bool) {
-        {
+    /// Put `c` in its place in the list, newest first.
+    fn upsert(&self, c: Conversation) {
+        let at = {
             let mut state = self.state.borrow_mut();
-            // Pages come newest first; the list keeps oldest first.
-            let mut page = page;
-            page.reverse();
-            if older {
-                page.extend(std::mem::take(&mut state.messages));
-                state.messages = page;
-            } else {
-                state.messages = page;
-            }
+            state.conversations.retain(|o| o.id != c.id);
+            let at = state.conversations.iter().position(|o| o.at_ms <= c.at_ms).unwrap_or(state.conversations.len());
+            state.conversations.insert(at, c.clone());
+            at
+        };
+        if let Some(old) = self.row_of(&c.id) {
+            self.list.remove(&old);
         }
-        self.earlier.set_visible(more);
-        self.render_bubbles();
-        if !older {
-            self.scroll_to_end();
+        self.list.insert(&row(&c), at as i32);
+        self.select_open();
+        self.list_stack.set_visible_child_name("list");
+    }
+
+    fn row_of(&self, id: &str) -> Option<gtk::ListBoxRow> {
+        let mut child = self.list.first_child();
+        while let Some(c) = child {
+            if c.widget_name() == id {
+                return c.downcast().ok();
+            }
+            child = c.next_sibling();
+        }
+        None
+    }
+
+    fn select_open(&self) {
+        let open = self.state.borrow().open.clone();
+        match open.and_then(|id| self.row_of(&id)) {
+            Some(row) => self.list.select_row(Some(&row)),
+            None => self.list.unselect_all(),
         }
     }
 
-    fn render_bubbles(&self) {
-        while let Some(child) = self.bubbles.first_child() {
-            self.bubbles.remove(&child);
-        }
-        let state = self.state.borrow();
-        let group = state.thread.as_ref().and_then(|id| state.threads.iter().find(|t| &t.id == id)).is_some_and(|t| t.addresses.len() > 1);
-        for m in &state.messages {
-            let bubble = gtk::Label::builder()
-                .label(&m.body)
-                .wrap(true)
-                .wrap_mode(gtk::pango::WrapMode::WordChar)
-                .xalign(0.0)
-                .selectable(true)
-                .max_width_chars(48)
-                .css_classes(["bubble", if m.from_me { "mine" } else { "theirs" }])
-                .build();
-            let line = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).halign(if m.from_me { gtk::Align::End } else { gtk::Align::Start }).build();
-            if group && !m.from_me && !m.address.is_empty() {
-                line.append(&gtk::Label::builder().label(&m.address).xalign(0.0).css_classes(["caption", "dim-label"]).build());
-            }
-            line.append(&bubble);
-            line.append(&gtk::Label::builder().label(fmt_when(m.date_ms)).xalign(if m.from_me { 1.0 } else { 0.0 }).css_classes(["caption", "dim-label", "numeric"]).build());
-            self.bubbles.append(&line);
-        }
+    fn conversation(&self, id: &str) -> Option<Conversation> {
+        self.state.borrow().conversations.iter().find(|c| c.id == id).cloned()
     }
 
     fn scroll_to_end(&self) {
@@ -192,45 +166,36 @@ impl Window {
     pub(super) fn setup_messages(self: &Rc<Self>) {
         let m = &self.messages;
         let w = Rc::downgrade(self);
-        m.threads.connect_row_activated(move |_, row| {
+        m.list.connect_row_activated(move |_, row| {
             let Some(w) = w.upgrade() else { return };
             let id = row.widget_name().to_string();
-            w.open_thread(id);
-        });
-        let w = Rc::downgrade(self);
-        m.earlier.connect_clicked(move |_| {
-            if let Some(w) = w.upgrade() {
-                w.load_messages(true);
-            }
+            w.open_conversation(id);
         });
         let w = Rc::downgrade(self);
         let send = move || {
             if let Some(w) = w.upgrade() {
-                w.send_text();
+                w.send_reply();
             }
         };
         let s = send.clone();
         m.send.connect_clicked(move |_| s());
         m.entry.connect_activate(move |_| send());
         let w = Rc::downgrade(self);
-        m.new_message.connect_clicked(move |_| {
-            if let Some(w) = w.upgrade() {
-                w.new_conversation();
+        self.window.connect_is_active_notify(move |win| {
+            if let Some(w) = w.upgrade().filter(|_| win.is_active()) {
+                w.read_open();
             }
         });
     }
 
-    /// Open the phone's texts in the content area.
+    /// Open the phone's conversations in the content area.
     pub(super) fn open_messages(self: &Rc<Self>, phone: Fingerprint) {
         let name = self.device(&phone).map(|d| d.device.name).unwrap_or_default();
-        {
-            let mut state = self.messages.state.borrow_mut();
-            *state = ViewState { phone: Some(phone), ..Default::default() };
-        }
+        *self.messages.state.borrow_mut() = ViewState { phone: Some(phone), ..Default::default() };
         self.state.borrow_mut().messages_open = Some(phone);
         self.messages.conversation_stack.set_visible_child_name("empty");
         self.messages.root.set_show_content(false);
-        self.messages.status(t!("Loading…"), &t!("Asking {name} for its messages.", name));
+        self.messages.status(t!("Loading…"), "");
         self.camera_title.set_title(t!("Messages"));
         self.camera_title.set_subtitle(&name);
         self.content_header.set_show_title(true);
@@ -238,12 +203,18 @@ impl Window {
         self.page.menu.set_visible(false);
         self.content_stack.set_visible_child_name("messages");
         self.show_content();
-        self.load_threads();
+        self.load_conversations();
     }
 
     pub(super) fn close_messages(&self) {
         if self.state.borrow_mut().messages_open.take().is_some() {
             *self.messages.state.borrow_mut() = ViewState::default();
+            while let Some(row) = self.messages.list.first_child() {
+                self.messages.list.remove(&row);
+            }
+            while let Some(child) = self.messages.bubbles.first_child() {
+                self.messages.bubbles.remove(&child);
+            }
             self.camera_title.set_subtitle(t!("Camera Preview"));
             self.content_header.set_show_title(false);
             self.camera_back.set_visible(false);
@@ -251,23 +222,26 @@ impl Window {
         }
     }
 
-    fn load_threads(self: &Rc<Self>) {
+    fn load_conversations(self: &Rc<Self>) {
         let (Some(c), Some(phone)) = (self.client(), self.messages.state.borrow().phone) else { return };
-        let call = self.bridge.call(&c, move |c| async move { c.sms_threads(phone.to_string()).await });
+        let call = self.bridge.call(&c, |c| async move { c.inbox().await });
         let w = self.clone();
         glib::spawn_future_local(async move {
             let result = call.await;
             if w.messages.state.borrow().phone != Some(phone) {
                 return;
             }
+            let name = w.device(&phone).map(|d| d.device.name).unwrap_or_default();
             match result {
-                Ok(threads) => {
-                    w.messages.show_threads(threads);
-                    // Development aid (screenshots): LINKSY_SCREENSHOT_THREAD=<id> opens one.
-                    if let Ok(id) = std::env::var("LINKSY_SCREENSHOT_THREAD")
-                        && w.messages.state.borrow().thread.is_none()
+                Ok(all) => {
+                    let phone = phone.to_string();
+                    w.messages.show_list(all.into_iter().filter(|c| c.phone == phone).collect(), &name);
+                    // Development aid (screenshots): LINKSY_SCREENSHOT_THREAD=<title> opens one.
+                    if let Ok(title) = std::env::var("LINKSY_SCREENSHOT_THREAD")
+                        && let Some(c) = w.messages.state.borrow().conversations.iter().find(|c| c.title == title).map(|c| c.id.clone())
                     {
-                        w.open_thread(id);
+                        let w = w.clone();
+                        glib::idle_add_local_once(move || w.open_conversation(c));
                     }
                 }
                 Err(e) => w.messages.status(t!("Can't Reach Its Messages"), &fmt::capitalize(&e)),
@@ -275,68 +249,116 @@ impl Window {
         });
     }
 
-    fn open_thread(self: &Rc<Self>, id: String) {
-        let to = {
-            let mut state = self.messages.state.borrow_mut();
-            let to = state.threads.iter().find(|t| t.id == id).map(|t| t.addresses.clone()).unwrap_or_default();
-            state.thread = Some(id.clone());
-            state.to = to.clone();
-            state.messages.clear();
-            to
-        };
-        let label = self.messages.state.borrow().threads.iter().find(|t| t.id == id).map(who).unwrap_or_default();
-        self.messages.title.set_title(&label);
-        self.messages.title.set_subtitle(&to.join(", "));
-        let mut row = self.messages.threads.first_child();
-        while let Some(r) = row {
-            if r.widget_name() == id.as_str()
-                && let Some(r) = r.downcast_ref::<gtk::ListBoxRow>()
-            {
-                self.messages.threads.select_row(Some(r));
-            }
-            row = r.next_sibling();
-        }
-        self.messages.render_bubbles();
+    fn open_conversation(self: &Rc<Self>, id: String) {
+        let Some(c) = self.messages.conversation(&id) else { return };
+        self.messages.state.borrow_mut().open = Some(id.clone());
+        self.messages.title.set_title(&c.title);
+        self.messages.title.set_subtitle(&c.app_name);
+        self.messages.select_open();
+        self.show_reply(&c);
         self.messages.conversation_stack.set_visible_child_name("open");
         self.messages.root.set_show_content(true);
-        self.messages.entry.grab_focus();
-        self.load_messages(false);
+        if c.can_reply {
+            self.messages.entry.grab_focus();
+        }
+        self.mark_read(&c);
+        self.load_thread(&c);
     }
 
-    fn load_messages(self: &Rc<Self>, older: bool) {
-        let (phone, thread, before) = {
-            let state = self.messages.state.borrow();
-            let before = if older { state.messages.first().map(|m| m.date_ms) } else { None };
-            (state.phone, state.thread.clone(), before)
-        };
-        let (Some(c), Some(phone), Some(thread)) = (self.client(), phone, thread) else { return };
-        let t = thread.clone();
-        let call = self.bridge.call(&c, move |c| async move { c.sms_messages(phone.to_string(), t, before).await });
+    fn show_reply(&self, c: &Conversation) {
+        self.messages.compose.set_visible(c.can_reply);
+        self.messages.no_reply.set_visible(!c.can_reply);
+    }
+
+    fn mark_read(&self, c: &Conversation) {
+        let Some(client) = self.client() else { return };
+        if c.unread == 0 {
+            return;
+        }
+        let id = c.id.clone();
+        let read = self.bridge.call(&client, move |c| async move { c.inbox_read(id).await });
+        glib::spawn_future_local(async move {
+            let _ = read.await;
+        });
+    }
+
+    /// Back to the window with a conversation open: what came in meanwhile is read now.
+    fn read_open(&self) {
+        let open = self.messages.state.borrow().open.clone();
+        if let Some(c) = open.and_then(|id| self.messages.conversation(&id)) {
+            self.mark_read(&c);
+        }
+    }
+
+    fn load_thread(self: &Rc<Self>, c: &Conversation) {
+        let Some(client) = self.client() else { return };
+        let id = c.id.clone();
+        let i = id.clone();
+        let call = self.bridge.call(&client, move |c| async move { c.inbox_thread(i).await });
         let w = self.clone();
         glib::spawn_future_local(async move {
             let result = call.await;
-            if w.messages.state.borrow().thread.as_deref() != Some(thread.as_str()) {
+            if w.messages.state.borrow().open.as_deref() != Some(id.as_str()) {
                 return;
             }
             match result {
-                Ok((messages, more)) => w.messages.show_messages(messages, more, older),
+                Ok(messages) => w.show_bubbles(&id, &messages),
                 Err(e) => w.toast(&fmt::capitalize(&e)),
             }
         });
     }
 
-    fn send_text(self: &Rc<Self>) {
+    fn show_bubbles(self: &Rc<Self>, id: &str, messages: &[InboxMessage]) {
+        let bubbles = &self.messages.bubbles;
+        while let Some(child) = bubbles.first_child() {
+            bubbles.remove(&child);
+        }
+        let group = self.messages.conversation(id).is_some_and(|c| c.group);
+        for m in messages {
+            let line = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).halign(if m.mine { gtk::Align::End } else { gtk::Align::Start }).build();
+            if group && !m.mine
+                && let Some(sender) = &m.sender
+            {
+                line.append(&gtk::Label::builder().label(sender).xalign(0.0).css_classes(["caption", "dim-label"]).build());
+            }
+            line.append(
+                &gtk::Label::builder()
+                    .label(&m.text)
+                    .wrap(true)
+                    .wrap_mode(gtk::pango::WrapMode::WordChar)
+                    .xalign(0.0)
+                    .selectable(true)
+                    .max_width_chars(48)
+                    .css_classes(["bubble", if m.mine { "mine" } else { "theirs" }])
+                    .build(),
+            );
+            if let Some(code) = &m.code {
+                let content = adw::ButtonContent::builder().icon_name("edit-copy-symbolic").label(t!("Copy {code}", code = code)).build();
+                let copy = gtk::Button::builder().child(&content).halign(gtk::Align::Start).css_classes(["flat"]).build();
+                let (w, code) = (Rc::downgrade(self), code.clone());
+                copy.connect_clicked(move |b| {
+                    b.clipboard().set_text(&code);
+                    if let Some(w) = w.upgrade() {
+                        w.toast(t!("Copied"));
+                    }
+                });
+                line.append(&copy);
+            }
+            line.append(&gtk::Label::builder().label(fmt_when(m.at_ms)).xalign(if m.mine { 1.0 } else { 0.0 }).css_classes(["caption", "dim-label", "numeric"]).build());
+            bubbles.append(&line);
+        }
+        self.messages.scroll_to_end();
+    }
+
+    fn send_reply(self: &Rc<Self>) {
         let text = self.messages.entry.text().trim().to_string();
-        let (phone, to) = {
-            let state = self.messages.state.borrow();
-            (state.phone, state.to.clone())
-        };
-        let (Some(c), Some(phone)) = (self.client(), phone) else { return };
-        if text.is_empty() || to.is_empty() {
+        let open = self.messages.state.borrow().open.clone();
+        let (Some(c), Some(id)) = (self.client(), open) else { return };
+        if text.is_empty() {
             return;
         }
         self.messages.compose.set_sensitive(false);
-        let call = self.bridge.call(&c, move |c| async move { c.sms_send(phone.to_string(), to, text).await });
+        let call = self.bridge.call(&c, move |c| async move { c.inbox_reply(id, text).await });
         let w = self.clone();
         glib::spawn_future_local(async move {
             let result = call.await;
@@ -345,90 +367,83 @@ impl Window {
                 Ok(()) => {
                     w.messages.entry.set_text("");
                     w.messages.entry.grab_focus();
-                    // The phone files it; ask for the conversation as it is now.
-                    if w.messages.state.borrow().thread.is_some() {
-                        w.load_messages(false);
-                    }
-                    w.load_threads();
                 }
                 Err(e) => w.toast(&t!("Not sent: {error}", error = fmt::capitalize(&e))),
             }
         });
     }
 
-    /// Ask for a number, then write to it.
-    fn new_conversation(self: &Rc<Self>) {
-        let entry = adw::EntryRow::builder().title(t!("Phone Number")).input_purpose(gtk::InputPurpose::Phone).build();
-        let list = gtk::ListBox::builder().css_classes(["boxed-list"]).selection_mode(gtk::SelectionMode::None).build();
-        list.append(&entry);
-        let dialog = adw::AlertDialog::builder().heading(t!("New Message")).extra_child(&list).build();
-        dialog.add_response("cancel", t!("Cancel"));
-        dialog.add_response("write", t!("Write"));
-        dialog.set_response_appearance("write", adw::ResponseAppearance::Suggested);
-        dialog.set_default_response(Some("write"));
-        let w = self.clone();
-        dialog.connect_response(None, move |_, response| {
-            let number = entry.text().trim().to_string();
-            if response != "write" || number.is_empty() {
-                return;
-            }
-            {
-                let mut state = w.messages.state.borrow_mut();
-                // An existing conversation with that number opens instead.
-                if let Some(t) = state.threads.iter().find(|t| t.addresses == [number.clone()]).cloned() {
-                    drop(state);
-                    w.open_thread(t.id);
-                    return;
-                }
-                state.thread = None;
-                state.to = vec![number.clone()];
-                state.messages.clear();
-            }
-            w.messages.threads.unselect_all();
-            w.messages.title.set_title(&number);
-            w.messages.title.set_subtitle(t!("New Message"));
-            w.messages.earlier.set_visible(false);
-            w.messages.render_bubbles();
-            w.messages.conversation_stack.set_visible_child_name("open");
-            w.messages.root.set_show_content(true);
-            w.messages.entry.grab_focus();
-        });
-        dialog.present(Some(&self.window));
-    }
-
-    /// A text came in or went out on the phone.
-    pub(super) fn sms_arrived(self: &Rc<Self>, from: Fingerprint, thread: String, message: SmsMessage) {
-        let open = {
-            let state = self.messages.state.borrow();
-            (state.phone == Some(from)).then(|| state.thread.clone())
-        };
-        let Some(open) = open else { return };
-        if open.as_deref() == Some(thread.as_str()) {
-            let added = {
-                let mut state = self.messages.state.borrow_mut();
-                let new = !state.messages.iter().any(|m| m.id == message.id);
-                if new {
-                    state.messages.push(message);
-                }
-                new
-            };
-            if added {
-                self.messages.render_bubbles();
-                self.messages.scroll_to_end();
-            }
+    /// A conversation changed: a message came in, was read or answered.
+    pub(super) fn inbox_changed(self: &Rc<Self>, c: Conversation) {
+        let phone = self.messages.state.borrow().phone;
+        if phone.is_none_or(|p| p.to_string() != c.phone) {
+            return;
         }
-        self.load_threads();
+        let open = self.messages.state.borrow().open.as_deref() == Some(c.id.as_str());
+        self.messages.upsert(c.clone());
+        if open {
+            self.show_reply(&c);
+            if self.window.is_active() {
+                self.mark_read(&c);
+            }
+            self.load_thread(&c);
+        }
     }
 }
 
-/// Who a conversation is with: contacts' names where known, else numbers.
-fn who(t: &SmsThread) -> String {
-    let names: Vec<&str> = t.addresses.iter().enumerate().map(|(i, a)| t.names.get(i).map(String::as_str).filter(|n| !n.is_empty()).unwrap_or(a)).collect();
-    names.join(", ")
+fn row(c: &Conversation) -> adw::ActionRow {
+    let row = adw::ActionRow::builder()
+        .title(glib::markup_escape_text(&c.title))
+        .subtitle(glib::markup_escape_text(&preview(c)))
+        .subtitle_lines(1)
+        .activatable(true)
+        .build();
+    let avatar = adw::Avatar::builder().size(40).text(&c.title).show_initials(!c.group).build();
+    if c.group {
+        avatar.set_icon_name(Some("system-users-symbolic"));
+    }
+    if let Some(picture) = c.picture.as_ref().and_then(|p| gdk::Texture::from_filename(p).ok()) {
+        avatar.set_custom_image(Some(&picture));
+    }
+    row.add_prefix(&avatar);
+    let side = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).valign(gtk::Align::Center).build();
+    let when = gtk::Label::builder().label(fmt_when(c.at_ms)).halign(gtk::Align::End).css_classes(["caption", "numeric"]).build();
+    when.add_css_class(if c.unread > 0 { "accent" } else { "dim-label" });
+    side.append(&when);
+    let app = gtk::Image::builder().pixel_size(16).halign(gtk::Align::End).tooltip_text(&c.app_name).build();
+    match &c.icon {
+        Some(icon) => app.set_from_file(Some(icon)),
+        None => app.set_icon_name(Some(kind_icon(&c.kind))),
+    }
+    side.append(&app);
+    row.add_suffix(&side);
+    if c.unread > 0 {
+        row.add_css_class("unread");
+    }
+    row.set_widget_name(&c.id);
+    row
 }
 
-fn one_line(text: &str) -> String {
-    text.lines().next().unwrap_or("").to_string()
+/// The newest line, with who said it when that isn't plain.
+fn preview(c: &Conversation) -> String {
+    let Some(m) = &c.last else { return String::new() };
+    let text = m.text.lines().next().unwrap_or("");
+    if m.mine {
+        t!("You: {text}", text = text)
+    } else if let Some(sender) = m.sender.as_ref().filter(|_| c.group) {
+        format!("{sender}: {text}")
+    } else {
+        text.to_string()
+    }
+}
+
+fn kind_icon(kind: &str) -> &'static str {
+    match kind {
+        "sms" => "phone-symbolic",
+        "mail" => "mail-unread-symbolic",
+        "social" => "system-users-symbolic",
+        _ => "chat-message-new-symbolic",
+    }
 }
 
 /// "14:05" today, "Mon" this week, "12 Oct" before.
