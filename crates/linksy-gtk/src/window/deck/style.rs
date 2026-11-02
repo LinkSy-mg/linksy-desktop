@@ -99,7 +99,7 @@ const CSS: &str = r#"
 .deck-screen.theme-dots { background-color: #000; background-image: radial-gradient(circle, rgba(255, 255, 255, 0.07) 1px, transparent 1.3px); background-size: 6px 6px; color: #f2f2f2; }
 .theme-dots .deck-status, .theme-dots .deck-name label { font-family: monospace; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
 .theme-dots .deck-tile { background-color: rgba(255, 255, 255, 0.025); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13); border-radius: 18px; color: #f2f2f2; }
-.theme-dots .deck-tile.lifted { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13), 0 14px 30px rgba(0, 0, 0, 0.45); }
+.theme-dots .deck-tile.lifted { background-color: #0b0b0b; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.13), 0 14px 30px rgba(0, 0, 0, 0.45); }
 .theme-dots .deck-tile label.t-label, .theme-dots .deck-tile label.title, .theme-dots .deck-tile label.pct { font-family: monospace; font-weight: 800; text-transform: uppercase; }
 
 .deck-screen.theme-pixel { background-color: #1d2b53; background-image: linear-gradient(rgba(0, 0, 0, 0.18) 50%, transparent 50%); background-size: 100% 4px; border-radius: 16px; color: #fff1e8; }
@@ -127,7 +127,7 @@ const CSS: &str = r#"
 .deck-screen.theme-term { background-color: #040904; color: #39ff7a; }
 .theme-term label { font-family: monospace; text-shadow: 0 0 6px rgba(57, 255, 122, 0.55); }
 .theme-term .deck-tile { background-color: rgba(57, 255, 122, 0.04); color: #39ff7a; box-shadow: inset 0 0 0 1px rgba(57, 255, 122, 0.45); border-radius: 4px; }
-.theme-term .deck-tile.lifted { box-shadow: inset 0 0 0 1px rgba(57, 255, 122, 0.45), 0 14px 30px rgba(0, 0, 0, 0.45); }
+.theme-term .deck-tile.lifted { background-color: #071407; box-shadow: inset 0 0 0 1px rgba(57, 255, 122, 0.45), 0 14px 30px rgba(0, 0, 0, 0.45); }
 .theme-term .deck-tile.on { background-color: rgba(57, 255, 122, 0.85); color: #041204; }
 .theme-term .deck-tile.on label { text-shadow: none; }
 .theme-term .deck-tile .t-label { font-size: 12px; font-weight: 400; }

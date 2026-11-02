@@ -627,7 +627,7 @@ impl Grid {
         let grid = self.downgrade();
         drag.connect_drag_update(move |g, dx, dy| {
             if let Some(grid) = grid.upgrade() {
-                grid.dragged(g, dx, dy);
+                grid.dragged(Some(g), dx, dy);
             }
         });
         let grid = self.downgrade();
@@ -645,7 +645,15 @@ impl Grid {
         self.add_controller(drag);
     }
 
-    fn dragged(&self, g: &gtk::GestureDrag, dx: f64, dy: f64) {
+    /// Development aid (screenshots): the picked tile as if dragged by `dx`,`dy`, moved or
+    /// pulled by its corner.
+    pub fn preview_drag(&self, resize: bool, dx: f64, dy: f64) {
+        let Some(id) = self.imp().picked.borrow().clone() else { return };
+        *self.imp().gesture.borrow_mut() = Gesture::Pressed(id, resize.then_some(Edge::Corner));
+        self.dragged(None, dx, dy);
+    }
+
+    fn dragged(&self, g: Option<&gtk::GestureDrag>, dx: f64, dy: f64) {
         let imp = self.imp();
         let m = imp.metrics.get();
         let grid = imp.face.borrow().grid;
@@ -655,7 +663,9 @@ impl Grid {
             _ => None,
         };
         if let Some((id, edge)) = started {
-            g.set_state(gtk::EventSequenceState::Claimed);
+            if let Some(g) = g {
+                g.set_state(gtk::EventSequenceState::Claimed);
+            }
             let Some((t, widget)) = tile_of(&id) else { return };
             *imp.gesture.borrow_mut() = match edge {
                 None => {

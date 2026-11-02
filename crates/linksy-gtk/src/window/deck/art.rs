@@ -351,3 +351,17 @@ fn cover(snapshot: &gtk::Snapshot, size: f32, theme: Theme) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_icon_parses_and_has_pixels() {
+        for (name, _) in model::ICONS {
+            assert!(path(name).is_some(), "{name} doesn't parse");
+            let lit = pixel_mask(name).iter().flatten().filter(|on| **on).count();
+            assert!((6..110).contains(&lit), "{name} on 12x12: {lit} pixels");
+        }
+    }
+}

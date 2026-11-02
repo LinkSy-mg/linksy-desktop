@@ -151,18 +151,25 @@ pub struct Editor {
 
 /// Development aids for screenshots, read once: LINKSY_SCREENSHOT_DECK_THEME=<id> shows a
 /// theme, LINKSY_SCREENSHOT_DECK_PICK=<n> picks the nth tile (1 is the first) and
-/// LINKSY_SCREENSHOT_DECK_LANDSCAPE=1 shows landscape, reflowed from portrait if empty.
+/// LINKSY_SCREENSHOT_DECK_LANDSCAPE=1 shows landscape, reflowed from portrait if empty;
+/// LINKSY_SCREENSHOT_DECK_DRAG=move,80,60 (or resize,…) shows the picked tile mid-drag.
 struct Aids {
     theme: Option<String>,
     pick: Option<usize>,
     landscape: bool,
+    drag: Option<(bool, f64, f64)>,
 }
 
 fn aids() -> &'static Aids {
     static AIDS: OnceLock<Aids> = OnceLock::new();
     AIDS.get_or_init(|| {
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-        Aids { theme: var("LINKSY_SCREENSHOT_DECK_THEME"), pick: var("LINKSY_SCREENSHOT_DECK_PICK").and_then(|n| n.parse().ok()), landscape: var("LINKSY_SCREENSHOT_DECK_LANDSCAPE").is_some() }
+        let drag = var("LINKSY_SCREENSHOT_DECK_DRAG").and_then(|d| {
+            let mut parts = d.split(',');
+            let resize = parts.next()? == "resize";
+            Some((resize, parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+        });
+        Aids { theme: var("LINKSY_SCREENSHOT_DECK_THEME"), pick: var("LINKSY_SCREENSHOT_DECK_PICK").and_then(|n| n.parse().ok()), landscape: var("LINKSY_SCREENSHOT_DECK_LANDSCAPE").is_some(), drag }
     })
 }
 
@@ -222,6 +229,14 @@ impl Editor {
         if let Some(n) = aids.pick {
             let id = editor.st.borrow().tiles().get(n.saturating_sub(1)).map(|t| t.id.clone());
             editor.pick(id);
+        }
+        if let Some((resize, dx, dy)) = aids.drag {
+            let grid = editor.ui.grid.downgrade();
+            glib::timeout_add_local_once(Duration::from_millis(800), move || {
+                if let Some(grid) = grid.upgrade() {
+                    grid.preview_drag(resize, dx, dy);
+                }
+            });
         }
         editor
     }
