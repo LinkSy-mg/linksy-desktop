@@ -605,22 +605,68 @@ Kirigami.Page {
                 id: terminalCard
                 readonly property bool locked: page.info !== null && app.terminal.locked.includes(page.info.id)
                 readonly property bool allowed: page.info !== null && app.terminal.allowed.includes(page.info.id)
+                readonly property var running: app.terminal.running.filter(t => t.device === page.info?.id)
                 Layout.fillWidth: true
                 visible: page.phone
                 banner.title: app.t("Terminal")
                 banner.titleIcon: "utilities-terminal"
                 contentItem: Item {
-                    implicitWidth: terminalText.implicitWidth
-                    implicitHeight: terminalText.implicitHeight
-                    QQC2.Label {
-                        id: terminalText
+                    implicitWidth: terminalColumn.implicitWidth
+                    implicitHeight: terminalColumn.implicitHeight
+                    ColumnLayout {
+                        id: terminalColumn
                         width: parent.width
-                        wrapMode: Text.Wrap
-                        opacity: 0.75
-                        textFormat: Text.PlainText
-                        text: terminalCard.locked ? app.t("Locked: 5 wrong codes in a row were typed on {name}. Unlock it if that was you.", { name: page.name })
-                            : app.terminal.code_set ? app.t("Let {name} open a shell on this computer after typing the terminal code. It runs as you.", { name: page.name })
-                            : app.t("Not set: no phone can open a terminal")
+                        spacing: Kirigami.Units.largeSpacing
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            opacity: 0.75
+                            textFormat: Text.PlainText
+                            text: terminalCard.locked ? app.t("Locked: 5 wrong codes in a row were typed on {name}. Unlock it if that was you.", { name: page.name })
+                                : app.terminal.code_set ? app.t("Let {name} open a shell on this computer after typing the terminal code. It runs as you.", { name: page.name })
+                                : app.t("Not set: no phone can open a terminal")
+                        }
+                        // The ones running now, each with End
+                        Repeater {
+                            model: terminalCard.running
+                            delegate: RowLayout {
+                                id: shell
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: Kirigami.Units.largeSpacing
+                                Kirigami.Icon {
+                                    implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                                    implicitHeight: implicitWidth
+                                    source: "utilities-terminal"
+                                    color: shell.modelData.attached ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.disabledTextColor
+                                }
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 0
+                                    QQC2.Label {
+                                        Layout.fillWidth: true
+                                        text: shell.modelData.title
+                                        textFormat: Text.PlainText
+                                        elide: Text.ElideRight
+                                    }
+                                    QQC2.Label {
+                                        Layout.fillWidth: true
+                                        text: shell.modelData.attached ? app.t("Terminal open on the phone now") : app.t("Terminal still running · not open on the phone")
+                                        wrapMode: Text.Wrap
+                                        font: Kirigami.Theme.smallFont
+                                        opacity: 0.7
+                                    }
+                                }
+                                QQC2.Button {
+                                    icon.name: "media-playback-stop"
+                                    text: app.t("End")
+                                    onClicked: app.request("end_terminal", { terminal: shell.modelData.id }, (ok, err) => {
+                                        if (!ok) app.toast(err);
+                                        app.request("terminal_status", {}, (ok2, s) => { if (ok2) app.terminal = s });
+                                    })
+                                }
+                            }
+                        }
                     }
                 }
                 actions: [
