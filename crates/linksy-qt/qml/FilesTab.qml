@@ -448,6 +448,64 @@ ColumnLayout {
         }
     }
 
+    // Copies to and from this phone going on, each with Cancel
+    Repeater {
+        model: tab.store.ops
+        delegate: RowLayout {
+            id: copying
+            required property string op
+            required property string phone
+            required property string name
+            required property real done
+            required property real total
+            required property bool upload
+            property bool stopping: false
+            Layout.fillWidth: true
+            visible: phone === tab.store.phone
+            spacing: Kirigami.Units.largeSpacing
+            Kirigami.Icon {
+                Layout.alignment: Qt.AlignTop
+                implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                implicitHeight: implicitWidth
+                source: copying.upload ? "document-send" : "folder-download"
+                opacity: 0.7
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 2
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    text: copying.upload ? tab.app.t("Uploading {name}", { name: copying.name }) : tab.app.t("Copying {name}", { name: copying.name })
+                    textFormat: Text.PlainText
+                    elide: Text.ElideMiddle
+                }
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    text: tab.app.t("{done} of {total}", { done: tab.app.size(copying.done), total: tab.app.size(copying.total) })
+                          + (copying.total > 0 ? ` · ${Math.floor(copying.done / copying.total * 100)}%` : "")
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.7
+                }
+                QQC2.ProgressBar {
+                    Layout.fillWidth: true
+                    from: 0
+                    to: Math.max(1, copying.total)
+                    value: copying.done
+                    indeterminate: copying.total === 0
+                }
+            }
+            QQC2.Button {
+                flat: true
+                enabled: !copying.stopping
+                text: tab.app.t("Cancel")
+                onClicked: {
+                    copying.stopping = true;
+                    tab.store.cancel(copying.op);
+                }
+            }
+        }
+    }
+
     // A name for something in the folder shown: none taken there, no "/"
     Kirigami.PromptDialog {
         id: nameDialog
