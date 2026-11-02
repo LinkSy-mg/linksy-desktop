@@ -722,6 +722,9 @@ pub struct RemoteNotification {
     /// A mail's subject, with its text in `body`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subject: Option<String>,
+    /// The newest message (`body`) is the phone owner's own, written on the phone.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mine: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

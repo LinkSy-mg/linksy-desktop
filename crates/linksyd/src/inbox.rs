@@ -60,6 +60,8 @@ struct Entry {
     messages: VecDeque<InboxMessage>,
     /// The phone's notification to answer through, while it has one.
     key: Option<String>,
+    /// Its notification's key, kept after it's gone.
+    seen_key: String,
     /// The conversation as the phone names it, to ask for its history.
     asked: String,
 }
@@ -72,6 +74,10 @@ struct Parsed {
     sender: Option<String>,
     text: String,
     group: bool,
+    /// Written by the phone's owner.
+    mine: bool,
+    /// The chat came named after its owner ("Vous"): a one-to-one chat they just answered.
+    titled_me: bool,
 }
 
 impl Inbox {
@@ -139,13 +145,20 @@ impl Inbox {
     /// A notification from `from`: a new message in a conversation, when it reads as one.
     /// Returns the code it carries, if any.
     pub fn posted(&self, from: &DeviceInfo, n: &RemoteNotification) -> Option<String> {
-        let Some(parsed) = parse(n) else { return self.alert(from, n) };
+        let Some(mut parsed) = parse(n) else { return self.alert(from, n) };
         let code = crate::codes::code_in(&format!("{} {}", n.title, n.body));
         let at_ms = n.time.unwrap_or_else(now_ms);
+        let mut inbox = self.inner.lock().unwrap();
+        // Named after the owner: the chat this notification was for until now
+        if parsed.titled_me
+            && let Some(e) = inbox.iter().filter(|e| e.phone == from.id && e.seen_key == n.key).max_by_key(|e| e.conversation.at_ms)
+        {
+            parsed.title = e.conversation.title.clone();
+        }
         let id = conversation_id(&from.id, &n.app, &parsed.title);
         let icon = n.icon.as_deref().and_then(|b64| unpack(&self.dir, &n.app, b64));
-        let picture = n.picture.as_deref().and_then(|b64| unpack(&self.dir.join("people"), &id, b64));
-        let mut inbox = self.inner.lock().unwrap();
+        // The owner's picture isn't the chat's
+        let picture = n.picture.as_deref().filter(|_| !parsed.mine).and_then(|b64| unpack(&self.dir.join("people"), &id, b64));
         let i = match inbox.iter().position(|e| e.conversation.id == id) {
             Some(i) => i,
             None => {
@@ -175,18 +188,24 @@ impl Inbox {
                     },
                     messages: VecDeque::new(),
                     key: None,
-                    asked: String::new(),
+                    seen_key: String::new(),
+                    asked: parsed.title.clone(),
                 });
                 inbox.len() - 1
             }
         };
         let e = &mut inbox[i];
-        let message = InboxMessage { at_ms, sender: parsed.sender, text: parsed.text, code: code.clone(), mine: false };
-        // A notification shown again, or updated with the same newest line, is no new message
-        let fresh = !e.messages.back().is_some_and(|m| m.text == message.text && m.sender == message.sender);
+        let message = InboxMessage { at_ms, sender: parsed.sender, text: parsed.text, code: code.clone(), mine: parsed.mine };
+        // A notification shown again, or updated with the same newest line (or the reply
+        // sent from here), is no new message
+        let fresh = !e.messages.back().is_some_and(|m| m.text == message.text && m.sender == message.sender && m.mine == message.mine);
         if fresh {
             e.messages.push_back(message.clone());
-            e.conversation.unread += 1;
+            if message.mine {
+                e.conversation.unread = 0;
+            } else {
+                e.conversation.unread += 1;
+            }
             e.conversation.last = Some(message);
             e.conversation.at_ms = at_ms;
         }
@@ -197,9 +216,12 @@ impl Inbox {
         while e.messages.len() > MAX_MESSAGES {
             e.messages.pop_front();
         }
-        e.asked = n.conversation.clone().unwrap_or_else(|| parsed.title.clone());
+        if !parsed.titled_me {
+            e.asked = n.conversation.clone().unwrap_or_else(|| parsed.title.clone());
+        }
         e.conversation.older |= from.features.iter().any(|f| f == "inbox_history");
         e.key = Some(n.key.clone());
+        e.seen_key = n.key.clone();
         e.conversation.can_reply = n.can_reply;
         e.conversation.group |= parsed.group;
         e.conversation.icon = icon.or(e.conversation.icon.take());
@@ -278,7 +300,8 @@ impl Inbox {
 fn from_phone(m: &ConversationMessage, before: u64) -> (InboxMessage, bool) {
     let mut text = m.text.trim().to_string();
     text.truncate(text.char_indices().nth(MAX_TEXT).map_or(text.len(), |(i, _)| i));
-    let message = InboxMessage { at_ms: m.time.unwrap_or(before.saturating_sub(1)), sender: m.sender.clone().filter(|_| !m.mine), code: crate::codes::code_in(&text), text, mine: m.mine };
+    let mine = m.mine || m.sender.as_deref().is_some_and(is_me);
+    let message = InboxMessage { at_ms: m.time.unwrap_or(before.saturating_sub(1)), sender: m.sender.clone().filter(|_| !mine), code: crate::codes::code_in(&text), text, mine };
     (message, m.time.is_some())
 }
 
@@ -369,7 +392,25 @@ fn parse(n: &RemoteNotification) -> Option<Parsed> {
         }
     }
     text.truncate(text.char_indices().nth(MAX_TEXT).map_or(text.len(), |(i, _)| i));
-    Some(Parsed { kind, title, sender, text, group })
+    let titled_me = is_me(&title);
+    let mine = n.mine || titled_me || sender.as_deref().is_some_and(is_me);
+    if mine {
+        sender = None;
+    }
+    if titled_me && !is_me(&n.title) && !n.title.trim().is_empty() {
+        title = clean_title(&n.title);
+    }
+    Some(Parsed { kind, title, sender, text, group, mine, titled_me })
+}
+
+/// How chats name the phone's owner in their notifications, in the common languages.
+fn is_me(name: &str) -> bool {
+    const ME: &[&str] = &[
+        "you", "me", "vous", "toi", "moi", "tú", "tu", "yo", "usted", "você", "eu", "du", "ich", "io", "jij", "ik", "вы", "ты", "я", "你", "我",
+        "あなた", "自分", "ianao", "izaho",
+    ];
+    let name = name.trim().to_lowercase();
+    ME.contains(&name.as_str())
 }
 
 /// Which kind of messaging app it comes from, if it's one.
@@ -463,6 +504,34 @@ mod tests {
         assert_eq!(inbox.thread(&alice.id).unwrap().len(), 2);
         inbox.removed(&phone.id, "k", false);
         assert!(inbox.list().iter().all(|c| !c.can_reply && c.unread == 0));
+    }
+
+    #[test]
+    fn the_owners_messages_are_theirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = Inbox::new(dir.path().into());
+        let phone = DeviceInfo { id: Fingerprint::of(b"p"), name: "Pixel".into(), kind: linksy_core::DeviceKind::Phone, os: "android".into(), features: vec![], away: None };
+        // A group: WhatsApp in French names the owner "Vous"
+        let group = |sender: &str, body: &str| RemoteNotification { key: "g".into(), conversation: Some("AUREON".into()), sender: Some(sender.into()), group: true, ..n("com.whatsapp", "WhatsApp", "AUREON", body) };
+        inbox.posted(&phone, &group("Chris", "When does the sun go down?"));
+        inbox.posted(&phone, &group("Vous", "At around 18:00"));
+        let aureon = inbox.list().into_iter().find(|c| c.title == "AUREON").unwrap();
+        let thread = inbox.thread(&aureon.id).unwrap();
+        assert_eq!((thread[1].mine, thread[1].sender.as_deref()), (true, None));
+        assert_eq!(aureon.unread, 0, "answered on the phone");
+
+        // One to one, answered on the phone: the update comes named after the owner
+        let jenna = RemoteNotification { key: "j".into(), ..n("com.whatsapp", "WhatsApp", "Jenna", "Bonne nuit") };
+        inbox.posted(&phone, &jenna);
+        inbox.posted(&phone, &RemoteNotification { conversation: Some("Vous".into()), sender: Some("Vous".into()), title: "Vous".into(), body: "Bonne nuit malala".into(), ..jenna.clone() });
+        // And a phone that says so
+        inbox.posted(&phone, &RemoteNotification { mine: true, body: "Dors bien".into(), ..jenna.clone() });
+        let list = inbox.list();
+        assert!(list.iter().all(|c| c.title != "Vous"), "no conversation named after the owner");
+        let jenna = list.iter().find(|c| c.title == "Jenna").unwrap();
+        let thread: Vec<_> = inbox.thread(&jenna.id).unwrap().into_iter().map(|m| (m.text, m.mine)).collect();
+        assert_eq!(thread, [("Bonne nuit".to_string(), false), ("Bonne nuit malala".to_string(), true), ("Dors bien".to_string(), true)]);
+        assert_eq!(jenna.last.as_ref().map(|m| m.mine), Some(true));
     }
 
     #[test]
