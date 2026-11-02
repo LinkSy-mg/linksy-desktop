@@ -3,6 +3,7 @@
 // (Ctrl and Shift add to it, as in Files); a double click or Enter opens it.
 import QtQuick
 import QtQuick.Controls as QQC2
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
@@ -15,6 +16,8 @@ ColumnLayout {
     required property bool narrow
     // The folder the rows are from: another one starts at its top
     property string listed: ""
+    // Search: this folder, by name, as it's typed
+    property bool searching: false
     property string query: ""
     // Picked rows by key, how many, and where a Shift range starts
     property var picked: ({})
@@ -41,6 +44,11 @@ ColumnLayout {
     onQueryChanged: {
         clearPicks();
         show(true);
+    }
+    onSearchingChanged: {
+        if (searching) return searchField.forceActiveFocus();
+        searchField.text = "";
+        query = "";
     }
 
     KeyedList { id: shown }
@@ -156,8 +164,9 @@ ColumnLayout {
         else store.launch(store.path + e.name);
     }
 
-    // Go to a folder: a fresh look, nothing picked
+    // Go to a folder: a fresh look, nothing picked, no search
     function openFolder(path) {
+        searching = false;
         clearPicks();
         store.list(path);
     }
@@ -183,10 +192,16 @@ ColumnLayout {
         store.copy(pickedEntries().map(e => e.name));
     }
 
-    // As in Files: Delete, F2 to rename, Escape to let go, Ctrl+A, the arrows, Enter to open
+    function localPath(url) {
+        return decodeURIComponent(url.toString().replace(/^file:\/\//, ""));
+    }
+
+    // As in Files: Delete, F2 to rename, Escape to let go, Ctrl+F to search, Ctrl+A, the
+    // arrows, Enter to open
     function key(event) {
         const ctrl = event.modifiers & Qt.ControlModifier, count = shown.model.count;
-        if (event.key === Qt.Key_Delete && pickedCount > 0) askDelete();
+        if (event.key === Qt.Key_F && ctrl) searching = true;
+        else if (event.key === Qt.Key_Delete && pickedCount > 0) askDelete();
         else if (event.key === Qt.Key_F2 && pickedCount === 1) askRename();
         else if (event.key === Qt.Key_Escape && pickedCount > 0) clearPicks();
         else if (event.key === Qt.Key_A && ctrl) pickAll();
@@ -264,6 +279,35 @@ ColumnLayout {
             }
         }
 
+        ToolIcon {
+            icon.name: "system-search"
+            text: tab.app.t("Search")
+            checkable: true
+            checked: tab.searching
+            onToggled: {
+                tab.searching = checked;
+                checked = Qt.binding(() => tab.searching);
+            }
+        }
+        ToolIcon {
+            id: sortButton
+            icon.name: "view-sort-descending"
+            text: tab.app.t("Sort")
+            down: sortMenu.visible
+            onClicked: sortMenu.popup(sortButton, 0, sortButton.height)
+        }
+        ToolIcon {
+            icon.name: "folder-new"
+            text: tab.app.t("New Folder…")
+            onClicked: nameDialog.ask(false, "", 0)
+        }
+        ToolIcon {
+            id: uploadButton
+            icon.name: "document-send"
+            text: tab.app.t("Upload")
+            down: uploadMenu.visible
+            onClicked: uploadMenu.popup(uploadButton, 0, uploadButton.height)
+        }
         QQC2.Button {
             Layout.leftMargin: Kirigami.Units.smallSpacing
             icon.name: "folder-open"
@@ -272,6 +316,18 @@ ColumnLayout {
             QQC2.ToolTip.text: text
             QQC2.ToolTip.visible: hovered && tab.narrow
             onClicked: tab.store.openInFiles()
+        }
+    }
+
+    Kirigami.SearchField {
+        id: searchField
+        Layout.fillWidth: true
+        visible: tab.searching
+        placeholderText: tab.app.t("Search This Folder")
+        onTextChanged: tab.query = text.trim().toLowerCase()
+        Keys.onEscapePressed: {
+            tab.searching = false;
+            folderView.forceActiveFocus();
         }
     }
 
@@ -371,6 +427,25 @@ ColumnLayout {
                 opacity: 0.7
             }
         }
+
+        // Files dropped here go into the folder shown
+        DropArea {
+            id: drop
+            anchors.fill: parent
+            onDropped: event => {
+                if (!event.hasUrls) return;
+                tab.store.upload(event.urls.map(u => tab.localPath(u)));
+                event.acceptProposedAction();
+            }
+        }
+        Rectangle {
+            anchors.fill: parent
+            visible: drop.containsDrag
+            radius: Kirigami.Units.cornerRadius * 2
+            color: Qt.alpha(Kirigami.Theme.highlightColor, 0.08)
+            border.width: 2
+            border.color: Kirigami.Theme.highlightColor
+        }
     }
 
     // A name for something in the folder shown: none taken there, no "/"
@@ -466,6 +541,82 @@ ColumnLayout {
                 onTriggered: deleteDialog.close()
             }
         ]
+    }
+
+    // Name, date or size, either way; folders first whichever
+    QQC2.ButtonGroup { id: sortGroup }
+    QQC2.ButtonGroup { id: orderGroup }
+    QQC2.Menu {
+        id: sortMenu
+        MenuHeading { text: tab.app.t("Sort") }
+        SortItem { value: "name"; text: tab.app.t("Name") }
+        SortItem { value: "date"; text: tab.app.t("Date") }
+        SortItem { value: "size"; text: tab.app.t("Size") }
+        QQC2.MenuSeparator {}
+        OrderItem { descending: false; text: tab.app.t("Ascending") }
+        OrderItem { descending: true; text: tab.app.t("Descending") }
+    }
+
+    QQC2.Menu {
+        id: uploadMenu
+        QQC2.MenuItem {
+            text: tab.app.t("Upload Files…")
+            onTriggered: uploadFiles.open()
+        }
+        QQC2.MenuItem {
+            text: tab.app.t("Upload Folders…")
+            onTriggered: uploadFolder.open()
+        }
+    }
+
+    FileDialog {
+        id: uploadFiles
+        title: tab.app.t("Upload to {name}", { name: tab.deviceName })
+        acceptLabel: tab.app.t("Upload")
+        fileMode: FileDialog.OpenFiles
+        onAccepted: tab.store.upload(selectedFiles.map(u => tab.localPath(u)))
+    }
+
+    FolderDialog {
+        id: uploadFolder
+        title: tab.app.t("Upload to {name}", { name: tab.deviceName })
+        acceptLabel: tab.app.t("Upload")
+        onAccepted: tab.store.upload([tab.localPath(selectedFolder)])
+    }
+
+    component ToolIcon: QQC2.ToolButton {
+        id: toolIcon
+        display: QQC2.AbstractButton.IconOnly
+        QQC2.ToolTip.text: toolIcon.text
+        QQC2.ToolTip.visible: toolIcon.hovered
+    }
+
+    component MenuHeading: QQC2.Label {
+        leftPadding: Kirigami.Units.largeSpacing
+        rightPadding: Kirigami.Units.largeSpacing
+        topPadding: Kirigami.Units.smallSpacing
+        bottomPadding: Kirigami.Units.smallSpacing
+        font.pointSize: Kirigami.Theme.smallFont.pointSize
+        font.bold: true
+        opacity: 0.7
+    }
+
+    component SortItem: QQC2.MenuItem {
+        id: sortItem
+        required property string value
+        checkable: true
+        checked: tab.store.sortBy === sortItem.value
+        QQC2.ButtonGroup.group: sortGroup
+        onTriggered: tab.store.sortBy = sortItem.value
+    }
+
+    component OrderItem: QQC2.MenuItem {
+        id: orderItem
+        required property bool descending
+        checkable: true
+        checked: tab.store.descending === orderItem.descending
+        QQC2.ButtonGroup.group: orderGroup
+        onTriggered: tab.store.descending = orderItem.descending
     }
 
     // On a narrow page only its icon
