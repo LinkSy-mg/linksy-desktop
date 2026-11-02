@@ -354,16 +354,19 @@ impl DevicePage {
 
         // "Use the phone as": the big features, each a card of its own.
         let card = |icon: &str, title: &str, desc: &str| -> (gtk::Box, gtk::Box, gtk::Label, gtk::Label) {
-            let image = gtk::Image::builder().icon_name(icon).pixel_size(28).halign(gtk::Align::Start).css_classes(["card-icon"]).build();
-            let badge = gtk::Label::builder().label(t!("Live")).halign(gtk::Align::End).valign(gtk::Align::Start).hexpand(true).visible(false).css_classes(["live-badge"]).build();
-            let top = gtk::Box::builder().build();
+            // The title beside its icon, the description small under them
+            let image = gtk::Image::builder().icon_name(icon).pixel_size(22).valign(gtk::Align::Start).css_classes(["card-icon", "small"]).build();
+            let badge = gtk::Label::builder().label(t!("Live")).halign(gtk::Align::Start).visible(false).css_classes(["live-badge"]).build();
+            let heading = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).hexpand(true).valign(gtk::Align::Center).build();
+            heading.append(&gtk::Label::builder().label(title).xalign(0.0).wrap(true).css_classes(["title-4"]).build());
+            heading.append(&badge);
+            let top = gtk::Box::builder().spacing(10).build();
+            top.append(&heading);
             top.append(&image);
-            top.append(&badge);
-            let description = gtk::Label::builder().label(desc).xalign(0.0).wrap(true).css_classes(["dim-label"]).build();
+            let description = gtk::Label::builder().label(desc).xalign(0.0).wrap(true).css_classes(["caption", "dim-label"]).build();
             let buttons = gtk::Box::builder().spacing(8).vexpand(true).valign(gtk::Align::End).build();
             let b = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).hexpand(true).css_classes(["feature-card"]).build();
             b.append(&top);
-            b.append(&gtk::Label::builder().label(title).xalign(0.0).css_classes(["title-4"]).build());
             b.append(&description);
             b.append(&buttons);
             (b, buttons, description, badge)

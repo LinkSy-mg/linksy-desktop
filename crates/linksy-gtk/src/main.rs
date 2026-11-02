@@ -169,6 +169,7 @@ button.soft-tile:active { background-color: alpha(currentColor, 0.13); }
   background-color: alpha(@accent_bg_color, 0.16);
   color: @accent_color;
 }
+.card-icon.small { min-width: 40px; min-height: 40px; border-radius: 12px; }
 /* Connect by USB Cable: numbered steps, the ones still ahead dimmed. */
 .step-number {
   min-width: 22px;
