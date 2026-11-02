@@ -41,6 +41,9 @@
 //! early when the computer ends the terminal).
 //! `--notifications-later SECONDS` starts without `notifications` and announces it after
 //! that long, as when the user turns the listener on.
+//! `--gallery DIR` shows the photos and videos under DIR as its gallery: a folder is an
+//! album, a file's modification time is when it was taken, a JPEG or PNG up to 256 KiB is
+//! its own thumbnail.
 
 use std::time::Duration;
 
@@ -65,6 +68,7 @@ async fn main() {
     let mut connect: Option<std::net::SocketAddr> = None;
     let mut no_discovery = false;
     let mut files: Option<std::path::PathBuf> = None;
+    let mut gallery: Option<std::path::PathBuf> = None;
     let mut clip_file: Option<std::path::PathBuf> = None;
     let mut clip_text: Option<String> = None;
     let mut terminal: Option<String> = None;
@@ -109,6 +113,7 @@ async fn main() {
             "--location" => location = value().split_once(',').and_then(|(a, b)| Some((a.trim().parse().ok()?, b.trim().parse().ok()?))),
             "--away" => away = true,
             "--files" => files = Some(value().into()),
+            "--gallery" => gallery = Some(value().into()),
             "--leave-after" => leave_after = Some(value().parse().expect("--leave-after SECONDS")),
             "--press" => {
                 press = Some(match value().as_str() {
@@ -141,6 +146,12 @@ async fn main() {
     config.features = ["files", "clipboard", "open_url", "battery", "ring", "media_remote", "call_state", "heartbeat", "import", "fs", "input", "screen", "camera", "display", "watch", "locate", "microphone", "notifications"].map(String::from).to_vec();
     if notifications_later.is_some() {
         config.features.retain(|f| f != "notifications");
+    }
+    if gallery.is_some() {
+        config.features.push("gallery".into());
+    }
+    if chats {
+        config.features.push("inbox_history".into());
     }
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
     let node = Node::start(config).await.expect("start");
@@ -221,7 +232,17 @@ async fn main() {
         };
         let list = [
             RemoteNotification { conversation: Some("Alice".into()), ..chat("0|com.whatsapp|1|alice", "com.whatsapp", "WhatsApp", "Alice", "Are we still on for lunch?") },
-            RemoteNotification { conversation: Some("Family".into()), sender: Some("Bob".into()), group: true, ..chat("0|com.whatsapp|1|family", "com.whatsapp", "WhatsApp", "Family", "Bob: Photos from Sunday are up") },
+            RemoteNotification {
+                conversation: Some("Family".into()),
+                sender: Some("Bob".into()),
+                group: true,
+                messages: vec![
+                    linksy_core::ConversationMessage { sender: Some("Mum".into()), text: "Is everyone coming on Sunday?".into(), time: Some(now - 2_400_000), mine: false },
+                    linksy_core::ConversationMessage { sender: None, text: "Me too. I'll bring the cake".into(), time: Some(now - 1_200_000), mine: true },
+                    linksy_core::ConversationMessage { sender: Some("Bob".into()), text: "Photos from Sunday are up".into(), time: Some(now), mine: false },
+                ],
+                ..chat("0|com.whatsapp|1|family", "com.whatsapp", "WhatsApp", "Family", "Bob: Photos from Sunday are up")
+            },
             RemoteNotification { can_reply: false, ..chat("0|com.google.android.apps.messaging|1|bank", "com.google.android.apps.messaging", "Messages", "BNI", "Your verification code is 482913. It expires in 5 minutes. Never share it.") },
             RemoteNotification { category: Some("email".into()), can_reply: false, ..chat("0|com.google.android.gm|1|mail", "com.google.android.gm", "Gmail", "GitHub", "[LinkSy-mg/linksy-desktop] New issue: Extended screen taps") },
             RemoteNotification { conversation: Some("#general".into()), sender: Some("ana".into()), group: true, ..chat("0|com.discord|1|general", "com.discord", "Discord", "Linksy · #general", "ana: the new release works on my Steam Deck") },
@@ -382,6 +403,15 @@ async fn main() {
             }
         });
     }
+    if let Some(root) = gallery {
+        let mut calls = node.incoming_gallery().expect("gallery requests");
+        let serving = node.clone();
+        tokio::spawn(async move {
+            while let Some(call) = calls.recv().await {
+                show_gallery(call, &root, &serving).await;
+            }
+        });
+    }
     if let Some(seconds) = call {
         let node = node.clone();
         tokio::spawn(async move {
@@ -493,6 +523,20 @@ async fn main() {
                 Ok(Event::NotificationReply { from, key, text }) => println!("REPLY to {key} from {}: {text}", from.name),
                 Ok(Event::NotificationAction { key, action, .. }) => println!("ACTION {action} on {key}"),
                 Ok(Event::NotificationDismissed { key, .. }) => println!("DISMISSED {key}"),
+                // A made-up past: a message every hour, three days back.
+                Ok(Event::InboxHistory { from, app, conversation, before_ms, limit }) if chats => {
+                    let oldest = before_ms.saturating_sub(3 * 86_400_000);
+                    let times: Vec<u64> = (1..=limit as u64).map(|i| before_ms.saturating_sub(i * 3_600_000)).filter(|t| *t > oldest).collect();
+                    let more = times.len() == limit as usize;
+                    let messages = times
+                        .into_iter()
+                        .rev()
+                        .enumerate()
+                        .map(|(i, time)| linksy_core::ConversationMessage { sender: Some(if i % 2 == 0 { "Mum" } else { "Bob" }.into()), text: format!("Earlier message {}", i + 1), time: Some(time), mine: i % 5 == 4 })
+                        .collect::<Vec<_>>();
+                    println!("history for {conversation}: {} messages{}", messages.len(), if more { ", more" } else { "" });
+                    let _ = node.inbox_history_page(&from.id, &app, &conversation, messages, more).await;
+                }
                 Ok(Event::HeartbeatWatch { from, on: true, every_s }) => {
                     println!("{} asks for a heartbeat every {every_s} s", from.name);
                     let node = node.clone();
@@ -604,6 +648,93 @@ fn fake_messages(thread: &str) -> Vec<linksy_core::SmsMessage> {
 }
 
 /// Answer a file request from `root`, as a phone serves its storage.
+/// The photos and videos under `root`, newest first by modification time (then id).
+fn gallery_items(root: &std::path::Path) -> Vec<(linksy_core::GalleryItem, String, std::path::PathBuf)> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let path = e.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else {
+                out.push(path);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(root, &mut files);
+    let mut items: Vec<_> = files
+        .into_iter()
+        .filter_map(|path| {
+            let ext = path.extension()?.to_str()?.to_ascii_lowercase();
+            let video = matches!(ext.as_str(), "mp4" | "mkv" | "webm" | "3gp");
+            if !video && !matches!(ext.as_str(), "jpg" | "jpeg" | "png" | "webp" | "heic") {
+                return None;
+            }
+            let meta = path.metadata().ok()?;
+            let taken_ms = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
+            let id = path.strip_prefix(root).ok()?.to_string_lossy().into_owned();
+            let album = path.parent()?.strip_prefix(root).ok()?.to_string_lossy().into_owned();
+            let name = path.file_name()?.to_string_lossy().into_owned();
+            let item = linksy_core::GalleryItem { id, name, video, taken_ms, size: meta.len(), duration_ms: video.then_some(14_000) };
+            Some((item, album, path))
+        })
+        .collect();
+    items.sort_by(|a, b| (b.0.taken_ms, &b.0.id).cmp(&(a.0.taken_ms, &a.0.id)));
+    items
+}
+
+async fn show_gallery(call: linksy_core::gallery::GalleryCall, root: &std::path::Path, node: &Node) {
+    use linksy_core::GalleryRequest;
+    let all = gallery_items(root);
+    let result = match call.request.clone() {
+        GalleryRequest::Albums => {
+            let mut albums: Vec<linksy_core::GalleryAlbum> = Vec::new();
+            for (_, album, _) in &all {
+                match albums.iter_mut().find(|a| a.id == *album) {
+                    Some(a) => a.count += 1,
+                    None => albums.push(linksy_core::GalleryAlbum { id: album.clone(), name: album.rsplit('/').next().unwrap_or(album).to_string(), count: 1 }),
+                }
+            }
+            call.albums(albums).await
+        }
+        GalleryRequest::Items { album, before, limit } => {
+            let matching: Vec<_> = all
+                .into_iter()
+                .filter(|(_, a, _)| album.as_ref().is_none_or(|want| want == a))
+                .filter(|(item, _, _)| before.as_ref().is_none_or(|b| (item.taken_ms, &item.id) < (b.taken_ms, &b.id)))
+                .map(|(item, _, _)| item)
+                .collect();
+            let more = matching.len() > limit as usize;
+            println!("gallery page: {} items{}", matching.len().min(limit as usize), if more { ", more" } else { "" });
+            call.items(matching.into_iter().take(limit as usize).collect(), more).await
+        }
+        GalleryRequest::Thumb { id, .. } => match all.iter().find(|(item, _, _)| item.id == id) {
+            Some((_, _, path)) => match std::fs::read(path) {
+                Ok(bytes) if bytes.len() as u64 <= linksy_core::gallery::MAX_THUMB && (bytes.starts_with(&[0xff, 0xd8]) || bytes.starts_with(b"\x89PNG")) => call.thumb(&bytes).await,
+                _ => call.error("no thumbnail for this one").await,
+            },
+            None => call.error("no such photo").await,
+        },
+        GalleryRequest::Send { ids, transfer } => {
+            let paths: Vec<_> = all.iter().filter(|(item, _, _)| ids.contains(&item.id)).map(|(_, _, path)| path.clone()).collect();
+            let to = call.from.id;
+            if paths.is_empty() {
+                call.error("no such photos").await
+            } else {
+                let sent = call.ok().await;
+                match node.send_gallery(&to, paths, transfer).await {
+                    Ok(_) => println!("gallery: sending {} to the computer", ids.len()),
+                    Err(e) => println!("gallery send: {e}"),
+                }
+                sent
+            }
+        }
+    };
+    if let Err(e) = result {
+        println!("gallery answer: {e}");
+    }
+}
+
 async fn serve(mut call: linksy_core::fs::FsCall, root: &std::path::Path) {
     use linksy_core::{FsEntry, FsRequest};
     use std::io::{Read, Seek, Write};
