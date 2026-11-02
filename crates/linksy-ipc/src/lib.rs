@@ -111,6 +111,10 @@ pub enum Request {
     SetDeckAction { phone: String, action: String, on: bool },
     /// The user's commands, all of them (a new one without an `id`); answers them as saved.
     SetDeckCommands { commands: Vec<DeckCommand> },
+    /// A phone's deck layouts (docs/protocol.md §4.20), as the editor shows them.
+    DeckLayouts { phone: String },
+    /// Save a phone's layouts (checked; their version is set here); answers them as saved.
+    SetDeckLayouts { phone: String, layouts: linksy_core::DeckLayouts },
     /// Forget the screen this computer's user picked for other devices to see or control,
     /// so the desktop's dialog shows the next time one asks. Answers whether one was kept.
     ForgetScreen,
@@ -903,6 +907,14 @@ impl Client {
 
     pub async fn set_deck_commands(&self, commands: Vec<DeckCommand>) -> Result<Vec<DeckCommand>, ClientError> {
         self.call(Request::SetDeckCommands { commands }).await
+    }
+
+    pub async fn deck_layouts(&self, phone: impl Into<String>) -> Result<linksy_core::DeckLayouts, ClientError> {
+        self.call(Request::DeckLayouts { phone: phone.into() }).await
+    }
+
+    pub async fn set_deck_layouts(&self, phone: impl Into<String>, layouts: linksy_core::DeckLayouts) -> Result<linksy_core::DeckLayouts, ClientError> {
+        self.call(Request::SetDeckLayouts { phone: phone.into(), layouts }).await
     }
 
     pub async fn forget_screen(&self) -> Result<bool, ClientError> {

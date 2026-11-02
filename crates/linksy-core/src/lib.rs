@@ -3,6 +3,7 @@
 
 pub mod away;
 pub mod cable;
+pub mod deck_layout;
 mod discovery;
 pub mod invite;
 pub mod error;
@@ -16,6 +17,7 @@ mod tls;
 pub mod transfer;
 pub mod trust;
 
+pub use deck_layout::{DeckFace, DeckLayout, DeckLayouts, DeckTheme, DeckTile};
 pub use error::{Error, Result};
 pub use identity::{DeviceInfo, DeviceKind, Fingerprint};
 pub use node::{Config, DeviceView, Direction, Event, MAX_CLIPBOARD, Node, Session, folder_name, over_usb, Link, link_of};
