@@ -21,7 +21,27 @@ ColumnLayout {
         return out;
     }
 
+    // The folder the rows are from: another one starts at its top
+    property string listed: ""
+
     spacing: Kirigami.Units.largeSpacing
+
+    Component.onCompleted: show()
+
+    KeyedList { id: shown }
+
+    Connections {
+        target: tab.store
+        function onEntriesChanged() { tab.show() }
+    }
+
+    function show() {
+        shown.sync(store.entries, e => (e.dir ? "d/" : "f/") + e.name);
+        if (listed !== store.path) {
+            listed = store.path;
+            list.positionViewAtBeginning();
+        }
+    }
 
     function icon(e) {
         if (e.dir) return "folder";
@@ -108,11 +128,12 @@ ColumnLayout {
             ListView {
                 id: list
                 clip: true
-                model: tab.store.entries
+                model: shown.model
                 delegate: QQC2.ItemDelegate {
                     id: entry
-                    required property var modelData
+                    required property string key
                     required property int index
+                    readonly property var modelData: shown.rows[key]
                     width: list.width
                     text: modelData.name
                     onClicked: {

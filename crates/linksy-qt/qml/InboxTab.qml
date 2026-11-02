@@ -26,7 +26,10 @@ Item {
 
     implicitHeight: Kirigami.Units.gridUnit * 31
 
+    onConversationsChanged: shown.sync(conversations, c => c.id)
+
     Component.onCompleted: {
+        shown.sync(conversations, c => c.id);
         search.text = store.search;
         if (current) {
             store.markRead(current);
@@ -94,6 +97,8 @@ Item {
         store.reply(reply.text.trim());
     }
 
+    KeyedList { id: shown }
+
     QQC2.ButtonGroup { id: showGroup }
     QQC2.ButtonGroup { id: sortGroup }
 
@@ -153,10 +158,11 @@ Item {
                 ListView {
                     id: list
                     clip: true
-                    model: tab.conversations
+                    model: shown.model
                     delegate: QQC2.ItemDelegate {
                         id: row
-                        required property var modelData
+                        required property string key
+                        readonly property var modelData: shown.rows[key]
                         readonly property bool unread: modelData.unread > 0
                         width: list.width
                         highlighted: modelData.id === tab.store.open

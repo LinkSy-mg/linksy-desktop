@@ -20,6 +20,7 @@ fn main() {
         "qml/UpgradeDialog.qml",
         "qml/PhoneFiles.qml",
         "qml/FilesTab.qml",
+        "qml/KeyedList.qml",
         "qml/Inbox.qml",
         "qml/InboxTab.qml",
     ]))

@@ -655,11 +655,27 @@ Kirigami.Page {
     Component {
         id: historyTab
         ColumnLayout {
+            id: historyView
             spacing: 0
+
+            // The newest 150; older ones are still in `linksy history`
+            function show() {
+                entries.sync(app.history.slice(0, 150), e => e.id);
+            }
+
+            Component.onCompleted: show()
+
+            KeyedList { id: entries }
+
+            Connections {
+                target: page.app
+                function onHistoryChanged() { historyView.show() }
+            }
+
             Kirigami.PlaceholderMessage {
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.gridUnit
-                visible: app.history.length === 0
+                visible: entries.model.count === 0
                 icon.name: "view-history"
                 text: app.t("Nothing shared yet")
                 explanation: app.t("Files, clipboard text and pings you exchange show up here.")
@@ -670,14 +686,22 @@ Kirigami.Page {
                 // with no height builds no rows to measure: the most at first.)
                 readonly property real most: Math.max(Kirigami.Units.gridUnit * 8, flick.height - tabBar.height)
                 Layout.preferredHeight: historyList.contentHeight > 0 ? Math.min(historyList.contentHeight, most) : most
-                visible: app.history.length > 0
+                visible: entries.model.count > 0
                 ListView {
                     id: historyList
                     clip: true
-                    model: app.history
-                    delegate: ActivityRow {
+                    model: entries.model
+                    delegate: Item {
+                        id: entry
+                        required property string key
                         width: historyList.width
-                        app: page.app
+                        implicitHeight: activity.implicitHeight
+                        ActivityRow {
+                            id: activity
+                            width: parent.width
+                            app: page.app
+                            modelData: entries.rows[entry.key]
+                        }
                     }
                 }
             }
