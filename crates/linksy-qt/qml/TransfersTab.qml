@@ -113,7 +113,7 @@ ColumnLayout {
                         anchors.centerIn: parent
                         width: Kirigami.Units.iconSizes.smallMedium
                         height: width
-                        source: "network-transmit-receive"
+                        source: "exchange-positions"
                         color: Kirigami.Theme.highlightColor
                     }
                 }

@@ -93,7 +93,7 @@ Rectangle {
                     visible: island.files === 0
                     width: Kirigami.Units.iconSizes.smallMedium
                     height: width
-                    source: "network-transmit-receive"
+                    source: "exchange-positions"
                     color: transfersPart.hovered ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
                 }
             }
