@@ -2869,7 +2869,6 @@ fn is_web_link(url: &str) -> bool {
     !rest.is_empty() && url.len() <= MAX_URL && !url.chars().any(char::is_control)
 }
 
-/// A device name as a folder name: no separators, nothing hidden or empty.
 /// Cut `text` to at most `max` bytes, on a character boundary.
 fn truncate(text: &mut String, max: usize) {
     if text.len() > max {
@@ -2878,7 +2877,8 @@ fn truncate(text: &mut String, max: usize) {
     }
 }
 
-fn folder_name(name: &str) -> String {
+/// A device name as a folder name: no separators, nothing hidden or empty.
+pub fn folder_name(name: &str) -> String {
     let clean: String = name.chars().map(|c| if c == '/' || c == '\\' || c.is_control() { '_' } else { c }).collect();
     let clean = clean.trim().trim_start_matches('.').to_string();
     if clean.is_empty() { "Phone".into() } else { clean }
