@@ -449,10 +449,15 @@ impl<D: Desktop> Deck<D> {
     }
 
     /// The layout a deck has until the user saves one: the clock, the player, the volume,
-    /// and buttons for the rest, wherever there's room.
+    /// and buttons for media, sound, Do Not Disturb, Wi-Fi, Bluetooth and locking where this
+    /// computer has them, row by row (on another page when there's no room).
     fn first_layouts(&self, saved: &Saved) -> DeckLayouts {
         let offered: HashSet<String> = self.offered(saved).into_iter().map(|a| a.id).collect();
-        let buttons: Vec<&str> = ["media.play_pause", "media.next", "sound.mute", "sound.mic_mute"].into_iter().filter(|a| offered.contains(*a)).collect();
+        // Media beside the clock, then a row for sound, then the rest
+        let buttons: Vec<&str> = ["media.play_pause", "media.next", "sound.mute", "sound.mic_mute", "sound.output", "system.dnd", "network.wifi", "network.bluetooth", "system.lock"]
+            .into_iter()
+            .filter(|a| offered.contains(*a))
+            .collect();
         let volume = offered.contains("sound.volume");
         let tile = |kind: &str, (x, y): (u8, u8), (w, h): (u8, u8), action: Option<&str>| DeckTile {
             id: action.unwrap_or(kind).into(),
@@ -1057,19 +1062,24 @@ mod tests {
         let d = deck(&dir);
         let first = d.layouts(&phone(1));
         assert_eq!((first.version, first.active.as_str(), first.layouts.len()), (0, "standard", 1));
-        let all = HashSet::from(["media.play_pause", "media.next", "sound.volume", "sound.mute", "sound.mic_mute"]);
-        assert_eq!(first.check(|a| all.contains(a)), Ok(()));
-        let buttons = [("button", Some("media.play_pause")), ("button", Some("media.next")), ("button", Some("sound.mute")), ("button", Some("sound.mic_mute"))];
+        assert_eq!(first.check(|a| OFFERED.contains(&a)), Ok(()));
+        let buttons = ["media.play_pause", "media.next", "sound.mute", "sound.mic_mute", "sound.output", "system.dnd", "network.wifi", "network.bluetooth", "system.lock"];
         for face in [&first.layouts[0].portrait, &first.layouts[0].landscape] {
             let mut want = vec![("clock", None), ("music", None), ("volume", Some("sound.volume"))];
-            want.extend(buttons);
+            want.extend(buttons.map(|b| ("button", Some(b))));
             assert_eq!(kinds(face), want);
         }
+        // Rows: the clock and media, the player, the volume, sound, the rest
+        let at = |face: &DeckFace| face.pages[0].iter().map(|t| (t.x, t.y)).collect::<Vec<_>>();
+        assert_eq!(at(&first.layouts[0].portrait), [(0, 0), (0, 1), (0, 3), (2, 0), (3, 0), (0, 4), (1, 4), (2, 4), (3, 4), (0, 5), (1, 5), (2, 5)]);
+        assert_eq!(at(&first.layouts[0].landscape), [(4, 0), (0, 0), (0, 2), (6, 0), (7, 0), (8, 0), (4, 1), (5, 1), (6, 1), (7, 1), (8, 1), (4, 2)]);
         assert_eq!(first.layouts[0].theme.id, "stock");
         assert!(!dir.path().join("deck.json").exists(), "not saved");
 
-        let quiet = ready(dir.path().join("quiet.json"), Fake { without: &["sound"], ..Default::default() });
-        assert_eq!(kinds(&quiet.layouts(&phone(1)).layouts[0].portrait), [("clock", None), ("music", None), ("button", Some("media.play_pause")), ("button", Some("media.next"))]);
+        let plain = ready(dir.path().join("plain.json"), Fake { without: &["sound", "dnd", "wifi", "bluetooth"], ..Default::default() });
+        let first = plain.layouts(&phone(1));
+        assert_eq!(kinds(&first.layouts[0].portrait), [("clock", None), ("music", None), ("button", Some("media.play_pause")), ("button", Some("media.next")), ("button", Some("system.lock"))]);
+        assert_eq!(at(&first.layouts[0].portrait)[4], (0, 3));
     }
 
     #[test]
