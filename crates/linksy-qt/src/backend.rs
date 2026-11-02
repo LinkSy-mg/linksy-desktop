@@ -229,6 +229,10 @@ pub mod qobject {
         #[qsignal]
         fn history(self: Pin<&mut Backend>, json: QString);
 
+        /// A phone's conversation changed: a message came in, was read or answered.
+        #[qsignal]
+        fn inbox(self: Pin<&mut Backend>, json: QString);
+
         /// Couldn't reach the service, or it went away.
         #[qsignal]
         fn offline(self: Pin<&mut Backend>, why: QString);
@@ -308,7 +312,7 @@ impl qobject::Backend {
                 b.as_mut().set_starting(false);
                 b.as_mut().set_connected(true);
             });
-            let (mut events, mut history) = (client.events(), client.history_updates());
+            let (mut events, mut history, mut inbox) = (client.events(), client.history_updates(), client.inbox_updates());
             use tokio::sync::broadcast::error::RecvError;
             loop {
                 tokio::select! {
@@ -324,6 +328,14 @@ impl qobject::Backend {
                         Ok(h) => {
                             let json = serde_json::to_string(&h).unwrap_or_default();
                             let _ = thread.queue(move |b| b.history(QString::from(&json)));
+                        }
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => break,
+                    },
+                    c = inbox.recv() => match c {
+                        Ok(c) => {
+                            let json = serde_json::to_string(&c).unwrap_or_default();
+                            let _ = thread.queue(move |b| b.inbox(QString::from(&json)));
                         }
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,

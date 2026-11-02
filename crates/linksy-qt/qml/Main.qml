@@ -45,6 +45,8 @@ Kirigami.ApplicationWindow {
     signal sessionEnded(string id)
     // A camera used here says what it can do and how it's set
     signal cameraState(string session, var state)
+    // A phone's conversation changed (MessagesPage)
+    signal conversationChanged(var conversation)
 
     readonly property var selected: devices.find(d => d.device.id === selectedId) ?? null
 
@@ -57,6 +59,7 @@ Kirigami.ApplicationWindow {
         }
         onEvent: json => root.handleEvent(JSON.parse(json))
         onHistory: json => root.historyUpdated(JSON.parse(json))
+        onInbox: json => root.conversationChanged(JSON.parse(json))
         onConnectedChanged: {
             if (!connected) {
                 root.corner = [];
@@ -74,6 +77,7 @@ Kirigami.ApplicationWindow {
             if (open === "news") whatsNew.showAnyTime();
             if (open === "upgrade") root.showUpgrade();
             if (open === "camera") root.previewCamera("", "Pixel");
+            if (open === "messages") openMessagesSoon.start();
         }
         onOffline: why => { if (why) root.toast(why) }
         onSetupChecked: json => root.setup = JSON.parse(json)
@@ -160,6 +164,10 @@ Kirigami.ApplicationWindow {
     // What apps get from a phone's camera in use here, with its controls
     function previewCamera(session, name) {
         pageStack.layers.push(Qt.resolvedUrl("CameraPage.qml"), { app: root, session: session, name: backend.cameraName(name) });
+    }
+
+    function openMessages(id) {
+        pageStack.layers.push(Qt.resolvedUrl("MessagesPage.qml"), { app: root, phone: id, name: deviceName(id) });
     }
 
     function openUsb() {
@@ -764,6 +772,12 @@ Kirigami.ApplicationWindow {
         id: openScreen
         interval: 1500
         onTriggered: if (root.selectedId) root.viewScreen(root.selectedId)
+    }
+
+    Timer {
+        id: openMessagesSoon
+        interval: 1500
+        onTriggered: if (root.selectedId) root.openMessages(root.selectedId)
     }
 
     Timer {

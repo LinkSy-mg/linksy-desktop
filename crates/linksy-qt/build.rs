@@ -18,6 +18,7 @@ fn main() {
         "qml/UsbPage.qml",
         "qml/WhatsNew.qml",
         "qml/UpgradeDialog.qml",
+        "qml/MessagesPage.qml",
     ]))
         .qt_module("Quick")
         .qt_module("QuickControls2")

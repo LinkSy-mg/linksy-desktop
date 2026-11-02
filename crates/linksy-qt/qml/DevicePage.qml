@@ -308,6 +308,23 @@ Kirigami.ScrollablePage {
                                             : app.t("Not set: no phone can open a terminal")
             }
             QQC2.Button {
+                id: messagesButton
+                visible: page.phone && page.info !== null && (app.can(page.info, "notifications") || app.can(page.info, "sms"))
+                Kirigami.FormData.label: app.t("Messages") + ":"
+                icon.name: "dialog-messages"
+                text: app.t("Messages")
+                onClicked: app.openMessages(page.info.id)
+            }
+            QQC2.Label {
+                visible: messagesButton.visible
+                Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                textFormat: Text.PlainText
+                text: app.t("Read and answer {device}'s messages here", { device: page.name })
+            }
+            QQC2.Button {
                 visible: page.phone && page.info && app.can(page.info, "fs")
                 Kirigami.FormData.label: app.t("Browse Files") + ":"
                 icon.name: "folder-open"
