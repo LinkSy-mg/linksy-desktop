@@ -29,6 +29,8 @@ Kirigami.Page {
 
     // The tabs this device has, and the one showing
     property string tab: "use"
+    // What the History tab shows: all, files, clipboard or links
+    property string historyFilter: "all"
     // Development aid (screenshots): LINKSY_SCREENSHOT_TAB=inbox opens that tab once it shows
     property string wanted: backend.env("LINKSY_SCREENSHOT_TAB")
     // A string first, so the list changes only when the tabs do, not with every device update
@@ -56,13 +58,6 @@ Kirigami.Page {
             text: app.t("Send Files")
             visible: page.trusted
             onTriggered: filePicker.open()
-        },
-        Kirigami.Action {
-            icon.name: "edit-clear-history"
-            text: app.t("Clear")
-            displayHint: Kirigami.DisplayHint.AlwaysHide
-            visible: page.trusted
-            onTriggered: app.request("clear_history", { with: page.info.id }, ok => { if (ok) app.history = [] })
         },
         Kirigami.Action {
             icon.name: "edit-delete"
@@ -658,9 +653,11 @@ Kirigami.Page {
             id: historyView
             spacing: 0
 
-            // The newest 150; older ones are still in `linksy history`
+            // The newest 150, of the kind chosen; older ones are still in `linksy history`
             function show() {
-                entries.sync(app.history.slice(0, 150), e => e.id);
+                const kind = ({ files: "files", clipboard: "clipboard", links: "link" })[page.historyFilter];
+                const shown = app.history.slice(0, 150).filter(e => !kind || e.what.kind === kind);
+                entries.sync(shown, e => e.id, e => ({ day: app.dayLabel(e.at) }));
             }
 
             Component.onCompleted: show()
@@ -670,6 +667,34 @@ Kirigami.Page {
             Connections {
                 target: page.app
                 function onHistoryChanged() { historyView.show() }
+            }
+            Connections {
+                target: page
+                function onHistoryFilterChanged() { historyView.show() }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.bottomMargin: Kirigami.Units.largeSpacing
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+                    Repeater {
+                        model: [["all", app.t("All")], ["files", app.t("Files")], ["clipboard", app.t("Clipboard")], ["links", app.t("Links")]]
+                        delegate: FilterPill {
+                            required property var modelData
+                            text: modelData[1]
+                            chosen: page.historyFilter === modelData[0]
+                            onClicked: page.historyFilter = modelData[0]
+                        }
+                    }
+                }
+                QQC2.Button {
+                    Layout.alignment: Qt.AlignTop
+                    flat: true
+                    text: app.t("Clear")
+                    onClicked: app.request("clear_history", { with: page.info.id }, ok => { if (ok) app.history = [] })
+                }
             }
 
             Kirigami.PlaceholderMessage {
@@ -691,6 +716,17 @@ Kirigami.Page {
                     id: historyList
                     clip: true
                     model: entries.model
+                    section.property: "day"
+                    section.delegate: QQC2.Label {
+                        required property string section
+                        width: historyList.width
+                        topPadding: Kirigami.Units.largeSpacing
+                        bottomPadding: Kirigami.Units.smallSpacing
+                        text: section
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        font.bold: true
+                        opacity: 0.7
+                    }
                     delegate: Item {
                         id: entry
                         required property string key
@@ -864,6 +900,32 @@ Kirigami.Page {
                     }
                 }
             }
+        }
+    }
+
+    // One of the History tab's kinds, filled in when chosen
+    component FilterPill: QQC2.AbstractButton {
+        id: pill
+        property bool chosen: false
+        hoverEnabled: true
+        implicitWidth: implicitContentWidth + leftPadding + rightPadding
+        implicitHeight: implicitContentHeight + topPadding + bottomPadding
+        topPadding: Kirigami.Units.smallSpacing
+        bottomPadding: Kirigami.Units.smallSpacing
+        leftPadding: Kirigami.Units.largeSpacing * 1.5
+        rightPadding: Kirigami.Units.largeSpacing * 1.5
+        Accessible.checkable: true
+        Accessible.checked: pill.chosen
+        contentItem: QQC2.Label {
+            text: pill.text
+            font.weight: Font.DemiBold
+            color: pill.chosen ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+        }
+        background: Rectangle {
+            radius: height / 2
+            color: pill.chosen ? Kirigami.Theme.highlightColor : Qt.alpha(Kirigami.Theme.textColor, pill.down ? 0.16 : pill.hovered ? 0.11 : 0.07)
+            border.width: pill.visualFocus ? 1 : 0
+            border.color: Kirigami.Theme.focusColor
         }
     }
 
