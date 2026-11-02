@@ -3,7 +3,9 @@
 //! a Unix socket and can come and go.
 
 mod clipboard;
+mod codes;
 mod history;
+mod inbox;
 mod ipc;
 mod links;
 mod lock;
@@ -244,10 +246,8 @@ async fn run() -> ExitCode {
     if node.info().features.iter().any(|f| f == "direct_join") {
         tokio::spawn(direct::run(node.clone()));
     }
-    let mirror = mirror::Mirror::load(data_dir.join("notifications.json"), icons, socket.clone());
-    if args.notifications {
-        tokio::spawn(mirror.clone().run(node.clone()));
-    }
+    let mirror = mirror::Mirror::load(data_dir.join("notifications.json"), icons, socket.clone(), args.notifications);
+    tokio::spawn(mirror.clone().run(node.clone()));
     #[cfg(target_os = "linux")]
     let _ = dav::BRIDGES.set(dav::Bridges::start(data_dir.join("files.json"), node.clone()).await);
     #[cfg(target_os = "linux")]

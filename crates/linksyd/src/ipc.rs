@@ -66,6 +66,21 @@ async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror
             }
         }
     });
+    let mut inbox = mirror.inbox().subscribe();
+    let inbox_tx = tx.clone();
+    let forward_inbox = tokio::spawn(async move {
+        loop {
+            match inbox.recv().await {
+                Ok(inbox) => {
+                    if inbox_tx.send(ServerMsg::Inbox { inbox }).is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            }
+        }
+    });
     let writer = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             let Ok(mut line) = serde_json::to_vec(&msg) else { continue };
@@ -102,6 +117,7 @@ async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror
     }
     forward.abort();
     forward_history.abort();
+    forward_inbox.abort();
     writer.abort();
 }
 
@@ -192,6 +208,16 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
         Request::ReplyNotification { from, key, text } => {
             let id = resolve(node, &from)?;
             mirror.reply(node, &id, &key, &text).await?;
+            Ok(Value::Null)
+        }
+        Request::Inbox => serde_json::to_value(mirror.inbox().list()).map_err(|e| e.to_string()),
+        Request::InboxThread { conversation } => serde_json::to_value(mirror.inbox().thread(&conversation).ok_or("that conversation is gone")?).map_err(|e| e.to_string()),
+        Request::InboxRead { conversation } => {
+            mirror.read(&conversation).await;
+            Ok(Value::Null)
+        }
+        Request::InboxReply { conversation, text } => {
+            mirror.reply_in(node, &conversation, &text).await?;
             Ok(Value::Null)
         }
         Request::NotificationPrefs => serde_json::to_value(mirror.prefs()).map_err(|e| e.to_string()),

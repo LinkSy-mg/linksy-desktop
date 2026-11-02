@@ -333,7 +333,7 @@ fn announce(from: &str, text: &str, copied: bool) {
     }
 }
 
-fn copy_text(text: &str) -> std::io::Result<()> {
+pub(crate) fn copy_text(text: &str) -> std::io::Result<()> {
     let tools = copiers(&[("wl-copy", &[])], &[("xclip", &["-selection", "clipboard"]), ("xsel", &["--clipboard", "--input"])]);
     let mut last = std::io::Error::new(std::io::ErrorKind::NotFound, "no clipboard tool (wl-copy, xclip or xsel)");
     for (cmd, args) in tools {

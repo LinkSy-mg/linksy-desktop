@@ -48,6 +48,12 @@ pub enum Request {
     /// Whether phone notifications show here, and which apps are muted.
     NotificationPrefs,
     SetNotificationPrefs { prefs: NotificationPrefs },
+    /// The phones' conversations, made from their message notifications: the list (each
+    /// with its newest message), one's messages, read here, and replying.
+    Inbox,
+    InboxThread { conversation: String },
+    InboxRead { conversation: String },
+    InboxReply { conversation: String, text: String },
     /// Texting through a phone: its conversations, a conversation's messages (newest
     /// first, older than `before_ms` to page back), and sending one.
     SmsThreads { phone: String },
@@ -357,12 +363,53 @@ pub struct UpdateInfo {
 pub struct NotificationPrefs {
     pub show: bool,
     pub muted: Vec<MutedApp>,
+    /// A verification code in a message goes on the clipboard by itself.
+    pub copy_codes: bool,
 }
 
 impl Default for NotificationPrefs {
     fn default() -> Self {
-        Self { show: true, muted: Vec::new() }
+        Self { show: true, muted: Vec::new(), copy_codes: true }
     }
+}
+
+/// A conversation from a phone's messaging app, as its notifications told it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Conversation {
+    pub id: String,
+    pub phone: String,
+    pub phone_name: String,
+    pub app: String,
+    pub app_name: String,
+    /// `chat`, `sms`, `mail` or `social`: the icon to show when the phone sent none.
+    pub kind: String,
+    pub title: String,
+    #[serde(default)]
+    pub group: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last: Option<InboxMessage>,
+    #[serde(default)]
+    pub unread: u32,
+    /// The phone still has a notification to answer through.
+    #[serde(default)]
+    pub can_reply: bool,
+    pub at_ms: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InboxMessage {
+    pub at_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default)]
+    pub mine: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -404,6 +451,9 @@ pub enum ServerMsg {
     },
     History {
         history: HistoryEntry,
+    },
+    Inbox {
+        inbox: Conversation,
     },
 }
 
@@ -470,6 +520,7 @@ pub struct Client {
     next: AtomicU64,
     events: broadcast::Sender<Event>,
     history: broadcast::Sender<HistoryEntry>,
+    inbox: broadcast::Sender<Conversation>,
 }
 
 impl Client {
@@ -482,7 +533,8 @@ impl Client {
         let pending: Pending = Arc::default();
         let (events, _) = broadcast::channel(512);
         let (history, _) = broadcast::channel(128);
-        let (p, ev, hist) = (pending.clone(), events.clone(), history.clone());
+        let (inbox, _) = broadcast::channel(128);
+        let (p, ev, hist, convs) = (pending.clone(), events.clone(), history.clone(), inbox.clone());
         tokio::spawn(async move {
             let mut lines = BufReader::new(read).lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -501,13 +553,16 @@ impl Client {
                     Ok(ServerMsg::History { history }) => {
                         let _ = hist.send(history);
                     }
+                    Ok(ServerMsg::Inbox { inbox }) => {
+                        let _ = convs.send(inbox);
+                    }
                     Err(_) => {}
                 }
             }
             // Daemon went away: fail everything still waiting. It's not you, it's the daemon.
             p.lock().unwrap().clear();
         });
-        Ok(Self { writer: tokio::sync::Mutex::new(write), pending, next: AtomicU64::new(1), events, history })
+        Ok(Self { writer: tokio::sync::Mutex::new(write), pending, next: AtomicU64::new(1), events, history, inbox })
     }
 
     pub fn events(&self) -> broadcast::Receiver<Event> {
@@ -517,6 +572,27 @@ impl Client {
     /// History entries as they are added or change (a transfer finishing, say).
     pub fn history_updates(&self) -> broadcast::Receiver<HistoryEntry> {
         self.history.subscribe()
+    }
+
+    /// Conversations as a new message, a read or a reply changes them.
+    pub fn inbox_updates(&self) -> broadcast::Receiver<Conversation> {
+        self.inbox.subscribe()
+    }
+
+    pub async fn inbox(&self) -> Result<Vec<Conversation>, ClientError> {
+        self.call(Request::Inbox).await
+    }
+
+    pub async fn inbox_thread(&self, conversation: impl Into<String>) -> Result<Vec<InboxMessage>, ClientError> {
+        self.call(Request::InboxThread { conversation: conversation.into() }).await
+    }
+
+    pub async fn inbox_read(&self, conversation: impl Into<String>) -> Result<(), ClientError> {
+        self.call(Request::InboxRead { conversation: conversation.into() }).await
+    }
+
+    pub async fn inbox_reply(&self, conversation: impl Into<String>, text: impl Into<String>) -> Result<(), ClientError> {
+        self.call(Request::InboxReply { conversation: conversation.into(), text: text.into() }).await
     }
 
     pub async fn call<T: DeserializeOwned>(&self, request: Request) -> Result<T, ClientError> {

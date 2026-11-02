@@ -29,6 +29,9 @@ struct Inner {
     /// This service's IPC socket, for the reply window it opens.
     socket: PathBuf,
     next: std::sync::atomic::AtomicU64,
+    inbox: crate::inbox::Inbox,
+    /// Shown on the desktop (not with --no-notifications); the inbox fills either way.
+    popups: bool,
 }
 
 struct Shown {
@@ -41,10 +44,36 @@ struct Shown {
 }
 
 impl Mirror {
-    pub fn load(prefs_path: PathBuf, icons: PathBuf, socket: PathBuf) -> Self {
+    pub fn load(prefs_path: PathBuf, icons: PathBuf, socket: PathBuf, popups: bool) -> Self {
         let prefs = std::fs::read(&prefs_path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
-        let inner = Inner { prefs_path, prefs: Mutex::new(prefs), shown: Mutex::default(), icons, socket, next: Default::default() };
+        let inbox = crate::inbox::Inbox::new(icons.clone());
+        let inner = Inner { prefs_path, prefs: Mutex::new(prefs), shown: Mutex::default(), icons, socket, next: Default::default(), inbox, popups };
         Self { inner: Arc::new(inner) }
+    }
+
+    pub fn inbox(&self) -> &crate::inbox::Inbox {
+        &self.inner.inbox
+    }
+
+    /// Conversation `id` read in the app: its notification here goes too.
+    pub async fn read(&self, id: &str) {
+        self.inner.inbox.read(id);
+        let Some((phone, key, _)) = self.inner.inbox.notification(id) else { return };
+        let gone = self.inner.shown.lock().unwrap().remove(&(phone, key));
+        if let Some(s) = gone {
+            close(s.id).await;
+        }
+    }
+
+    /// Answer conversation `id` through the phone's notification.
+    pub async fn reply_in(&self, node: &Node, id: &str, text: &str) -> Result<(), String> {
+        let (phone, key, can_reply) = self.inner.inbox.notification(id).ok_or("answer it on the phone: its notification is gone")?;
+        if !can_reply {
+            return Err("this app's notification can't be answered from here".into());
+        }
+        self.reply(node, &phone, &key, text).await?;
+        self.inner.inbox.replied(id, text);
+        Ok(())
     }
 
     pub fn prefs(&self) -> NotificationPrefs {
@@ -97,11 +126,17 @@ impl Mirror {
             match events.recv().await {
                 Ok(Event::NotificationPosted { from, notification }) => {
                     let prefs = self.prefs();
-                    if prefs.show && !prefs.muted.iter().any(|m| m.app == notification.app) {
-                        self.show(node.clone(), from, notification);
+                    if prefs.muted.iter().any(|m| m.app == notification.app) {
+                        continue;
+                    }
+                    let code = self.inner.inbox.posted(&from, &notification);
+                    let copied = code.as_deref().filter(|_| prefs.copy_codes).is_some_and(|c| crate::clipboard::copy_text(c).is_ok());
+                    if prefs.show && self.inner.popups {
+                        self.show(node.clone(), from, notification, code, copied);
                     }
                 }
                 Ok(Event::NotificationRemoved { from, key }) => {
+                    self.inner.inbox.removed(&from.id, &key);
                     let gone = self.inner.shown.lock().unwrap().remove(&(from.id, key));
                     if let Some(s) = gone {
                         close(s.id).await;
@@ -114,7 +149,7 @@ impl Mirror {
     }
 
     #[cfg(target_os = "linux")]
-    fn show(&self, node: Node, from: DeviceInfo, n: RemoteNotification) {
+    fn show(&self, node: Node, from: DeviceInfo, n: RemoteNotification, code: Option<String>, copied: bool) {
         use notify_rust::{CloseReason, NotificationResponse};
 
         let entry = (from.id, n.key.clone());
@@ -125,11 +160,12 @@ impl Mirror {
             shown.insert(entry.clone(), Shown { from: from.clone(), notification: n.clone(), id: previous, generation });
             previous
         };
-        let icon = n.icon.as_deref().and_then(|b64| self.unpack_icon(&n.app, b64));
+        let icon = n.icon.as_deref().and_then(|b64| crate::inbox::unpack(&self.inner.icons, &n.app, b64));
         let mirror = self.clone();
         let rt = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
-            let body = if n.body.is_empty() { format!("{} · {}", n.app_name, from.name) } else { format!("{}\n{} · {}", n.body, n.app_name, from.name) };
+            let source = if copied { t!("{app} · {device} · code copied", app = n.app_name, device = from.name) } else { format!("{} · {}", n.app_name, from.name) };
+            let body = if n.body.is_empty() { source } else { format!("{}\n{source}", n.body) };
             let mut note = crate::notify::base(&n.title, &body);
             if let Some(icon) = &icon {
                 note.icon(&icon.to_string_lossy());
@@ -138,10 +174,13 @@ impl Mirror {
                 // Same notification, new content: update it in place.
                 note.id(previous);
             }
+            if let Some(code) = &code {
+                note.action(&format!("copy:{code}"), &t!("Copy {code}", code));
+            }
             if n.can_reply {
                 note.action("reply", t!("Reply"));
             }
-            if let Some(b) = n.actions.first() {
+            if let Some(b) = n.actions.first().filter(|_| code.is_none() || !n.can_reply) {
                 note.action(&format!("act:{}", b.id), &b.label);
             }
             note.action("mute", &t!("Mute {app}", app = n.app_name));
@@ -178,6 +217,9 @@ impl Mirror {
                             warn!("could not open the reply window: {e}");
                         }
                     }
+                    NotificationResponse::Action(a) if a.starts_with("copy:") => {
+                        let _ = crate::clipboard::copy_text(&a[5..]);
+                    }
                     NotificationResponse::Action(a) if a == "mute" => {
                         mirror.mute(&n.app, &n.app_name);
                         mirror.inner.shown.lock().unwrap().remove(&entry);
@@ -200,23 +242,6 @@ impl Mirror {
                 }
             });
         });
-    }
-
-    /// Write an app's icon (base64 PNG) where the notification server can read it.
-    #[cfg(target_os = "linux")]
-    fn unpack_icon(&self, app: &str, b64: &str) -> Option<PathBuf> {
-        use base64::Engine;
-        let png = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
-        if !png.starts_with(b"\x89PNG") {
-            return None;
-        }
-        let name: String = app.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' }).collect();
-        let path = self.inner.icons.join(format!("{name}.png"));
-        if std::fs::read(&path).ok().as_deref() != Some(&png[..]) {
-            std::fs::create_dir_all(&self.inner.icons).ok()?;
-            std::fs::write(&path, &png).ok()?;
-        }
-        Some(path)
     }
 }
 
