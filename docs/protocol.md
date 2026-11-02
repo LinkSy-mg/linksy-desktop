@@ -250,6 +250,7 @@ and close the other with reason `duplicate`.
   {"type":"notify","title":"Ping","body":""}
   {"type":"clipboard","text":"…"}             // ≤ 256 KiB of UTF-8, else ignored
   {"type":"renamed","name":"Living Room PC"}    // sender's new name
+  {"type":"features","features":["files","notifications"]}  // sender's features now (§4.10)
   {"type":"ping"}
   {"type":"open_url","url":"https://…"}        // "Open on PC": open in the browser
   {"type":"battery","level":82,"charging":false} // sender's battery, percent 0–100
@@ -350,7 +351,8 @@ and close the other with reason `duplicate`.
 
   **Phone, for 0.11 (decided 2026-11-02):** a `NotificationListenerService` in the Linksy
   app itself, not a separate app. Skip Linksy's own notifications and ongoing ones (music,
-  navigation, downloads); announce `notifications` in `features` while it's on. On Android
+  navigation, downloads); announce `notifications` in `features` while it's on
+  (`Node::set_features`, §4.10). On Android
   13+ an app installed from the web finds the switch greyed out: ask once, then guide App
   info › ⋮ › Allow restricted settings, then ask again. The listener makes Play Protect
   block browser installs in many countries with no "Install anyway": the download page and
@@ -747,7 +749,11 @@ controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifica
 `direct_join` (joins them: a computer whose NetworkManager has a Wi-Fi Direct device, or a
 phone), `direct_group` (hosts and joins Wi-Fi Direct groups by name and passphrase: phones,
 §4.17 "Phone to phone").
-Set `Config.features` in the core. A desktop announces all of them,
+Set `Config.features` in the core. To change them while running (`notifications` turned
+on or off), call `Node::set_features`: connected devices get a `features` message
+(at most 64 names of up to 64 bytes) and update at once, others see the new list at the
+next handshake. Older desktops ignore the message until they reconnect.
+A desktop announces all of them,
 except `clipboard_watch` where its desktop doesn't let apps watch the clipboard (GNOME).
 When a device sends no list (older versions), the desktop assumes everything except, for
 `os == "android"`, `sms`, `notifications`, `media_state`, `control`, `clipboard_file`,
@@ -1945,3 +1951,6 @@ robust against any encoder (GPU ones may slice too):
   optional `category`, `conversation`, `sender`, `group`, `time` and `picture`; older
   devices ignore them. Phone to-do: fill them from `MessagingStyle`, and send the launcher
   icon at 96 px.
+- **2026-11-02** — Core: `Node::set_features` changes the features while running; connected
+  devices hear a new `features` message (§4.5, §4.10), so `notifications` can be announced
+  when the listener is turned on. Older desktops ignore it until they reconnect.
