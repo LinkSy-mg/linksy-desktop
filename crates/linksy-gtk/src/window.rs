@@ -94,8 +94,9 @@ struct State {
     pictures_checked: std::collections::HashSet<Fingerprint>,
     /// The camera preview on screen: whose camera, and the pipeline reading it.
     preview: Option<(Fingerprint, gstreamer::Element)>,
-    /// Whose deck page shows.
+    /// Whose deck page shows, and its editor.
     deck: Option<Fingerprint>,
+    deck_editor: Option<Rc<deck::Editor>>,
     /// Opening Linksy starts its service once, if it isn't running.
     started_service: bool,
     restarted_service: bool,
@@ -408,8 +409,10 @@ impl Window {
         });
         let w = Rc::downgrade(&win);
         win.camera_back.connect_clicked(move |_| {
-            if let Some(w) = w.upgrade() {
-                w.close_deck();
+            let Some(w) = w.upgrade() else { return };
+            if w.state.borrow().deck.is_some() {
+                w.leave_deck();
+            } else {
                 w.stop_preview();
                 w.render_page();
             }
