@@ -690,18 +690,15 @@ Kirigami.Page {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 14
-                    banner.title: app.t("Deck")
-                    banner.titleIcon: "view-grid"
                     contentItem: Item {
-                        implicitWidth: deckText.implicitWidth
-                        implicitHeight: deckText.implicitHeight
-                        QQC2.Label {
-                            id: deckText
+                        implicitWidth: deckHead.implicitWidth
+                        implicitHeight: deckHead.implicitHeight
+                        CardHead {
+                            id: deckHead
                             width: parent.width
-                            wrapMode: Text.Wrap
-                            opacity: 0.75
-                            textFormat: Text.PlainText
-                            text: app.t("Buttons for this computer on {device}", { device: page.name })
+                            title: app.t("Deck")
+                            iconName: "view-grid"
+                            description: app.t("Buttons for this computer on {device}", { device: page.name })
                         }
                     }
                     actions: Kirigami.Action {
@@ -1233,8 +1230,6 @@ Kirigami.Page {
         Layout.fillWidth: true
         Layout.fillHeight: true
         Layout.preferredWidth: Kirigami.Units.gridUnit * 14
-        banner.title: card.title
-        banner.titleIcon: card.iconName
         // Kirigami stretches a card's contentItem to the card's full height when the card grows (as
         // its row does for the other card), and a stretched ColumnLayout centres its rows onto the
         // actions: the column inside keeps its own height
@@ -1245,11 +1240,12 @@ Kirigami.Page {
                 id: column
                 width: parent.width
                 spacing: Kirigami.Units.largeSpacing
-                QQC2.Label {
+                CardHead {
                     Layout.fillWidth: true
-                    text: card.running ? app.t("Live now") : card.subtitle
-                    wrapMode: Text.Wrap
-                    opacity: 0.75
+                    title: card.title
+                    iconName: card.iconName
+                    description: card.subtitle
+                    live: card.running !== null
                 }
                 // A microphone in use here: what it hears
                 MicWave {
@@ -1284,6 +1280,69 @@ Kirigami.Page {
                 }
             }
         ]
+    }
+
+    // A Use As card's head: its title (and Live while it runs) beside its icon, then what it does
+    component CardHead: ColumnLayout {
+        id: head
+        property string title
+        property string iconName
+        property string description
+        property bool live: false
+        spacing: Kirigami.Units.largeSpacing
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.largeSpacing
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignTop
+                spacing: Kirigami.Units.smallSpacing
+                Kirigami.Heading {
+                    Layout.fillWidth: true
+                    level: 4
+                    font.bold: true
+                    wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
+                    text: head.title
+                }
+                Rectangle {
+                    visible: head.live
+                    implicitWidth: liveLabel.implicitWidth + Kirigami.Units.largeSpacing * 2
+                    implicitHeight: liveLabel.implicitHeight + 4
+                    radius: height / 2
+                    color: Qt.alpha(Kirigami.Theme.positiveTextColor, 0.16)
+                    QQC2.Label {
+                        id: liveLabel
+                        anchors.centerIn: parent
+                        text: app.t("Live")
+                        font.pointSize: Kirigami.Theme.smallFont.pointSize
+                        font.bold: true
+                        color: Kirigami.Theme.positiveTextColor
+                    }
+                }
+            }
+            Rectangle {
+                Layout.alignment: Qt.AlignTop
+                implicitWidth: Math.round(Kirigami.Units.gridUnit * 2.2)
+                implicitHeight: implicitWidth
+                radius: Kirigami.Units.cornerRadius * 2
+                color: Qt.alpha(Kirigami.Theme.highlightColor, 0.16)
+                Kirigami.Icon {
+                    anchors.centerIn: parent
+                    width: Kirigami.Units.iconSizes.smallMedium
+                    height: width
+                    source: head.iconName
+                    color: Kirigami.Theme.highlightColor
+                }
+            }
+        }
+        QQC2.Label {
+            Layout.fillWidth: true
+            text: head.description
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+        }
     }
 
     // The microphone's sound as it arrives: its latest levels as bars, newest on the right
