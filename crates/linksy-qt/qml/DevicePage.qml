@@ -50,22 +50,47 @@ Kirigami.Page {
     // Where the tabs are in the page, to pin them at its top once it scrolls past them
     readonly property real tabsTop: column.y + tabBar.y
 
-    title: name
+    // Its deck shows in place of the page, with Back
+    property bool deckOpen: false
+
+    title: deckOpen ? app.t("Deck") : name
     padding: 0
-    flickable: flick
+    flickable: deckOpen ? deckFlick : flick
+    titleDelegate: RowLayout {
+        Layout.fillWidth: true
+        Layout.minimumWidth: 0
+        spacing: Kirigami.Units.smallSpacing
+        QQC2.ToolButton {
+            visible: page.deckOpen
+            icon.name: "go-previous"
+            text: page.app.t("Back")
+            display: QQC2.AbstractButton.IconOnly
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: hovered
+            onClicked: page.deckOpen = false
+        }
+        Kirigami.Heading {
+            Layout.fillWidth: true
+            Layout.minimumWidth: 0
+            text: page.title
+            maximumLineCount: 1
+            elide: Text.ElideRight
+            textFormat: Text.PlainText
+        }
+    }
 
     actions: [
         Kirigami.Action {
             icon.name: "document-send"
             text: app.t("Send Files")
-            visible: page.trusted
+            visible: page.trusted && !page.deckOpen
             onTriggered: filePicker.open()
         },
         Kirigami.Action {
             icon.name: "edit-delete"
             text: app.t("Forget Device…")
             displayHint: Kirigami.DisplayHint.AlwaysHide
-            visible: page.trusted
+            visible: page.trusted && !page.deckOpen
             onTriggered: forgetDialog.open()
         }
     ]
@@ -73,6 +98,7 @@ Kirigami.Page {
     onViewChanged: fresh = null
     onDeviceIdChanged: {
         wanted = "";
+        deckOpen = false;
         Qt.callLater(page.rebuild);
     }
     onInboxPhoneChanged: inbox.reset(inboxPhone)
@@ -248,8 +274,37 @@ Kirigami.Page {
         onDropped: drop => { if (drop.hasUrls) app.sendFiles(page.info.id, drop.urls) }
     }
 
+    // The deck in place of the page; the page stays where it was underneath
     QQC2.ScrollView {
         anchors.fill: parent
+        visible: page.deckOpen
+        QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
+
+        Flickable {
+            id: deckFlick
+            contentWidth: width
+            contentHeight: deck.height + Kirigami.Units.gridUnit * 3
+            clip: true
+            flickDeceleration: 1500
+            maximumFlickVelocity: 5000
+            Loader {
+                id: deck
+                x: column.x
+                y: Kirigami.Units.largeSpacing * 2
+                width: column.width
+                active: page.deckOpen
+                sourceComponent: DeckView {
+                    app: page.app
+                    phone: page.deviceId
+                    name: page.name
+                }
+            }
+        }
+    }
+
+    QQC2.ScrollView {
+        anchors.fill: parent
+        visible: !page.deckOpen
         QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
 
         Flickable {
@@ -558,7 +613,7 @@ Kirigami.Page {
 
     // The tabs again, pinned at the top of the page once it scrolls past them
     Rectangle {
-        visible: tabBar.visible && flick.contentY > page.tabsTop
+        visible: !page.deckOpen && tabBar.visible && flick.contentY > page.tabsTop
         width: flick.width
         height: pinned.implicitHeight
         color: Kirigami.Theme.backgroundColor
@@ -652,7 +707,7 @@ Kirigami.Page {
                     actions: Kirigami.Action {
                         text: app.t("Choose Actions…")
                         icon.name: "configure"
-                        onTriggered: app.openDeck(page.info.id)
+                        onTriggered: page.deckOpen = true
                     }
                 }
             }

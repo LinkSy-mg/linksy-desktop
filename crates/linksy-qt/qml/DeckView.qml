@@ -1,11 +1,12 @@
-// A phone's deck, from this computer's side: which actions the phone may run here, a switch
-// each by group. The phone lays the buttons out.
+// A phone's deck, from this computer's side, shown in place of its page: which actions the
+// phone may run here, a switch each by group, and your own commands. The phone lays the
+// buttons out.
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-Kirigami.ScrollablePage {
+ColumnLayout {
     id: page
     required property var app
     required property string phone
@@ -16,8 +17,6 @@ Kirigami.ScrollablePage {
     property string error: ""
     // The groups, in the order the service gives them
     readonly property var groups: options.reduce((out, a) => out.includes(a.group) ? out : out.concat([a.group]), [])
-
-    title: app.t("Deck")
 
     Component.onCompleted: load()
 
@@ -61,6 +60,7 @@ Kirigami.ScrollablePage {
     }
 
     ColumnLayout {
+        Layout.fillWidth: true
         spacing: Kirigami.Units.largeSpacing
 
         Kirigami.InlineMessage {
