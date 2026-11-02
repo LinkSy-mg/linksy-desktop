@@ -1,5 +1,6 @@
-//! A phone's Files tab: a file manager for the folder it shares, one folder at a time. Only
-//! the rows in view are built (a camera folder holds thousands of photos). A click picks a
+//! A phone's Files tab: a file manager for the folder it shares, one folder at a time. The
+//! list grows down the page, 200 rows at a time (a camera folder holds thousands of photos).
+//! A click picks a
 //! row (Ctrl and Shift add to it, as in Files); a double click or Enter opens it: a folder
 //! here, a file through the same bridge as the Files sidebar. Copies to and from the phone
 //! run in the service and show under the list while they go.
@@ -28,6 +29,9 @@ enum SortBy {
 
 /// A menu's choices, one picked at a time.
 type Choices<T> = Vec<(T, gtk::CheckButton)>;
+
+/// Rows built at first, and added each time the page scrolls to their end.
+const ROWS: u32 = 200;
 
 /// A row's entry, with what sorting and searching compare.
 struct Item {
@@ -59,6 +63,9 @@ pub struct FilesView {
     store: gio::ListStore,
     filter: gtk::CustomFilter,
     sorter: gtk::CustomSorter,
+    sorted: gtk::SortListModel,
+    /// The rows built: the first ones, more as the page scrolls to their end.
+    shown: gtk::SliceListModel,
     selection: gtk::MultiSelection,
     list: gtk::ListView,
     stack: gtk::Stack,
@@ -153,7 +160,9 @@ impl FilesView {
             b.entry.dir.cmp(&a.entry.dir).then(if descending { order.reverse() } else { order }).into()
         });
         let filtered = gtk::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
-        let selection = gtk::MultiSelection::new(Some(gtk::SortListModel::new(Some(filtered), Some(sorter.clone()))));
+        let sorted = gtk::SortListModel::new(Some(filtered), Some(sorter.clone()));
+        let shown = gtk::SliceListModel::new(Some(sorted.clone()), 0, ROWS);
+        let selection = gtk::MultiSelection::new(Some(shown.clone()));
 
         let factory = gtk::SignalListItemFactory::new();
         factory.connect_setup(|_, item| {
@@ -189,20 +198,14 @@ impl FilesView {
             detail.set_visible(!detail.label().is_empty());
             next.set_visible(e.dir);
         });
+        // In the page, not a box of its own: it grows down and the page scrolls
         let list = gtk::ListView::builder().model(&selection).factory(&factory).enable_rubberband(true).css_classes(["files-list"]).build();
-        let scroller = gtk::ScrolledWindow::builder()
-            .child(&list)
-            .hscrollbar_policy(gtk::PolicyType::Never)
-            .propagate_natural_height(true)
-            .max_content_height(520)
-            .css_classes(["files-box", "inner-scroll"])
-            .build();
         let status = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).css_classes(["dim-label"]).margin_top(28).margin_bottom(28).build();
         let loading = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(10).halign(gtk::Align::Center).margin_top(28).margin_bottom(28).build();
         loading.append(&super::spinner());
         loading.append(&gtk::Label::builder().label(t!("Loading…")).css_classes(["dim-label"]).build());
         let stack = gtk::Stack::builder().vhomogeneous(false).css_classes(["files-area"]).build();
-        stack.add_named(&scroller, Some("list"));
+        stack.add_named(&list, Some("list"));
         stack.add_named(&status, Some("status"));
         stack.add_named(&loading, Some("loading"));
         let copies = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).visible(false).css_classes(["files-copies"]).build();
@@ -225,6 +228,8 @@ impl FilesView {
             store,
             filter,
             sorter,
+            sorted,
+            shown,
             selection,
             list,
             stack,
@@ -262,6 +267,22 @@ impl FilesView {
                 button.set_label(label);
             }
         }
+    }
+
+    /// The page reached the end of the rows: more of them.
+    pub fn grow(&self) {
+        if self.shown.size() < self.sorted.n_items() {
+            self.shown.set_size(self.shown.size() + ROWS);
+        }
+    }
+
+    /// Where `name` is in the list, with rows built up to it.
+    fn reveal(&self, name: &str) -> Option<u32> {
+        let at = (0..self.sorted.n_items()).find(|&i| self.sorted.item(i).is_some_and(|o| item(&o).entry.name == name))?;
+        if at >= self.shown.size() {
+            self.shown.set_size(at + ROWS);
+        }
+        Some(at)
     }
 
     fn status(&self, text: &str) {
@@ -584,23 +605,15 @@ impl Window {
             match result {
                 Ok(entries) => {
                     let items: Vec<glib::BoxedAnyObject> = entries.into_iter().filter(|e| !e.name.starts_with('.')).map(new_item).collect();
-                    let adjustment = w.files.list.vadjustment().map(|a| a.value());
+                    if moved {
+                        w.files.shown.set_size(ROWS);
+                    }
                     w.files.store.splice(0, w.files.store.n_items(), &items);
                     w.files.show_list();
-                    let at = pick.and_then(|name| (0..w.files.selection.n_items()).find(|&i| w.files.selection.item(i).is_some_and(|o| item(&o).entry.name == name)));
-                    match (at, adjustment) {
-                        (Some(i), _) => w.files.list.scroll_to(i, gtk::ListScrollFlags::SELECT | gtk::ListScrollFlags::FOCUS, None),
-                        (None, Some(y)) if !moved => {
-                            // Where it was, once the rows are laid out again
-                            let list = w.files.list.clone();
-                            glib::idle_add_local_once(move || {
-                                if let Some(a) = list.vadjustment() {
-                                    a.set_value(y);
-                                }
-                            });
-                        }
-                        _ if w.files.selection.n_items() > 0 => w.files.list.scroll_to(0, gtk::ListScrollFlags::NONE, None),
-                        _ => {}
+                    match pick.and_then(|name| w.files.reveal(&name)) {
+                        Some(i) => w.files.list.scroll_to(i, gtk::ListScrollFlags::SELECT | gtk::ListScrollFlags::FOCUS, None),
+                        None if moved => w.page.scroll_to_tabs(),
+                        None => {}
                     }
                 }
                 Err(e) => {

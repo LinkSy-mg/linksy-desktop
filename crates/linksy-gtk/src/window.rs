@@ -603,6 +603,7 @@ impl Window {
                 }
                 page::Action::ClearHistory => w.clear_history(id),
                 page::Action::FilterActivity | page::Action::MoreActivity => w.render_activity(),
+                page::Action::MoreFiles => w.files.grow(),
                 page::Action::AllowTerminal(on) => w.terminal_call(move |c| async move { c.allow_terminal(&id.to_string(), on).await }),
                 page::Action::SetUpTerminal => {
                     // A code first; then this phone may use it.

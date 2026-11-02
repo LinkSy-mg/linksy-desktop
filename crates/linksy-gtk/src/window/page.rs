@@ -58,6 +58,8 @@ pub enum Action {
     FilterActivity,
     /// The page reached the end of the timeline: older entries.
     MoreActivity,
+    /// The page reached the end of a folder's files: more of them.
+    MoreFiles,
     /// Let this phone open terminals here (with the code), or stop it.
     AllowTerminal(bool),
     /// No code yet: choose one, then allow this phone.
@@ -669,10 +671,13 @@ impl DevicePage {
                 glib::idle_add_local_once(move || e(Action::MoreActivity));
             }
         });
-        let g = grow.clone();
+        let (g, e, t) = (grow.clone(), emit.clone(), tab.clone());
         scroller.connect_edge_reached(move |_, pos| {
             if pos == gtk::PositionType::Bottom {
                 g();
+                if t.get() == Tab::Files {
+                    e(Action::MoreFiles);
+                }
             }
         });
         // A window taller than the entries built never scrolls to their end: more once it's
@@ -869,6 +874,17 @@ impl DevicePage {
     pub fn select_tab(&self, tab: Tab) {
         if let Some((_, b)) = self.tab_buttons.iter().find(|(t, b)| *t == tab && b.is_visible()) {
             b.set_active(true);
+        }
+    }
+
+    /// Back up to the tabs, when the page is scrolled past them.
+    pub fn scroll_to_tabs(&self) {
+        let a = self.scroller.vadjustment();
+        let Some(column) = self.scroller.child().and_then(|viewport| viewport.first_child()) else { return };
+        if let Some(p) = self.tabs.compute_point(&column, &gtk::graphene::Point::new(0.0, 0.0))
+            && a.value() > p.y() as f64
+        {
+            a.set_value(p.y() as f64);
         }
     }
 
