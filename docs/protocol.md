@@ -58,7 +58,7 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Controlling the phone from the computer | Done | Not possible | AccessibilityService is blocked for sideloaded apps |
 | Texting from the computer | Done | Not possible | SMS permissions are blocked for sideloaded apps |
 | Phone notifications on the computer, reply | Done | Not possible | notification-listener access is blocked |
-| Messages page, codes copied | Done (next release) | To do (optional fields) | from message notifications; `conversation`, `sender`… (§4.5) |
+| Messages page, codes copied | Done (0.11.4) | To do (optional fields) | from message notifications; `conversation`, `sender`… (§4.5) |
 | Images/files on the clipboard | Done | Done | offer with `"clipboard":true` (§4.5) |
 | Automatic clipboard sync, computer → phone | Done (not on GNOME) | Done (phone asks) | `clipboard_watch` (§4.5) |
 | Phone as microphone | Done | Done | session `microphone`, raw PCM (§4.8) |
@@ -328,7 +328,7 @@ and close the other with reason `duplicate`.
   Send `notification_removed` when it goes away on the phone (read, swiped, answered), so
   it goes away on the computer too. Nothing of it is saved to disk on either side.
 
-  **Messages (desktop, next release).** The computer also makes the phone's conversations
+  **Messages (desktop 0.11.4).** The computer also makes the phone's conversations
   out of these notifications, in memory only (100 conversations, the last 50 messages
   each), for its Messages page: each new `body` from a chat, SMS, mail or social app is one
   message; a verification code in it is copied to the clipboard (the user can turn that
@@ -1946,11 +1946,11 @@ robust against any encoder (GPU ones may slice too):
   protocol change.
 - **2026-11-02** — Plan: 0.11 is the phone's notifications through a listener in the Linksy
   app itself (§4.5, phone to-do); the separate "Extras" app is dropped. No protocol change.
-- **2026-11-02** — Desktop (next release): a **Messages** page made from the phone's message
+- **2026-11-02** — Desktop 0.11.4: a **Messages** page made from the phone's message
   notifications, verification codes copied (§4.5 Messages). `notification_posted` gains
   optional `category`, `conversation`, `sender`, `group`, `time` and `picture`; older
   devices ignore them. Phone to-do: fill them from `MessagingStyle`, and send the launcher
   icon at 96 px.
-- **2026-11-02** — Core: `Node::set_features` changes the features while running; connected
+- **2026-11-02** — Core (in desktop 0.11.4): `Node::set_features` changes the features while running; connected
   devices hear a new `features` message (§4.5, §4.10), so `notifications` can be announced
   when the listener is turned on. Older desktops ignore it until they reconnect.

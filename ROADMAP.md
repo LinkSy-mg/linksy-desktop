@@ -17,7 +17,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
 | 0.9 | Works on every desktop | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Private discovery · One Accept for a batch (desktop done in 0.9.0; screen control on Hyprland and Sway moves to 0.10) |
 | **0.10** | **Lighter and smoother** | Lighter at rest (desktop done in 0.11.3) · Transfers in a corner panel (desktop done) · Choose which monitor to view (desktop done) · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
-| **0.11** | **Never miss a notification** | The phone's notifications on the computer, with reply, which brings texts from every messaging app · Snap to computer (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
+| **0.11** | **Never miss a notification** | The phone's notifications on the computer, with reply, which brings texts from every messaging app (desktop: Messages page and copied codes in 0.11.4) · Snap to computer (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near · Connection Doctor |
 | **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) · The phone's photos on the computer |
 | **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (desktop done in 0.11.3; your own relay in Android 0.2.3) |
@@ -235,9 +235,9 @@ The computer's side has been there since 0.2.2 (`notification_posted`, `notifica
 - **Installing:** the listener makes Play Protect block a browser install in many countries,
   with no "Install anyway". The download page and the app's update sheet say how: pause
   "Scan apps with Play Protect" while installing, then turn it back on.
-- **Desktop:** each one as a notification with its app's icon and Reply; the same
-  conversation grouped; a per-app switch on the device page; the last ones listed in the
-  app, so one missed isn't gone. Both apps.
+- **Desktop (done in 0.11.4):** each one as a notification with its app's icon and Reply;
+  a Messages page with each conversation and its last 50 messages, so one missed isn't gone;
+  verification codes copied; Mute per app. Both apps.
 - **Not possible without developer options:** one-time codes, which Android 15 hides from
   listeners like this one.
 - **Done when:** a WhatsApp or SMS message shows on the computer within a second, a reply
