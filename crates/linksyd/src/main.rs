@@ -15,6 +15,7 @@ mod lock;
 mod mirror;
 #[cfg(target_os = "linux")]
 mod network;
+mod phone_files;
 mod photos;
 mod pictures;
 #[cfg(target_os = "linux")]
@@ -229,6 +230,7 @@ async fn run() -> ExitCode {
     }
     let history = history::History::load(data_dir.join("history.json"));
     tokio::spawn(history.clone().run(node.clone()));
+    let _ = phone_files::FILES.set(phone_files::PhoneFiles::new(node.clone(), history.clone()));
     #[cfg(target_os = "linux")]
     tokio::spawn(rest::run());
     #[cfg(target_os = "linux")]

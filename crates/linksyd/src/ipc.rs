@@ -81,6 +81,23 @@ async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror
             }
         }
     });
+    let forward_files = crate::phone_files::FILES.get().map(|files| {
+        let mut progress = files.subscribe();
+        let files_tx = tx.clone();
+        tokio::spawn(async move {
+            loop {
+                match progress.recv().await {
+                    Ok(fs_progress) => {
+                        if files_tx.send(ServerMsg::FsProgress { fs_progress }).is_err() {
+                            break;
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(_) => break,
+                }
+            }
+        })
+    });
     let writer = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             let Ok(mut line) = serde_json::to_vec(&msg) else { continue };
@@ -118,6 +135,9 @@ async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror
     forward.abort();
     forward_history.abort();
     forward_inbox.abort();
+    if let Some(f) = forward_files {
+        f.abort();
+    }
     writer.abort();
 }
 
@@ -306,6 +326,29 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
                 Err("opening a phone's files isn't available here yet".into())
             }
         }
+        Request::FsCopy { phone, paths } => {
+            let id = resolve(node, &phone)?;
+            json(serde_json::to_value(phone_files()?.copy(id, paths)?))
+        }
+        Request::FsUpload { phone, dir, paths } => {
+            let id = resolve(node, &phone)?;
+            json(serde_json::to_value(phone_files()?.upload(id, &dir, paths)?))
+        }
+        Request::FsMkdir { phone, path } => {
+            let id = resolve(node, &phone)?;
+            phone_files()?.mkdir(id, &path).await?;
+            Ok(Value::Null)
+        }
+        Request::FsRename { phone, path, to } => {
+            let id = resolve(node, &phone)?;
+            Ok(Value::String(phone_files()?.rename(id, &path, &to).await?))
+        }
+        Request::FsDelete { phone, paths } => {
+            let id = resolve(node, &phone)?;
+            phone_files()?.delete(id, paths).await?;
+            Ok(Value::Null)
+        }
+        Request::FsCancel { op } => Ok(Value::Bool(phone_files()?.cancel(op))),
         Request::BrowseFiles { phone } => {
             let id = resolve(node, &phone)?;
             let name = device(node, &id).map(|d| d.name).unwrap_or_else(|| "The phone".into());
@@ -500,6 +543,10 @@ fn usb_status() -> linksy_ipc::UsbStatus {
         return usb.status();
     }
     linksy_ipc::UsbStatus::default()
+}
+
+fn phone_files() -> Result<&'static crate::phone_files::PhoneFiles, String> {
+    crate::phone_files::FILES.get().ok_or_else(|| "not ready yet".to_string())
 }
 
 fn terminals() -> Result<&'static crate::terminal::Terminals, String> {
