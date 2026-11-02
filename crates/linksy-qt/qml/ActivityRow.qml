@@ -107,6 +107,7 @@ RowLayout {
             QQC2.Label {
                 Layout.fillWidth: true
                 text: row.look[1]
+                textFormat: Text.PlainText
                 font.bold: true
                 elide: Text.ElideMiddle
             }

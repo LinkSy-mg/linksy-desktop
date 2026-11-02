@@ -99,6 +99,13 @@ Kirigami.ScrollablePage {
                         text: modelData.name
                         checked: modelData.on
                         onToggled: page.setAction(actionRow, modelData.id, checked)
+                        // Names show as they are, never as markup
+                        contentItem: QQC2.Label {
+                            text: actionRow.text
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                        }
                     }
                 }
             }

@@ -402,6 +402,7 @@ ColumnLayout {
                             QQC2.Label {
                                 Layout.fillWidth: true
                                 elide: Text.ElideMiddle
+                                textFormat: Text.PlainText
                                 text: recentItem.e.what["import"] === true ? page.plural(recentItem.count, "photo")
                                     : recentItem.group ? page.plural(recentItem.count, "item") : recentItem.e.what.files[0].split("/").pop()
                             }
@@ -437,14 +438,28 @@ ColumnLayout {
                 Repeater {
                     model: recentItem.open ? recentItem.e.what.files : []
                     QQC2.ItemDelegate {
+                        id: savedFile
                         required property var modelData
                         required property int index
                         Layout.fillWidth: true
                         Layout.leftMargin: Kirigami.Units.gridUnit * 3
                         enabled: index < recentItem.saved.length
-                        icon.name: page.fileIcon(modelData)
                         text: modelData.split("/").pop()
                         onClicked: Qt.openUrlExternally("file://" + recentItem.saved[index])
+                        contentItem: RowLayout {
+                            spacing: Kirigami.Units.largeSpacing
+                            Kirigami.Icon {
+                                implicitWidth: Kirigami.Units.iconSizes.small
+                                implicitHeight: implicitWidth
+                                source: page.fileIcon(savedFile.modelData)
+                            }
+                            QQC2.Label {
+                                Layout.fillWidth: true
+                                text: savedFile.text
+                                textFormat: Text.PlainText
+                                elide: Text.ElideMiddle
+                            }
+                        }
                     }
                 }
                 QQC2.Label {

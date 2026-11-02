@@ -192,9 +192,27 @@ ColumnLayout {
             hoverEnabled: true
             onClicked: mouse => tab.click(cell.index, mouse.modifiers)
             onDoubleClicked: tab.store.save([cell.itemId], true)
+            onContainsMouseChanged: {
+                if (containsMouse) {
+                    tip.text = `${cell.name}\n${tab.app.dayLabel(cell.taken_ms)}`;
+                    tip.cell = cell;
+                } else if (tip.cell === cell) {
+                    tip.cell = null;
+                }
+            }
         }
-        QQC2.ToolTip.text: `${cell.name}\n${tab.app.dayLabel(cell.taken_ms)}`
-        QQC2.ToolTip.visible: pointer.containsMouse
-        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+    }
+
+    // One for the grid; names show as they are, never as markup
+    QQC2.ToolTip {
+        id: tip
+        property Item cell: null
+        parent: cell ?? tab
+        visible: cell !== null
+        delay: Kirigami.Units.toolTipDelay
+        contentItem: QQC2.Label {
+            text: tip.text
+            textFormat: Text.PlainText
+        }
     }
 }
