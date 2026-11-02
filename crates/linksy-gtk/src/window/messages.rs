@@ -43,8 +43,12 @@ pub struct MessagesView {
     divider: gtk::Separator,
     thread_side: gtk::Box,
     search: gtk::SearchEntry,
+    /// What shows and in which order, from the menu beside the search.
+    filter: gtk::MenuButton,
     show: Cell<Show>,
-    pills: Vec<(Show, gtk::ToggleButton)>,
+    oldest_first: Cell<bool>,
+    shows: Vec<(Show, gtk::CheckButton)>,
+    sorts: Vec<(bool, gtk::CheckButton)>,
     list: gtk::ListBox,
     alerts_head: gtk::Box,
     alerts: gtk::ListBox,
@@ -77,18 +81,39 @@ struct ViewState {
 
 impl MessagesView {
     pub fn new() -> Rc<Self> {
-        let search = gtk::SearchEntry::builder().placeholder_text(t!("Search")).build();
-        let chips = gtk::Box::builder().spacing(6).build();
-        let mut pills = Vec::new();
-        let mut first: Option<gtk::ToggleButton> = None;
-        for (label, which) in [(t!("All"), Show::All), (t!("Chats"), Show::Chats), (t!("Texts"), Show::Texts), (t!("Mail"), Show::Mail), (t!("Other"), Show::Other)] {
-            let b = gtk::ToggleButton::builder().label(label).css_classes(["filter-pill"]).active(which == Show::All).build();
+        let search = gtk::SearchEntry::builder().placeholder_text(t!("Search")).hexpand(true).build();
+        let menu = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).margin_top(6).margin_bottom(6).margin_start(6).margin_end(6).build();
+        let heading = |label: &str| gtk::Label::builder().label(label).xalign(0.0).margin_start(6).margin_top(4).margin_bottom(2).css_classes(["caption-heading", "dim-label"]).build();
+        menu.append(&heading(t!("Show")));
+        let mut shows = Vec::new();
+        let mut first: Option<gtk::CheckButton> = None;
+        for (label, which) in [(t!("All"), Show::All), (t!("Chats"), Show::Chats), (t!("Texts"), Show::Texts), (t!("Mail"), Show::Mail), (t!("Other Notifications"), Show::Other)] {
+            let b = gtk::CheckButton::builder().label(label).active(which == Show::All).build();
             b.set_group(first.as_ref());
             first.get_or_insert(b.clone());
-            chips.append(&b);
-            pills.push((which, b));
+            menu.append(&b);
+            shows.push((which, b));
         }
-        let chips_scroller = gtk::ScrolledWindow::builder().child(&chips).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).build();
+        menu.append(&gtk::Separator::builder().margin_top(6).margin_bottom(4).build());
+        menu.append(&heading(t!("Sort")));
+        let mut sorts = Vec::new();
+        let mut first: Option<gtk::CheckButton> = None;
+        for (label, oldest) in [(t!("Newest First"), false), (t!("Oldest First"), true)] {
+            let b = gtk::CheckButton::builder().label(label).active(!oldest).build();
+            b.set_group(first.as_ref());
+            first.get_or_insert(b.clone());
+            menu.append(&b);
+            sorts.push((oldest, b));
+        }
+        let filter = gtk::MenuButton::builder()
+            .icon_name("view-sort-descending-symbolic")
+            .tooltip_text(t!("Show and Sort"))
+            .popover(&gtk::Popover::builder().child(&menu).build())
+            .valign(gtk::Align::Center)
+            .build();
+        let search_row = gtk::Box::builder().spacing(6).build();
+        search_row.append(&search);
+        search_row.append(&filter);
 
         let list = gtk::ListBox::builder().css_classes(["inbox-list"]).build();
         let alerts_head = gtk::Box::builder().spacing(6).margin_top(14).margin_start(10).visible(false).build();
@@ -104,8 +129,7 @@ impl MessagesView {
         column.append(&empty);
         let list_scroller = gtk::ScrolledWindow::builder().child(&column).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build();
         let list_side = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).width_request(300).margin_end(12).build();
-        list_side.append(&search);
-        list_side.append(&chips_scroller);
+        list_side.append(&search_row);
         list_side.append(&list_scroller);
 
         let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(t!("Back")).css_classes(["flat", "circular"]).valign(gtk::Align::Center).visible(false).build();
@@ -161,8 +185,11 @@ impl MessagesView {
             divider,
             thread_side,
             search,
+            filter,
             show: Cell::new(Show::All),
-            pills,
+            oldest_first: Cell::new(false),
+            shows,
+            sorts,
             list,
             alerts_head,
             alerts,
@@ -314,12 +341,29 @@ impl Window {
                 w.messages.apply_filter();
             }
         });
-        for (which, b) in &m.pills {
+        for (which, b) in &m.shows {
             let (w, which) = (Rc::downgrade(self), *which);
             b.connect_toggled(move |b| {
                 if let Some(w) = w.upgrade().filter(|_| b.is_active()) {
                     w.messages.show.set(which);
+                    // Filtered: the button says so.
+                    if which == Show::All {
+                        w.messages.filter.remove_css_class("accent");
+                    } else {
+                        w.messages.filter.add_css_class("accent");
+                    }
                     w.messages.apply_filter();
+                }
+            });
+        }
+        for (oldest, b) in &m.sorts {
+            let (w, oldest) = (Rc::downgrade(self), *oldest);
+            b.connect_toggled(move |b| {
+                if let Some(w) = w.upgrade().filter(|_| b.is_active())
+                    && w.messages.oldest_first.replace(oldest) != oldest
+                    && w.messages.state.borrow().built
+                {
+                    w.build_inbox();
                 }
             });
         }
@@ -388,10 +432,14 @@ impl Window {
     fn build_inbox(self: &Rc<Self>) {
         let m = &self.messages;
         m.clear_rows();
-        let (conversations, alerts) = {
+        let (mut conversations, mut alerts) = {
             let state = m.state.borrow();
             (state.conversations.clone(), state.alerts.clone())
         };
+        if m.oldest_first.get() {
+            conversations.reverse();
+            alerts.reverse();
+        }
         for c in &conversations {
             m.list.append(&self.conversation_row(c));
         }
@@ -603,7 +651,8 @@ impl Window {
             state.conversations.retain(|o| o.id != c.id);
             let at = same.unwrap_or_else(|| state.conversations.iter().position(|o| o.at_ms <= c.at_ms).unwrap_or(state.conversations.len()));
             state.conversations.insert(at, c.clone());
-            at
+            // The rows run the other way when the oldest come first.
+            if self.messages.oldest_first.get() { state.conversations.len() - 1 - at } else { at }
         };
         self.page.set_inbox_count(self.messages.count());
         if !self.messages.state.borrow().built {
