@@ -28,9 +28,9 @@ Kirigami.ApplicationWindow {
     // Transfers for the corner panel, any device: from their start to a few seconds after
     // the last one ends
     property var corner: []
-    // The Transfers page: on its way (oldest first), ended lately, and direct links (id: up)
     // A device's Transfers tab shows (the corner panel steps aside); its page says so
     property bool transfersOpen: false
+    // Transfers: on their way (oldest first), ended lately, and direct links (id: up)
     property var moving: []
     property var recent: []
     property var direct: ({})
@@ -102,7 +102,6 @@ Kirigami.ApplicationWindow {
         return id;
     }
 
-    // "3.8 MB", as the GTK app writes sizes
     // "1 item", "3 photos"
     function plural(n, word) {
         if (word === "photo") return n === 1 ? t("1 photo") : t("{n} photos", { n: n });
@@ -113,6 +112,7 @@ Kirigami.ApplicationWindow {
         toOpen[transfer] = true;
     }
 
+    // "3.8 MB", as the GTK app writes sizes
     function size(bytes) {
         const units = [t("bytes"), t("KB"), t("MB"), t("GB"), t("TB")];
         if (bytes < 1000) return bytes === 1 ? t("1 byte") : t("{bytes} bytes", { bytes: bytes });
