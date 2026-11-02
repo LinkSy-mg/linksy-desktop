@@ -416,6 +416,24 @@ Kirigami.Page {
                             }
                         }
                     }
+
+                    // How long it can still be reached away from home
+                    ColumnLayout {
+                        Layout.alignment: Qt.AlignVCenter
+                        visible: page.trusted && typeof page.view?.away_until === "number"
+                        spacing: 2
+                        QQC2.Label {
+                            Layout.alignment: Qt.AlignRight
+                            text: app.t("Reachable from away until")
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.7
+                        }
+                        QQC2.Label {
+                            Layout.alignment: Qt.AlignRight
+                            text: typeof page.view?.away_until === "number" ? new Date(page.view.away_until * 1000).toLocaleDateString(Qt.locale(), "ddd d MMM") : ""
+                            font.bold: true
+                        }
+                    }
                 }
 
                 // Not paired yet
