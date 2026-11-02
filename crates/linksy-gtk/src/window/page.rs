@@ -1,5 +1,7 @@
-//! A device's page: who it is, big buttons for what you can do with it, and a timeline of
-//! everything shared with it, grouped by day, with live progress for running transfers.
+//! A device's page: who it is and how it's connected, big buttons for what you do most,
+//! then tabs: what to use it as, its inbox, its files, the timeline of everything shared
+//! with it (grouped by day, with live progress), and its settings. A tab's content is
+//! built when it shows.
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
@@ -48,8 +50,8 @@ pub enum Action {
     /// Let this device see and control the screen without asking.
     AllowScreen(bool),
     Locate,
-    Messages,
-    BrowseFiles,
+    /// A tab shows, to fill.
+    Tab(Tab),
     /// The timeline's filter changed.
     FilterActivity,
     /// The page reached the end of the timeline: older entries.
@@ -64,6 +66,28 @@ pub enum Action {
 }
 
 type Handler = Rc<RefCell<Option<Rc<dyn Fn(Action)>>>>;
+type NarrowHandler = Rc<RefCell<Option<Rc<dyn Fn(bool)>>>>;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Tab {
+    Use,
+    Inbox,
+    Files,
+    History,
+    Settings,
+}
+
+impl Tab {
+    fn name(self) -> &'static str {
+        match self {
+            Tab::Use => "use",
+            Tab::Inbox => "inbox",
+            Tab::Files => "files",
+            Tab::History => "history",
+            Tab::Settings => "settings",
+        }
+    }
+}
 
 /// Most entries shown at once; older ones are still in `linksy history`.
 const SHOWN: usize = 150;
@@ -78,13 +102,18 @@ pub struct DevicePage {
     pub menu: gtk::MenuButton,
     pub avatar: adw::Avatar,
     kind: gtk::Image,
-    /// The battery, as a ring around the avatar.
-    battery: Rc<std::cell::Cell<Option<f64>>>,
-    ring: gtk::DrawingArea,
     name: gtk::Label,
-    /// How it's connected ("Connected away from home"), as a chip.
+    /// How it's connected and how fast ("Wi-Fi · 4 ms"), as a chip.
+    link_chip: gtk::Box,
+    link_icon: gtk::Image,
     link: gtk::Label,
-    status: gtk::Label,
+    /// Its battery: level and whether it charges, drawn, and the percentage.
+    battery: Rc<std::cell::Cell<(f64, bool)>>,
+    battery_chip: gtk::Box,
+    battery_icon: gtk::DrawingArea,
+    battery_label: gtk::Label,
+    battery_bolt: gtk::Image,
+    e2e: gtk::Box,
     reach: gtk::Box,
     reach_until: gtk::Label,
     /// Send Files beside the smaller actions; stacked when the page is narrow.
@@ -111,10 +140,17 @@ pub struct DevicePage {
     mic_start: gtk::Button,
     mic_running: gtk::Box,
     mic_wave: Wave,
-    /// Settings and places, as plain rows.
+    /// The tabs under the actions, and what each shows.
+    tabs: gtk::ScrolledWindow,
+    tab_buttons: Vec<(Tab, gtk::ToggleButton)>,
+    tab_stack: gtk::Stack,
+    tab: Rc<std::cell::Cell<Tab>>,
+    inbox_badge: gtk::Label,
+    /// The window's inbox and files views go here.
+    pub inbox_slot: gtk::Box,
+    pub files_slot: gtk::Box,
+    /// The device's switches, as plain rows.
     settings: gtk::ListBox,
-    messages_row: adw::ActionRow,
-    files_row: adw::ActionRow,
     /// "Lock When Away", for phones; `syncing` while it's set from the service's state.
     lock_row: adw::SwitchRow,
     /// "Allow Everything From Away" (docs/protocol.md §4.13).
@@ -137,7 +173,6 @@ pub struct DevicePage {
     syncing: Rc<std::cell::Cell<bool>>,
     pair_box: gtk::Box,
     staged: adw::Banner,
-    activity_box: gtk::Box,
     /// Which kind of entries the timeline shows.
     filter: Rc<std::cell::Cell<Filter>>,
     /// One heading and timeline per day.
@@ -151,6 +186,10 @@ pub struct DevicePage {
     on_activate: Rc<dyn Fn(&gtk::ListBoxRow)>,
     empty: gtk::Box,
     handler: Handler,
+    /// Told when the page gets narrow, or wide again.
+    on_narrow: NarrowHandler,
+    /// Development aid (screenshots): LINKSY_SCREENSHOT_TAB=inbox opens that tab once it shows.
+    wanted: std::cell::Cell<Option<Tab>>,
     /// Received files of finished rows, by entry id (the row's widget name), to open.
     received: Rc<RefCell<HashMap<String, Vec<PathBuf>>>>,
 }
@@ -187,40 +226,56 @@ impl DevicePage {
             }
         };
 
-        // Hero: who this is, how it's connected, its battery as a ring.
-        let avatar = adw::Avatar::builder().size(76).show_initials(true).halign(gtk::Align::Center).valign(gtk::Align::Center).build();
-        let battery: Rc<std::cell::Cell<Option<f64>>> = Rc::default();
-        let ring = gtk::DrawingArea::builder().content_width(94).content_height(94).build();
-        let level = battery.clone();
-        ring.set_draw_func(move |area, cr, w, h| {
-            let Some(level) = level.get() else { return };
-            let (cx, cy, r) = (w as f64 / 2.0, h as f64 / 2.0, w.min(h) as f64 / 2.0 - 3.0);
-            let fg = area.color();
-            cr.set_line_width(4.5);
-            cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, 0.12);
-            cr.arc(cx, cy, r, 0.0, std::f64::consts::TAU);
-            let _ = cr.stroke();
-            // Green, then amber and red as it runs low.
-            let (red, green, blue) = if level > 0.3 { (0.18, 0.76, 0.49) } else if level > 0.15 { (0.90, 0.65, 0.04) } else { (0.88, 0.11, 0.14) };
-            cr.set_source_rgb(red, green, blue);
-            cr.set_line_cap(gtk::cairo::LineCap::Round);
-            let start = -std::f64::consts::FRAC_PI_2;
-            cr.arc(cx, cy, r, start, start + level.clamp(0.0, 1.0) * std::f64::consts::TAU);
-            let _ = cr.stroke();
-        });
+        // Hero: who this is, how it's connected and how fast, its battery.
+        let avatar = adw::Avatar::builder().size(80).show_initials(true).build();
         let kind = gtk::Image::builder().pixel_size(14).css_classes(["hero-kind"]).halign(gtk::Align::End).valign(gtk::Align::End).build();
-        let avatar_overlay = gtk::Overlay::builder().child(&ring).halign(gtk::Align::Start).valign(gtk::Align::Center).build();
-        avatar_overlay.add_overlay(&avatar);
+        let avatar_overlay = gtk::Overlay::builder().child(&avatar).halign(gtk::Align::Start).valign(gtk::Align::Center).build();
         avatar_overlay.add_overlay(&kind);
         let name = gtk::Label::builder().css_classes(["title-1"]).xalign(0.0).wrap(true).build();
-        let link = gtk::Label::builder().valign(gtk::Align::Center).css_classes(["link-chip"]).build();
-        let status = gtk::Label::builder().css_classes(["dim-label"]).xalign(0.0).wrap(true).build();
-        let status_line = gtk::Box::builder().spacing(10).build();
-        status_line.append(&link);
-        status_line.append(&status);
+        let link_icon = gtk::Image::builder().pixel_size(14).build();
+        let link = gtk::Label::builder().css_classes(["numeric"]).build();
+        let link_chip = gtk::Box::builder().spacing(6).valign(gtk::Align::Center).css_classes(["link-chip"]).build();
+        link_chip.append(&link_icon);
+        link_chip.append(&link);
+        let battery: Rc<std::cell::Cell<(f64, bool)>> = Rc::default();
+        let battery_icon = gtk::DrawingArea::builder().content_width(22).content_height(12).valign(gtk::Align::Center).build();
+        let level = battery.clone();
+        battery_icon.set_draw_func(move |area, cr, w, h| {
+            let (level, charging) = level.get();
+            let (w, h) = (w as f64, h as f64);
+            let fg = area.color();
+            let body = w - 3.0;
+            cr.set_source_rgba(fg.red() as f64, fg.green() as f64, fg.blue() as f64, fg.alpha() as f64);
+            cr.set_line_width(1.4);
+            rounded(cr, 0.7, 0.7, body - 1.4, h - 1.4, 3.0);
+            let _ = cr.stroke();
+            cr.rectangle(body + 0.6, h / 2.0 - 2.2, 1.8, 4.4);
+            let _ = cr.fill();
+            if level <= 0.15 && !charging {
+                cr.set_source_rgb(0.88, 0.11, 0.14);
+            }
+            let inner = (body - 4.6) * level.clamp(0.0, 1.0);
+            if inner > 0.0 {
+                rounded(cr, 2.3, 2.3, inner, h - 4.6, 1.4);
+                let _ = cr.fill();
+            }
+        });
+        let battery_label = gtk::Label::builder().css_classes(["numeric"]).build();
+        let bolt = gtk::Image::builder().icon_name("thunderbolt-symbolic").pixel_size(12).build();
+        let battery_chip = gtk::Box::builder().spacing(6).valign(gtk::Align::Center).css_classes(["battery-chip"]).build();
+        battery_chip.append(&battery_icon);
+        battery_chip.append(&battery_label);
+        battery_chip.append(&bolt);
+        let chips = gtk::Box::builder().spacing(8).build();
+        chips.append(&link_chip);
+        chips.append(&battery_chip);
+        let e2e = gtk::Box::builder().spacing(5).css_classes(["dim-label"]).build();
+        e2e.append(&gtk::Image::builder().icon_name("channel-secure-symbolic").pixel_size(12).build());
+        e2e.append(&gtk::Label::builder().label(t!("Encrypted end to end")).xalign(0.0).css_classes(["caption"]).build());
         let who = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).hexpand(true).valign(gtk::Align::Center).build();
         who.append(&name);
-        who.append(&status_line);
+        who.append(&chips);
+        who.append(&e2e);
         let reach_until = gtk::Label::builder().xalign(1.0).css_classes(["heading"]).build();
         let reach = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).valign(gtk::Align::Center).build();
         reach.append(&gtk::Label::builder().label(t!("Reachable from away until")).xalign(1.0).css_classes(["caption", "dim-label"]).build());
@@ -345,17 +400,7 @@ impl DevicePage {
         use_as.append(&use_as_head);
         use_as.append(&cards);
 
-        // Settings and places: plain rows.
-        let messages_row = adw::ActionRow::builder().title(t!("Messages")).activatable(true).build();
-        messages_row.add_prefix(&gtk::Image::builder().icon_name("chat-message-new-symbolic").build());
-        messages_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
-        let e = emit.clone();
-        messages_row.connect_activated(move |_| e(Action::Messages));
-        let files_row = adw::ActionRow::builder().title(t!("Browse Files")).activatable(true).build();
-        files_row.add_prefix(&gtk::Image::builder().icon_name("folder-remote-symbolic").build());
-        files_row.add_suffix(&gtk::Image::builder().icon_name("go-next-symbolic").build());
-        let e = emit.clone();
-        files_row.connect_activated(move |_| e(Action::BrowseFiles));
+        // The device's switches: plain rows.
         let lock_row = adw::SwitchRow::builder().title(t!("Lock When Away")).build();
         lock_row.add_prefix(&gtk::Image::builder().icon_name("system-lock-screen-symbolic").build());
         let syncing: Rc<std::cell::Cell<bool>> = Rc::default();
@@ -424,8 +469,6 @@ impl DevicePage {
         terminal_box.append(&gtk::Label::builder().label(t!("Terminal")).xalign(0.0).css_classes(["title-4"]).build());
         terminal_box.append(&terminal_card);
         let settings = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["plain-list"]).build();
-        settings.append(&messages_row);
-        settings.append(&files_row);
         settings.append(&lock_row);
         settings.append(&accept_row);
         settings.append(&screen_row);
@@ -454,9 +497,8 @@ impl DevicePage {
 
         // Timeline.
         let filter: Rc<std::cell::Cell<Filter>> = Rc::new(std::cell::Cell::new(Filter::All));
-        let filters = gtk::Box::builder().spacing(6).build();
+        let filters = gtk::Box::builder().spacing(6).hexpand(true).build();
         let activity_header = gtk::Box::builder().spacing(6).build();
-        activity_header.append(&gtk::Label::builder().label(t!("Activity")).xalign(0.0).hexpand(true).css_classes(["title-4"]).build());
         activity_header.append(&filters);
         let mut first: Option<gtk::ToggleButton> = None;
         for (label, which) in [(t!("All"), Filter::All), (t!("Files"), Filter::Files), (t!("Clipboard"), Filter::Clipboard), (t!("Links"), Filter::Links)] {
@@ -475,7 +517,7 @@ impl DevicePage {
         let clear = gtk::Button::builder().label(t!("Clear")).css_classes(["flat"]).valign(gtk::Align::Center).build();
         let e = emit.clone();
         clear.connect_clicked(move |_| e(Action::ClearHistory));
-        filters.append(&clear);
+        activity_header.append(&clear);
         let activity = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(4).build();
         let received: Rc<RefCell<HashMap<String, Vec<PathBuf>>>> = Rc::default();
         let (e, r) = (emit.clone(), received.clone());
@@ -494,24 +536,77 @@ impl DevicePage {
         activity_box.append(&activity);
         activity_box.append(&empty);
 
+        // Tabs: a line under them all, the one showing underlined in the accent.
+        let use_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(22).build();
+        use_page.append(&use_as);
+        use_page.append(&terminal_box);
+        use_page.append(&terminals);
+        let inbox_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        let files_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        let forget_button = gtk::Button::builder().label(t!("Forget Device…")).halign(gtk::Align::Start).css_classes(["error"]).build();
+        let e = emit.clone();
+        forget_button.connect_clicked(move |_| e(Action::Forget));
+        let settings_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(22).build();
+        settings_page.append(&settings);
+        settings_page.append(&forget_button);
+        let tab_stack = gtk::Stack::builder().vhomogeneous(false).hhomogeneous(false).transition_type(gtk::StackTransitionType::Crossfade).transition_duration(120).build();
+        tab_stack.add_named(&use_page, Some(Tab::Use.name()));
+        tab_stack.add_named(&inbox_slot, Some(Tab::Inbox.name()));
+        tab_stack.add_named(&files_slot, Some(Tab::Files.name()));
+        tab_stack.add_named(&activity_box, Some(Tab::History.name()));
+        tab_stack.add_named(&settings_page, Some(Tab::Settings.name()));
+        let tab = Rc::new(std::cell::Cell::new(Tab::Use));
+        let inbox_badge = gtk::Label::builder().css_classes(["count-badge", "numeric"]).valign(gtk::Align::Center).visible(false).build();
+        let tab_row = gtk::Box::builder().spacing(24).css_classes(["page-tabs"]).build();
+        let mut tab_buttons = Vec::new();
+        let mut group: Option<gtk::ToggleButton> = None;
+        for (which, icon, label) in [
+            (Tab::Use, "video-joined-displays-symbolic", t!("Use As")),
+            (Tab::Inbox, "mail-unread-symbolic", t!("Inbox")),
+            (Tab::Files, "folder-symbolic", t!("Files")),
+            (Tab::History, "document-open-recent-symbolic", t!("History")),
+            (Tab::Settings, "emblem-system-symbolic", t!("Settings")),
+        ] {
+            let inner = gtk::Box::builder().spacing(7).build();
+            inner.append(&gtk::Image::from_icon_name(icon));
+            inner.append(&gtk::Label::new(Some(label)));
+            if which == Tab::Inbox {
+                inner.append(&inbox_badge);
+            }
+            let b = gtk::ToggleButton::builder().child(&inner).css_classes(["page-tab"]).active(which == Tab::Use).build();
+            b.set_group(group.as_ref());
+            group.get_or_insert(b.clone());
+            let (e, current, stack) = (emit.clone(), tab.clone(), tab_stack.clone());
+            b.connect_toggled(move |b| {
+                if b.is_active() {
+                    stack.set_visible_child_name(which.name());
+                    if current.replace(which) != which {
+                        e(Action::Tab(which));
+                    }
+                }
+            });
+            tab_row.append(&b);
+            tab_buttons.push((which, b));
+        }
+        let tabs = gtk::ScrolledWindow::builder().child(&tab_row).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).margin_top(10).build();
+        let tabbed = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(20).build();
+        tabbed.append(&tabs);
+        tabbed.append(&tab_stack);
+
         let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(26).margin_top(6).margin_bottom(32).margin_start(16).margin_end(16).build();
         content.append(&hero);
         content.append(&actions);
-        content.append(&use_as);
-        content.append(&terminal_box);
-        content.append(&settings);
-        content.append(&terminals);
         content.append(&pair_box);
-        content.append(&activity_box);
+        content.append(&tabbed);
         let clamp = adw::Clamp::builder().maximum_size(860).tightening_threshold(600).child(&content).build();
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         column.append(&staged);
         column.append(&clamp);
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&column).build();
         let (shown, more) = (Rc::new(std::cell::Cell::new(FIRST)), Rc::new(std::cell::Cell::new(false)));
-        let (e, s, m) = (emit.clone(), shown.clone(), more.clone());
+        let (e, s, m, t) = (emit.clone(), shown.clone(), more.clone(), tab.clone());
         let grow: Rc<dyn Fn()> = Rc::new(move || {
-            if m.replace(false) {
+            if t.get() == Tab::History && m.replace(false) {
                 s.set((s.get() + FIRST).min(SHOWN));
                 let e = e.clone();
                 glib::idle_add_local_once(move || e(Action::MoreActivity));
@@ -547,13 +642,27 @@ impl DevicePage {
             (small.upcast_ref(), "min-children-per-line", &one),
             (small.upcast_ref(), "max-children-per-line", &one),
         ];
+        let mut narrow = Vec::new();
         for (width, count) in [("760sp", 1), ("680sp", 2), ("540sp", 5), ("400sp", 7)] {
             let b = adw::Breakpoint::new(adw::BreakpointCondition::parse(&format!("max-width: {width}")).expect("breakpoint"));
             for (widget, property, value) in &changes[..count] {
                 b.add_setter(*widget, property, Some(value));
             }
+            if width != "760sp" {
+                narrow.push(b.clone());
+            }
             root.add_breakpoint(b);
         }
+        // The inbox shows one side at a time from the second one on.
+        let on_narrow: NarrowHandler = Rc::default();
+        let tell = on_narrow.clone();
+        root.connect_current_breakpoint_notify(move |bin| {
+            let is = bin.current_breakpoint().is_some_and(|b| narrow.contains(&b));
+            let f = tell.borrow().clone();
+            if let Some(f) = f {
+                f(is);
+            }
+        });
 
         // Header menu.
         let forget = gtk::Button::builder().label(t!("Forget Device…")).css_classes(["flat", "destructive-label"]).build();
@@ -572,11 +681,16 @@ impl DevicePage {
             menu,
             avatar,
             kind,
-            battery,
-            ring,
             name,
+            link_chip,
+            link_icon,
             link,
-            status,
+            battery,
+            battery_chip,
+            battery_icon,
+            battery_label,
+            battery_bolt: bolt,
+            e2e,
             reach,
             reach_until,
             actions,
@@ -600,9 +714,14 @@ impl DevicePage {
             webcam_live,
             webcam_start,
             webcam_running,
+            tabs,
+            tab_buttons,
+            tab_stack,
+            tab,
+            inbox_badge,
+            inbox_slot,
+            files_slot,
             settings,
-            messages_row,
-            files_row,
             lock_row,
             away_row,
             accept_row,
@@ -619,7 +738,6 @@ impl DevicePage {
             syncing,
             pair_box,
             staged,
-            activity_box,
             filter,
             activity,
             shown,
@@ -629,7 +747,98 @@ impl DevicePage {
             on_activate,
             empty,
             handler,
+            on_narrow,
+            wanted: std::cell::Cell::new(std::env::var("LINKSY_SCREENSHOT_TAB").ok().and_then(|t| [Tab::Use, Tab::Inbox, Tab::Files, Tab::History, Tab::Settings].into_iter().find(|w| w.name() == t))),
             received,
+        }
+    }
+
+    pub fn connect_narrow(&self, f: impl Fn(bool) + 'static) {
+        *self.on_narrow.borrow_mut() = Some(Rc::new(f));
+    }
+
+    pub fn tab(&self) -> Tab {
+        self.tab.get()
+    }
+
+    pub fn select_tab(&self, tab: Tab) {
+        if let Some((_, b)) = self.tab_buttons.iter().find(|(t, b)| *t == tab && b.is_visible()) {
+            b.set_active(true);
+        }
+    }
+
+    /// Unread conversations and other notifications, on the Inbox tab.
+    pub fn set_inbox_count(&self, count: u32) {
+        self.inbox_badge.set_label(&count.to_string());
+        self.inbox_badge.set_visible(count > 0);
+    }
+
+    /// Show the tabs this device has, and one of them.
+    fn update_tabs(&self, d: &DeviceView) {
+        let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
+        let any_use = self.display_card.is_visible() || self.webcam_card.is_visible() || self.mic_card.is_visible() || self.terminal_box.is_visible() || self.terminals.is_visible();
+        let has = |t: Tab| match t {
+            Tab::Use => any_use,
+            Tab::Inbox => d.device.kind == DeviceKind::Phone && (super::can(&d.device, "notifications") || super::can(&d.device, "sms")),
+            Tab::Files => phone && super::can(&d.device, "fs"),
+            Tab::History | Tab::Settings => true,
+        };
+        for (t, b) in &self.tab_buttons {
+            b.set_visible(d.trusted && has(*t));
+        }
+        self.tabs.set_visible(d.trusted);
+        self.tab_stack.set_visible(d.trusted);
+        if let Some(want) = self.wanted.take() {
+            match self.tab_buttons.iter().find(|(t, _)| *t == want && d.trusted && has(*t)) {
+                Some((_, b)) => b.set_active(true),
+                None => self.wanted.set(Some(want)),
+            }
+        }
+        if !has(self.tab.get())
+            && let Some((_, b)) = self.tab_buttons.iter().find(|(t, _)| has(*t))
+        {
+            b.set_active(true);
+        }
+    }
+
+    /// How it's connected and how fast, and its battery, which change while it shows.
+    pub fn show_link(&self, d: &DeviceView) {
+        let available = d.connected || d.nearby;
+        let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
+        let (icon, what) = if d.connected && d.away {
+            ("network-wireless-hotspot-symbolic", t!("Away from home").to_string())
+        } else if d.connected && d.usb {
+            ("media-removable-symbolic", t!("USB").to_string())
+        } else if d.connected && phone {
+            ("network-wireless-symbolic", t!("Wi-Fi").to_string())
+        } else if d.connected {
+            ("network-wired-symbolic", t!("Local network").to_string())
+        } else {
+            ("network-offline-symbolic", status_text(d).to_string())
+        };
+        self.link_icon.set_icon_name(Some(icon));
+        match d.latency_ms.filter(|_| d.connected) {
+            Some(ms) => self.link.set_label(&t!("{link} · {ms} ms", link = what, ms = ms.max(1))),
+            None => self.link.set_label(&what),
+        }
+        for class in ["away", "usb", "offline"] {
+            self.link_chip.remove_css_class(class);
+        }
+        if d.connected && d.away {
+            self.link_chip.add_css_class("away");
+        } else if d.connected && d.usb {
+            self.link_chip.add_css_class("usb");
+        } else if !d.connected {
+            self.link_chip.add_css_class("offline");
+        }
+        let battery = d.battery.filter(|_| available);
+        self.battery_chip.set_visible(battery.is_some());
+        if let Some(b) = battery {
+            self.battery.set((b.level as f64 / 100.0, b.charging));
+            self.battery_label.set_label(&format!("{}%", b.level));
+            self.battery_bolt.set_visible(b.charging);
+            self.battery_chip.set_tooltip_text(Some(&if b.charging { t!("Battery {level}%, charging", level = b.level) } else { t!("Battery {level}%", level = b.level) }));
+            self.battery_icon.queue_draw();
         }
     }
 
@@ -692,6 +901,7 @@ impl DevicePage {
             self.terminals.append(&row);
         }
         self.terminals.set_visible(d.trusted && !mine.is_empty());
+        self.update_tabs(d);
     }
 
     pub fn connect_actions(&self, f: impl Fn(Action) + 'static) {
@@ -749,30 +959,13 @@ impl DevicePage {
     }
 
     pub fn show_device(&self, d: &DeviceView, staged: &[PathBuf], locks: bool) {
-        let available = d.connected || d.nearby;
         let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
         self.avatar.set_text(Some(&d.device.name));
         self.kind.set_icon_name(Some(kind_icon(d.device.kind)));
+        self.kind.set_tooltip_text(Some(&kind_name(&d.device)));
         self.name.set_label(&d.device.name);
-        self.battery.set(d.battery.filter(|_| available).map(|b| b.level as f64 / 100.0));
-        self.ring.queue_draw();
-        self.link.set_label(status_text(d));
-        for class in ["away", "usb", "offline"] {
-            self.link.remove_css_class(class);
-        }
-        if d.connected && d.away {
-            self.link.add_css_class("away");
-        } else if d.connected && d.usb {
-            self.link.add_css_class("usb");
-        } else if !available {
-            self.link.add_css_class("offline");
-        }
-        let mut status = vec![kind_name(&d.device).to_string()];
-        status.extend(fmt::battery(d));
-        if d.trusted {
-            status.push(t!("Encrypted end to end").into());
-        }
-        self.status.set_label(&status.join(" · "));
+        self.show_link(d);
+        self.e2e.set_visible(d.trusted);
         self.reach.set_visible(d.trusted && d.away_until.is_some());
         self.reach_until.set_label(&d.away_until.map(fmt::day).unwrap_or_default());
 
@@ -791,10 +984,6 @@ impl DevicePage {
         self.use_as_hint_content.set_label(if d.connected && d.usb { t!("Connected by USB") } else { t!("Faster by USB Cable") });
 
         self.lock_row.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "heartbeat"));
-        self.messages_row.set_visible(d.device.kind == DeviceKind::Phone && (super::can(&d.device, "notifications") || super::can(&d.device, "sms")));
-        self.files_row.set_visible(phone && super::can(&d.device, "fs"));
-        self.files_row.set_subtitle(&glib::markup_escape_text(&t!("Open the folder {device} shares in Files, like a USB drive", device = d.device.name)));
-        self.messages_row.set_subtitle(&glib::markup_escape_text(&t!("Read and answer {device}'s messages here", device = d.device.name)));
         self.lock_row.set_subtitle(&glib::markup_escape_text(&t!("Lock this computer when {device} leaves. It never unlocks it.", device = d.device.name)));
         // Away from home: only for devices that told this one how to reach them.
         self.away_row.set_visible(d.trusted && d.away_until.is_some());
@@ -816,7 +1005,7 @@ impl DevicePage {
         self.syncing.set(false);
         self.pair_box.set_visible(!d.trusted);
         self.menu.set_visible(d.trusted);
-        self.activity_box.set_visible(d.trusted);
+        self.update_tabs(d);
 
         let ready = d.trusted && !staged.is_empty();
         if ready {
@@ -841,6 +1030,9 @@ impl DevicePage {
             self.activity.remove(&child);
         }
         self.received.borrow_mut().clear();
+        if self.tab.get() != Tab::History {
+            return HashMap::new();
+        }
         let filter = self.filter.get();
         let mut days: Vec<(String, Vec<&HistoryEntry>)> = Vec::new();
         let matching: Vec<&HistoryEntry> = history.iter().take(SHOWN).filter(|e| filter.shows(&e.what)).collect();
@@ -1080,6 +1272,16 @@ impl Wave {
         self.levels.borrow_mut().clear();
         self.area.queue_draw();
     }
+}
+
+fn rounded(cr: &gtk::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
+    let r = r.min(w / 2.0).min(h / 2.0);
+    cr.new_sub_path();
+    cr.arc(x + w - r, y + r, r, -std::f64::consts::FRAC_PI_2, 0.0);
+    cr.arc(x + w - r, y + h - r, r, 0.0, std::f64::consts::FRAC_PI_2);
+    cr.arc(x + r, y + h - r, r, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
+    cr.arc(x + r, y + r, r, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
+    cr.close_path();
 }
 
 /// First line of `text`, at most `max` characters.

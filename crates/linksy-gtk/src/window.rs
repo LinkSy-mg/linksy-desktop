@@ -4,6 +4,7 @@
 
 mod camera;
 mod corner;
+mod files;
 mod island;
 mod transfers;
 mod invite;
@@ -80,8 +81,6 @@ struct State {
     /// The second display this computer extends onto: its session, the device and its
     /// name, so that a drop (the phone's screen went off, say) can offer to reconnect.
     second_display: Option<(Uuid, Fingerprint, String)>,
-    /// The phone whose texts are on screen.
-    messages_open: Option<Fingerprint>,
     /// Devices that lock this computer when they leave, and after how long.
     lock: linksy_ipc::LockPrefs,
     /// Terminals for phones; none where the service can't run them (a Flatpak).
@@ -136,6 +135,7 @@ pub struct Window {
     camera_title: adw::WindowTitle,
     // Texting through a phone
     messages: Rc<messages::MessagesView>,
+    files: Rc<files::FilesView>,
     corner: Rc<corner::Corner>,
     transfers: Rc<transfers::TransfersPage>,
     island: Rc<island::Island>,
@@ -236,7 +236,9 @@ impl Window {
         });
         camera_picture.add_controller(click);
         let messages = messages::MessagesView::new();
-        content_stack.add_named(&messages.root, Some("messages"));
+        page.inbox_slot.append(&messages.root);
+        let files = files::FilesView::new();
+        page.files_slot.append(&files.root);
         let transfers = transfers::TransfersPage::new();
         content_stack.add_named(&transfers.root, Some("transfers"));
         let camera_back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(t!("Back")).visible(false).build();
@@ -292,18 +294,10 @@ impl Window {
         toasts.set_child(Some(&overlay));
         window.set_content(Some(&toasts));
 
-        // Medium windows collapse the texting view; narrow ones also show one
-        // pane at a time. (The last matching breakpoint applies, so narrow repeats medium.)
-        let collapse_texts = |b: &adw::Breakpoint| {
-            b.add_setter(&messages.root, "collapsed", Some(&true.to_value()));
-        };
-        let medium = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 820sp").expect("breakpoint"));
-        collapse_texts(&medium);
-        window.add_breakpoint(medium);
+        // Narrow windows show the device list or a page, one at a time.
         let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 620sp").expect("breakpoint"));
         narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
         narrow.add_setter(&corner.root, "halign", Some(&gtk::Align::Fill.to_value()));
-        collapse_texts(&narrow);
         window.add_breakpoint(narrow);
 
         let win = Rc::new(Self {
@@ -333,6 +327,7 @@ impl Window {
             camera_back,
             camera_title,
             messages,
+            files,
             corner,
             transfers,
             island,
@@ -401,7 +396,6 @@ impl Window {
         win.camera_back.connect_clicked(move |_| {
             if let Some(w) = w.upgrade() {
                 w.stop_preview();
-                w.close_messages();
                 w.render_page();
             }
         });
@@ -416,6 +410,22 @@ impl Window {
         win.setup_sidebar();
         win.setup_page();
         win.setup_messages();
+        win.setup_files();
+        let w = Rc::downgrade(&win);
+        win.page.connect_narrow(move |narrow| {
+            if let Some(w) = w.upgrade() {
+                w.messages.set_narrow(narrow);
+            }
+        });
+        // How fast the device answers, while its page is on screen.
+        let w = Rc::downgrade(&win);
+        glib::timeout_add_seconds_local(5, move || match w.upgrade() {
+            Some(w) => {
+                w.refresh_link();
+                glib::ControlFlow::Continue
+            }
+            None => glib::ControlFlow::Break,
+        });
         win.refresh_setup();
         // One thing at a time: Finish Setup when it's needed, otherwise what's new
         if !win.offer_setup() {
@@ -540,8 +550,7 @@ impl Window {
                 page::Action::SendClipboard => w.send_clipboard(id),
                 page::Action::Ping => w.ping(id),
                 page::Action::Ring => w.ring(id, true),
-                page::Action::Messages => w.open_messages(id),
-                page::Action::BrowseFiles => w.browse_files(id),
+                page::Action::Tab(tab) => w.tab_shown(id, tab),
                 page::Action::LockWhenAway(on) => w.lock_when_away(id, on),
                 page::Action::AwayAll(on) => w.away_all(id, on),
                 page::Action::AutoAccept(on) => w.auto_accept(id, on),
@@ -1085,10 +1094,10 @@ impl Window {
             Event::Battery { .. } => self.refresh_devices(),
             Event::Ring { from, on: true } => self.toast(&t!("{name} is looking for this computer", name = from.name)),
             Event::Ring { on: false, .. } => {}
-            // Phone notifications are the service's to show, as desktop notifications.
-            Event::NotificationPosted { .. }
-            | Event::NotificationRemoved { .. }
-            | Event::NotificationReply { .. }
+            // Phone notifications are the service's to show, as desktop notifications; the
+            // Inbox lists the ones that aren't messages.
+            Event::NotificationPosted { from, .. } | Event::NotificationRemoved { from, .. } => self.alerts_changed(&from.id),
+            Event::NotificationReply { .. }
             | Event::NotificationAction { .. }
             | Event::NotificationDismissed { .. } => {}
             // Media players are the service's (MPRIS, so GNOME's own controls show them).
@@ -1390,6 +1399,15 @@ impl Window {
             self.render_page();
             self.render_activity();
             self.refresh_history();
+            self.page.set_inbox_count(0);
+            if let Some(d) = self.selected_device().filter(|d| d.trusted) {
+                if can(&d.device, "notifications") || can(&d.device, "sms") {
+                    self.load_inbox(d.device.id);
+                }
+                if self.page.tab() == page::Tab::Files {
+                    self.files_shown(d.device.id);
+                }
+            }
         }
         if id.is_some() {
             self.show_content();
@@ -1431,10 +1449,6 @@ impl Window {
         if previewing.is_some() && (previewing != selected || previewing != camera) {
             self.stop_preview();
         }
-        let texting = self.state.borrow().messages_open;
-        if texting.is_some() && texting != selected {
-            self.close_messages();
-        }
         match self.selected_device() {
             Some(d) => {
                 self.content.set_title(&d.device.name);
@@ -1451,17 +1465,7 @@ impl Window {
                 if previewing {
                     self.page.menu.set_visible(false);
                 }
-                let texting = self.state.borrow().messages_open.is_some();
-                if texting {
-                    self.page.menu.set_visible(false);
-                }
-                self.content_stack.set_visible_child_name(if previewing {
-                    "camera"
-                } else if texting {
-                    "messages"
-                } else {
-                    "device"
-                });
+                self.content_stack.set_visible_child_name(if previewing { "camera" } else { "device" });
             }
             None => {
                 self.content.set_title("Linksy");
@@ -1474,6 +1478,35 @@ impl Window {
         let mut state = self.state.borrow_mut();
         let state = &mut *state;
         state.live = self.page.show_history(&state.history, &state.progress);
+    }
+
+    /// A tab of the device's page shows: what's in it, fetched now.
+    fn tab_shown(self: &Rc<Self>, id: Fingerprint, tab: page::Tab) {
+        match tab {
+            page::Tab::Inbox => self.inbox_shown(id),
+            page::Tab::Files => self.files_shown(id),
+            page::Tab::History => self.render_activity(),
+            page::Tab::Use | page::Tab::Settings => {}
+        }
+    }
+
+    /// The selected device's link and battery again, while its page is on screen.
+    fn refresh_link(self: &Rc<Self>) {
+        let Some(id) = self.state.borrow().selected else { return };
+        if !self.window.is_visible() || self.content_stack.visible_child_name().as_deref() != Some("device") || self.device(&id).is_none_or(|d| !d.connected) {
+            return;
+        }
+        let Some(c) = self.client() else { return };
+        let call = self.bridge.call(&c, |c| async move { c.devices().await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            if let Ok(devices) = call.await
+                && let Some(d) = devices.into_iter().find(|d| d.device.id == id)
+                && w.state.borrow().selected == Some(id)
+            {
+                w.page.show_link(&d);
+            }
+        });
     }
 
     // ---- sending ----

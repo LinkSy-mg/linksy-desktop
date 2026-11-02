@@ -61,6 +61,56 @@ button.small { padding: 2px 12px; min-height: 26px; font-size: 0.9em; }
 .link-chip.away { background-color: alpha(#22C3E6, 0.16); color: mix(#22C3E6, currentColor, 0.35); }
 .link-chip.usb { background-color: alpha(@accent_bg_color, 0.16); color: @accent_color; }
 .link-chip.offline { background-color: alpha(currentColor, 0.08); color: alpha(currentColor, 0.7); }
+.battery-chip {
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 0.85em;
+  font-weight: 700;
+  background-color: alpha(currentColor, 0.07);
+}
+/* Tabs under the actions: a line under them all, the one showing underlined */
+.page-tabs { border-bottom: 1px solid alpha(currentColor, 0.12); }
+button.page-tab {
+  padding: 10px 2px 8px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  border-bottom: 2px solid transparent;
+  color: alpha(currentColor, 0.72);
+  font-weight: 600;
+}
+button.page-tab:hover { color: @window_fg_color; }
+button.page-tab:checked { color: @accent_color; border-bottom-color: @accent_color; background: none; }
+.count-badge {
+  min-width: 18px;
+  min-height: 18px;
+  padding: 0 5px;
+  border-radius: 99px;
+  background-color: @accent_bg_color;
+  color: @accent_fg_color;
+  font-size: 0.75em;
+  font-weight: 800;
+}
+/* Inbox and Files tabs */
+list.inbox-list { background: none; }
+list.inbox-list > row { border-radius: 12px; }
+list.inbox-list > row:selected { background-color: alpha(@accent_bg_color, 0.14); color: inherit; }
+.inbox-name { font-weight: 600; }
+.app-badge { padding: 2px; border-radius: 6px; background-color: @window_bg_color; box-shadow: 0 0 0 1px alpha(currentColor, 0.12); }
+.alert-icon { min-width: 40px; min-height: 40px; border-radius: 12px; background-color: alpha(currentColor, 0.06); }
+button.code-chip {
+  padding: 2px 10px;
+  min-height: 28px;
+  border-radius: 9px;
+  font-weight: 700;
+  background-color: alpha(@accent_bg_color, 0.14);
+  color: @accent_color;
+}
+button.crumb { padding: 2px 6px; min-height: 28px; font-weight: 600; color: @accent_color; }
+button.crumb.current { color: @window_fg_color; }
+.files-box { border-radius: 14px; border: 1px solid alpha(currentColor, 0.1); }
+listview.files-list { background: none; }
+listview.files-list > row { border-bottom: 1px solid alpha(currentColor, 0.07); }
 button.send-tile {
   padding: 20px 22px;
   min-height: 150px;
