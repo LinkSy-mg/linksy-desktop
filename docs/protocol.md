@@ -1541,29 +1541,51 @@ computer → phone {"type":"deck_actions","actions":[
                     {"id":"media.play_pause","name":"Play or Pause","kind":"button","group":"Media"},
                     {"id":"sound.volume","name":"Volume","kind":"slider","group":"Sound"},
                     {"id":"sound.mute","name":"Mute","kind":"toggle","group":"Sound"},
+                    {"id":"sound.output","name":"Sound Output","kind":"button","group":"Sound"},
+                    {"id":"system.restart","name":"Restart","kind":"button","group":"System","confirm":"Restart Office PC?"},
+                    {"id":"network.wifi","name":"Wi-Fi","kind":"toggle","group":"Network","confirm":"This can disconnect Pixel 9 from Office PC."},
                     {"id":"command.3f2a…","name":"Backup","kind":"button","group":"Commands"}]}
-computer → phone {"type":"deck_state","states":[{"id":"sound.volume","value":0.42},{"id":"sound.mute","on":false}]}
+computer → phone {"type":"deck_state","states":[{"id":"sound.volume","value":0.42},{"id":"sound.mute","on":false},
+                    {"id":"sound.output","text":"Speakers"},{"id":"network.wifi","on":true}]}
 phone → computer {"type":"deck_run","action":"sound.volume","value":0.6}
 phone → computer {"type":"deck_close"}          the deck is gone: stop sending state
 ```
 
 - `kind`: `button` (run it), `toggle` (run it to flip; its state says `on`), `slider` (run
   it with `value` 0 to 1; its state says `value`).
+- `confirm` (optional): ask this before running it (Cancel, or the action's `name` to go
+  on), and run it only on yes. It's in the computer's language with the names filled in.
+- `text` in a state (optional): what the tile shows besides, like `sound.output`'s output.
+  Both fields are new; an older core ignores them. A `kind` the core doesn't know would
+  fail the whole `deck_actions`, so the computer adds none.
 - `deck_actions` comes on `deck_open` and again whenever the user turns one on or off on
   the computer; `deck_state` while the deck is open, when something changes. The list is
   only what's on for that phone: anything else the phone runs is refused (ignored), so a
   tile whose action left the list should show as unavailable, not disappear.
-- Ids: `media.play_pause`, `media.next`, `media.previous`, `sound.volume`, `sound.mute`,
-  `sound.mic_mute`, `system.lock`, and `command.<id>` for the user's own commands (a name
-  and a command line, set on the computer). More may come; show any id with its `name` and
-  `kind`. `group` is one of `Media`, `Sound`, `System`, `Commands` in English whatever the
-  language (`name` is in the computer's).
-- Desktop: media and sound are on for a phone until the user turns them off, locking and
-  commands off until turned on. Media buttons go to the player that's playing, else the
-  first paused one. Sound needs wpctl or pactl (no `sound.*` without them). States:
-  `sound.volume` (`value`), `sound.mute` and `sound.mic_mute` (`on`); a `deck_state` comes
-  after every run that was allowed, so a refused run gets no answer. While a slider is
-  dragged, the computer may skip to its newest value.
+- Ids, each only where this computer can do it (a missing tool means it isn't offered):
+
+  | Group | Id | Kind | State | Desktop does it with |
+  |---|---|---|---|---|
+  | `Media` | `media.play_pause`, `media.next`, `media.previous` | button | | the player that's playing, else the first paused one |
+  | `Sound` | `sound.volume` | slider | `value` | wpctl, or pactl |
+  | `Sound` | `sound.mute`, `sound.mic_mute` | toggle | `on` | wpctl, or pactl |
+  | `Sound` | `sound.output` | button | `text`: the output's name | the next output becomes the default (wpctl, or pactl) |
+  | `System` | `system.lock` | button | | the desktop's screen lock |
+  | `System` | `system.dnd` | toggle | `on` | GNOME: banners off; Plasma: the notifications inhibited |
+  | `System` | `system.restart`, `system.shutdown` | button, `confirm` | | logind (it asks for a password where its rules want one) |
+  | `Network` | `network.wifi` | toggle, `confirm` | `on` | nmcli |
+  | `Network` | `network.bluetooth` | toggle | `on` | bluetoothctl, or rfkill |
+  | `Network` | `network.airplane` | toggle, `confirm` | `on`: every radio off | GNOME's airplane mode, else nmcli and Bluetooth |
+  | `Power` | `power.saver`, `power.balanced`, `power.performance` | toggle | `on` for the active profile | powerprofilesctl (performance only where it has it) |
+  | `Power` | `power.auto` | toggle | `on` | GNOME's power saver on low battery |
+  | `Commands` | `command.<id>` | button | | the user's own commands (a name and a command line, set on the computer) |
+
+  More may come; show any id with its `name` and `kind`. `group` is in English whatever
+  the language (`name` is in the computer's).
+- Desktop: media, sound and Do Not Disturb are on for a phone until the user turns them
+  off; the rest is off until turned on (or until a tile for it is saved, §4.20). A
+  `deck_state` comes after every run that was allowed, so a refused run gets no answer.
+  While a slider is dragged, the computer may skip to its newest value.
 - Core: `Node::deck_open(to, open)`, `Node::deck_run(to, action, value)`;
   `Event::DeckActions`, `Event::DeckState`.
 
@@ -1616,12 +1638,18 @@ computer → phone {"type":"deck_state",…}         as in §4.19
 - Away from the computer, the phone keeps showing the last layouts it got from it (kept
   per computer, with their `version`); its tiles are unavailable until the computer is
   back. The phone doesn't send layouts back (it may later).
+- The screen, while the deck shows: the phone keeps it on, over its own screen timeout
+  (`FLAG_KEEP_SCREEN_ON` on the deck's window). After 60 s without a touch it dims to
+  about 20 % brightness (the window's `screenBrightness`), and a touch brings it back.
+  Leaving the deck gives the screen back to the phone's own settings.
 - Limits: at most 20 layouts, 8 pages a face, 64 tiles a page, names and labels of 60
   characters; the computer refuses to save layouts whose JSON is over 1 MiB less 1 KiB, so
   the message stays within a frame (§4.4).
 - Desktop: placing a tile in the editor allows its action for that phone (the same as
   turning it on in §4.19). Until the user saves, the first layout is a clock, the player,
-  the volume and buttons for what the computer offers.
+  the volume and buttons for media, mute, the microphone, the output, Do Not Disturb,
+  Wi-Fi, Bluetooth and locking, those the computer offers; a tile whose action is still
+  off for the phone shows as unavailable.
 - Core: `Event::DeckLayout { from, layouts }` with `linksy_core::DeckLayouts`
   (`deck_layout.rs`, which also has the kinds, sizes, themes and `check`); the computer
   sends with `Node::deck_layout(to, &layouts)`, which refuses a phone without the feature.
@@ -2157,3 +2185,10 @@ robust against any encoder (GPU ones may slice too):
   every save, only to a phone with feature `deck_layout`. Core: `Event::DeckLayout`,
   `DeckLayouts`. A message over 1 MiB now fails when sent instead of at the other side.
   Phone to-do: announce `deck_layout`, draw the layouts and themes, keep the last ones.
+- **2026-11-02** — Deck actions (§4.19), desktop next release: `sound.output`,
+  `system.dnd`, `system.restart`, `system.shutdown`, `network.wifi`, `network.bluetooth`,
+  `network.airplane`, `power.saver`, `power.balanced`, `power.performance`, `power.auto`,
+  in new groups `Network` and `Power`; `deck_actions` entries gain optional `confirm`,
+  `deck_state` entries optional `text`. The deck keeps the screen on and dims it after
+  60 s untouched (§4.20). Phone to-do: ask `confirm` before running, show `text`, the
+  screen rule.
