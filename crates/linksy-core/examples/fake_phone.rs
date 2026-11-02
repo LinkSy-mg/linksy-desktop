@@ -47,6 +47,8 @@
 //! its own thumbnail.
 //! `--deck ACTION[=VALUE]` opens the deck, prints the `deck_actions` and `deck_state` it
 //! gets, runs that action (a slider with VALUE), prints the state after, then closes it.
+//! `--deck-layout` announces `deck_layout`, so the deck also gets its layouts (printed as
+//! DECK_LAYOUT, in short); `--deck-wait SECONDS` keeps the deck open that long after the run.
 
 use std::time::Duration;
 
@@ -85,6 +87,7 @@ async fn main() {
     let mut away = false;
     let mut accept_pairing = false;
     let mut deck: Option<(String, Option<f64>)> = None;
+    let (mut deck_layout, mut deck_wait) = (false, 0u64);
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -141,6 +144,8 @@ async fn main() {
                     None => (run, None),
                 });
             }
+            "--deck-layout" => deck_layout = true,
+            "--deck-wait" => deck_wait = value().parse().expect("--deck-wait SECONDS"),
             "--chats" => chats = true,
             "--notifications-later" => notifications_later = Some(value().parse().expect("--notifications-later SECONDS")),
             other => panic!("unknown option {other}"),
@@ -163,6 +168,9 @@ async fn main() {
     }
     if chats {
         config.features.push("inbox_history".into());
+    }
+    if deck_layout {
+        config.features.push("deck_layout".into());
     }
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
     let node = Node::start(config).await.expect("start");
@@ -355,31 +363,38 @@ async fn main() {
         if let Some((action, value)) = &deck {
             let pc = t.device.id;
             let _ = node.deck_open(&pc, true).await;
-            // Its list, then the state: each a stream of its own, in whichever order
-            for _ in 0..2 {
-                match deck_message(&mut events, &pc).await {
-                    Some(Event::DeckActions { actions, .. }) => println!("DECK_ACTIONS {}", serde_json::to_string(&actions).unwrap()),
-                    Some(Event::DeckState { states, .. }) => println!("DECK_STATE {}", serde_json::to_string(&states).unwrap()),
-                    _ => println!("no deck answer from {}", t.device.name),
-                }
+            // Its list, its layouts if it takes them, then the state: each a stream of its
+            // own, in whichever order
+            let (mut listed, mut stated, mut laid) = (false, false, !deck_layout);
+            while !(listed && stated && laid) {
+                let Some(e) = deck_message(&mut events, &pc).await else {
+                    println!("no deck answer from {}", t.device.name);
+                    break;
+                };
+                listed |= matches!(e, Event::DeckActions { .. });
+                stated |= matches!(e, Event::DeckState { .. });
+                laid |= matches!(e, Event::DeckLayout { .. });
+                print_deck(&e, "DECK_STATE");
             }
             let r = node.deck_run(&pc, action, *value).await;
             println!("ran {action}{}: {:?}", value.map(|v| format!("={v}")).unwrap_or_default(), r.map_err(|e| e.to_string()));
             // A new list may come first, when it changed on the computer meanwhile
             let mut after = false;
             while let Some(e) = deck_message(&mut events, &pc).await {
-                match e {
-                    Event::DeckActions { actions, .. } => println!("DECK_ACTIONS {}", serde_json::to_string(&actions).unwrap()),
-                    Event::DeckState { states, .. } => {
-                        println!("DECK_STATE_AFTER {}", serde_json::to_string(&states).unwrap());
-                        after = true;
-                        break;
-                    }
-                    _ => {}
+                print_deck(&e, "DECK_STATE_AFTER");
+                if matches!(e, Event::DeckState { .. }) {
+                    after = true;
+                    break;
                 }
             }
             if !after {
                 println!("no state after {action}: refused");
+            }
+            let until = tokio::time::Instant::now() + Duration::from_secs(deck_wait);
+            while tokio::time::Instant::now() < until {
+                if let Ok(Some(e)) = tokio::time::timeout_at(until, deck_message(&mut events, &pc)).await {
+                    print_deck(&e, "DECK_STATE");
+                }
             }
             let _ = node.deck_open(&pc, false).await;
         }
@@ -567,6 +582,7 @@ async fn main() {
                 Ok(Event::NotificationReply { from, key, text }) => println!("REPLY to {key} from {}: {text}", from.name),
                 Ok(Event::NotificationAction { key, action, .. }) => println!("ACTION {action} on {key}"),
                 Ok(Event::NotificationDismissed { key, .. }) => println!("DISMISSED {key}"),
+                Ok(e @ Event::DeckLayout { .. }) => print_deck(&e, ""),
                 // A made-up past: a message every hour, three days back.
                 Ok(Event::InboxHistory { from, app, conversation, before_ms, limit }) if chats => {
                     let oldest = before_ms.saturating_sub(3 * 86_400_000);
@@ -673,7 +689,7 @@ async fn deck_message(events: &mut tokio::sync::broadcast::Receiver<Event>, pc: 
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(_) => return None,
             };
-            if let Event::DeckActions { from, .. } | Event::DeckState { from, .. } = &e
+            if let Event::DeckActions { from, .. } | Event::DeckState { from, .. } | Event::DeckLayout { from, .. } = &e
                 && from.id == *pc
             {
                 return Some(e);
@@ -683,6 +699,20 @@ async fn deck_message(events: &mut tokio::sync::broadcast::Receiver<Event>, pc: 
     .await
     .ok()
     .flatten()
+}
+
+/// A deck message from the computer, the layouts in short.
+fn print_deck(e: &Event, state: &str) {
+    match e {
+        Event::DeckActions { actions, .. } => println!("DECK_ACTIONS {}", serde_json::to_string(actions).unwrap()),
+        Event::DeckState { states, .. } => println!("{state} {}", serde_json::to_string(states).unwrap()),
+        Event::DeckLayout { layouts, .. } => {
+            let tiles = |f: &linksy_core::DeckFace| f.pages.iter().map(Vec::len).sum::<usize>();
+            let each: Vec<String> = layouts.layouts.iter().map(|l| format!("{}:{}/{}", l.id, tiles(&l.portrait), tiles(&l.landscape))).collect();
+            println!("DECK_LAYOUT version={} active={} layouts={} tiles(portrait/landscape)={}", layouts.version, layouts.active, layouts.layouts.len(), each.join(","));
+        }
+        _ => {}
+    }
 }
 
 fn fake_threads() -> Vec<linksy_core::SmsThread> {
