@@ -404,8 +404,8 @@ impl DevicePage {
         let cards = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .homogeneous(true)
-            .min_children_per_line(2)
-            .max_children_per_line(2)
+            .min_children_per_line(4)
+            .max_children_per_line(4)
             .column_spacing(10)
             .row_spacing(10)
             .vexpand(false)
@@ -728,11 +728,9 @@ impl DevicePage {
         // the last matching breakpoint applies, so each repeats the ones before.)
         // Responsive design, written by hand, in Rust. Be gentle with it.
         let vertical = gtk::Orientation::Vertical.to_value();
-        let one = 1u32.to_value();
-        let changes: [(&gtk::Widget, &str, &glib::Value); 8] = [
+        let (one, two) = (1u32.to_value(), 2u32.to_value());
+        let changes: [(&gtk::Widget, &str, &glib::Value); 6] = [
             (actions.upcast_ref(), "orientation", &vertical),
-            (cards.upcast_ref(), "min-children-per-line", &one),
-            (cards.upcast_ref(), "max-children-per-line", &one),
             (hero.upcast_ref(), "orientation", &vertical),
             (use_as_head.upcast_ref(), "orientation", &vertical),
             (activity_header.upcast_ref(), "orientation", &vertical),
@@ -740,11 +738,14 @@ impl DevicePage {
             (small.upcast_ref(), "max-children-per-line", &one),
         ];
         let mut narrow = Vec::new();
-        for (width, count) in [("760sp", 1), ("680sp", 3), ("540sp", 6), ("400sp", 8)] {
+        // The Use As cards: four per line, then two, then one
+        for (width, count, per_line) in [("760sp", 1, &two), ("680sp", 1, &two), ("540sp", 4, &one), ("400sp", 6, &one)] {
             let b = adw::Breakpoint::new(adw::BreakpointCondition::parse(&format!("max-width: {width}")).expect("breakpoint"));
             for (widget, property, value) in &changes[..count] {
                 b.add_setter(*widget, property, Some(value));
             }
+            b.add_setter(&cards, "min-children-per-line", Some(per_line));
+            b.add_setter(&cards, "max-children-per-line", Some(per_line));
             if width != "760sp" {
                 narrow.push(b.clone());
             }
