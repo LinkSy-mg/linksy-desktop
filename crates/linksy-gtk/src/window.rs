@@ -427,6 +427,18 @@ impl Window {
         win.setup_messages();
         win.setup_files();
         win.setup_gallery();
+        // Development aid (screenshots): LINKSY_SCREENSHOT_TAB=deck opens the phone's deck.
+        if std::env::var("LINKSY_SCREENSHOT_TAB").as_deref() == Ok("deck") {
+            let w = Rc::downgrade(&win);
+            glib::timeout_add_local_once(std::time::Duration::from_millis(2500), move || {
+                if let Some(w) = w.upgrade() {
+                    let selected = w.state.borrow().selected;
+                    if let Some(id) = selected {
+                        w.show_deck(id);
+                    }
+                }
+            });
+        }
         let w = Rc::downgrade(&win);
         win.page.connect_narrow(move |narrow| {
             if let Some(w) = w.upgrade() {
