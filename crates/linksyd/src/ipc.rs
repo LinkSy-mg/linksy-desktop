@@ -256,6 +256,7 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
                 false => Err(error.unwrap_or_else(|| "the phone couldn't send it".into())),
             }
         }
+        Request::InboxOlder { conversation } => serde_json::to_value(mirror.older(node, &conversation).await?).map_err(|e| e.to_string()),
         Request::Alerts => serde_json::to_value(mirror.inbox().alerts()).map_err(|e| e.to_string()),
         Request::DismissAlert { phone, key } => {
             let id = resolve(node, &phone)?;

@@ -54,6 +54,8 @@ pub enum Request {
     InboxThread { conversation: String },
     InboxRead { conversation: String },
     InboxReply { conversation: String, text: String },
+    /// Earlier messages from the phone, added to the conversation; answers all of them.
+    InboxOlder { conversation: String },
     /// The phones' other notifications (not messages), newest first; dismissing one there
     /// (`key`), or all of a phone's.
     Alerts,
@@ -406,6 +408,9 @@ pub struct Conversation {
     #[serde(default)]
     pub can_reply: bool,
     pub at_ms: u64,
+    /// The phone may have earlier messages to give (`inbox_older`).
+    #[serde(default)]
+    pub older: bool,
 }
 
 /// A phone notification that isn't a message (a reminder, a delivery…), while the phone
@@ -619,6 +624,10 @@ impl Client {
 
     pub async fn inbox_reply(&self, conversation: impl Into<String>, text: impl Into<String>) -> Result<(), ClientError> {
         self.call(Request::InboxReply { conversation: conversation.into(), text: text.into() }).await
+    }
+
+    pub async fn inbox_older(&self, conversation: impl Into<String>) -> Result<Vec<InboxMessage>, ClientError> {
+        self.call(Request::InboxOlder { conversation: conversation.into() }).await
     }
 
     pub async fn call<T: DeserializeOwned>(&self, request: Request) -> Result<T, ClientError> {

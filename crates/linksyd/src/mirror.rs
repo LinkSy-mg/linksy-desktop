@@ -73,13 +73,35 @@ impl Mirror {
         };
         for key in keys {
             node.dismiss_notification(phone, &key).await.map_err(|e| e.to_string())?;
-            self.inner.inbox.removed(phone, &key);
+            self.inner.inbox.removed(phone, &key, false);
             let gone = self.inner.shown.lock().unwrap().remove(&(*phone, key));
             if let Some(s) = gone {
                 close(s.id).await;
             }
         }
         Ok(())
+    }
+
+    /// Conversation `id`'s earlier messages, asked of the phone: the whole conversation then.
+    pub async fn older(&self, node: &Node, id: &str) -> Result<Vec<linksy_ipc::InboxMessage>, String> {
+        use linksy_core::Event;
+        use tokio::sync::broadcast::error::RecvError;
+
+        let (phone, app, conversation, before) = self.inner.inbox.older_than(id).ok_or("no earlier messages to ask for")?;
+        let mut events = node.subscribe();
+        node.inbox_history(&phone, &app, &conversation, before, 50).await.map_err(|e| e.to_string())?;
+        let page = async {
+            loop {
+                match events.recv().await {
+                    Ok(Event::InboxHistoryPage { from, app: a, conversation: c, messages, more }) if from.id == phone && a == app && c == conversation => return Some((messages, more)),
+                    Ok(_) | Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => return None,
+                }
+            }
+        };
+        let (messages, more) = tokio::time::timeout(std::time::Duration::from_secs(10), page).await.ok().flatten().ok_or("the phone didn't answer")?;
+        self.inner.inbox.add_older(&phone, &app, &conversation, &messages, more);
+        self.inner.inbox.thread(id).ok_or_else(|| "that conversation is gone".into())
     }
 
     /// Answer conversation `id` through the phone's notification.
@@ -149,11 +171,11 @@ impl Mirror {
                     let code = self.inner.inbox.posted(&from, &notification);
                     let copied = code.as_deref().filter(|_| prefs.copy_codes).is_some_and(|c| crate::clipboard::copy_text(c).is_ok());
                     if prefs.show && self.inner.popups {
-                        self.show(node.clone(), from, notification, code, copied);
+                        self.show(node.clone(), from, *notification, code, copied);
                     }
                 }
-                Ok(Event::NotificationRemoved { from, key }) => {
-                    self.inner.inbox.removed(&from.id, &key);
+                Ok(Event::NotificationRemoved { from, key, reply_kept }) => {
+                    self.inner.inbox.removed(&from.id, &key, reply_kept);
                     let gone = self.inner.shown.lock().unwrap().remove(&(from.id, key));
                     if let Some(s) = gone {
                         close(s.id).await;

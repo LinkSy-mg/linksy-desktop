@@ -5,12 +5,12 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use linksy_core::{DeviceInfo, Fingerprint, RemoteNotification};
+use linksy_core::{ConversationMessage, DeviceInfo, Fingerprint, RemoteNotification};
 use linksy_ipc::{Alert, Conversation, InboxMessage};
 use tokio::sync::broadcast;
 
 const MAX_CONVERSATIONS: usize = 100;
-const MAX_MESSAGES: usize = 50;
+const MAX_MESSAGES: usize = 200;
 const MAX_ALERTS: usize = 30;
 const MAX_TEXT: usize = 4096;
 
@@ -56,9 +56,12 @@ pub struct Inbox {
 struct Entry {
     phone: Fingerprint,
     conversation: Conversation,
+    /// Oldest first.
     messages: VecDeque<InboxMessage>,
     /// The phone's notification to answer through, while it has one.
     key: Option<String>,
+    /// The conversation as the phone names it, to ask for its history.
+    asked: String,
 }
 
 /// What a notification says, as a message.
@@ -168,9 +171,11 @@ impl Inbox {
                         unread: 0,
                         can_reply: false,
                         at_ms,
+                        older: false,
                     },
                     messages: VecDeque::new(),
                     key: None,
+                    asked: String::new(),
                 });
                 inbox.len() - 1
             }
@@ -181,13 +186,19 @@ impl Inbox {
         let fresh = !e.messages.back().is_some_and(|m| m.text == message.text && m.sender == message.sender);
         if fresh {
             e.messages.push_back(message.clone());
-            if e.messages.len() > MAX_MESSAGES {
-                e.messages.pop_front();
-            }
             e.conversation.unread += 1;
             e.conversation.last = Some(message);
             e.conversation.at_ms = at_ms;
         }
+        // The earlier messages the notification carries fill in what was missed.
+        for m in &n.messages {
+            add_message(&mut e.messages, from_phone(m, at_ms));
+        }
+        while e.messages.len() > MAX_MESSAGES {
+            e.messages.pop_front();
+        }
+        e.asked = n.conversation.clone().unwrap_or_else(|| parsed.title.clone());
+        e.conversation.older |= from.features.iter().any(|f| f == "inbox_history");
         e.key = Some(n.key.clone());
         e.conversation.can_reply = n.can_reply;
         e.conversation.group |= parsed.group;
@@ -197,17 +208,45 @@ impl Inbox {
         code
     }
 
-    /// The phone's notification `key` is gone (read, answered or swiped away there).
-    pub fn removed(&self, from: &Fingerprint, key: &str) {
+    /// The phone's notification `key` is gone (read, answered or swiped away there); with
+    /// `reply_kept`, the phone still answers its conversation through it.
+    pub fn removed(&self, from: &Fingerprint, key: &str, reply_kept: bool) {
         let phone = from.to_string();
         self.alerts.lock().unwrap().retain(|a| !(a.phone == phone && a.key == key));
         let mut inbox = self.inner.lock().unwrap();
         for e in inbox.iter_mut().filter(|e| e.phone == *from && e.key.as_deref() == Some(key)) {
-            e.key = None;
-            e.conversation.can_reply = false;
+            if !reply_kept {
+                e.key = None;
+                e.conversation.can_reply = false;
+            }
             e.conversation.unread = 0;
             let _ = self.updates.send(e.conversation.clone());
         }
+    }
+
+    /// Where to ask for conversation `id`'s earlier messages: the phone, the app, the
+    /// conversation as the phone names it, and the time of the oldest one here.
+    pub fn older_than(&self, id: &str) -> Option<(Fingerprint, String, String, u64)> {
+        let inbox = self.inner.lock().unwrap();
+        let e = inbox.iter().find(|e| e.conversation.id == id && e.conversation.older)?;
+        let oldest = e.messages.front().map_or(e.conversation.at_ms, |m| m.at_ms);
+        Some((e.phone, e.conversation.app.clone(), e.asked.clone(), oldest))
+    }
+
+    /// Earlier messages from the phone; `more`: it has older ones still.
+    pub fn add_older(&self, phone: &Fingerprint, app: &str, conversation: &str, messages: &[ConversationMessage], more: bool) {
+        let mut inbox = self.inner.lock().unwrap();
+        let Some(e) = inbox.iter_mut().find(|e| e.phone == *phone && e.conversation.app == app && e.asked == conversation) else { return };
+        let before = e.messages.front().map_or(e.conversation.at_ms, |m| m.at_ms);
+        for m in messages {
+            add_message(&mut e.messages, from_phone(m, before));
+        }
+        // The newest stay; older ones beyond what's kept are asked again if wanted.
+        while e.messages.len() > MAX_MESSAGES {
+            e.messages.pop_front();
+        }
+        e.conversation.older = more;
+        let _ = self.updates.send(e.conversation.clone());
     }
 
     pub fn read(&self, id: &str) {
@@ -224,7 +263,7 @@ impl Inbox {
         if let Some(e) = inbox.iter_mut().find(|e| e.conversation.id == id) {
             let message = InboxMessage { at_ms: now_ms(), sender: None, text: text.into(), code: None, mine: true };
             e.messages.push_back(message.clone());
-            if e.messages.len() > MAX_MESSAGES {
+            while e.messages.len() > MAX_MESSAGES {
                 e.messages.pop_front();
             }
             e.conversation.unread = 0;
@@ -233,6 +272,27 @@ impl Inbox {
             let _ = self.updates.send(e.conversation.clone());
         }
     }
+}
+
+/// A message the phone kept, with its code; one without a time goes just before `before`.
+fn from_phone(m: &ConversationMessage, before: u64) -> (InboxMessage, bool) {
+    let mut text = m.text.trim().to_string();
+    text.truncate(text.char_indices().nth(MAX_TEXT).map_or(text.len(), |(i, _)| i));
+    let message = InboxMessage { at_ms: m.time.unwrap_or(before.saturating_sub(1)), sender: m.sender.clone().filter(|_| !m.mine), code: crate::codes::code_in(&text), text, mine: m.mine };
+    (message, m.time.is_some())
+}
+
+/// Put `m` in its place by time, unless it's there already: same words from the same
+/// side, and at the same time when it has one ("ok" twice is two messages).
+fn add_message(messages: &mut VecDeque<InboxMessage>, (m, timed): (InboxMessage, bool)) {
+    let same = |o: &InboxMessage| {
+        o.text == m.text && o.mine == m.mine && (o.sender == m.sender || o.sender.is_none() || m.sender.is_none()) && (!timed || o.at_ms.abs_diff(m.at_ms) <= 1000)
+    };
+    if m.text.is_empty() || messages.iter().any(same) {
+        return;
+    }
+    let at = messages.iter().position(|o| o.at_ms > m.at_ms).unwrap_or(messages.len());
+    messages.insert(at, m);
 }
 
 fn now_ms() -> u64 {
@@ -304,6 +364,9 @@ fn parse(n: &RemoteNotification) -> Option<Parsed> {
     if kind == "mail" {
         // The sender is the conversation; the subject and the start of the mail are the text
         sender = None;
+        if let Some(subject) = n.subject.as_deref().map(str::trim).filter(|s| !s.is_empty() && !text.starts_with(s)) {
+            text = format!("{subject}\n{text}");
+        }
     }
     text.truncate(text.char_indices().nth(MAX_TEXT).map_or(text.len(), |(i, _)| i));
     Some(Parsed { kind, title, sender, text, group })
@@ -398,7 +461,7 @@ mod tests {
         let alice = list.iter().find(|c| c.title == "Alice").unwrap();
         assert_eq!((alice.unread, alice.last.as_ref().unwrap().text.as_str()), (2, "At noon?"));
         assert_eq!(inbox.thread(&alice.id).unwrap().len(), 2);
-        inbox.removed(&phone.id, "k");
+        inbox.removed(&phone.id, "k", false);
         assert!(inbox.list().iter().all(|c| !c.can_reply && c.unread == 0));
     }
 
@@ -415,7 +478,57 @@ mod tests {
         let alerts = inbox.alerts();
         assert_eq!(alerts.iter().map(|a| (a.key.as_str(), a.body.as_str())).collect::<Vec<_>>(), [("b", "In 5 minutes"), ("a", "Your code is 771204")]);
         assert!(inbox.list().is_empty());
-        inbox.removed(&phone.id, "b");
+        inbox.removed(&phone.id, "b", false);
         assert_eq!(inbox.alert_keys(&phone.id), ["a"]);
+    }
+
+    #[test]
+    fn history_fills_in_and_pages_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = Inbox::new(dir.path().into());
+        let features = vec!["inbox_history".to_string()];
+        let phone = DeviceInfo { id: Fingerprint::of(b"p"), name: "Pixel".into(), kind: linksy_core::DeviceKind::Phone, os: "android".into(), features, away: None };
+        let said = |sender: Option<&str>, text: &str, time: u64, mine: bool| ConversationMessage { sender: sender.map(Into::into), text: text.into(), time: Some(time), mine };
+        let family = RemoteNotification {
+            conversation: Some("Family".into()),
+            sender: Some("Bob".into()),
+            group: true,
+            time: Some(5000),
+            messages: vec![said(Some("Mum"), "ok", 1000, false), said(None, "ok", 2000, true), said(Some("Mum"), "ok", 3000, false), said(Some("Bob"), "Photos are up", 5000, false)],
+            ..n("com.whatsapp", "WhatsApp", "Family", "Bob: Photos are up")
+        };
+        inbox.posted(&phone, &family);
+        let c = inbox.list().remove(0);
+        assert_eq!((c.unread, c.older), (1, true), "the history isn't unread, and more can be asked");
+        let thread = inbox.thread(&c.id).unwrap();
+        let texts: Vec<_> = thread.iter().map(|m| (m.text.as_str(), m.mine, m.at_ms)).collect();
+        assert_eq!(texts, [("ok", false, 1000), ("ok", true, 2000), ("ok", false, 3000), ("Photos are up", false, 5000)], "repeated words stay, the newest isn't doubled");
+
+        let (from, app, conversation, before) = inbox.older_than(&c.id).unwrap();
+        assert_eq!((from, app.as_str(), conversation.as_str(), before), (phone.id, "com.whatsapp", "Family", 1000));
+        inbox.add_older(&phone.id, "com.whatsapp", "Family", &[said(Some("Bob"), "Hi all, your code is 482913", 500, false), said(Some("Mum"), "ok", 1000, false)], false);
+        let thread = inbox.thread(&c.id).unwrap();
+        assert_eq!(thread.len(), 5);
+        assert_eq!((thread[0].code.as_deref(), thread[0].sender.as_deref()), (Some("482913"), Some("Bob")));
+        assert!(inbox.older_than(&c.id).is_none(), "the phone said there's nothing older");
+    }
+
+    #[test]
+    fn a_kept_reply_survives_the_notification() {
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = Inbox::new(dir.path().into());
+        let phone = DeviceInfo { id: Fingerprint::of(b"p"), name: "Pixel".into(), kind: linksy_core::DeviceKind::Phone, os: "android".into(), features: vec![], away: None };
+        inbox.posted(&phone, &n("com.whatsapp", "WhatsApp", "Alice", "Lunch?"));
+        let id = inbox.list()[0].id.clone();
+        inbox.removed(&phone.id, "k", true);
+        assert!(inbox.list()[0].can_reply);
+        assert_eq!(inbox.notification(&id).map(|(_, key, reply)| (key, reply)), Some(("k".to_string(), true)));
+        inbox.removed(&phone.id, "k", false);
+        assert!(inbox.notification(&id).is_none());
+        assert!(inbox.older_than(&id).is_none(), "a phone without history has none to ask");
+        let mail = RemoteNotification { subject: Some("Invoice".into()), ..n("com.google.android.gm", "Gmail", "Shop", "Here it is") };
+        inbox.posted(&phone, &mail);
+        let shop = inbox.list().into_iter().find(|c| c.title == "Shop").unwrap();
+        assert_eq!(shop.last.unwrap().text, "Invoice\nHere it is");
     }
 }
