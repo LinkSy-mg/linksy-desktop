@@ -423,6 +423,7 @@ impl Window {
         win.page.connect_narrow(move |narrow| {
             if let Some(w) = w.upgrade() {
                 w.messages.set_narrow(narrow);
+                w.files.set_narrow(narrow);
             }
         });
         // How fast the device answers, while its page is on screen.
@@ -685,6 +686,7 @@ impl Window {
                             Update::Event(ev) => w.handle_event(*ev),
                             Update::History(h) => w.history_changed(h),
                             Update::Inbox(c) => w.inbox_changed(c),
+                            Update::Files(p) => w.files_progress(p),
                         }
                     }
                     // Service went away.

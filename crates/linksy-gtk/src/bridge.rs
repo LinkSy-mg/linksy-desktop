@@ -6,13 +6,15 @@ use std::future::Future;
 use std::sync::Arc;
 
 use linksy_ipc::linksy_core::Event;
-use linksy_ipc::{Client, ClientError, Conversation, HistoryEntry};
+use linksy_ipc::{Client, ClientError, Conversation, FsProgress, HistoryEntry};
 
-/// What the service pushes: live events, history changes and conversations.
+/// What the service pushes: live events, history changes, conversations and copies to and
+/// from phones.
 pub enum Update {
     Event(Box<Event>),
     History(HistoryEntry),
     Inbox(Conversation),
+    Files(FsProgress),
 }
 
 pub struct Bridge {
@@ -36,7 +38,7 @@ impl Bridge {
         let handle = self.rt.spawn(async {
             let client = Arc::new(Client::connect().await.map_err(|e| e.to_string())?);
             let (tx, rx) = async_channel::unbounded();
-            let (mut events, mut history, mut inbox) = (client.events(), client.history_updates(), client.inbox_updates());
+            let (mut events, mut history, mut inbox, mut files) = (client.events(), client.history_updates(), client.inbox_updates(), client.fs_progress());
             tokio::spawn(async move {
                 use tokio::sync::broadcast::error::RecvError;
                 loop {
@@ -53,6 +55,11 @@ impl Bridge {
                         },
                         c = inbox.recv() => match c {
                             Ok(c) => Update::Inbox(c),
+                            Err(RecvError::Lagged(_)) => continue,
+                            Err(RecvError::Closed) => break,
+                        },
+                        p = files.recv() => match p {
+                            Ok(p) => Update::Files(p),
                             Err(RecvError::Lagged(_)) => continue,
                             Err(RecvError::Closed) => break,
                         },
