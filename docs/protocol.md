@@ -1538,9 +1538,16 @@ phone → computer {"type":"deck_close"}          the deck is gone: stop sending
   only what's on for that phone: anything else the phone runs is refused (ignored), so a
   tile whose action left the list should show as unavailable, not disappear.
 - Ids: `media.play_pause`, `media.next`, `media.previous`, `sound.volume`, `sound.mute`,
-  `sound.mic_mute`, `system.lock`, `system.screen_off`, and `command.<id>` for the user's
-  own commands (a name and a command line, set on the computer). More may come; show any
-  id with its `name` and `kind`.
+  `sound.mic_mute`, `system.lock`, and `command.<id>` for the user's own commands (a name
+  and a command line, set on the computer). More may come; show any id with its `name` and
+  `kind`. `group` is one of `Media`, `Sound`, `System`, `Commands` in English whatever the
+  language (`name` is in the computer's).
+- Desktop: media and sound are on for a phone until the user turns them off, locking and
+  commands off until turned on. Media buttons go to the player that's playing, else the
+  first paused one. Sound needs wpctl or pactl (no `sound.*` without them). States:
+  `sound.volume` (`value`), `sound.mute` and `sound.mic_mute` (`on`); a `deck_state` comes
+  after every run that was allowed, so a refused run gets no answer. While a slider is
+  dragged, the computer may skip to its newest value.
 - Core: `Node::deck_open(to, open)`, `Node::deck_run(to, action, value)`;
   `Event::DeckActions`, `Event::DeckState`.
 
