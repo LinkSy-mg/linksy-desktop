@@ -39,6 +39,8 @@
 //! `--resume` reattaches the first terminal `terminal_list` gives instead, and
 //! `--close` ends it after; `--watch-terminal SECONDS` watches longer than 3 s (it stops
 //! early when the computer ends the terminal).
+//! `--notifications-later SECONDS` starts without `notifications` and announces it after
+//! that long, as when the user turns the listener on.
 
 use std::time::Duration;
 
@@ -51,6 +53,7 @@ async fn main() {
     let (mut level, mut charging, mut seconds) = (None, false, 60);
     let mut notify = None;
     let mut chats = false;
+    let mut notifications_later: Option<u64> = None;
     let mut display: Option<std::path::PathBuf> = None;
     let (mut media, mut watch_media) = (None, false);
     let mut press: Option<linksy_core::MediaCommand> = None;
@@ -123,6 +126,7 @@ async fn main() {
                 notify = Some((title, value()));
             }
             "--chats" => chats = true,
+            "--notifications-later" => notifications_later = Some(value().parse().expect("--notifications-later SECONDS")),
             other => panic!("unknown option {other}"),
         }
     }
@@ -135,6 +139,9 @@ async fn main() {
     config.away = away;
     // What it does, like a phone that says so (Locate shows only then).
     config.features = ["files", "clipboard", "open_url", "battery", "ring", "media_remote", "call_state", "heartbeat", "import", "fs", "input", "screen", "camera", "display", "watch", "locate", "microphone", "notifications"].map(String::from).to_vec();
+    if notifications_later.is_some() {
+        config.features.retain(|f| f != "notifications");
+    }
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
     let node = Node::start(config).await.expect("start");
     let mut events = node.subscribe();
@@ -189,6 +196,13 @@ async fn main() {
                 Err(e) => println!("notification to {}: {e}", t.device.name),
             }
         }
+    }
+    if let Some(s) = notifications_later {
+        tokio::time::sleep(Duration::from_secs(s)).await;
+        let mut features = node.info().features;
+        features.push("notifications".into());
+        node.set_features(features).await;
+        println!("notifications turned on");
     }
     if chats {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
