@@ -73,6 +73,7 @@ type Later = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 pub enum Tab {
     Use,
     Inbox,
+    Gallery,
     Files,
     History,
     Settings,
@@ -83,6 +84,7 @@ impl Tab {
         match self {
             Tab::Use => "use",
             Tab::Inbox => "inbox",
+            Tab::Gallery => "gallery",
             Tab::Files => "files",
             Tab::History => "history",
             Tab::Settings => "settings",
@@ -153,6 +155,7 @@ pub struct DevicePage {
     inbox_badge: gtk::Label,
     /// The window's inbox and files views go here.
     pub inbox_slot: gtk::Box,
+    pub gallery_slot: gtk::Box,
     pub files_slot: gtk::Box,
     /// The device's switches, as plain rows.
     settings: gtk::ListBox,
@@ -547,6 +550,7 @@ impl DevicePage {
         use_page.append(&terminal_box);
         use_page.append(&terminals);
         let inbox_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        let gallery_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let files_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let forget_button = gtk::Button::builder().label(t!("Forget Device…")).halign(gtk::Align::Start).css_classes(["error"]).build();
         let e = emit.clone();
@@ -557,6 +561,7 @@ impl DevicePage {
         let tab_stack = gtk::Stack::builder().vhomogeneous(false).hhomogeneous(false).transition_type(gtk::StackTransitionType::Crossfade).transition_duration(120).build();
         tab_stack.add_named(&use_page, Some(Tab::Use.name()));
         tab_stack.add_named(&inbox_slot, Some(Tab::Inbox.name()));
+        tab_stack.add_named(&gallery_slot, Some(Tab::Gallery.name()));
         tab_stack.add_named(&files_slot, Some(Tab::Files.name()));
         tab_stack.add_named(&activity_box, Some(Tab::History.name()));
         tab_stack.add_named(&settings_page, Some(Tab::Settings.name()));
@@ -572,6 +577,7 @@ impl DevicePage {
         for (which, icon, label) in [
             (Tab::Use, "video-joined-displays-symbolic", t!("Use As")),
             (Tab::Inbox, "mail-unread-symbolic", t!("Inbox")),
+            (Tab::Gallery, "image-x-generic-symbolic", t!("Gallery")),
             (Tab::Files, "folder-symbolic", t!("Files")),
             (Tab::History, "document-open-recent-symbolic", t!("History")),
             (Tab::Settings, "emblem-system-symbolic", t!("Settings")),
@@ -789,6 +795,7 @@ impl DevicePage {
             tab,
             inbox_badge,
             inbox_slot,
+            gallery_slot,
             files_slot,
             settings,
             lock_row,
@@ -817,7 +824,7 @@ impl DevicePage {
             empty,
             handler,
             on_narrow,
-            wanted: std::cell::Cell::new(std::env::var("LINKSY_SCREENSHOT_TAB").ok().and_then(|t| [Tab::Use, Tab::Inbox, Tab::Files, Tab::History, Tab::Settings].into_iter().find(|w| w.name() == t))),
+            wanted: std::cell::Cell::new(std::env::var("LINKSY_SCREENSHOT_TAB").ok().and_then(|t| [Tab::Use, Tab::Inbox, Tab::Gallery, Tab::Files, Tab::History, Tab::Settings].into_iter().find(|w| w.name() == t))),
             received,
         }
     }
@@ -851,6 +858,7 @@ impl DevicePage {
         let has = |t: Tab| match t {
             Tab::Use => any_use,
             Tab::Inbox => d.device.kind == DeviceKind::Phone && (super::can(&d.device, "notifications") || super::can(&d.device, "sms")),
+            Tab::Gallery => phone && super::can(&d.device, "gallery"),
             Tab::Files => phone && super::can(&d.device, "fs"),
             Tab::History | Tab::Settings => true,
         };

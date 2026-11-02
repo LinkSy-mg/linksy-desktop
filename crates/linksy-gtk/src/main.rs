@@ -113,6 +113,13 @@ button.code-chip {
 button.crumb { padding: 2px 6px; min-height: 28px; font-weight: 600; color: @accent_color; }
 button.crumb.current { color: @window_fg_color; }
 .files-box { border-radius: 14px; border: 1px solid alpha(currentColor, 0.1); }
+gridview.gallery-grid { background: none; }
+gridview.gallery-grid > child { padding: 3px; border-radius: 12px; background: none; }
+gridview.gallery-grid > child:selected { background-color: alpha(@accent_bg_color, 0.22); box-shadow: inset 0 0 0 3px @accent_bg_color; }
+.gallery-cell { border-radius: 10px; }
+.gallery-cell picture { background-color: alpha(currentColor, 0.06); }
+.video-badge { margin: 6px; padding: 1px 6px; border-radius: 6px; background-color: alpha(black, 0.62); color: white; font-size: 0.8em; font-weight: 700; }
+.selection-bar { padding: 6px 6px 6px 16px; border-radius: 99px; background-color: @card_bg_color; box-shadow: 0 0 0 1px alpha(currentColor, 0.08), 0 6px 20px alpha(black, 0.1); }
 listview.files-list { background: none; }
 listview.files-list > row { border-bottom: 1px solid alpha(currentColor, 0.07); }
 button.send-tile {

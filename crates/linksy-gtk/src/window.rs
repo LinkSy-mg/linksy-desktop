@@ -5,6 +5,7 @@
 mod camera;
 mod corner;
 mod files;
+mod gallery;
 mod island;
 mod transfers;
 mod invite;
@@ -56,6 +57,8 @@ struct State {
     selected: Option<Fingerprint>,
     /// Files waiting for a device to be picked ("Open With Linksy", drops with no device).
     staged: Vec<PathBuf>,
+    /// Transfers to open once they're done (a photo double-clicked in the Gallery).
+    open_when_done: std::collections::HashSet<Uuid>,
     /// History with the selected device, newest first.
     history: Vec<HistoryEntry>,
     progress: HashMap<Uuid, Progress>,
@@ -136,6 +139,7 @@ pub struct Window {
     // Texting through a phone
     messages: Rc<messages::MessagesView>,
     files: Rc<files::FilesView>,
+    gallery: Rc<gallery::GalleryView>,
     corner: Rc<corner::Corner>,
     transfers: Rc<transfers::TransfersPage>,
     island: Rc<island::Island>,
@@ -239,6 +243,8 @@ impl Window {
         page.inbox_slot.append(&messages.root);
         let files = files::FilesView::new();
         page.files_slot.append(&files.root);
+        let gallery = gallery::GalleryView::new();
+        page.gallery_slot.append(&gallery.root);
         let transfers = transfers::TransfersPage::new();
         content_stack.add_named(&transfers.root, Some("transfers"));
         let camera_back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(t!("Back")).visible(false).build();
@@ -328,6 +334,7 @@ impl Window {
             camera_title,
             messages,
             files,
+            gallery,
             corner,
             transfers,
             island,
@@ -411,6 +418,7 @@ impl Window {
         win.setup_page();
         win.setup_messages();
         win.setup_files();
+        win.setup_gallery();
         let w = Rc::downgrade(&win);
         win.page.connect_narrow(move |narrow| {
             if let Some(w) = w.upgrade() {
@@ -1049,8 +1057,16 @@ impl Window {
                 self.transfers_changed();
             }
             Event::TransferProgress { transfer, bytes, total } => self.update_progress(transfer, bytes, total),
-            Event::TransferComplete { transfer, .. } => {
-                self.state.borrow_mut().progress.remove(&transfer);
+            Event::TransferComplete { transfer, saved } => {
+                let open = {
+                    let mut state = self.state.borrow_mut();
+                    state.progress.remove(&transfer);
+                    state.open_when_done.remove(&transfer)
+                };
+                // A photo double-clicked in the Gallery: here now, so it opens.
+                if open && let Some(first) = saved.first() {
+                    gtk::FileLauncher::new(Some(&gio::File::for_path(first))).launch(Some(&self.window), gio::Cancellable::NONE, |_| {});
+                }
             }
             Event::TransferFailed { transfer, .. } => {
                 self.close_offer_dialog(&transfer);
@@ -1120,7 +1136,7 @@ impl Window {
             // The service runs decks and asks phones for their history.
             Event::DeckOpen { .. } | Event::DeckClose { .. } | Event::DeckRun { .. } | Event::DeckActions { .. } | Event::DeckState { .. } => {}
             Event::InboxHistory { .. } | Event::InboxHistoryPage { .. } => {}
-            Event::GalleryChanged { .. } => {}
+            Event::GalleryChanged { from } => self.gallery_changed(&from.id),
             // Between the service and phones (USB cable, §4.11)
             Event::UsbPlugged { .. } | Event::UsbConnect { .. } => {}
             // Locate is answered through the service (it waits for the reply).
@@ -1408,8 +1424,10 @@ impl Window {
                 if can(&d.device, "notifications") || can(&d.device, "sms") {
                     self.load_inbox(d.device.id);
                 }
-                if self.page.tab() == page::Tab::Files {
-                    self.files_shown(d.device.id);
+                match self.page.tab() {
+                    page::Tab::Files => self.files_shown(d.device.id),
+                    page::Tab::Gallery => self.gallery_shown(d.device.id),
+                    _ => {}
                 }
             }
         }
@@ -1488,6 +1506,7 @@ impl Window {
     fn tab_shown(self: &Rc<Self>, id: Fingerprint, tab: page::Tab) {
         match tab {
             page::Tab::Inbox => self.inbox_shown(id),
+            page::Tab::Gallery => self.gallery_shown(id),
             page::Tab::Files => self.files_shown(id),
             page::Tab::History => self.render_activity(),
             page::Tab::Use | page::Tab::Settings => {}
