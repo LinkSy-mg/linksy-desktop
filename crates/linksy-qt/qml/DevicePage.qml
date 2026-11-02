@@ -890,9 +890,6 @@ Kirigami.Page {
             ColumnLayout {
                 Layout.fillWidth: true
                 spacing: 0
-                Kirigami.Separator {
-                    Layout.fillWidth: true
-                }
                 SwitchRow {
                     visible: page.phone && app.can(page.info, "heartbeat")
                     iconName: "system-lock-screen"
