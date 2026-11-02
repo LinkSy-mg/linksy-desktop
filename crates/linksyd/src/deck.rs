@@ -44,6 +44,8 @@ pub enum Act {
     Lock,
     Restart,
     Shutdown,
+    /// Do Not Disturb on if it's off, else off.
+    Dnd,
     Command { name: String, line: String },
 }
 
@@ -54,6 +56,8 @@ pub struct Caps {
     pub sound: bool,
     /// Restart and turn off (logind).
     pub power_off: bool,
+    /// Do Not Disturb (GNOME's or Plasma's).
+    pub dnd: bool,
 }
 
 /// This computer's state now, as far as the decks show it.
@@ -64,6 +68,7 @@ pub struct Status {
     pub mic_muted: Option<bool>,
     /// The default output's name.
     pub output: Option<String>,
+    pub dnd: Option<bool>,
 }
 
 /// What runs the actions: this desktop, or a stand-in in tests.
@@ -82,7 +87,7 @@ pub struct System {
 impl Desktop for System {
     async fn probe(&self) -> Caps {
         let found = self.controls.probe().await;
-        Caps { sound: crate::volume::available(), power_off: found.power_off }
+        Caps { sound: crate::volume::available(), power_off: found.power_off, dnd: found.dnd() }
     }
 
     async fn run(&self, act: Act) {
@@ -97,18 +102,21 @@ impl Desktop for System {
             }
             Act::Restart => self.controls.power_off(true).await,
             Act::Shutdown => self.controls.power_off(false).await,
+            Act::Dnd => self.controls.toggle_dnd().await,
             Act::Command { name, line } => spawn(&name, &line),
         }
     }
 
     async fn status(&self, ids: &HashSet<&str>) -> Status {
         let (output, mic) = (ids.contains("sound.volume") || ids.contains("sound.mute"), ids.contains("sound.mic_mute"));
-        let (out, mic_muted, name) = tokio::join!(
+        let has = |id| ids.contains(id);
+        let (out, mic_muted, name, dnd) = tokio::join!(
             async { if output { crate::volume::output_state().await } else { None } },
             async { if mic { crate::volume::mic_muted().await } else { None } },
-            async { if ids.contains("sound.output") { crate::volume::output_name().await } else { None } },
+            async { if has("sound.output") { crate::volume::output_name().await } else { None } },
+            async { if has("system.dnd") { self.controls.dnd().await } else { None } },
         );
-        Status { level: out.map(|(level, _)| level.clamp(0.0, 1.0)), muted: out.map(|(_, muted)| muted), mic_muted, output: name }
+        Status { level: out.map(|(level, _)| level.clamp(0.0, 1.0)), muted: out.map(|(_, muted)| muted), mic_muted, output: name, dnd }
     }
 }
 
@@ -149,7 +157,7 @@ impl Saved {
     fn on(&self, phone: &Fingerprint, id: &str) -> bool {
         match self.phones.get(phone).and_then(|choices| choices.get(id)) {
             Some(on) => *on,
-            None => id.starts_with("media.") || id.starts_with("sound."),
+            None => id.starts_with("media.") || id.starts_with("sound.") || id == "system.dnd",
         }
     }
 }
@@ -238,6 +246,9 @@ impl<D: Desktop> Deck<D> {
             ]);
         }
         all.push(action("system.lock", t!("Lock Screen"), DeckKind::Button, SYSTEM));
+        if caps.dnd {
+            all.push(action("system.dnd", t!("Do Not Disturb"), DeckKind::Toggle, SYSTEM));
+        }
         let asking = |mut action: DeckAction, question: &str| {
             action.confirm = Some(question.into());
             action
@@ -430,6 +441,7 @@ impl<D: Desktop> Deck<D> {
             "system.lock" => Act::Lock,
             "system.restart" if caps.power_off => Act::Restart,
             "system.shutdown" if caps.power_off => Act::Shutdown,
+            "system.dnd" if caps.dnd => Act::Dnd,
             _ => {
                 let id = id.strip_prefix("command.")?;
                 let c = saved.commands.iter().find(|c| c.id == id)?;
@@ -633,6 +645,7 @@ fn states(actions: &[DeckAction], now: &Status) -> Vec<DeckState> {
                 "sound.mute" => state(Some(now.muted?), None),
                 "sound.mic_mute" => state(Some(now.mic_muted?), None),
                 "sound.output" => Some(DeckState { id: a.id.clone(), on: None, value: None, text: Some(now.output.clone()?) }),
+                "system.dnd" => state(Some(now.dnd?), None),
                 _ => None,
             }
         })
@@ -654,7 +667,7 @@ mod tests {
     impl Fake {
         fn caps(&self) -> Caps {
             let has = |what| !self.without.contains(&what);
-            Caps { sound: has("sound"), power_off: has("power_off") }
+            Caps { sound: has("sound"), power_off: has("power_off"), dnd: has("dnd") }
         }
     }
 
@@ -675,6 +688,7 @@ mod tests {
                 muted: output.then_some(false),
                 mic_muted: has("sound.mic_mute").then_some(true),
                 output: has("sound.output").then(|| "Speakers".into()),
+                dnd: has("system.dnd").then_some(false),
             }
         }
     }
@@ -704,8 +718,8 @@ mod tests {
     }
 
     /// Everything the fake computer offers, and what's on for a phone until changed.
-    const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.restart", "system.shutdown"];
-    const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output"];
+    const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "system.restart", "system.shutdown"];
+    const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.dnd"];
 
     #[test]
     fn media_and_sound_on_until_changed_and_kept() {
@@ -835,6 +849,19 @@ mod tests {
 
         let elsewhere = ready(dir.path().join("other.json"), Fake { without: &["power_off"], ..Default::default() });
         assert!(elsewhere.set_action(&p, "system.restart", true).is_err(), "no logind: not offered");
+    }
+
+    #[tokio::test]
+    async fn do_not_disturb_is_a_toggle_on_like_media() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        assert_eq!(d.act(&phone(1), "system.dnd", None), Some(Act::Dnd));
+        let dnd = d.enabled(&phone(1)).into_iter().find(|a| a.id == "system.dnd").unwrap();
+        assert_eq!((dnd.kind, dnd.group.as_str(), dnd.confirm.as_deref()), (DeckKind::Toggle, SYSTEM, None));
+        let now = d.inner.desktop.status(&HashSet::from(["system.dnd"])).await;
+        assert_eq!(states(&[dnd], &now), [DeckState { id: "system.dnd".into(), on: Some(false), value: None, text: None }]);
+        let plain = ready(dir.path().join("plain.json"), Fake { without: &["dnd"], ..Default::default() });
+        assert_eq!(plain.act(&phone(1), "system.dnd", None), None);
     }
 
     #[tokio::test]
