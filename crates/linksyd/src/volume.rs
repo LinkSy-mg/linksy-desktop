@@ -100,9 +100,18 @@ fn same(a: (f64, bool), b: (f64, bool)) -> bool {
     (a.0 - b.0).abs() < 0.005 && a.1 == b.1
 }
 
-async fn output(program: &str, args: &[&str]) -> Option<String> {
+/// What a tool prints, within 5 s (a stuck one is stopped).
+pub(crate) async fn output(program: &str, args: &[&str]) -> Option<String> {
     // In English, with a decimal point: what the parsers read
-    let out = Command::from(linksy_host::command(program, &[("LC_ALL", "C")])).args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().await.ok()?;
+    let mut command = Command::from(linksy_host::command(program, &[("LC_ALL", "C")]));
+    command.args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true);
+    let out = match tokio::time::timeout(Duration::from_secs(5), command.output()).await {
+        Ok(out) => out.ok()?,
+        Err(_) => {
+            debug!("{program} {} took too long", args.join(" "));
+            return None;
+        }
+    };
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
