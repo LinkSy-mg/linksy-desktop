@@ -227,6 +227,9 @@ async fn main() {
             RemoteNotification { conversation: Some("#general".into()), sender: Some("ana".into()), group: true, ..chat("0|com.discord|1|general", "com.discord", "Discord", "Linksy · #general", "ana: the new release works on my Steam Deck") },
             // An older phone: no messaging details, the desktop has to read the title
             RemoteNotification { category: None, time: None, ..chat("0|com.facebook.orca|1|carol", "com.facebook.orca", "Messenger", "Carol (2 messages)", "See you tomorrow!") },
+            // Not messages: they go under Other Notifications
+            RemoteNotification { category: Some("reminder".into()), can_reply: false, actions: vec![], ..chat("0|com.google.android.calendar|1|sync", "com.google.android.calendar", "Calendar", "Team sync in 15 minutes", "Room 2 · until 15:00") },
+            RemoteNotification { category: None, can_reply: false, actions: vec![], ..chat("0|mg.bank.app|1|login", "mg.bank.app", "Bank", "Sign in to your account", "Your code is 771204") },
         ];
         for t in node.trusted() {
             for n in &list {
