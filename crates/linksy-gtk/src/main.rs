@@ -70,6 +70,7 @@ button.small { padding: 2px 12px; min-height: 26px; font-size: 0.9em; }
 }
 /* Tabs under the actions: a line under them all, the one showing underlined */
 .page-tabs { border-bottom: 1px solid alpha(currentColor, 0.12); }
+.sticky-tabs { padding-top: 4px; background-color: @window_bg_color; }
 button.page-tab {
   padding: 10px 2px 8px;
   border-radius: 0;

@@ -67,6 +67,7 @@ pub enum Action {
 
 type Handler = Rc<RefCell<Option<Rc<dyn Fn(Action)>>>>;
 type NarrowHandler = Rc<RefCell<Option<Rc<dyn Fn(bool)>>>>;
+type Later = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
@@ -143,6 +144,10 @@ pub struct DevicePage {
     /// The tabs under the actions, and what each shows.
     tabs: gtk::ScrolledWindow,
     tab_buttons: Vec<(Tab, gtk::ToggleButton)>,
+    /// The same tabs, pinned at the top once the page scrolls past them.
+    sticky: gtk::Box,
+    sticky_buttons: Vec<(Tab, gtk::ToggleButton)>,
+    sticky_badge: gtk::Label,
     tab_stack: gtk::Stack,
     tab: Rc<std::cell::Cell<Tab>>,
     inbox_badge: gtk::Label,
@@ -556,10 +561,14 @@ impl DevicePage {
         tab_stack.add_named(&activity_box, Some(Tab::History.name()));
         tab_stack.add_named(&settings_page, Some(Tab::Settings.name()));
         let tab = Rc::new(std::cell::Cell::new(Tab::Use));
-        let inbox_badge = gtk::Label::builder().css_classes(["count-badge", "numeric"]).valign(gtk::Align::Center).visible(false).build();
+        let badge = || gtk::Label::builder().css_classes(["count-badge", "numeric"]).valign(gtk::Align::Center).visible(false).build();
+        let (inbox_badge, sticky_badge) = (badge(), badge());
         let tab_row = gtk::Box::builder().spacing(24).css_classes(["page-tabs"]).build();
-        let mut tab_buttons = Vec::new();
-        let mut group: Option<gtk::ToggleButton> = None;
+        // Scrolled past, the tabs stay at the top of the page: a copy, kept in step.
+        let sticky_row = gtk::Box::builder().spacing(24).css_classes(["page-tabs"]).build();
+        let (mut tab_buttons, mut sticky_buttons) = (Vec::new(), Vec::new());
+        let (mut group, mut sticky_group): (Option<gtk::ToggleButton>, Option<gtk::ToggleButton>) = (None, None);
+        let to_tabs: Later = Rc::default();
         for (which, icon, label) in [
             (Tab::Use, "video-joined-displays-symbolic", t!("Use As")),
             (Tab::Inbox, "mail-unread-symbolic", t!("Inbox")),
@@ -567,26 +576,44 @@ impl DevicePage {
             (Tab::History, "document-open-recent-symbolic", t!("History")),
             (Tab::Settings, "emblem-system-symbolic", t!("Settings")),
         ] {
-            let inner = gtk::Box::builder().spacing(7).build();
-            inner.append(&gtk::Image::from_icon_name(icon));
-            inner.append(&gtk::Label::new(Some(label)));
-            if which == Tab::Inbox {
-                inner.append(&inbox_badge);
-            }
-            let b = gtk::ToggleButton::builder().child(&inner).css_classes(["page-tab"]).active(which == Tab::Use).build();
+            let button = |badge: &gtk::Label| {
+                let inner = gtk::Box::builder().spacing(7).build();
+                inner.append(&gtk::Image::from_icon_name(icon));
+                inner.append(&gtk::Label::new(Some(label)));
+                if which == Tab::Inbox {
+                    inner.append(badge);
+                }
+                gtk::ToggleButton::builder().child(&inner).css_classes(["page-tab"]).active(which == Tab::Use).build()
+            };
+            let (b, s) = (button(&inbox_badge), button(&sticky_badge));
             b.set_group(group.as_ref());
             group.get_or_insert(b.clone());
-            let (e, current, stack) = (emit.clone(), tab.clone(), tab_stack.clone());
+            s.set_group(sticky_group.as_ref());
+            sticky_group.get_or_insert(s.clone());
+            let (e, current, stack, twin) = (emit.clone(), tab.clone(), tab_stack.clone(), s.clone());
             b.connect_toggled(move |b| {
                 if b.is_active() {
+                    twin.set_active(true);
                     stack.set_visible_child_name(which.name());
                     if current.replace(which) != which {
                         e(Action::Tab(which));
                     }
                 }
             });
+            let (twin, to_tabs) = (b.clone(), to_tabs.clone());
+            s.connect_toggled(move |s| {
+                if s.is_active() {
+                    twin.set_active(true);
+                    let f = to_tabs.borrow().clone();
+                    if let Some(f) = f {
+                        f();
+                    }
+                }
+            });
             tab_row.append(&b);
+            sticky_row.append(&s);
             tab_buttons.push((which, b));
+            sticky_buttons.push((which, s));
         }
         let tabs = gtk::ScrolledWindow::builder().child(&tab_row).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).margin_top(10).build();
         let tabbed = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(20).build();
@@ -626,7 +653,46 @@ impl DevicePage {
                 g();
             }
         });
-        let root = adw::BreakpointBin::builder().width_request(300).height_request(300).child(&scroller).build();
+        let sticky_tabs = gtk::ScrolledWindow::builder().child(&sticky_row).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).halign(gtk::Align::Start).build();
+        let sticky = gtk::Box::builder().valign(gtk::Align::Start).css_classes(["sticky-tabs"]).visible(false).build();
+        sticky.append(&sticky_tabs);
+        let overlay = gtk::Overlay::builder().child(&scroller).build();
+        overlay.add_overlay(&sticky);
+        let top_of_tabs = {
+            let (bar, column) = (tabs.clone(), column.clone());
+            move || bar.compute_point(&column, &gtk::graphene::Point::new(0.0, 0.0)).map(|p| p.y() as f64)
+        };
+        // Shown once they're scrolled past, exactly where they are across the page.
+        let place = {
+            let (pinned, pinned_tabs, bar, over, top) = (sticky.clone(), sticky_tabs.clone(), tabs.clone(), overlay.clone(), top_of_tabs.clone());
+            move |a: &gtk::Adjustment| {
+                let show = bar.is_visible() && top().is_some_and(|y| a.value() > y);
+                if show && let Some(p) = bar.compute_point(&over, &gtk::graphene::Point::new(0.0, 0.0)) {
+                    pinned_tabs.set_margin_start(p.x().max(0.0) as i32);
+                    pinned_tabs.set_size_request(bar.width(), -1);
+                }
+                pinned.set_visible(show);
+            }
+        };
+        let p = place.clone();
+        scroller.vadjustment().connect_value_changed(move |a| p(a));
+        scroller.vadjustment().connect_changed(move |a| place(a));
+        // A tab chosen up there: its top just under them.
+        let (pinned, adjustment) = (sticky.clone(), scroller.vadjustment());
+        *to_tabs.borrow_mut() = Some(Rc::new(move || {
+            if pinned.is_visible()
+                && let Some(y) = top_of_tabs()
+            {
+                let a = adjustment.clone();
+                glib::idle_add_local_once(move || a.set_value(y.min(a.upper() - a.page_size())));
+            }
+        }));
+        // Development aid (screenshots): LINKSY_SCREENSHOT_SCROLL=600 scrolls the page down.
+        if let Some(y) = std::env::var("LINKSY_SCREENSHOT_SCROLL").ok().and_then(|y| y.parse::<f64>().ok()) {
+            let a = scroller.vadjustment();
+            glib::timeout_add_local_once(std::time::Duration::from_millis(2500), move || a.set_value(y));
+        }
+        let root = adw::BreakpointBin::builder().width_request(300).height_request(300).child(&overlay).build();
         // Narrower and narrower: stack Send Files over the tiles, then the cards, then the
         // header, the "Use as" heading and the timeline's filters, then the tiles. (Only
         // the last matching breakpoint applies, so each repeats the ones before.)
@@ -716,6 +782,9 @@ impl DevicePage {
             webcam_running,
             tabs,
             tab_buttons,
+            sticky,
+            sticky_buttons,
+            sticky_badge,
             tab_stack,
             tab,
             inbox_badge,
@@ -769,8 +838,10 @@ impl DevicePage {
 
     /// Unread conversations and other notifications, on the Inbox tab.
     pub fn set_inbox_count(&self, count: u32) {
-        self.inbox_badge.set_label(&count.to_string());
-        self.inbox_badge.set_visible(count > 0);
+        for badge in [&self.inbox_badge, &self.sticky_badge] {
+            badge.set_label(&count.to_string());
+            badge.set_visible(count > 0);
+        }
     }
 
     /// Show the tabs this device has, and one of them.
@@ -783,8 +854,11 @@ impl DevicePage {
             Tab::Files => phone && super::can(&d.device, "fs"),
             Tab::History | Tab::Settings => true,
         };
-        for (t, b) in &self.tab_buttons {
+        for (t, b) in self.tab_buttons.iter().chain(&self.sticky_buttons) {
             b.set_visible(d.trusted && has(*t));
+        }
+        if !d.trusted {
+            self.sticky.set_visible(false);
         }
         self.tabs.set_visible(d.trusted);
         self.tab_stack.set_visible(d.trusted);
