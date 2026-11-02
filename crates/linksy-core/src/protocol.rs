@@ -808,9 +808,12 @@ pub struct DeckAction {
     pub id: String,
     pub name: String,
     pub kind: DeckKind,
-    /// Which list it belongs to ("Media", "Sound", "System", "Commands").
+    /// Which list it belongs to ("Media", "Sound", "System", "Network", "Power", "Commands").
     #[serde(default)]
     pub group: String,
+    /// The question the phone asks before running it ("Restart Office PC?").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirm: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -830,6 +833,9 @@ pub struct DeckState {
     pub on: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<f64>,
+    /// What it shows, like the sound output's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -990,5 +996,26 @@ mod tests {
         read_control_frames(&bytes[..], |m| got.push(m));
         assert_eq!(got, msgs);
         assert_eq!(serde_json::to_string(&msgs[1]).unwrap(), r#"{"type":"button","button":"right","pressed":true}"#);
+    }
+
+    #[test]
+    fn deck_messages_old_and_new() {
+        let older = r#"{"type":"deck_actions","actions":[{"id":"media.next","name":"Next Track","kind":"button","group":"Media"}]}"#;
+        let Message::DeckActions { actions } = serde_json::from_str(older).unwrap() else { panic!() };
+        assert_eq!(actions[0].confirm, None);
+        let restart = DeckAction { id: "system.restart".into(), name: "Restart".into(), kind: DeckKind::Button, group: "System".into(), confirm: Some("Restart Office PC?".into()) };
+        let json = serde_json::to_string(&Message::DeckActions { actions: vec![restart.clone()] }).unwrap();
+        assert!(json.contains(r#""confirm":"Restart Office PC?""#), "{json}");
+        let state = DeckState { id: "sound.output".into(), on: None, value: None, text: Some("Speakers".into()) };
+        assert_eq!(serde_json::to_string(&state).unwrap(), r#"{"id":"sound.output","text":"Speakers"}"#);
+        // What a phone built before these fields does: they're ignored
+        #[derive(Deserialize)]
+        struct Before {
+            id: String,
+        }
+        let before: Before = serde_json::from_str(&serde_json::to_string(&restart).unwrap()).unwrap();
+        assert_eq!(before.id, "system.restart");
+        // A kind it doesn't know fails the whole list, so the computer adds none
+        assert!(serde_json::from_str::<Message>(&json.replace(r#""kind":"button""#, r#""kind":"dial""#)).is_err());
     }
 }

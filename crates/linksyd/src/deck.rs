@@ -172,7 +172,7 @@ impl<D: Desktop> Deck<D> {
 
     /// Everything this computer offers a deck.
     fn offered(&self, saved: &Saved) -> Vec<DeckAction> {
-        let action = |id: &str, name: &str, kind, group: &str| DeckAction { id: id.into(), name: name.into(), kind, group: group.into() };
+        let action = |id: &str, name: &str, kind, group: &str| DeckAction { id: id.into(), name: name.into(), kind, group: group.into(), confirm: None };
         let mut all = vec![
             action("media.play_pause", t!("Play or Pause"), DeckKind::Button, MEDIA),
             action("media.next", t!("Next Track"), DeckKind::Button, MEDIA),
@@ -532,7 +532,7 @@ fn states(actions: &[DeckAction], sound: &Sound) -> Vec<DeckState> {
                 "sound.mic_mute" => (Some(sound.mic_muted?), None),
                 _ => return None,
             };
-            Some(DeckState { id: a.id.clone(), on, value })
+            Some(DeckState { id: a.id.clone(), on, value, text: None })
         })
         .collect()
 }
@@ -683,7 +683,7 @@ mod tests {
         let d = deck(&dir);
         let sound = Sound { level: Some(0.42), muted: Some(false), mic_muted: None };
         let now = states(&d.enabled(&phone(1)), &sound);
-        assert_eq!(now, [DeckState { id: "sound.volume".into(), on: None, value: Some(0.42) }, DeckState { id: "sound.mute".into(), on: Some(false), value: None }]);
+        assert_eq!(now, [DeckState { id: "sound.volume".into(), on: None, value: Some(0.42), text: None }, DeckState { id: "sound.mute".into(), on: Some(false), value: None, text: None }]);
         d.set_action(&phone(1), "sound.volume", false).unwrap();
         assert_eq!(states(&d.enabled(&phone(1)), &sound).len(), 1);
     }

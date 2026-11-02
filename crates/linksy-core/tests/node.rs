@@ -384,7 +384,7 @@ async fn deck_and_conversation_history_travel() {
 
     phone.node.deck_open(&pc_id, true).await.unwrap();
     wait_for(&mut on_pc, |e| matches!(e, Event::DeckOpen { .. }).then_some(())).await;
-    let action = DeckAction { id: "media.play_pause".into(), name: "Play or Pause".into(), kind: DeckKind::Button, group: "Media".into() };
+    let action = DeckAction { id: "system.restart".into(), name: "Restart".into(), kind: DeckKind::Button, group: "System".into(), confirm: Some("Restart Beta?".into()) };
     pc.node.deck_actions(&phone_id, vec![action.clone()]).await.unwrap();
     let got = wait_for(&mut on_phone, |e| match e {
         Event::DeckActions { actions, .. } => Some(actions.clone()),
