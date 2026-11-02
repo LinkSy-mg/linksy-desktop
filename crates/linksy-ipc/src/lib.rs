@@ -54,6 +54,10 @@ pub enum Request {
     InboxThread { conversation: String },
     InboxRead { conversation: String },
     InboxReply { conversation: String, text: String },
+    /// The phones' other notifications (not messages), newest first; dismissing one there
+    /// (`key`), or all of a phone's.
+    Alerts,
+    DismissAlert { phone: String, key: Option<String> },
     /// Texting through a phone: its conversations, a conversation's messages (newest
     /// first, older than `before_ms` to page back), and sending one.
     SmsThreads { phone: String },
@@ -61,6 +65,10 @@ pub enum Request {
     SmsSend { phone: String, to: Vec<String>, text: String },
     /// Show a phone's files in the file manager (and its sidebar); answers the location.
     BrowseFiles { phone: String },
+    /// A folder of what a phone shares (`/` first), one listing at a time.
+    FsList { phone: String, path: String },
+    /// Where apps open a phone's files (`dav://…/`, mounted), without opening a window.
+    FsPlace { phone: String },
     /// Whether phones' photos are imported here, and where.
     PhotoPrefs,
     SetPhotoPrefs { prefs: PhotoPrefs },
@@ -400,6 +408,24 @@ pub struct Conversation {
     pub at_ms: u64,
 }
 
+/// A phone notification that isn't a message (a reminder, a delivery…), while the phone
+/// still shows it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Alert {
+    pub phone: String,
+    pub key: String,
+    pub app: String,
+    pub app_name: String,
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    pub at_ms: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InboxMessage {
     pub at_ms: u64,
@@ -687,6 +713,22 @@ impl Client {
 
     pub async fn browse_files(&self, phone: impl Into<String>) -> Result<String, ClientError> {
         self.call(Request::BrowseFiles { phone: phone.into() }).await
+    }
+
+    pub async fn fs_list(&self, phone: impl Into<String>, path: impl Into<String>) -> Result<Vec<linksy_core::FsEntry>, ClientError> {
+        self.call(Request::FsList { phone: phone.into(), path: path.into() }).await
+    }
+
+    pub async fn fs_place(&self, phone: impl Into<String>) -> Result<String, ClientError> {
+        self.call(Request::FsPlace { phone: phone.into() }).await
+    }
+
+    pub async fn alerts(&self) -> Result<Vec<Alert>, ClientError> {
+        self.call(Request::Alerts).await
+    }
+
+    pub async fn dismiss_alert(&self, phone: impl Into<String>, key: Option<String>) -> Result<(), ClientError> {
+        self.call(Request::DismissAlert { phone: phone.into(), key }).await
     }
 
     pub async fn photo_prefs(&self) -> Result<PhotoPrefs, ClientError> {

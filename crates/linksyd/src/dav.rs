@@ -55,6 +55,22 @@ impl Bridges {
 
     /// Show a phone's files in the file manager: serve it, mount it, bookmark it, open it.
     pub async fn browse(&self, phone: Fingerprint, name: &str) -> Result<String, String> {
+        let uri = self.place(phone, name).await?;
+        // Label it with the folder the phone shares, when it says ("Pixel 9 (Documents)").
+        let label = match self.node.fs(&phone, FsRequest::Info, &[]).await {
+            Ok(FsAnswer::Info { name: folder }) if !folder.trim().is_empty() => format!("{name} ({})", folder.trim()),
+            _ => name.to_string(),
+        };
+        bookmark(&uri, &label);
+        // Tests check the bridge without a window opening on someone's screen.
+        if std::env::var_os("LINKSY_FILES_NO_OPEN").is_none() {
+            show_folder(&uri).await;
+        }
+        Ok(uri)
+    }
+
+    /// Serve and mount a phone's files, for apps to open them by address.
+    pub async fn place(&self, phone: Fingerprint, name: &str) -> Result<String, String> {
         // First make sure the phone shares its files at all, for a clear message.
         match self.node.fs(&phone, FsRequest::Stat { path: "/".into() }, &[]).await {
             Ok(_) => {}
@@ -63,11 +79,6 @@ impl Bridges {
             }
             Err(e) => return Err(e.to_string()),
         }
-        // Label it with the folder the phone shares, when it says ("Pixel 9 (Documents)").
-        let label = match self.node.fs(&phone, FsRequest::Info, &[]).await {
-            Ok(FsAnswer::Info { name: folder }) if !folder.trim().is_empty() => format!("{name} ({})", folder.trim()),
-            _ => name.to_string(),
-        };
         let uri = self.serve(phone).await.map_err(|e| e.to_string())?;
         let mounted = tokio::process::Command::new("gio").args(["mount", &uri]).output().await;
         if let Ok(out) = &mounted
@@ -75,11 +86,6 @@ impl Bridges {
             && !String::from_utf8_lossy(&out.stderr).contains("already mounted")
         {
             debug!("gio mount: {}", String::from_utf8_lossy(&out.stderr).trim());
-        }
-        bookmark(&uri, &label);
-        // Tests check the bridge without a window opening on someone's screen.
-        if std::env::var_os("LINKSY_FILES_NO_OPEN").is_none() {
-            show_folder(&uri).await;
         }
         Ok(uri)
     }

@@ -256,6 +256,36 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
                 false => Err(error.unwrap_or_else(|| "the phone couldn't send it".into())),
             }
         }
+        Request::Alerts => serde_json::to_value(mirror.inbox().alerts()).map_err(|e| e.to_string()),
+        Request::DismissAlert { phone, key } => {
+            let id = resolve(node, &phone)?;
+            mirror.dismiss(node, &id, key.as_deref()).await?;
+            Ok(Value::Null)
+        }
+        Request::FsList { phone, path } => {
+            let id = resolve(node, &phone)?;
+            match node.fs(&id, linksy_core::FsRequest::List { path }, &[]).await.map_err(|e| e.to_string())? {
+                linksy_core::fs::FsAnswer::Entries(mut entries) => {
+                    entries.sort_by(|a, b| b.dir.cmp(&a.dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+                    serde_json::to_value(entries).map_err(|e| e.to_string())
+                }
+                _ => Err("the phone answered something else".into()),
+            }
+        }
+        Request::FsPlace { phone } => {
+            let id = resolve(node, &phone)?;
+            let name = device(node, &id).map(|d| d.name).unwrap_or_else(|| "The phone".into());
+            #[cfg(target_os = "linux")]
+            {
+                let bridges = crate::dav::BRIDGES.get().ok_or("not ready yet")?;
+                Ok(Value::String(bridges.place(id, &name).await?))
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                let _ = (id, name);
+                Err("opening a phone's files isn't available here yet".into())
+            }
+        }
         Request::BrowseFiles { phone } => {
             let id = resolve(node, &phone)?;
             let name = device(node, &id).map(|d| d.name).unwrap_or_else(|| "The phone".into());

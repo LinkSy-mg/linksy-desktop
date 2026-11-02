@@ -6,11 +6,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use linksy_core::{DeviceInfo, Fingerprint, RemoteNotification};
-use linksy_ipc::{Conversation, InboxMessage};
+use linksy_ipc::{Alert, Conversation, InboxMessage};
 use tokio::sync::broadcast;
 
 const MAX_CONVERSATIONS: usize = 100;
 const MAX_MESSAGES: usize = 50;
+const MAX_ALERTS: usize = 30;
 const MAX_TEXT: usize = 4096;
 
 const SMS: &[&str] = &["com.google.android.apps.messaging", "com.samsung.android.messaging", "com.android.mms", "com.android.messaging", "com.oneplus.mms"];
@@ -45,6 +46,8 @@ const CHAT: &[&str] = &[
 #[derive(Clone)]
 pub struct Inbox {
     inner: Arc<Mutex<Vec<Entry>>>,
+    /// The other notifications, newest first.
+    alerts: Arc<Mutex<VecDeque<Alert>>>,
     updates: broadcast::Sender<Conversation>,
     /// Where pictures and app icons are unpacked (the runtime folder, gone at logout).
     dir: PathBuf,
@@ -70,7 +73,43 @@ struct Parsed {
 
 impl Inbox {
     pub fn new(dir: PathBuf) -> Self {
-        Self { inner: Arc::default(), updates: broadcast::channel(64).0, dir }
+        Self { inner: Arc::default(), alerts: Arc::default(), updates: broadcast::channel(64).0, dir }
+    }
+
+    pub fn alerts(&self) -> Vec<Alert> {
+        self.alerts.lock().unwrap().iter().cloned().collect()
+    }
+
+    /// The keys of `phone`'s other notifications.
+    pub fn alert_keys(&self, phone: &Fingerprint) -> Vec<String> {
+        let phone = phone.to_string();
+        self.alerts.lock().unwrap().iter().filter(|a| a.phone == phone).map(|a| a.key.clone()).collect()
+    }
+
+    /// A notification that isn't a message. Returns the code it carries, if any.
+    fn alert(&self, from: &DeviceInfo, n: &RemoteNotification) -> Option<String> {
+        if kind(n).is_some() || (n.title.trim().is_empty() && n.body.trim().is_empty()) {
+            return None;
+        }
+        let code = crate::codes::code_in(&format!("{} {}", n.title, n.body));
+        let mut body = n.body.trim().to_string();
+        body.truncate(body.char_indices().nth(MAX_TEXT).map_or(body.len(), |(i, _)| i));
+        let alert = Alert {
+            phone: from.id.to_string(),
+            key: n.key.clone(),
+            app: n.app.clone(),
+            app_name: n.app_name.clone(),
+            title: n.title.trim().chars().take(200).collect(),
+            body,
+            icon: n.icon.as_deref().and_then(|b64| unpack(&self.dir, &n.app, b64)),
+            code: code.clone(),
+            at_ms: n.time.unwrap_or_else(now_ms),
+        };
+        let mut alerts = self.alerts.lock().unwrap();
+        alerts.retain(|a| !(a.phone == alert.phone && a.key == alert.key));
+        alerts.push_front(alert);
+        alerts.truncate(MAX_ALERTS);
+        code
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Conversation> {
@@ -97,7 +136,7 @@ impl Inbox {
     /// A notification from `from`: a new message in a conversation, when it reads as one.
     /// Returns the code it carries, if any.
     pub fn posted(&self, from: &DeviceInfo, n: &RemoteNotification) -> Option<String> {
-        let parsed = parse(n)?;
+        let Some(parsed) = parse(n) else { return self.alert(from, n) };
         let code = crate::codes::code_in(&format!("{} {}", n.title, n.body));
         let at_ms = n.time.unwrap_or_else(now_ms);
         let id = conversation_id(&from.id, &n.app, &parsed.title);
@@ -160,6 +199,8 @@ impl Inbox {
 
     /// The phone's notification `key` is gone (read, answered or swiped away there).
     pub fn removed(&self, from: &Fingerprint, key: &str) {
+        let phone = from.to_string();
+        self.alerts.lock().unwrap().retain(|a| !(a.phone == phone && a.key == key));
         let mut inbox = self.inner.lock().unwrap();
         for e in inbox.iter_mut().filter(|e| e.phone == *from && e.key.as_deref() == Some(key)) {
             e.key = None;
@@ -230,18 +271,7 @@ pub(crate) fn unpack(dir: &Path, name: &str, b64: &str) -> Option<PathBuf> {
 /// What the phone says comes first; for a phone that doesn't, the title is read the way
 /// the common apps write it.
 fn parse(n: &RemoteNotification) -> Option<Parsed> {
-    let app = n.app.as_str();
-    let kind = if SMS.contains(&app) {
-        "sms"
-    } else if MAIL.contains(&app) || n.category.as_deref() == Some("email") {
-        "mail"
-    } else if SOCIAL.contains(&app) || n.category.as_deref() == Some("social") {
-        "social"
-    } else if CHAT.contains(&app) || n.category.as_deref() == Some("msg") || n.can_reply {
-        "chat"
-    } else {
-        return None;
-    };
+    let kind = kind(n)?;
     let body = n.body.trim();
     // "12 messages from 3 chats": the app's summary, not a message
     if n.title.trim() == n.app_name || body.is_empty() || is_summary(body) {
@@ -277,6 +307,22 @@ fn parse(n: &RemoteNotification) -> Option<Parsed> {
     }
     text.truncate(text.char_indices().nth(MAX_TEXT).map_or(text.len(), |(i, _)| i));
     Some(Parsed { kind, title, sender, text, group })
+}
+
+/// Which kind of messaging app it comes from, if it's one.
+fn kind(n: &RemoteNotification) -> Option<&'static str> {
+    let app = n.app.as_str();
+    if SMS.contains(&app) {
+        Some("sms")
+    } else if MAIL.contains(&app) || n.category.as_deref() == Some("email") {
+        Some("mail")
+    } else if SOCIAL.contains(&app) || n.category.as_deref() == Some("social") {
+        Some("social")
+    } else if CHAT.contains(&app) || n.category.as_deref() == Some("msg") || n.can_reply {
+        Some("chat")
+    } else {
+        None
+    }
 }
 
 fn is_summary(body: &str) -> bool {
@@ -354,5 +400,22 @@ mod tests {
         assert_eq!(inbox.thread(&alice.id).unwrap().len(), 2);
         inbox.removed(&phone.id, "k");
         assert!(inbox.list().iter().all(|c| !c.can_reply && c.unread == 0));
+    }
+
+    #[test]
+    fn other_notifications_kept_apart_until_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = Inbox::new(dir.path().into());
+        let phone = DeviceInfo { id: Fingerprint::of(b"p"), name: "Pixel".into(), kind: linksy_core::DeviceKind::Phone, os: "android".into(), features: vec![], away: None };
+        let quiet = |key: &str, app: &str, title: &str, body: &str| RemoteNotification { key: key.into(), can_reply: false, ..n(app, "App", title, body) };
+        assert_eq!(inbox.posted(&phone, &quiet("a", "com.bank", "Sign in", "Your code is 771204")).as_deref(), Some("771204"));
+        inbox.posted(&phone, &quiet("b", "com.google.android.calendar", "Team sync", "In 15 minutes"));
+        inbox.posted(&phone, &quiet("b", "com.google.android.calendar", "Team sync", "In 5 minutes"));
+        inbox.posted(&phone, &n("com.whatsapp", "WhatsApp", "WhatsApp", "12 messages from 3 chats"));
+        let alerts = inbox.alerts();
+        assert_eq!(alerts.iter().map(|a| (a.key.as_str(), a.body.as_str())).collect::<Vec<_>>(), [("b", "In 5 minutes"), ("a", "Your code is 771204")]);
+        assert!(inbox.list().is_empty());
+        inbox.removed(&phone.id, "b");
+        assert_eq!(inbox.alert_keys(&phone.id), ["a"]);
     }
 }

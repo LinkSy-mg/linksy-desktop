@@ -65,6 +65,23 @@ impl Mirror {
         }
     }
 
+    /// Dismiss `phone`'s other notification `key` there and here, or all of them.
+    pub async fn dismiss(&self, node: &Node, phone: &Fingerprint, key: Option<&str>) -> Result<(), String> {
+        let keys = match key {
+            Some(k) => vec![k.to_string()],
+            None => self.inner.inbox.alert_keys(phone),
+        };
+        for key in keys {
+            node.dismiss_notification(phone, &key).await.map_err(|e| e.to_string())?;
+            self.inner.inbox.removed(phone, &key);
+            let gone = self.inner.shown.lock().unwrap().remove(&(*phone, key));
+            if let Some(s) = gone {
+                close(s.id).await;
+            }
+        }
+        Ok(())
+    }
+
     /// Answer conversation `id` through the phone's notification.
     pub async fn reply_in(&self, node: &Node, id: &str, text: &str) -> Result<(), String> {
         let (phone, key, can_reply) = self.inner.inbox.notification(id).ok_or("answer it on the phone: its notification is gone")?;
