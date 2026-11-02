@@ -43,9 +43,16 @@ pub enum Act {
     Command { name: String, line: String },
 }
 
-/// This computer's sound now, as far as the decks show it.
+/// What this computer can do for a deck besides media and locking, found out once.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Sound {
+pub struct Caps {
+    /// A volume to set (wpctl or pactl).
+    pub sound: bool,
+}
+
+/// This computer's state now, as far as the decks show it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Status {
     pub level: Option<f64>,
     pub muted: Option<bool>,
     pub mic_muted: Option<bool>,
@@ -53,18 +60,17 @@ pub struct Sound {
 
 /// What runs the actions: this desktop, or a stand-in in tests.
 pub trait Desktop: Send + Sync + 'static {
-    /// There's a volume to set (wpctl or pactl).
-    fn has_sound(&self) -> bool;
+    fn probe(&self) -> impl Future<Output = Caps> + Send;
     fn run(&self, act: Act) -> impl Future<Output = ()> + Send;
-    /// The output's level and mute (`output`), the microphone's mute (`mic`).
-    fn sound(&self, output: bool, mic: bool) -> impl Future<Output = Sound> + Send;
+    /// The state of what the actions `ids` show; the rest stays unknown.
+    fn status(&self, ids: &HashSet<&str>) -> impl Future<Output = Status> + Send;
 }
 
 pub struct System;
 
 impl Desktop for System {
-    fn has_sound(&self) -> bool {
-        crate::volume::available()
+    async fn probe(&self) -> Caps {
+        Caps { sound: crate::volume::available() }
     }
 
     async fn run(&self, act: Act) {
@@ -80,12 +86,13 @@ impl Desktop for System {
         }
     }
 
-    async fn sound(&self, output: bool, mic: bool) -> Sound {
+    async fn status(&self, ids: &HashSet<&str>) -> Status {
+        let (output, mic) = (ids.contains("sound.volume") || ids.contains("sound.mute"), ids.contains("sound.mic_mute"));
         let (out, mic_muted) = tokio::join!(
             async { if output { crate::volume::output_state().await } else { None } },
             async { if mic { crate::volume::mic_muted().await } else { None } },
         );
-        Sound { level: out.map(|(level, _)| level.clamp(0.0, 1.0)), muted: out.map(|(_, muted)| muted), mic_muted }
+        Status { level: out.map(|(level, _)| level.clamp(0.0, 1.0)), muted: out.map(|(_, muted)| muted), mic_muted }
     }
 }
 
@@ -161,24 +168,52 @@ struct Inner<D> {
     jobs: mpsc::UnboundedSender<Job>,
     queued: Mutex<Option<mpsc::UnboundedReceiver<Job>>>,
     desktop: D,
+    /// Found out the first time a deck or the editor needs it.
+    caps: tokio::sync::OnceCell<Caps>,
+    /// The state as last read, for what a batch doesn't read again.
+    status: Mutex<Status>,
+    /// For the names in the questions actions ask.
+    node: OnceLock<Node>,
 }
 
 impl<D: Desktop> Deck<D> {
     pub fn load(path: PathBuf, desktop: D) -> Self {
         let saved = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let (jobs, queued) = mpsc::unbounded_channel();
-        Self { inner: Arc::new(Inner { path, saved: Mutex::new(saved), open: Mutex::default(), jobs, queued: Mutex::new(Some(queued)), desktop }) }
+        let inner = Inner {
+            path,
+            saved: Mutex::new(saved),
+            open: Mutex::default(),
+            jobs,
+            queued: Mutex::new(Some(queued)),
+            desktop,
+            caps: tokio::sync::OnceCell::new(),
+            status: Mutex::default(),
+            node: OnceLock::new(),
+        };
+        Self { inner: Arc::new(inner) }
     }
 
-    /// Everything this computer offers a deck.
+    /// Find out what this computer can do, once; until then only what needs nothing.
+    pub async fn ready(&self) {
+        self.inner.caps.get_or_init(|| self.inner.desktop.probe()).await;
+    }
+
+    fn caps(&self) -> Caps {
+        self.inner.caps.get().copied().unwrap_or_default()
+    }
+
+    /// Everything this computer offers a deck. The questions keep `{computer}` and
+    /// `{phone}`, for [`Deck::named`].
     fn offered(&self, saved: &Saved) -> Vec<DeckAction> {
+        let caps = self.caps();
         let action = |id: &str, name: &str, kind, group: &str| DeckAction { id: id.into(), name: name.into(), kind, group: group.into(), confirm: None };
         let mut all = vec![
             action("media.play_pause", t!("Play or Pause"), DeckKind::Button, MEDIA),
             action("media.next", t!("Next Track"), DeckKind::Button, MEDIA),
             action("media.previous", t!("Previous Track"), DeckKind::Button, MEDIA),
         ];
-        if self.inner.desktop.has_sound() {
+        if caps.sound {
             all.extend([
                 action("sound.volume", t!("Volume"), DeckKind::Slider, SOUND),
                 action("sound.mute", t!("Mute"), DeckKind::Toggle, SOUND),
@@ -193,13 +228,30 @@ impl<D: Desktop> Deck<D> {
     /// What `phone`'s deck may do: its list.
     fn enabled(&self, phone: &Fingerprint) -> Vec<DeckAction> {
         let saved = self.inner.saved.lock().unwrap();
-        self.offered(&saved).into_iter().filter(|a| saved.on(phone, &a.id)).collect()
+        let list = self.offered(&saved).into_iter().filter(|a| saved.on(phone, &a.id)).collect();
+        drop(saved);
+        self.named(phone, list)
     }
 
     pub fn prefs(&self, phone: &Fingerprint) -> DeckPrefs {
         let saved = self.inner.saved.lock().unwrap();
-        let actions = self.offered(&saved).into_iter().map(|a| DeckOption { on: saved.on(phone, &a.id), action: a }).collect();
-        DeckPrefs { actions, commands: saved.commands.clone() }
+        let offered = self.offered(&saved);
+        let on: Vec<bool> = offered.iter().map(|a| saved.on(phone, &a.id)).collect();
+        let commands = saved.commands.clone();
+        drop(saved);
+        let actions = self.named(phone, offered).into_iter().zip(on).map(|(action, on)| DeckOption { action, on }).collect();
+        DeckPrefs { actions, commands }
+    }
+
+    /// The questions with this computer's name and `phone`'s.
+    fn named(&self, phone: &Fingerprint, mut actions: Vec<DeckAction>) -> Vec<DeckAction> {
+        let Some(node) = self.inner.node.get() else { return actions };
+        let computer = node.info().name;
+        let phone = node.trusted().into_iter().find(|t| t.device.id == *phone).map(|t| t.device.name).unwrap_or_default();
+        for q in actions.iter_mut().filter_map(|a| a.confirm.as_mut()) {
+            *q = q.replace("{computer}", &computer).replace("{phone}", &phone);
+        }
+        actions
     }
 
     pub fn set_action(&self, phone: &Fingerprint, action: &str, on: bool) -> Result<(), String> {
@@ -345,14 +397,14 @@ impl<D: Desktop> Deck<D> {
         if !saved.on(phone, id) {
             return None;
         }
-        let sound = self.inner.desktop.has_sound();
+        let caps = self.caps();
         Some(match id {
             "media.play_pause" => Act::Media(MediaCommand::PlayPause),
             "media.next" => Act::Media(MediaCommand::Next),
             "media.previous" => Act::Media(MediaCommand::Previous),
-            "sound.volume" if sound => Act::Volume(value.filter(|v| v.is_finite())?.clamp(0.0, 1.0)),
-            "sound.mute" if sound => Act::Mute,
-            "sound.mic_mute" if sound => Act::MicMute,
+            "sound.volume" if caps.sound => Act::Volume(value.filter(|v| v.is_finite())?.clamp(0.0, 1.0)),
+            "sound.mute" if caps.sound => Act::Mute,
+            "sound.mic_mute" if caps.sound => Act::MicMute,
             "system.lock" => Act::Lock,
             _ => {
                 let id = id.strip_prefix("command.")?;
@@ -364,6 +416,7 @@ impl<D: Desktop> Deck<D> {
 
     pub async fn run(self, node: Node) {
         let Some(jobs) = self.inner.queued.lock().unwrap().take() else { return };
+        let _ = self.inner.node.set(node.clone());
         tokio::spawn(self.clone().work(node.clone(), jobs));
         let mut events = node.subscribe();
         let paired = |id: &Fingerprint| node.trusted().iter().any(|t| t.device.id == *id);
@@ -374,12 +427,15 @@ impl<D: Desktop> Deck<D> {
                         self.inner.open.lock().unwrap().insert(from.id, None);
                         let _ = self.inner.jobs.send(Job::Open(from.id));
                     }
-                    Ok(Event::DeckRun { from, action, value }) if paired(&from.id) => match self.act(&from.id, &action, value) {
-                        Some(act) => {
-                            let _ = self.inner.jobs.send(Job::Run(from.id, act));
+                    Ok(Event::DeckRun { from, action, value }) if paired(&from.id) => {
+                        self.ready().await;
+                        match self.act(&from.id, &action, value) {
+                            Some(act) => {
+                                let _ = self.inner.jobs.send(Job::Run(from.id, act));
+                            }
+                            None => debug!("{} may not run {action} here", from.name),
                         }
-                        None => debug!("{} may not run {action} here", from.name),
-                    },
+                    }
                     Ok(Event::DeckOpen { from } | Event::DeckRun { from, .. }) => debug!("deck of {}, which isn't paired", from.name),
                     Ok(Event::DeckClose { from }) => {
                         self.inner.open.lock().unwrap().remove(&from.id);
@@ -407,6 +463,9 @@ impl<D: Desktop> Deck<D> {
             while let Ok(job) = jobs.try_recv() {
                 batch.push(job);
             }
+            self.ready().await;
+            // Only the volume moved (a slider, the keyboard): read the sound alone again
+            let sound_only = batch.iter().all(|j| matches!(j, Job::Sound | Job::Run(_, Act::Volume(_))));
             let mut told = HashSet::new();
             let mut acts = Vec::new();
             for job in batch {
@@ -431,7 +490,7 @@ impl<D: Desktop> Deck<D> {
                 }
             }
             self.perform(acts).await;
-            self.send_states(&node, &told).await;
+            self.send_states(&node, &told, sound_only).await;
         }
     }
 
@@ -483,14 +542,25 @@ impl<D: Desktop> Deck<D> {
     }
 
     /// The state to the decks `told` something, and to the other open ones if it changed.
-    async fn send_states(&self, node: &Node, told: &HashSet<Fingerprint>) {
+    async fn send_states(&self, node: &Node, told: &HashSet<Fingerprint>, sound_only: bool) {
         let phones: Vec<Fingerprint> = self.inner.open.lock().unwrap().keys().copied().collect();
         let lists: Vec<(Fingerprint, Vec<DeckAction>)> = phones.into_iter().map(|p| (p, self.enabled(&p))).collect();
-        let shows = |id: &str| lists.iter().any(|(_, actions)| actions.iter().any(|a| a.id == id));
-        let (output, mic) = (shows("sound.volume") || shows("sound.mute"), shows("sound.mic_mute"));
-        let sound = if output || mic { self.inner.desktop.sound(output, mic).await } else { Sound::default() };
+        let mut shown: HashSet<&str> = lists.iter().flat_map(|(_, actions)| actions.iter().map(|a| a.id.as_str())).collect();
+        if sound_only {
+            shown.retain(|id| ["sound.volume", "sound.mute"].contains(id));
+        }
+        let fresh = if shown.is_empty() { Status::default() } else { self.inner.desktop.status(&shown).await };
+        let status = {
+            let mut last = self.inner.status.lock().unwrap();
+            if sound_only {
+                (last.level, last.muted) = (fresh.level, fresh.muted);
+            } else {
+                *last = fresh;
+            }
+            last.clone()
+        };
         for (phone, actions) in lists {
-            let now = states(&actions, &sound);
+            let now = states(&actions, &status);
             {
                 let mut open = self.inner.open.lock().unwrap();
                 let Some(last) = open.get_mut(&phone) else { continue };
@@ -522,17 +592,17 @@ fn runs(layouts: &DeckLayouts) -> impl Iterator<Item = &str> {
 }
 
 /// The tiles' state for these actions: the ones that have one.
-fn states(actions: &[DeckAction], sound: &Sound) -> Vec<DeckState> {
+fn states(actions: &[DeckAction], now: &Status) -> Vec<DeckState> {
     actions
         .iter()
         .filter_map(|a| {
-            let (on, value) = match a.id.as_str() {
-                "sound.volume" => (None, Some(sound.level?)),
-                "sound.mute" => (Some(sound.muted?), None),
-                "sound.mic_mute" => (Some(sound.mic_muted?), None),
-                _ => return None,
-            };
-            Some(DeckState { id: a.id.clone(), on, value, text: None })
+            let state = |on, value| Some(DeckState { id: a.id.clone(), on, value, text: None });
+            match a.id.as_str() {
+                "sound.volume" => state(None, Some(now.level?)),
+                "sound.mute" => state(Some(now.muted?), None),
+                "sound.mic_mute" => state(Some(now.mic_muted?), None),
+                _ => None,
+            }
         })
         .collect()
 }
@@ -541,23 +611,32 @@ fn states(actions: &[DeckAction], sound: &Sound) -> Vec<DeckState> {
 mod tests {
     use super::*;
 
+    /// A computer that can do everything (but sound, with `no_sound`) and only says what it
+    /// would have done.
     #[derive(Default)]
     struct Fake {
         no_sound: bool,
         ran: Mutex<Vec<Act>>,
     }
 
+    impl Fake {
+        fn caps(&self) -> Caps {
+            Caps { sound: !self.no_sound }
+        }
+    }
+
     impl Desktop for Fake {
-        fn has_sound(&self) -> bool {
-            !self.no_sound
+        async fn probe(&self) -> Caps {
+            self.caps()
         }
 
         async fn run(&self, act: Act) {
             self.ran.lock().unwrap().push(act);
         }
 
-        async fn sound(&self, output: bool, mic: bool) -> Sound {
-            Sound { level: output.then_some(0.42), muted: output.then_some(false), mic_muted: mic.then_some(true) }
+        async fn status(&self, ids: &HashSet<&str>) -> Status {
+            let output = ids.contains("sound.volume") || ids.contains("sound.mute");
+            Status { level: output.then_some(0.42), muted: output.then_some(false), mic_muted: ids.contains("sound.mic_mute").then_some(true) }
         }
     }
 
@@ -565,8 +644,16 @@ mod tests {
         Fingerprint([n; 32])
     }
 
+    /// A deck that already found out what `fake` can do.
+    fn ready(path: PathBuf, fake: Fake) -> Deck<Fake> {
+        let caps = fake.caps();
+        let d = Deck::load(path, fake);
+        d.inner.caps.set(caps).unwrap();
+        d
+    }
+
     fn deck(dir: &tempfile::TempDir) -> Deck<Fake> {
-        Deck::load(dir.path().join("deck.json"), Fake::default())
+        ready(dir.path().join("deck.json"), Fake::default())
     }
 
     fn command(id: &str, name: &str, line: &str) -> DeckCommand {
@@ -616,7 +703,7 @@ mod tests {
         assert_eq!(d.act(&phone(2), "system.lock", None), None);
 
         // Without wpctl or pactl, no sound at all
-        let quiet = Deck::load(dir.path().join("quiet.json"), Fake { no_sound: true, ..Default::default() });
+        let quiet = ready(dir.path().join("quiet.json"), Fake { no_sound: true, ..Default::default() });
         assert_eq!(quiet.act(&p, "sound.volume", Some(0.5)), None);
         assert!(quiet.prefs(&p).actions.iter().all(|a| a.action.group != SOUND));
         assert!(quiet.set_action(&p, "sound.mute", true).is_err());
@@ -681,11 +768,22 @@ mod tests {
     fn state_for_the_tiles_that_have_one() {
         let dir = tempfile::tempdir().unwrap();
         let d = deck(&dir);
-        let sound = Sound { level: Some(0.42), muted: Some(false), mic_muted: None };
+        let sound = Status { level: Some(0.42), muted: Some(false), ..Default::default() };
         let now = states(&d.enabled(&phone(1)), &sound);
         assert_eq!(now, [DeckState { id: "sound.volume".into(), on: None, value: Some(0.42), text: None }, DeckState { id: "sound.mute".into(), on: Some(false), value: None, text: None }]);
         d.set_action(&phone(1), "sound.volume", false).unwrap();
         assert_eq!(states(&d.enabled(&phone(1)), &sound).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn found_out_once_and_only_what_is_there_is_offered() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = Deck::load(dir.path().join("deck.json"), Fake { no_sound: true, ..Default::default() });
+        assert_eq!(d.prefs(&phone(1)).actions.len(), 4, "media and locking need nothing");
+        d.ready().await;
+        d.ready().await;
+        assert_eq!(d.caps(), Caps { sound: false });
+        assert!(d.prefs(&phone(1)).actions.iter().all(|a| !a.action.id.starts_with("sound.")));
     }
 
     fn tile(id: &str, kind: &str, (x, y): (u8, u8), (w, h): (u8, u8), action: Option<&str>) -> DeckTile {
@@ -721,7 +819,7 @@ mod tests {
         assert_eq!(first.layouts[0].theme.id, "stock");
         assert!(!dir.path().join("deck.json").exists(), "not saved");
 
-        let quiet = Deck::load(dir.path().join("quiet.json"), Fake { no_sound: true, ..Default::default() });
+        let quiet = ready(dir.path().join("quiet.json"), Fake { no_sound: true, ..Default::default() });
         assert_eq!(kinds(&quiet.layouts(&phone(1)).layouts[0].portrait), [("clock", None), ("music", None), ("button", Some("media.play_pause")), ("button", Some("media.next"))]);
     }
 

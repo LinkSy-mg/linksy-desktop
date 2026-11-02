@@ -383,14 +383,14 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             node.set_allow_screen(&id, on).map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
-        Request::DeckPrefs { phone } => json(serde_json::to_value(deck()?.prefs(&paired(node, &phone)?))),
+        Request::DeckPrefs { phone } => json(serde_json::to_value(deck().await?.prefs(&paired(node, &phone)?))),
         Request::SetDeckAction { phone, action, on } => {
-            deck()?.set_action(&paired(node, &phone)?, &action, on)?;
+            deck().await?.set_action(&paired(node, &phone)?, &action, on)?;
             Ok(Value::Null)
         }
-        Request::SetDeckCommands { commands } => json(serde_json::to_value(deck()?.set_commands(commands)?)),
-        Request::DeckLayouts { phone } => json(serde_json::to_value(deck()?.layouts(&paired(node, &phone)?))),
-        Request::SetDeckLayouts { phone, layouts } => json(serde_json::to_value(deck()?.set_layouts(&paired(node, &phone)?, layouts)?)),
+        Request::SetDeckCommands { commands } => json(serde_json::to_value(deck().await?.set_commands(commands)?)),
+        Request::DeckLayouts { phone } => json(serde_json::to_value(deck().await?.layouts(&paired(node, &phone)?))),
+        Request::SetDeckLayouts { phone, layouts } => json(serde_json::to_value(deck().await?.set_layouts(&paired(node, &phone)?, layouts)?)),
         Request::ForgetScreen => Ok(Value::Bool(sessions.forget_screen())),
         Request::Locate { device } => {
             let id = resolve(node, &device)?;
@@ -559,8 +559,11 @@ fn gallery() -> Result<&'static crate::gallery::Gallery, String> {
     crate::gallery::GALLERY.get().ok_or_else(|| "not ready yet".into())
 }
 
-fn deck() -> Result<&'static crate::deck::Deck, String> {
-    crate::deck::DECK.get().ok_or_else(|| "decks aren't available here".to_string())
+/// The decks, once they know what this computer can do.
+async fn deck() -> Result<&'static crate::deck::Deck, String> {
+    let deck = crate::deck::DECK.get().ok_or_else(|| "decks aren't available here".to_string())?;
+    deck.ready().await;
+    Ok(deck)
 }
 
 /// Like [`resolve`], for paired devices only.
