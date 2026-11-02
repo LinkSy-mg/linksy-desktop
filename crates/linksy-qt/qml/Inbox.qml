@@ -16,6 +16,9 @@ QtObject {
     property string error: ""
     property string open: ""
     property var thread: []
+    // Earlier messages asked of the phone; when they land, the ones shown stay in place
+    property bool fetchingOlder: false
+    property bool keepPlace: false
     property bool sending: false
     property string show: "all"
     property bool oldestFirst: false
@@ -58,17 +61,23 @@ QtObject {
                 inbox.alerts = ok2 ? alerts.filter(a => a.phone === id) : [];
                 inbox.error = "";
                 inbox.loaded = true;
-                // Development aid (screenshots): LINKSY_SCREENSHOT_THREAD=<title> opens one
-                const title = backend.env("LINKSY_SCREENSHOT_THREAD");
-                const c = title && !inbox.open && inbox.shown ? inbox.conversations.find(c => c.title === title) : null;
-                if (c) inbox.openConversation(c.id);
+                inbox.openWanted();
             });
         });
+    }
+
+    // Development aid (screenshots): LINKSY_SCREENSHOT_THREAD=<title> opens one
+    function openWanted() {
+        const title = backend.env("LINKSY_SCREENSHOT_THREAD");
+        const c = title && !open && shown ? conversations.find(c => c.title === title) : null;
+        if (c) openConversation(c.id);
     }
 
     // A conversation changed: read or answerable again with nothing newer, it keeps its place
     function changed(c) {
         if (c.phone !== phone) return;
+        const before = conversations.find(o => o.id === c.id);
+        const newer = !before || before.at_ms !== c.at_ms || JSON.stringify(before.last) !== JSON.stringify(c.last);
         const same = conversations.findIndex(o => o.id === c.id && o.at_ms === c.at_ms);
         const list = conversations.filter(o => o.id !== c.id);
         let at = same >= 0 ? same : list.findIndex(o => o.at_ms <= c.at_ms);
@@ -77,11 +86,12 @@ QtObject {
         conversations = list;
         if (c.id !== open || !shown) return;
         if (app.active) markRead(c);
-        loadThread();
+        if (newer) loadThread();
     }
 
     function openConversation(id) {
         open = id;
+        keepPlace = false;
         thread = [];
         const c = current;
         if (!c) return;
@@ -99,6 +109,20 @@ QtObject {
         app.request("inbox_thread", { conversation: id }, (ok, list) => {
             if (id !== inbox.open) return;
             if (!ok) return inbox.app.toast(inbox.capitalize(list));
+            inbox.thread = list;
+        });
+    }
+
+    // Earlier messages from the phone; it answers the whole conversation
+    function loadOlder() {
+        const id = open;
+        if (!id || fetchingOlder) return;
+        fetchingOlder = true;
+        app.request("inbox_older", { conversation: id }, (ok, list) => {
+            inbox.fetchingOlder = false;
+            if (id !== inbox.open) return;
+            if (!ok) return inbox.app.toast(inbox.capitalize(list));
+            inbox.keepPlace = true;
             inbox.thread = list;
         });
     }

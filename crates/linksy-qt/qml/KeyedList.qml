@@ -9,14 +9,15 @@ QtObject {
     property var rows: ({})
     property ListModel model: ListModel {}
 
-    // `list` in order; `keyOf(x)` a unique string; `rolesOf(x)` scalar roles for sections
+    // `list` in order; `keyOf(x, i)` a unique string; `rolesOf(x)` scalar roles for sections
     function sync(list, keyOf, rolesOf) {
         const next = {};
-        const wanted = list.map(x => {
-            const row = Object.assign({ key: String(keyOf(x)) }, rolesOf ? rolesOf(x) : {});
-            next[row.key] = x;
-            return row;
-        });
+        const wanted = [];
+        for (let i = 0; i < list.length; i++) {
+            const row = Object.assign({ key: String(keyOf(list[i], i)) }, rolesOf ? rolesOf(list[i]) : {});
+            next[row.key] = list[i];
+            wanted.push(row);
+        }
         const present = {};
         let kept = 0;
         for (let i = 0; i < model.count; i++) {

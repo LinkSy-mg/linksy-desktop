@@ -30,6 +30,7 @@ Item {
 
     Component.onCompleted: {
         shown.sync(conversations, c => c.id);
+        showThread();
         search.text = store.search;
         if (current) {
             store.markRead(current);
@@ -39,7 +40,7 @@ Item {
 
     Connections {
         target: tab.store
-        function onThreadChanged() { Qt.callLater(() => thread.positionViewAtEnd()) }
+        function onThreadChanged() { tab.showThread() }
         function onSent() {
             reply.text = "";
             reply.forceActiveFocus();
@@ -49,6 +50,39 @@ Item {
         target: tab.app
         // Back to the window with a conversation open: what came in meanwhile is read now
         function onActiveChanged() { if (tab.app.active && tab.current) tab.store.markRead(tab.current) }
+    }
+
+    // The open conversation's messages: at its end, or with earlier ones just loaded, the
+    // message at the top stays where it is
+    function showThread() {
+        let anchor = "", offset = 0;
+        if (store.keepPlace) {
+            store.keepPlace = false;
+            for (let y = 0; y < thread.height && !anchor; y += 8) {
+                const i = thread.indexAt(thread.width / 2, thread.contentY + y);
+                if (i < 0) continue;
+                anchor = messages.model.get(i).key;
+                offset = (thread.itemAtIndex(i)?.y ?? thread.contentY) - thread.contentY;
+            }
+        }
+        // Messages have no id: when, whose and what, and how many alike came before
+        const keys = [], seen = {};
+        for (const m of store.thread) {
+            const key = `${m.at_ms}|${m.mine ? 1 : 0}|${m.text}`;
+            seen[key] = (seen[key] ?? 0) + 1;
+            keys.push(`${key}|${seen[key]}`);
+        }
+        messages.sync(store.thread, (m, i) => keys[i], m => ({ day: app.dayLabel(m.at_ms) }));
+        if (!anchor) {
+            Qt.callLater(() => thread.positionViewAtEnd());
+            return;
+        }
+        for (let i = 0; i < messages.model.count; i++) {
+            if (messages.model.get(i).key !== anchor) continue;
+            thread.positionViewAtIndex(i, ListView.Beginning);
+            thread.contentY -= offset;
+            break;
+        }
     }
 
     function shows(kind) {
@@ -98,6 +132,7 @@ Item {
     }
 
     KeyedList { id: shown }
+    KeyedList { id: messages }
 
     QQC2.ButtonGroup { id: showGroup }
     QQC2.ButtonGroup { id: sortGroup }
@@ -331,16 +366,41 @@ Item {
                     ListView {
                         id: thread
                         clip: true
-                        model: tab.store.thread
+                        model: messages.model
                         spacing: Kirigami.Units.smallSpacing
                         topMargin: Kirigami.Units.largeSpacing
                         bottomMargin: Kirigami.Units.largeSpacing
+                        // The phone may have earlier ones to give
+                        header: Item {
+                            readonly property bool older: tab.current?.older ?? false
+                            width: thread.width
+                            height: older ? olderButton.implicitHeight + Kirigami.Units.smallSpacing : 0
+                            visible: older
+                            QQC2.Button {
+                                id: olderButton
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                flat: true
+                                enabled: !tab.store.fetchingOlder
+                                text: tab.app.t("Load Earlier Messages")
+                                onClicked: tab.store.loadOlder()
+                            }
+                        }
+                        section.property: "day"
+                        section.delegate: QQC2.Label {
+                            required property string section
+                            width: thread.width
+                            horizontalAlignment: Text.AlignHCenter
+                            topPadding: Kirigami.Units.largeSpacing
+                            bottomPadding: Kirigami.Units.smallSpacing
+                            text: section
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.7
+                        }
                         delegate: Item {
                             id: line
-                            required property var modelData
-                            required property int index
+                            required property string key
+                            readonly property var modelData: messages.rows[key]
                             readonly property bool mine: modelData.mine
-                            readonly property string day: tab.app.dayLabel(modelData.at_ms)
                             // Lines are the bubble's side of the view, mine on the right
                             readonly property real side: Kirigami.Units.gridUnit
                             width: thread.width
@@ -350,16 +410,6 @@ Item {
                                 id: column
                                 width: parent.width
                                 spacing: 2
-                                QQC2.Label {
-                                    visible: line.index === 0 || tab.app.dayLabel(tab.store.thread[line.index - 1].at_ms) !== line.day
-                                    width: parent.width
-                                    horizontalAlignment: Text.AlignHCenter
-                                    topPadding: Kirigami.Units.largeSpacing
-                                    bottomPadding: Kirigami.Units.smallSpacing
-                                    text: line.day
-                                    font: Kirigami.Theme.smallFont
-                                    opacity: 0.7
-                                }
                                 QQC2.Label {
                                     visible: (tab.current?.group ?? false) && !line.mine && !!line.modelData.sender
                                     x: line.side + Kirigami.Units.largeSpacing
