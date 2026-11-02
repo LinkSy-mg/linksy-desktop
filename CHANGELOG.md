@@ -2,6 +2,29 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.11.4
+
+### New
+- **Messages, from the phone's notifications:** a phone's chats, texts and mail in one place
+  on its page: WhatsApp, Telegram, Signal, Messenger, Discord, Slack, the SMS app, Gmail,
+  Outlook and others. Each conversation shows its picture, its newest message and the app it
+  came from, and group chats show who wrote what. Answer from the computer when the app lets
+  its notification be answered. Nothing is kept on disk. Needs a phone that sends its
+  notifications, which a coming version of Linksy for Android adds.
+- **Verification codes copied:** a code that arrives in a message goes straight to the
+  clipboard, and its notification says so and has a Copy button. Turn it off with Copy Codes
+  Automatically in Preferences. Android 15 and newer hide some codes from apps like Linksy;
+  those can't be copied.
+- **In the terminal:** `linksy inbox` lists the conversations, `linksy inbox <id>` shows one,
+  and `linksy reply <id> <text>` answers it.
+- **Phone Notifications in the Qt app's Preferences:** show them, copy codes and unmute apps,
+  as in the GTK app.
+
+### Changed
+- **Messages no longer lists the phone's SMS threads or writes new texts:** the phone app
+  can't read texts, so they come from the SMS app's notifications, like every other
+  messaging app.
+
 ## 0.11.3
 
 ### Improved
