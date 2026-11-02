@@ -1,7 +1,8 @@
 //! What a phone's deck switches on this computer besides media, sound and locking
-//! (docs/protocol.md §4.19): restarting and turning it off, Do Not Disturb. Each goes
-//! through what this computer has (from the Flatpak, its own tools), and isn't offered
-//! without it. Tools run in English and are stopped after 5 s.
+//! (docs/protocol.md §4.19): restarting and turning it off, Do Not Disturb, Wi-Fi,
+//! Bluetooth, airplane mode and the power profile. Each goes through what this computer has
+//! (from the Flatpak, its own tools), and isn't offered without it. Tools run in English
+//! and are stopped after 5 s.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -22,6 +23,9 @@ const NOTIFICATIONS: &str = "org.freedesktop.Notifications";
 const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 /// GNOME's Do Not Disturb is banners off.
 const BANNERS: (&str, &str) = ("org.gnome.desktop.notifications", "show-banners");
+const LOW_BATTERY: (&str, &str) = ("org.gnome.settings-daemon.plugins.power", "power-saver-profile-on-low-battery");
+/// The power profiles a deck sets, as powerprofilesctl names them.
+pub const PROFILES: [&str; 3] = ["power-saver", "balanced", "performance"];
 
 const RFKILL: &str = "org.gnome.SettingsDaemon.Rfkill";
 const RFKILL_PATH: &str = "/org/gnome/SettingsDaemon/Rfkill";
@@ -57,6 +61,10 @@ pub struct Found {
     pub wifi: bool,
     bluetooth: Option<Bluetooth>,
     airplane: Option<Airplane>,
+    /// The ones of [`PROFILES`] `powerprofilesctl list` has.
+    pub profiles: Vec<String>,
+    /// GNOME's power saver on low battery.
+    pub power_auto: bool,
 }
 
 impl Found {
@@ -118,7 +126,41 @@ impl Controls {
         } else {
             None
         };
-        self.found.get_or_init(|| Found { power_off, dnd, wifi, bluetooth, airplane }).clone()
+        let profiles = match linksy_host::installed("powerprofilesctl") {
+            true => output("powerprofilesctl", &["list"]).await.map(|o| parse_profiles(&o)).unwrap_or_default(),
+            false => Vec::new(),
+        };
+        let power_auto = gsettings && gsetting(LOW_BATTERY).await.is_some();
+        self.found.get_or_init(|| Found { power_off, dnd, wifi, bluetooth, airplane, profiles, power_auto }).clone()
+    }
+
+    /// The power profile now: one of [`PROFILES`], or another.
+    pub async fn profile(&self) -> Option<String> {
+        if self.found().profiles.is_empty() {
+            return None;
+        }
+        let name = output("powerprofilesctl", &["get"]).await?.trim().to_string();
+        (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then_some(name)
+    }
+
+    pub async fn set_profile(&self, profile: &str) {
+        if self.found().profiles.iter().any(|p| p == profile) {
+            run("powerprofilesctl", &["set", profile]).await;
+        }
+    }
+
+    /// Whether GNOME turns the power saver on when the battery is low.
+    pub async fn power_auto(&self) -> Option<bool> {
+        if !self.found().power_auto {
+            return None;
+        }
+        gsetting(LOW_BATTERY).await
+    }
+
+    pub async fn toggle_power_auto(&self) {
+        if let Some(on) = self.power_auto().await {
+            set_gsetting(LOW_BATTERY, !on).await;
+        }
     }
 
     fn found(&self) -> Found {
@@ -323,6 +365,18 @@ fn unblocked(text: &str) -> Option<bool> {
     (!devices.is_empty()).then(|| devices.iter().any(|&(soft, hard)| soft && hard))
 }
 
+/// `powerprofilesctl list`: each profile a line of its own (`* balanced:`, the active one
+/// starred), its details indented under it.
+fn parse_profiles(text: &str) -> Vec<String> {
+    let listed: Vec<&str> = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("* ").or_else(|| l.strip_prefix("  ")))
+        .filter(|l| !l.starts_with(' '))
+        .filter_map(|l| l.trim_end().strip_suffix(':'))
+        .collect();
+    PROFILES.iter().filter(|p| listed.contains(p)).map(|p| p.to_string()).collect()
+}
+
 /// A boolean setting, from `gsettings get` (`true` or `false`).
 async fn gsetting((schema, key): (&str, &str)) -> Option<bool> {
     parse_bool(&output("gsettings", &["get", schema, key]).await?)
@@ -360,5 +414,9 @@ mod tests {
         assert_eq!(unblocked(rfkill), Some(true));
         assert_eq!(unblocked(&rfkill.replace("Soft blocked: no", "Soft blocked: yes")), Some(false));
         assert_eq!(unblocked(""), None);
+        let list = "  performance:\n    CpuDriver:\tamd_pstate\n    Degraded:   no\n\n* balanced:\n    CpuDriver:\tamd_pstate\n    PlatformDriver:\tplatform_profile\n\n  power-saver:\n    CpuDriver:\tamd_pstate\n";
+        assert_eq!(parse_profiles(list), PROFILES);
+        assert_eq!(parse_profiles("* balanced:\n    CpuDriver:\tintel_pstate\n\n  power-saver:\n"), ["power-saver", "balanced"]);
+        assert!(parse_profiles("Failed to activate service 'net.hadess.PowerProfiles'").is_empty());
     }
 }

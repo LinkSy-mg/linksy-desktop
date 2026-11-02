@@ -31,6 +31,7 @@ const MEDIA: &str = "Media";
 const SOUND: &str = "Sound";
 const SYSTEM: &str = "System";
 const NETWORK: &str = "Network";
+const POWER: &str = "Power";
 const COMMANDS: &str = "Commands";
 
 /// What an action does here.
@@ -50,6 +51,9 @@ pub enum Act {
     Wifi,
     Bluetooth,
     Airplane,
+    /// One of `controls::PROFILES`.
+    Profile(&'static str),
+    PowerAuto,
     Command { name: String, line: String },
 }
 
@@ -66,6 +70,12 @@ pub struct Caps {
     pub wifi: bool,
     pub bluetooth: bool,
     pub airplane: bool,
+    /// The power profiles powerprofilesctl has.
+    pub saver: bool,
+    pub balanced: bool,
+    pub performance: bool,
+    /// GNOME's power saver on low battery.
+    pub power_auto: bool,
 }
 
 /// This computer's state now, as far as the decks show it.
@@ -80,6 +90,9 @@ pub struct Status {
     pub wifi: Option<bool>,
     pub bluetooth: Option<bool>,
     pub airplane: Option<bool>,
+    /// The power profile now, as powerprofilesctl names it.
+    pub profile: Option<String>,
+    pub power_auto: Option<bool>,
 }
 
 /// What runs the actions: this desktop, or a stand-in in tests.
@@ -105,6 +118,10 @@ impl Desktop for System {
             wifi: found.wifi,
             bluetooth: found.bluetooth(),
             airplane: found.airplane(),
+            saver: found.profiles.iter().any(|p| p == "power-saver"),
+            balanced: found.profiles.iter().any(|p| p == "balanced"),
+            performance: found.profiles.iter().any(|p| p == "performance"),
+            power_auto: found.power_auto,
         }
     }
 
@@ -124,6 +141,8 @@ impl Desktop for System {
             Act::Wifi => self.controls.toggle_wifi().await,
             Act::Bluetooth => self.controls.toggle_bluetooth().await,
             Act::Airplane => self.controls.toggle_airplane().await,
+            Act::Profile(profile) => self.controls.set_profile(profile).await,
+            Act::PowerAuto => self.controls.toggle_power_auto().await,
             Act::Command { name, line } => spawn(&name, &line),
         }
     }
@@ -138,12 +157,26 @@ impl Desktop for System {
             async { if has("sound.output") { crate::volume::output_name().await } else { None } },
             async { if has("system.dnd") { c.dnd().await } else { None } },
         );
-        let (wifi, bluetooth, airplane) = tokio::join!(
+        let profiles = has("power.saver") || has("power.balanced") || has("power.performance");
+        let (wifi, bluetooth, airplane, profile, power_auto) = tokio::join!(
             async { if has("network.wifi") { c.wifi().await } else { None } },
             async { if has("network.bluetooth") { c.bluetooth().await } else { None } },
             async { if has("network.airplane") { c.airplane().await } else { None } },
+            async { if profiles { c.profile().await } else { None } },
+            async { if has("power.auto") { c.power_auto().await } else { None } },
         );
-        Status { level: out.map(|(level, _)| level.clamp(0.0, 1.0)), muted: out.map(|(_, muted)| muted), mic_muted, output: name, dnd, wifi, bluetooth, airplane }
+        Status {
+            level: out.map(|(level, _)| level.clamp(0.0, 1.0)),
+            muted: out.map(|(_, muted)| muted),
+            mic_muted,
+            output: name,
+            dnd,
+            wifi,
+            bluetooth,
+            airplane,
+            profile,
+            power_auto,
+        }
     }
 }
 
@@ -294,6 +327,14 @@ impl<D: Desktop> Deck<D> {
         }
         if caps.airplane {
             all.push(asking(action("network.airplane", t!("Airplane Mode"), DeckKind::Toggle, NETWORK), cuts_off));
+        }
+        for (id, name, here) in [("power.saver", t!("Power Saver"), caps.saver), ("power.balanced", t!("Balanced"), caps.balanced), ("power.performance", t!("Performance"), caps.performance)] {
+            if here {
+                all.push(action(id, name, DeckKind::Toggle, POWER));
+            }
+        }
+        if caps.power_auto {
+            all.push(action("power.auto", t!("Power Saver on Low Battery"), DeckKind::Toggle, POWER));
         }
         all.extend(saved.commands.iter().map(|c| action(&format!("command.{}", c.id), &c.name, DeckKind::Button, COMMANDS)));
         all
@@ -483,6 +524,10 @@ impl<D: Desktop> Deck<D> {
             "network.wifi" if caps.wifi => Act::Wifi,
             "network.bluetooth" if caps.bluetooth => Act::Bluetooth,
             "network.airplane" if caps.airplane => Act::Airplane,
+            "power.saver" if caps.saver => Act::Profile("power-saver"),
+            "power.balanced" if caps.balanced => Act::Profile("balanced"),
+            "power.performance" if caps.performance => Act::Profile("performance"),
+            "power.auto" if caps.power_auto => Act::PowerAuto,
             _ => {
                 let id = id.strip_prefix("command.")?;
                 let c = saved.commands.iter().find(|c| c.id == id)?;
@@ -690,6 +735,10 @@ fn states(actions: &[DeckAction], now: &Status) -> Vec<DeckState> {
                 "network.wifi" => state(Some(now.wifi?), None),
                 "network.bluetooth" => state(Some(now.bluetooth?), None),
                 "network.airplane" => state(Some(now.airplane?), None),
+                "power.saver" => state(Some(now.profile.as_deref()? == "power-saver"), None),
+                "power.balanced" => state(Some(now.profile.as_deref()? == "balanced"), None),
+                "power.performance" => state(Some(now.profile.as_deref()? == "performance"), None),
+                "power.auto" => state(Some(now.power_auto?), None),
                 _ => None,
             }
         })
@@ -711,7 +760,18 @@ mod tests {
     impl Fake {
         fn caps(&self) -> Caps {
             let has = |what| !self.without.contains(&what);
-            Caps { sound: has("sound"), power_off: has("power_off"), dnd: has("dnd"), wifi: has("wifi"), bluetooth: has("bluetooth"), airplane: has("airplane") }
+            Caps {
+                sound: has("sound"),
+                power_off: has("power_off"),
+                dnd: has("dnd"),
+                wifi: has("wifi"),
+                bluetooth: has("bluetooth"),
+                airplane: has("airplane"),
+                saver: has("profiles"),
+                balanced: has("profiles"),
+                performance: has("profiles") && has("performance"),
+                power_auto: has("power_auto"),
+            }
         }
     }
 
@@ -736,6 +796,8 @@ mod tests {
                 wifi: has("network.wifi").then_some(true),
                 bluetooth: has("network.bluetooth").then_some(false),
                 airplane: has("network.airplane").then_some(false),
+                profile: ["power.saver", "power.balanced", "power.performance"].iter().any(|p| has(p)).then(|| "balanced".into()),
+                power_auto: has("power.auto").then_some(true),
             }
         }
     }
@@ -765,7 +827,7 @@ mod tests {
     }
 
     /// Everything the fake computer offers, and what's on for a phone until changed.
-    const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "system.restart", "system.shutdown", "network.wifi", "network.bluetooth", "network.airplane"];
+    const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "system.restart", "system.shutdown", "network.wifi", "network.bluetooth", "network.airplane", "power.saver", "power.balanced", "power.performance", "power.auto"];
     const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.dnd"];
 
     #[test]
@@ -931,6 +993,26 @@ mod tests {
         let wired = ready(dir.path().join("wired.json"), Fake { without: &["wifi", "airplane"], ..Default::default() });
         assert!(wired.set_action(&p, "network.wifi", true).is_err());
         assert!(wired.set_action(&p, "network.bluetooth", true).is_ok());
+    }
+
+    #[tokio::test]
+    async fn the_active_power_profile_is_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        let ids = ["power.saver", "power.balanced", "power.performance", "power.auto"];
+        for id in ids {
+            assert_eq!(d.act(&p, id, None), None, "{id} is off until allowed");
+            d.set_action(&p, id, true).unwrap();
+        }
+        assert_eq!(ids.map(|id| d.act(&p, id, None)), [Some(Act::Profile("power-saver")), Some(Act::Profile("balanced")), Some(Act::Profile("performance")), Some(Act::PowerAuto)]);
+        let list: Vec<DeckAction> = d.enabled(&p).into_iter().filter(|a| a.group == POWER).collect();
+        let now = d.inner.desktop.status(&HashSet::from(ids)).await;
+        assert_eq!(states(&list, &now).iter().map(|s| (s.id.as_str(), s.on)).collect::<Vec<_>>(), [("power.saver", Some(false)), ("power.balanced", Some(true)), ("power.performance", Some(false)), ("power.auto", Some(true))]);
+
+        let laptop = ready(dir.path().join("laptop.json"), Fake { without: &["performance", "power_auto"], ..Default::default() });
+        let offered: Vec<String> = laptop.prefs(&p).actions.into_iter().map(|a| a.action.id).filter(|id| id.starts_with("power.")).collect();
+        assert_eq!(offered, ["power.saver", "power.balanced"]);
     }
 
     #[tokio::test]
