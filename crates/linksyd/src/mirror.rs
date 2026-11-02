@@ -200,12 +200,12 @@ impl Mirror {
             previous
         };
         let icon = n.icon.as_deref().and_then(|b64| crate::inbox::unpack(&self.inner.icons, &n.app, b64));
+        let several = node.trusted().iter().filter(|t| t.device.kind == linksy_core::DeviceKind::Phone).count() > 1;
         let mirror = self.clone();
         let rt = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
-            let source = if copied { t!("{app} · {device} · code copied", app = n.app_name, device = from.name) } else { format!("{} · {}", n.app_name, from.name) };
-            let body = if n.body.is_empty() { source } else { format!("{}\n{source}", n.body) };
-            let mut note = crate::notify::base(&n.title, &body);
+            let summary = summary(&n.title, &n.app_name, several.then_some(from.name.as_str()), copied);
+            let mut note = crate::notify::base(&summary, &n.body);
             if let Some(icon) = &icon {
                 note.icon(&icon.to_string_lossy());
             }
@@ -303,3 +303,31 @@ async fn close(id: u32) {
 
 #[cfg(not(target_os = "linux"))]
 async fn close(_id: u32) {}
+
+/// A phone notification's title here, with where it's from ("Jenna · WhatsApp"): desktops
+/// show the body on one line, where a line about the app would read as part of the message.
+/// `device` when there's more than one phone.
+fn summary(title: &str, app: &str, device: Option<&str>, copied: bool) -> String {
+    let title = title.trim();
+    let mut parts = vec![title];
+    if title != app {
+        parts.push(app);
+    }
+    parts.extend(device);
+    parts.retain(|p| !p.trim().is_empty());
+    let summary = parts.join(" · ");
+    if copied { t!("{what} · code copied", what = summary) } else { summary }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::summary;
+
+    #[test]
+    fn says_where_from_in_the_title() {
+        assert_eq!(summary("Jenna", "WhatsApp", None, false), "Jenna · WhatsApp");
+        assert_eq!(summary("Jenna", "WhatsApp", Some("realme 15 Pro 5G"), false), "Jenna · WhatsApp · realme 15 Pro 5G");
+        assert_eq!(summary("WhatsApp", "WhatsApp", None, false), "WhatsApp");
+        assert_eq!(summary(" ", "Bank", None, true), "Bank · code copied");
+    }
+}
