@@ -660,7 +660,7 @@ pub enum MediaCommand {
 }
 
 /// A notification mirrored from another device (a phone's WhatsApp message…).
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RemoteNotification {
     /// Stable id on the sender (Android: the StatusBarNotification key).
     pub key: String,
@@ -679,6 +679,19 @@ pub struct RemoteNotification {
     /// The app's icon, a small PNG (≤ 64 KiB) in standard base64.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    // Messaging details, all optional (docs/protocol.md §4.5)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub conversation: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub group: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

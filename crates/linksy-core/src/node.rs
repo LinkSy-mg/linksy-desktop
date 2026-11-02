@@ -873,12 +873,15 @@ impl Node {
     }
 
     /// Mirror one of this device's notifications to a connected device (phones).
-    pub async fn post_notification(&self, to: &Fingerprint, notification: RemoteNotification) -> Result<()> {
+    pub async fn post_notification(&self, to: &Fingerprint, mut notification: RemoteNotification) -> Result<()> {
         if notification.key.is_empty() || notification.key.len() > MAX_KEY {
             return Err(invalid("notification key must be 1 to 1024 bytes"));
         }
         if notification.icon.as_ref().is_some_and(|i| i.len() > MAX_ICON) {
             return Err(invalid("notification icon is too large"));
+        }
+        if notification.picture.as_ref().is_some_and(|p| p.len() > MAX_ICON) {
+            notification.picture = None;
         }
         self.send_message(to, &Message::NotificationPosted(notification)).await
     }
@@ -1723,9 +1726,12 @@ impl Node {
                                     }
                                 }
                                 Ok(Message::Battery(_)) => debug!("bad battery level from {}", from.name),
-                                Ok(Message::NotificationPosted(n))
+                                Ok(Message::NotificationPosted(mut n))
                                     if !n.key.is_empty() && n.key.len() <= MAX_KEY && n.icon.as_ref().is_none_or(|i| i.len() <= MAX_ICON) =>
                                 {
+                                    if n.picture.as_ref().is_some_and(|p| p.len() > MAX_ICON) {
+                                        n.picture = None;
+                                    }
                                     node.emit(Event::NotificationPosted { from, notification: n })
                                 }
                                 Ok(Message::NotificationPosted(_)) => debug!("bad notification from {}", from.name),

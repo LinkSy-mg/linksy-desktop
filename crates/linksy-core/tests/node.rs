@@ -398,7 +398,7 @@ async fn mirrored_notifications_go_both_ways() {
         body: "Lunch?".into(),
         can_reply: true,
         actions: vec![NotificationButton { id: "read".into(), label: "Mark as read".into() }],
-        icon: None,
+        ..Default::default()
     };
     phone.node.post_notification(&pc_id, n.clone()).await.unwrap();
     let got = wait_for(&mut on_pc, |e| match e {
