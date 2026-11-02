@@ -59,6 +59,9 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Texting from the computer | Done | Not possible | SMS permissions are blocked for sideloaded apps |
 | Phone notifications on the computer, reply | Done | Not possible | notification-listener access is blocked |
 | Messages page, codes copied | Done (0.11.4) | To do (optional fields) | from message notifications; `conversation`, `sender`… (§4.5) |
+| Inbox: other notifications, earlier messages, replies after the notification | Done (next release) | To do | `messages`, `reply_kept`, `inbox_history` (§4.5) |
+| Gallery: the phone's photos page by page | Done (next release) | To do | `gallery` stream, thumbnails, `send` (§4.18) |
+| Deck: the phone as buttons for the computer | Done (next release) | To do | `deck_open`, `deck_actions`, `deck_run` (§4.19) |
 | Images/files on the clipboard | Done | Done | offer with `"clipboard":true` (§4.5) |
 | Automatic clipboard sync, computer → phone | Done (not on GNOME) | Done (phone asks) | `clipboard_watch` (§4.5) |
 | Phone as microphone | Done | Done | session `microphone`, raw PCM (§4.8) |
@@ -348,6 +351,35 @@ and close the other with reason `duplicate`.
   With these, `body` is the newest message alone, not "Bob: …". Send the app's launcher
   icon as `icon` (96 px), not the small status-bar one: the page shows it beside each
   conversation.
+
+  **Inbox (desktop, next release).** The Messages page became the device page's Inbox
+  tab: conversations plus the phone's other notifications (not messages: a reminder, a
+  delivery, a sign-in code), each with a dismiss button and Clear All
+  (`notification_dismiss`); a code in those is copied too. The computer keeps up to 200
+  messages per conversation. Optional, for a phone that can:
+  - `messages` on `notification_posted`: the conversation's latest messages, oldest first,
+    from `MessagingStyle.getMessages()` (and `getHistoricMessages()`), each
+    `{"sender":"Mum","text":"…","time":1730000000000,"mine":false}` (`mine` for the
+    user's own, without `sender`). The computer adds the ones it doesn't have; `body` is
+    still the newest alone. Up to 25.
+  - `subject` on `notification_posted` for mail (`EXTRA_TITLE_BIG` / the subject line),
+    with the mail's text in `body` (`EXTRA_BIG_TEXT`).
+  - **Answering after the notification is gone:** keep each conversation's newest reply
+    action (its `RemoteInput` and `PendingIntent`) when its notification goes away, and
+    say so: `{"type":"notification_removed","key":"…","reply_kept":true}`. The computer
+    keeps answering it with `notification_reply` and that `key`; the reply always goes out
+    the way the conversation came in (same app, same SIM or account: there's no choosing
+    another sender). Forget it, and answer `notification_reply` for it with nothing, once
+    the app cancels the intent or after a day.
+  - **Earlier messages:** with feature `inbox_history`, keep what the listener saw of each
+    conversation on the phone (per app and `conversation`, as sent; a few hundred messages,
+    the newest kept), and answer
+    `{"type":"inbox_history","app":"com.whatsapp","conversation":"Family","before_ms":1730000000000,"limit":50}`
+    with
+    `{"type":"inbox_history_page","app":"com.whatsapp","conversation":"Family","messages":[…],"more":true}`:
+    the messages older than `before_ms`, oldest first, at most `limit` (≤ 200), `more`
+    when there are older ones still. Android lets no app read another's messages, so
+    this is only what Linksy saw since its listener was turned on.
 
   **Phone, for 0.11 (decided 2026-11-02):** a `NotificationListenerService` in the Linksy
   app itself, not a separate app. Skip Linksy's own notifications and ongoing ones (music,
@@ -748,7 +780,8 @@ controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifica
 `picture`), `direct_host` (hosts direct links: a phone with Wi-Fi Direct, §4.17),
 `direct_join` (joins them: a computer whose NetworkManager has a Wi-Fi Direct device, or a
 phone), `direct_group` (hosts and joins Wi-Fi Direct groups by name and passphrase: phones,
-§4.17 "Phone to phone").
+§4.17 "Phone to phone"), `inbox_history` (answers `inbox_history`, §4.5), `gallery` (shows
+its photos, §4.18), `deck` (a computer that runs a phone's deck, §4.19).
 Set `Config.features` in the core. To change them while running (`notifications` turned
 on or off), call `Node::set_features`: connected devices get a `features` message
 (at most 64 names of up to 64 bytes) and update at once, others see the new list at the
@@ -1438,6 +1471,79 @@ this version. The computer's log shows each step:
 link to … up", or "no direct link: <why>"). Compare the transfer speed with and without
 (`--no-direct`).
 
+### 4.18 Gallery: the phone's photos on the computer (desktop, next release) — `src/gallery.rs`
+
+The computer browses the phone's photos and videos page by page and fetches only the
+thumbnails it shows; nothing is copied until the user saves a photo. Phones and tablets
+only: a computer never shows another computer's Gallery. Feature `gallery` (§4.10) while
+the phone has photo access.
+
+One request per bidirectional stream, like files (§4.9): the first frame is the request
+with `"type":"gallery"`, then the phone's one answer, then it finishes the stream.
+
+```json
+{"type":"gallery","op":"albums"}
+→ {"type":"gallery_albums","albums":[{"id":"camera","name":"Camera","count":1104}]}
+{"type":"gallery","op":"items","album":"camera","before":{"taken_ms":1730000000000,"id":"41"},"limit":120}
+→ {"type":"gallery_items","items":[{"id":"40","name":"IMG_20261102.jpg","taken_ms":1729999990000,"size":3400000},
+     {"id":"39","name":"VID_1.mp4","video":true,"taken_ms":1729999000000,"size":90000000,"duration_ms":14000}],"more":true}
+{"type":"gallery","op":"thumb","id":"40","size":256}
+→ {"type":"gallery_data","length":18234} then that many bytes of JPEG
+{"type":"gallery","op":"send","ids":["40","39"],"transfer":"<uuid>"}
+→ {"type":"gallery_ok"}, then the phone sends those files as an ordinary transfer (§4.5)
+     whose offer has "id":"<uuid>" and "import":true
+any of them → {"type":"gallery_error","message":"…"}
+```
+
+- `items`: newest first by when taken (`DATE_TAKEN`, else `DATE_ADDED`), photos and videos
+  together; without `album`, all of them. `before` is the last item of the previous page
+  (its time and id, for photos taken in the same millisecond); none: the newest. At most
+  500 per page (the computer asks for about 120). `id` is the phone's own (`MediaStore`
+  `_ID`); `name` the file name.
+- `thumb`: a JPEG `size` px on its longer side (32 to 1024; the computer asks 256), at
+  most 256 KiB. `ContentResolver.loadThumbnail` does it on Android 10+.
+- `send`: the computer chose the transfer id and takes that transfer without asking, into
+  its pictures folder, even when photo import is off. Core: answer `call.ok()`, then
+  `Node::send_gallery(from, paths, transfer)` (copy each item out of `MediaStore` to a
+  cache file first, or stream it).
+- Tell the computer when the library changes (a photo taken, a screenshot, one deleted):
+  `{"type":"gallery_changed"}` (`Node::gallery_changed`), at most every 2 s. It reloads
+  the first page.
+- Core API: `Node::incoming_gallery()` gives the requests (`GalleryCall`: `albums`,
+  `items`, `thumb`, `ok`, `error`). A device that takes none answers "doesn't share its
+  photos"; from away it answers "only on the same network" like files.
+
+### 4.19 Deck: the phone as buttons for the computer (desktop, next release)
+
+The phone owns the deck's layout (pages of tiles, sizes, colours, icons, sliders; saved on
+the phone, one deck per computer). The computer only says what it lets that phone do, and
+runs it. Computers announce feature `deck`.
+
+```json
+phone → computer {"type":"deck_open"}           the deck shows: send me what I may do
+computer → phone {"type":"deck_actions","actions":[
+                    {"id":"media.play_pause","name":"Play or Pause","kind":"button","group":"Media"},
+                    {"id":"sound.volume","name":"Volume","kind":"slider","group":"Sound"},
+                    {"id":"sound.mute","name":"Mute","kind":"toggle","group":"Sound"},
+                    {"id":"command.3f2a…","name":"Backup","kind":"button","group":"Commands"}]}
+computer → phone {"type":"deck_state","states":[{"id":"sound.volume","value":0.42},{"id":"sound.mute","on":false}]}
+phone → computer {"type":"deck_run","action":"sound.volume","value":0.6}
+phone → computer {"type":"deck_close"}          the deck is gone: stop sending state
+```
+
+- `kind`: `button` (run it), `toggle` (run it to flip; its state says `on`), `slider` (run
+  it with `value` 0 to 1; its state says `value`).
+- `deck_actions` comes on `deck_open` and again whenever the user turns one on or off on
+  the computer; `deck_state` while the deck is open, when something changes. The list is
+  only what's on for that phone: anything else the phone runs is refused (ignored), so a
+  tile whose action left the list should show as unavailable, not disappear.
+- Ids: `media.play_pause`, `media.next`, `media.previous`, `sound.volume`, `sound.mute`,
+  `sound.mic_mute`, `system.lock`, `system.screen_off`, and `command.<id>` for the user's
+  own commands (a name and a command line, set on the computer). More may come; show any
+  id with its `name` and `kind`.
+- Core: `Node::deck_open(to, open)`, `Node::deck_run(to, action, value)`;
+  `Event::DeckActions`, `Event::DeckState`.
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -1954,3 +2060,7 @@ robust against any encoder (GPU ones may slice too):
 - **2026-11-02** — Core (in desktop 0.11.4): `Node::set_features` changes the features while running; connected
   devices hear a new `features` message (§4.5, §4.10), so `notifications` can be announced
   when the listener is turned on. Older desktops ignore it until they reconnect.
+- **2026-11-02** — Desktop (next release): the device page in tabs; Inbox with the phone's
+  other notifications, `messages` history, `subject`, `reply_kept` and `inbox_history`
+  pages (§4.5); Gallery (§4.18); Deck (§4.19); `DeviceView.latency_ms`. Phone to-do: the
+  optional Inbox fields, `gallery` and the deck. Older devices ignore all of it.
