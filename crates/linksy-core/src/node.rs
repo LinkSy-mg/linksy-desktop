@@ -349,6 +349,9 @@ pub struct DeviceView {
     /// It sees and controls the screen without asking, except from away.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub allow_screen: bool,
+    /// Round trip to it while connected, in milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u32>,
 }
 
 /// How a connection reaches the other device, by the address it comes from: bridges
@@ -672,6 +675,7 @@ impl Node {
                 away_all: t.away_all,
                 auto_accept: t.auto_accept,
                 allow_screen: t.allow_screen,
+                latency_ms: peers.get(&t.device.id).map(|p| p.conn.rtt().as_millis().min(u32::MAX as u128) as u32),
                 // Only once each knows how to reach the other away.
                 away_until: (away_on && t.device.away.is_some()).then(|| t.lease_until()),
                 nearby: nearby.contains_key(&t.device.id),
@@ -693,7 +697,7 @@ impl Node {
             .collect();
         for (id, (device, _)) in nearby.iter() {
             if !trust.contains(id) {
-                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false });
+                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false, latency_ms: None });
             }
         }
         // Paired and reachable first, then devices to pair, then paired ones that are away.
