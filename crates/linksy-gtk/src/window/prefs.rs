@@ -275,6 +275,12 @@ impl Window {
             .build();
         let show = adw::SwitchRow::builder().title(t!("Show Phone Notifications")).active(prefs.show).build();
         group.add(&show);
+        let codes = adw::SwitchRow::builder()
+            .title(t!("Copy Codes Automatically"))
+            .subtitle(t!("A verification code in a message goes straight to the clipboard."))
+            .active(prefs.copy_codes)
+            .build();
+        group.add(&codes);
         let prefs = Rc::new(RefCell::new(prefs));
         let save = {
             let (w, dialog, prefs) = (self.clone(), dialog.clone(), prefs.clone());
@@ -293,6 +299,11 @@ impl Window {
         let (p, s) = (prefs.clone(), save.clone());
         show.connect_active_notify(move |row| {
             p.borrow_mut().show = row.is_active();
+            s();
+        });
+        let (p, s) = (prefs.clone(), save.clone());
+        codes.connect_active_notify(move |row| {
+            p.borrow_mut().copy_codes = row.is_active();
             s();
         });
         let muted = prefs.borrow().muted.clone();
