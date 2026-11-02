@@ -14,6 +14,9 @@ Item {
     required property var store
     required property bool narrow
     readonly property var current: store.current
+    readonly property var currentAlert: store.currentAlert
+    // A conversation or another notification shows on the right
+    readonly property bool opened: current !== null || currentAlert !== null
     readonly property var conversations: {
         const list = store.conversations.filter(c => tab.shows(c.kind) && (tab.matches(c.title) || tab.matches(tab.preview(c))));
         return store.oldestFirst ? list.reverse() : list;
@@ -157,7 +160,7 @@ Item {
 
         // The conversations, then the other notifications
         ColumnLayout {
-            visible: !tab.narrow || tab.current === null
+            visible: !tab.narrow || !tab.opened
             Layout.fillHeight: true
             Layout.fillWidth: tab.narrow
             Layout.preferredWidth: Kirigami.Units.gridUnit * 17
@@ -300,9 +303,9 @@ Item {
             Layout.fillHeight: true
         }
 
-        // The open conversation
+        // The open conversation, or another notification in full
         Item {
-            visible: !tab.narrow || tab.current !== null
+            visible: !tab.narrow || tab.opened
             Layout.fillWidth: true
             Layout.fillHeight: true
             Layout.leftMargin: tab.narrow ? 0 : Kirigami.Units.gridUnit
@@ -310,9 +313,76 @@ Item {
             Kirigami.PlaceholderMessage {
                 anchors.centerIn: parent
                 width: parent.width - Kirigami.Units.gridUnit * 4
-                visible: tab.current === null
+                visible: !tab.opened
                 icon.name: "dialog-messages"
                 text: tab.app.t("No Conversation Selected")
+            }
+
+            // Another notification, all of it
+            ColumnLayout {
+                anchors.fill: parent
+                visible: tab.current === null && tab.currentAlert !== null
+                spacing: Kirigami.Units.largeSpacing
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.largeSpacing
+                    QQC2.ToolButton {
+                        visible: tab.narrow
+                        icon.name: "go-previous"
+                        text: tab.app.t("Back")
+                        display: QQC2.AbstractButton.IconOnly
+                        QQC2.ToolTip.text: text
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: tab.store.close()
+                    }
+                    AlertIcon {
+                        alert: tab.currentAlert
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Kirigami.Heading {
+                            Layout.fillWidth: true
+                            level: 4
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            text: tab.currentAlert?.title ?? ""
+                        }
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.7
+                            text: tab.currentAlert ? `${tab.currentAlert.app_name} · ${tab.when(tab.currentAlert.at_ms)}` : ""
+                        }
+                    }
+                    QQC2.Button {
+                        icon.name: "window-close"
+                        text: tab.app.t("Dismiss")
+                        onClicked: tab.store.dismiss(tab.currentAlert.key)
+                    }
+                }
+                Kirigami.Separator {
+                    Layout.fillWidth: true
+                }
+                QQC2.ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    QQC2.TextArea {
+                        readOnly: true
+                        selectByMouse: true
+                        wrapMode: Text.Wrap
+                        textFormat: TextEdit.PlainText
+                        background: null
+                        text: tab.currentAlert?.body ?? ""
+                    }
+                }
+                CodeChip {
+                    Layout.bottomMargin: Kirigami.Units.largeSpacing
+                    code: tab.currentAlert?.code ?? ""
+                }
             }
 
             ColumnLayout {
@@ -331,7 +401,7 @@ Item {
                         display: QQC2.AbstractButton.IconOnly
                         QQC2.ToolTip.text: text
                         QQC2.ToolTip.visible: hovered
-                        onClicked: tab.store.open = ""
+                        onClicked: tab.store.close()
                     }
                     Face {
                         conversation: tab.current
@@ -527,67 +597,77 @@ Item {
         }
     }
 
-    // One of the phone's other notifications, to copy its code or dismiss it
-    component AlertRow: RowLayout {
+    // Its app's icon in a tile
+    component AlertIcon: Rectangle {
+        id: tile
+        property var alert: null
+        Layout.alignment: Qt.AlignTop
+        implicitWidth: Kirigami.Units.gridUnit * 2.2
+        implicitHeight: implicitWidth
+        radius: Kirigami.Units.cornerRadius * 2
+        color: Qt.alpha(Kirigami.Theme.textColor, 0.06)
+        Kirigami.Icon {
+            anchors.centerIn: parent
+            width: Kirigami.Units.iconSizes.smallMedium
+            height: width
+            source: tile.alert?.icon ? "file://" + tile.alert.icon : "preferences-desktop-notification-bell"
+        }
+    }
+
+    // One of the phone's other notifications: opens in full, copies its code, goes away
+    component AlertRow: QQC2.ItemDelegate {
         id: alert
         required property var modelData
         Layout.fillWidth: true
-        Layout.leftMargin: Kirigami.Units.largeSpacing
-        Layout.topMargin: Kirigami.Units.largeSpacing
-        Layout.bottomMargin: Kirigami.Units.smallSpacing
-        spacing: Kirigami.Units.largeSpacing
-        Rectangle {
-            Layout.alignment: Qt.AlignTop
-            implicitWidth: Kirigami.Units.gridUnit * 2.2
-            implicitHeight: implicitWidth
-            radius: Kirigami.Units.cornerRadius * 2
-            color: Qt.alpha(Kirigami.Theme.textColor, 0.06)
-            Kirigami.Icon {
-                anchors.centerIn: parent
-                width: Kirigami.Units.iconSizes.smallMedium
-                height: width
-                source: alert.modelData.icon ? "file://" + alert.modelData.icon : "preferences-desktop-notification-bell"
+        highlighted: modelData.key === tab.store.alert
+        text: modelData.title
+        onClicked: tab.store.openAlert(modelData.key)
+
+        contentItem: RowLayout {
+            spacing: Kirigami.Units.largeSpacing
+            AlertIcon {
+                alert: alert.modelData
             }
-        }
-        ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 2
-            QQC2.Label {
+            ColumnLayout {
                 Layout.fillWidth: true
-                text: alert.modelData.title
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                font.weight: Font.DemiBold
+                spacing: 2
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    text: alert.modelData.title
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    font.weight: Font.DemiBold
+                }
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    visible: text !== ""
+                    text: (alert.modelData.body ?? "").split("\n")[0]
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    opacity: 0.7
+                }
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    text: `${alert.modelData.app_name} · ${tab.when(alert.modelData.at_ms)}`
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.6
+                }
+                CodeChip {
+                    Layout.topMargin: Kirigami.Units.smallSpacing
+                    code: alert.modelData.code ?? ""
+                }
             }
-            QQC2.Label {
-                Layout.fillWidth: true
-                visible: text !== ""
-                text: (alert.modelData.body ?? "").split("\n")[0]
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                opacity: 0.7
+            QQC2.ToolButton {
+                Layout.alignment: Qt.AlignVCenter
+                icon.name: "window-close"
+                text: tab.app.t("Dismiss")
+                display: QQC2.AbstractButton.IconOnly
+                QQC2.ToolTip.text: text
+                QQC2.ToolTip.visible: hovered
+                onClicked: tab.store.dismiss(alert.modelData.key)
             }
-            QQC2.Label {
-                Layout.fillWidth: true
-                text: `${alert.modelData.app_name} · ${tab.when(alert.modelData.at_ms)}`
-                textFormat: Text.PlainText
-                elide: Text.ElideRight
-                font: Kirigami.Theme.smallFont
-                opacity: 0.6
-            }
-            CodeChip {
-                Layout.topMargin: Kirigami.Units.smallSpacing
-                code: alert.modelData.code ?? ""
-            }
-        }
-        QQC2.ToolButton {
-            Layout.alignment: Qt.AlignVCenter
-            icon.name: "window-close"
-            text: tab.app.t("Dismiss")
-            display: QQC2.AbstractButton.IconOnly
-            QQC2.ToolTip.text: text
-            QQC2.ToolTip.visible: hovered
-            onClicked: tab.store.dismiss(alert.modelData.key)
         }
     }
 

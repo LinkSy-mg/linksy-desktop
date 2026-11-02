@@ -24,6 +24,9 @@ QtObject {
     property bool oldestFirst: false
     property string search: ""
     readonly property var current: conversations.find(c => c.id === open) ?? null
+    // One of the other notifications shown in full instead, by key; gone, it shows no more
+    property string alert: ""
+    readonly property var currentAlert: alerts.find(a => a.key === alert) ?? null
     // Unread conversations and other notifications, for the tab's badge
     readonly property int count: conversations.reduce((n, c) => n + Math.min(c.unread, 1), 0) + alerts.length
 
@@ -40,6 +43,7 @@ QtObject {
         loaded = false;
         error = "";
         open = "";
+        alert = "";
         thread = [];
         if (id) load();
     }
@@ -89,7 +93,21 @@ QtObject {
         if (newer) loadThread();
     }
 
+    // One open at a time: a conversation or another notification
+    function openAlert(key) {
+        open = "";
+        thread = [];
+        alert = key;
+    }
+
+    // Back to the list: neither open
+    function close() {
+        open = "";
+        alert = "";
+    }
+
     function openConversation(id) {
+        alert = "";
         open = id;
         keepPlace = false;
         thread = [];
