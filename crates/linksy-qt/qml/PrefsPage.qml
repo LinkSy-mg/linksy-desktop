@@ -12,12 +12,14 @@ Kirigami.ScrollablePage {
 
     readonly property var s: app.settings
     property var photos: null
+    property var notifications: null
     property var updates: null
     readonly property var languages: JSON.parse(backend.languages())
     readonly property string address: backend.localAddress(app.status?.port ?? 0)
 
     Component.onCompleted: {
         app.request("photo_prefs", {}, (ok, p) => { if (ok) page.photos = p });
+        app.request("notification_prefs", {}, (ok, p) => { if (ok) page.notifications = p });
         app.request("updates", {}, (ok, u) => { if (ok) page.updates = u });
     }
 
@@ -26,6 +28,13 @@ Kirigami.ScrollablePage {
         const next = Object.assign({}, s, change);
         app.request("update_settings", { settings: next }, (ok, err) => {
             if (ok) app.settings = next; else app.toast(err);
+        });
+    }
+
+    function updateNotifications(change) {
+        const next = Object.assign({}, notifications, change);
+        app.request("set_notification_prefs", { prefs: next }, (ok, err) => {
+            if (ok) page.notifications = next; else app.toast(err);
         });
     }
 
@@ -136,6 +145,56 @@ Kirigami.ScrollablePage {
             text: app.t("New photos from your phone go to {folder}, in a folder named after it, without asking.", { folder: (page.photos?.folder ?? "").replace(/^\/home\/[^/]+/, "~") })
             opacity: 0.7
             font: Kirigami.Theme.smallFont
+        }
+
+        // Phone notifications: on or off, codes copied, and the apps muted from a notification
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: app.t("Phone Notifications")
+            visible: page.notifications !== null
+        }
+        QQC2.Switch {
+            Kirigami.FormData.label: app.t("Show Phone Notifications") + ":"
+            visible: page.notifications !== null
+            checked: page.notifications?.show ?? true
+            onToggled: page.updateNotifications({ show: checked })
+        }
+        QQC2.Label {
+            visible: page.notifications !== null
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            wrapMode: Text.Wrap
+            text: app.t("Messages and alerts from your phone show up here, and you can reply to them. Your phone asks for permission first.")
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
+        QQC2.Switch {
+            Kirigami.FormData.label: app.t("Copy Codes Automatically") + ":"
+            visible: page.notifications !== null
+            checked: page.notifications?.copy_codes ?? true
+            onToggled: page.updateNotifications({ copy_codes: checked })
+        }
+        QQC2.Label {
+            visible: page.notifications !== null
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            wrapMode: Text.Wrap
+            text: app.t("A verification code in a message goes straight to the clipboard.")
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
+        }
+        Repeater {
+            model: page.notifications?.muted ?? []
+            delegate: RowLayout {
+                required property var modelData
+                Kirigami.FormData.label: modelData.app_name + ":"
+                QQC2.Label {
+                    text: app.t("Muted")
+                    opacity: 0.7
+                }
+                QQC2.Button {
+                    text: app.t("Unmute")
+                    onClicked: page.updateNotifications({ muted: page.notifications.muted.filter(m => m.app !== modelData.app) })
+                }
+            }
         }
 
         Kirigami.Separator {
