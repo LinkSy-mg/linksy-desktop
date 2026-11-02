@@ -16,7 +16,8 @@ use crate::identity::DeviceInfo;
 pub const PROTOCOL_VERSION: u32 = 1;
 /// Pairing with commit and reveal (docs/protocol.md §4.4).
 pub const PAIRING_VERSION: u32 = 2;
-const MAX_FRAME: usize = 1 << 20;
+/// The largest message either side takes, in bytes of JSON.
+pub const MAX_FRAME: usize = 1 << 20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -843,6 +844,10 @@ pub struct Battery {
 
 pub async fn write_msg<T: Serialize>(s: &mut quinn::SendStream, msg: &T) -> Result<()> {
     let body = serde_json::to_vec(msg)?;
+    // The other side would refuse it
+    if body.len() > MAX_FRAME {
+        return Err(protocol(format!("a message of {} bytes is over the limit", body.len())));
+    }
     s.write_all(&(body.len() as u32).to_be_bytes()).await?;
     s.write_all(&body).await?;
     Ok(())
