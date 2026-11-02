@@ -92,6 +92,8 @@ impl St {
         let action = t.action.as_deref().and_then(|a| self.prefs.actions.iter().find(|o| o.action.id == a));
         match (action, &t.action) {
             (Some(o), _) => o.action.name.clone(),
+            // One of the user's commands, since removed
+            (None, Some(a)) if a.starts_with("command.") => t!("Command").into(),
             (None, Some(a)) => a.clone(),
             (None, None) => t.kind.clone(),
         }
@@ -172,13 +174,15 @@ pub struct Editor {
 /// theme, LINKSY_SCREENSHOT_DECK_PICK=<n> picks the nth tile (1 is the first) and
 /// LINKSY_SCREENSHOT_DECK_LANDSCAPE=1 shows landscape, reflowed from portrait if empty;
 /// LINKSY_SCREENSHOT_DECK_DRAG=move,80,60 (or resize,…) shows the picked tile mid-drag;
-/// LINKSY_SCREENSHOT_DECK_ON=1 shows the toggles on.
+/// LINKSY_SCREENSHOT_DECK_ON=1 shows the toggles on; LINKSY_SCREENSHOT_DECK_SAVE=1 saves
+/// once the rest is done.
 struct Aids {
     theme: Option<String>,
     pick: Option<usize>,
     landscape: bool,
     drag: Option<(bool, f64, f64)>,
     on: bool,
+    save: bool,
 }
 
 fn aids() -> &'static Aids {
@@ -190,7 +194,7 @@ fn aids() -> &'static Aids {
             let resize = parts.next()? == "resize";
             Some((resize, parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
         });
-        Aids { theme: var("LINKSY_SCREENSHOT_DECK_THEME"), pick: var("LINKSY_SCREENSHOT_DECK_PICK").and_then(|n| n.parse().ok()), landscape: var("LINKSY_SCREENSHOT_DECK_LANDSCAPE").is_some(), drag, on: var("LINKSY_SCREENSHOT_DECK_ON").is_some() }
+        Aids { theme: var("LINKSY_SCREENSHOT_DECK_THEME"), pick: var("LINKSY_SCREENSHOT_DECK_PICK").and_then(|n| n.parse().ok()), landscape: var("LINKSY_SCREENSHOT_DECK_LANDSCAPE").is_some(), drag, on: var("LINKSY_SCREENSHOT_DECK_ON").is_some(), save: var("LINKSY_SCREENSHOT_DECK_SAVE").is_some() }
     })
 }
 
@@ -250,6 +254,9 @@ impl Editor {
         if let Some(n) = aids.pick {
             let id = editor.st.borrow().tiles().get(n.saturating_sub(1)).map(|t| t.id.clone());
             editor.pick(id);
+        }
+        if aids.save {
+            editor.save(None);
         }
         if let Some((resize, dx, dy)) = aids.drag {
             let grid = editor.ui.grid.downgrade();
@@ -736,7 +743,8 @@ impl Editor {
         }
         b.append(&sizes);
 
-        if let Some(action) = &t.action {
+        let stale = t.action.as_deref().is_some_and(|a| !st.offered(a));
+        if let Some(action) = t.action.as_ref().filter(|_| !stale) {
             let slider = t.kind == "volume";
             let options: Vec<(String, String)> =
                 st.prefs.actions.iter().filter(|o| (o.action.kind == DeckKind::Slider) == slider).map(|o| (o.action.id.clone(), o.action.name.clone())).collect();
@@ -764,9 +772,10 @@ impl Editor {
             (_, Some(_)) => t!("Runs on the computer · {hint}. Placing it allows it for {device}.", hint = hint.as_str(), device = self.device.as_str()),
             _ => t!("Runs on the computer · {hint}.", hint = hint.as_str()),
         };
-        b.append(&label(&note, &["deck-where"]));
-        if t.action.as_deref().is_some_and(|a| !st.offered(a)) {
+        if stale {
             b.append(&label(t!("Not available on this computer"), &["deck-warn"]));
+        } else {
+            b.append(&label(&note, &["deck-where"]));
         }
         let question = t.action.as_deref().and_then(|a| st.prefs.actions.iter().find(|o| o.action.id == a)).and_then(|o| o.action.confirm.clone());
         if let Some(q) = question {
