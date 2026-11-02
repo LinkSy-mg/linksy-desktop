@@ -189,7 +189,7 @@ row.dim-step .title { opacity: 0.6; }
   background-color: alpha(@success_color, 0.16);
   color: @success_color;
 }
-list.plain-list { background: none; border-top: 1px solid alpha(currentColor, 0.1); }
+list.plain-list { background: none; }
 list.plain-list > row { background: none; border-bottom: 1px solid alpha(currentColor, 0.1); }
 list.plain-list > row:hover { background-color: alpha(currentColor, 0.03); }
 
