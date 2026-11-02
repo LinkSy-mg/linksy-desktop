@@ -44,6 +44,8 @@
 //! `--gallery DIR` shows the photos and videos under DIR as its gallery: a folder is an
 //! album, a file's modification time is when it was taken, a JPEG or PNG up to 256 KiB is
 //! its own thumbnail.
+//! `--deck ACTION[=VALUE]` opens the deck, prints the `deck_actions` and `deck_state` it
+//! gets, runs that action (a slider with VALUE), prints the state after, then closes it.
 
 use std::time::Duration;
 
@@ -81,6 +83,7 @@ async fn main() {
     let mut location: Option<(f64, f64)> = None;
     let mut away = false;
     let mut accept_pairing = false;
+    let mut deck: Option<(String, Option<f64>)> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -130,6 +133,13 @@ async fn main() {
                 let title = value();
                 notify = Some((title, value()));
             }
+            "--deck" => {
+                let run = value();
+                deck = Some(match run.split_once('=') {
+                    Some((action, v)) => (action.to_string(), Some(v.parse().expect("--deck ACTION=VALUE"))),
+                    None => (run, None),
+                });
+            }
             "--chats" => chats = true,
             "--notifications-later" => notifications_later = Some(value().parse().expect("--notifications-later SECONDS")),
             other => panic!("unknown option {other}"),
@@ -175,7 +185,7 @@ async fn main() {
         None => false,
     };
 
-    if !connected && (level.is_some() || clip_file.is_some() || clip_text.is_some() || watch_clipboard || picture.is_some() || terminal.is_some()) {
+    if !connected && (level.is_some() || clip_file.is_some() || clip_text.is_some() || watch_clipboard || picture.is_some() || terminal.is_some() || deck.is_some()) {
         // These need the computer connected first.
         let _ = tokio::time::timeout(Duration::from_secs(30), async {
             while !matches!(events.recv().await, Ok(Event::Connected { .. }) | Err(_)) {}
@@ -340,6 +350,37 @@ async fn main() {
                 }
                 Err(e) => println!("terminal refused: {e:?}"),
             }
+        }
+        if let Some((action, value)) = &deck {
+            let pc = t.device.id;
+            let _ = node.deck_open(&pc, true).await;
+            // Its list, then the state: each a stream of its own, in whichever order
+            for _ in 0..2 {
+                match deck_message(&mut events, &pc).await {
+                    Some(Event::DeckActions { actions, .. }) => println!("DECK_ACTIONS {}", serde_json::to_string(&actions).unwrap()),
+                    Some(Event::DeckState { states, .. }) => println!("DECK_STATE {}", serde_json::to_string(&states).unwrap()),
+                    _ => println!("no deck answer from {}", t.device.name),
+                }
+            }
+            let r = node.deck_run(&pc, action, *value).await;
+            println!("ran {action}{}: {:?}", value.map(|v| format!("={v}")).unwrap_or_default(), r.map_err(|e| e.to_string()));
+            // A new list may come first, when it changed on the computer meanwhile
+            let mut after = false;
+            while let Some(e) = deck_message(&mut events, &pc).await {
+                match e {
+                    Event::DeckActions { actions, .. } => println!("DECK_ACTIONS {}", serde_json::to_string(&actions).unwrap()),
+                    Event::DeckState { states, .. } => {
+                        println!("DECK_STATE_AFTER {}", serde_json::to_string(&states).unwrap());
+                        after = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            if !after {
+                println!("no state after {action}: refused");
+            }
+            let _ = node.deck_open(&pc, false).await;
         }
         if let Some(text) = &clip_text {
             let r = node.send_clipboard(&t.device.id, text).await;
@@ -618,6 +659,27 @@ async fn main() {
         }
     }
     node.shutdown().await;
+}
+
+/// The next deck list or state from `pc`, within 5 s.
+async fn deck_message(events: &mut tokio::sync::broadcast::Receiver<Event>, pc: &linksy_core::Fingerprint) -> Option<Event> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let e = match events.recv().await {
+                Ok(e) => e,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => return None,
+            };
+            if let Event::DeckActions { from, .. } | Event::DeckState { from, .. } = &e
+                && from.id == *pc
+            {
+                return Some(e);
+            }
+        }
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 fn fake_threads() -> Vec<linksy_core::SmsThread> {
