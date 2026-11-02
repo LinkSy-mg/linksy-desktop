@@ -390,7 +390,11 @@ impl Grid {
                     let widget = build(t);
                     self.adopt(&widget, &t.id);
                     widget.insert_after(self, Some(&slot.widget));
+                    let focused = slot.widget.has_focus();
                     slot.widget.unparent();
+                    if focused {
+                        widget.grab_focus();
+                    }
                     slot.widget = widget;
                 }
                 slot.tile = t.clone();
@@ -459,7 +463,11 @@ impl Grid {
             let widget = build(&slot.tile);
             self.adopt(&widget, &slot.tile.id);
             widget.insert_after(self, Some(&slot.widget));
+            let focused = slot.widget.has_focus();
             slot.widget.unparent();
+            if focused {
+                widget.grab_focus();
+            }
             slot.widget = widget;
         }
         drop(slots);
