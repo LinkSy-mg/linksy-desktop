@@ -2,8 +2,9 @@
 //!
 //! Newline-delimited JSON over a Unix socket. Clients send `{"id": n, "cmd": ...}`;
 //! the daemon answers `{"id": n, "ok": ...}` or `{"id": n, "error": "..."}`, and pushes
-//! `{"event": ...}` lines to every client as things happen, and `{"history": ...}` lines
-//! when the activity history gains or updates an entry.
+//! `{"event": ...}` lines to every client as things happen, `{"history": ...}` lines
+//! when the activity history gains or updates an entry, and `{"fs_progress": ...}` lines as
+//! copies from and to phones go.
 
 use std::collections::HashMap;
 use std::io;
@@ -78,6 +79,19 @@ pub enum Request {
     FsList { phone: String, path: String },
     /// Where apps open a phone's files (`dav://…/`, mounted), without opening a window.
     FsPlace { phone: String },
+    /// Copy a phone's files and folders into the download folder, in a folder named after
+    /// the phone, never over anything there. Answers the operation's id at once; how it goes
+    /// comes as [`FsProgress`].
+    FsCopy { phone: String, paths: Vec<String> },
+    /// Copy files and folders from here into the phone's folder `dir`, the same way.
+    FsUpload { phone: String, dir: String, paths: Vec<PathBuf> },
+    FsMkdir { phone: String, path: String },
+    /// Rename an item in its folder: `to` is the new name, not a path. Answers the new path.
+    FsRename { phone: String, path: String, to: String },
+    /// Delete files, and folders with everything in them.
+    FsDelete { phone: String, paths: Vec<String> },
+    /// Stop a copy or upload; what it was writing goes. Answers whether it was running.
+    FsCancel { op: Uuid },
     /// Whether phones' photos are imported here, and where.
     PhotoPrefs,
     SetPhotoPrefs { prefs: PhotoPrefs },
@@ -493,6 +507,29 @@ pub struct MutedApp {
     pub app_name: String,
 }
 
+/// How a copy from a phone (`FsCopy`) or to one (`FsUpload`) is going: a few times a second
+/// while it runs, then once `finished`, with an `error` when it didn't ("cancelled" when
+/// stopped).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FsProgress {
+    pub op: Uuid,
+    pub phone: Fingerprint,
+    /// The file being copied now.
+    pub name: String,
+    pub done: u64,
+    pub total: u64,
+    #[serde(default)]
+    pub finished: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    /// Copies: each item asked for, where it landed (once it did).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub saved: Vec<PathBuf>,
+    /// Uploads: the phone's folder they go into.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dir: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum HistoryStatus {
@@ -528,6 +565,9 @@ pub enum ServerMsg {
     },
     Inbox {
         inbox: Conversation,
+    },
+    FsProgress {
+        fs_progress: FsProgress,
     },
 }
 
@@ -595,6 +635,7 @@ pub struct Client {
     events: broadcast::Sender<Event>,
     history: broadcast::Sender<HistoryEntry>,
     inbox: broadcast::Sender<Conversation>,
+    fs_progress: broadcast::Sender<FsProgress>,
 }
 
 impl Client {
@@ -608,7 +649,8 @@ impl Client {
         let (events, _) = broadcast::channel(512);
         let (history, _) = broadcast::channel(128);
         let (inbox, _) = broadcast::channel(128);
-        let (p, ev, hist, convs) = (pending.clone(), events.clone(), history.clone(), inbox.clone());
+        let (fs_progress, _) = broadcast::channel(128);
+        let (p, ev, hist, convs, copies) = (pending.clone(), events.clone(), history.clone(), inbox.clone(), fs_progress.clone());
         tokio::spawn(async move {
             let mut lines = BufReader::new(read).lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -630,13 +672,16 @@ impl Client {
                     Ok(ServerMsg::Inbox { inbox }) => {
                         let _ = convs.send(inbox);
                     }
+                    Ok(ServerMsg::FsProgress { fs_progress }) => {
+                        let _ = copies.send(fs_progress);
+                    }
                     Err(_) => {}
                 }
             }
             // Daemon went away: fail everything still waiting. It's not you, it's the daemon.
             p.lock().unwrap().clear();
         });
-        Ok(Self { writer: tokio::sync::Mutex::new(write), pending, next: AtomicU64::new(1), events, history, inbox })
+        Ok(Self { writer: tokio::sync::Mutex::new(write), pending, next: AtomicU64::new(1), events, history, inbox, fs_progress })
     }
 
     pub fn events(&self) -> broadcast::Receiver<Event> {
@@ -651,6 +696,11 @@ impl Client {
     /// Conversations as a new message, a read or a reply changes them.
     pub fn inbox_updates(&self) -> broadcast::Receiver<Conversation> {
         self.inbox.subscribe()
+    }
+
+    /// Copies from and to phones as they go (`fs_copy`, `fs_upload`).
+    pub fn fs_progress(&self) -> broadcast::Receiver<FsProgress> {
+        self.fs_progress.subscribe()
     }
 
     pub async fn inbox(&self) -> Result<Vec<Conversation>, ClientError> {
@@ -789,6 +839,30 @@ impl Client {
 
     pub async fn gallery_save(&self, phone: impl Into<String>, ids: Vec<String>) -> Result<Uuid, ClientError> {
         self.call(Request::GallerySave { phone: phone.into(), ids }).await
+    }
+
+    pub async fn fs_copy(&self, phone: impl Into<String>, paths: Vec<String>) -> Result<Uuid, ClientError> {
+        self.call(Request::FsCopy { phone: phone.into(), paths }).await
+    }
+
+    pub async fn fs_upload(&self, phone: impl Into<String>, dir: impl Into<String>, paths: Vec<PathBuf>) -> Result<Uuid, ClientError> {
+        self.call(Request::FsUpload { phone: phone.into(), dir: dir.into(), paths }).await
+    }
+
+    pub async fn fs_mkdir(&self, phone: impl Into<String>, path: impl Into<String>) -> Result<(), ClientError> {
+        self.call(Request::FsMkdir { phone: phone.into(), path: path.into() }).await
+    }
+
+    pub async fn fs_rename(&self, phone: impl Into<String>, path: impl Into<String>, to: impl Into<String>) -> Result<String, ClientError> {
+        self.call(Request::FsRename { phone: phone.into(), path: path.into(), to: to.into() }).await
+    }
+
+    pub async fn fs_delete(&self, phone: impl Into<String>, paths: Vec<String>) -> Result<(), ClientError> {
+        self.call(Request::FsDelete { phone: phone.into(), paths }).await
+    }
+
+    pub async fn fs_cancel(&self, op: Uuid) -> Result<bool, ClientError> {
+        self.call(Request::FsCancel { op }).await
     }
 
     pub async fn alerts(&self) -> Result<Vec<Alert>, ClientError> {
