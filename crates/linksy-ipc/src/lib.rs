@@ -60,6 +60,13 @@ pub enum Request {
     /// (`key`), or all of a phone's.
     Alerts,
     DismissAlert { phone: String, key: Option<String> },
+    /// A phone's photos (docs/protocol.md §4.18): its albums, a page of items (newest
+    /// first, older than `before`), where an item's thumbnail is, and having some sent
+    /// here into the photos folder (answers the transfer's id).
+    GalleryAlbums { phone: String },
+    GalleryItems { phone: String, album: Option<String>, before: Option<linksy_core::GalleryCursor>, limit: u32 },
+    GalleryThumb { phone: String, item: String },
+    GallerySave { phone: String, ids: Vec<String> },
     /// Texting through a phone: its conversations, a conversation's messages (newest
     /// first, older than `before_ms` to page back), and sending one.
     SmsThreads { phone: String },
@@ -413,6 +420,12 @@ pub struct Conversation {
     pub older: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GalleryPage {
+    pub items: Vec<linksy_core::GalleryItem>,
+    pub more: bool,
+}
+
 /// A phone notification that isn't a message (a reminder, a delivery…), while the phone
 /// still shows it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -730,6 +743,22 @@ impl Client {
 
     pub async fn fs_place(&self, phone: impl Into<String>) -> Result<String, ClientError> {
         self.call(Request::FsPlace { phone: phone.into() }).await
+    }
+
+    pub async fn gallery_albums(&self, phone: impl Into<String>) -> Result<Vec<linksy_core::GalleryAlbum>, ClientError> {
+        self.call(Request::GalleryAlbums { phone: phone.into() }).await
+    }
+
+    pub async fn gallery_items(&self, phone: impl Into<String>, album: Option<String>, before: Option<linksy_core::GalleryCursor>, limit: u32) -> Result<GalleryPage, ClientError> {
+        self.call(Request::GalleryItems { phone: phone.into(), album, before, limit }).await
+    }
+
+    pub async fn gallery_thumb(&self, phone: impl Into<String>, item: impl Into<String>) -> Result<PathBuf, ClientError> {
+        self.call(Request::GalleryThumb { phone: phone.into(), item: item.into() }).await
+    }
+
+    pub async fn gallery_save(&self, phone: impl Into<String>, ids: Vec<String>) -> Result<Uuid, ClientError> {
+        self.call(Request::GallerySave { phone: phone.into(), ids }).await
     }
 
     pub async fn alerts(&self) -> Result<Vec<Alert>, ClientError> {

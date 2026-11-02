@@ -4,6 +4,7 @@
 
 mod clipboard;
 mod codes;
+mod gallery;
 mod history;
 mod inbox;
 mod ipc;
@@ -246,6 +247,7 @@ async fn run() -> ExitCode {
     if node.info().features.iter().any(|f| f == "direct_join") {
         tokio::spawn(direct::run(node.clone()));
     }
+    let _ = gallery::GALLERY.set(gallery::Gallery::new(icons.with_file_name("linksy-thumbs")));
     let mirror = mirror::Mirror::load(data_dir.join("notifications.json"), icons, socket.clone(), args.notifications);
     tokio::spawn(mirror.clone().run(node.clone()));
     #[cfg(target_os = "linux")]

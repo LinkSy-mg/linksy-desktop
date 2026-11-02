@@ -258,6 +258,25 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
         }
         Request::InboxOlder { conversation } => serde_json::to_value(mirror.older(node, &conversation).await?).map_err(|e| e.to_string()),
         Request::Alerts => serde_json::to_value(mirror.inbox().alerts()).map_err(|e| e.to_string()),
+        Request::GalleryAlbums { phone } => {
+            let id = resolve(node, &phone)?;
+            serde_json::to_value(gallery()?.albums(node, &id).await?).map_err(|e| e.to_string())
+        }
+        Request::GalleryItems { phone, album, before, limit } => {
+            let id = resolve(node, &phone)?;
+            let (items, more) = gallery()?.items(node, &id, album, before, limit).await?;
+            serde_json::to_value(linksy_ipc::GalleryPage { items, more }).map_err(|e| e.to_string())
+        }
+        Request::GalleryThumb { phone, item } => {
+            let id = resolve(node, &phone)?;
+            serde_json::to_value(gallery()?.thumb(node, &id, &item).await?).map_err(|e| e.to_string())
+        }
+        Request::GallerySave { phone, ids } => {
+            let id = resolve(node, &phone)?;
+            let name = device(node, &id).map(|d| d.name).unwrap_or_else(|| "Phone".into());
+            let into = photos.prefs().folder.join(linksy_core::folder_name(&name));
+            serde_json::to_value(gallery()?.save(node, &id, ids, into).await?).map_err(|e| e.to_string())
+        }
         Request::DismissAlert { phone, key } => {
             let id = resolve(node, &phone)?;
             mirror.dismiss(node, &id, key.as_deref()).await?;
@@ -479,6 +498,10 @@ fn usb_status() -> linksy_ipc::UsbStatus {
 
 fn terminals() -> Result<&'static crate::terminal::Terminals, String> {
     crate::terminal::TERMINALS.get().ok_or_else(|| "terminals aren't available here".to_string())
+}
+
+fn gallery() -> Result<&'static crate::gallery::Gallery, String> {
+    crate::gallery::GALLERY.get().ok_or_else(|| "not ready yet".into())
 }
 
 fn resolve(node: &Node, target: &str) -> Result<Fingerprint, String> {
