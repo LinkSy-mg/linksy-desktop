@@ -144,13 +144,14 @@ pub fn tile(t: &DeckTile, look: &Look) -> gtk::Widget {
             face.set_valign(gtk::Align::Center);
             face.set_spacing(3);
             face.append(&look.icon(model::icon_for(action, PLAYING), icon_size));
-            face.append(&look.text(label, "t-label", inner, 2, &[1.4, 1.2, 1.0], true));
+            // One size for every one-cell label, so neighbours match
+            face.append(&look.text(label, "t-label", inner, 2, &[1.0], true));
         }
         "button" => {
             face.append(&look.icon(model::icon_for(action, PLAYING), icon_size));
             face.first_child().expect("icon").set_halign(gtk::Align::Start);
             face.append(&spacer());
-            face.append(&look.text(label, "t-label", inner, 1, &[1.5, 1.3, 1.1], false));
+            face.append(&look.text(label, "t-label", inner, 1, &[1.3], false));
         }
         _ => {
             face.append(&spacer());

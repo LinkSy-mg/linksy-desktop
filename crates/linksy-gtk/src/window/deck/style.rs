@@ -119,6 +119,7 @@ const CSS: &str = r#"
 .theme-eink .deck-tile.lifted { box-shadow: inset 0 0 0 2px #111, 0 14px 30px rgba(0, 0, 0, 0.3); }
 .theme-eink .deck-tile.on { background-color: #111; color: #f5f5f0; }
 .theme-eink .deck-play { background-color: #111; color: #f5f5f0; }
+.theme-eink .deck-handle.right, .theme-eink .deck-handle.bottom { background-color: #111; box-shadow: 0 0 0 1.5px #f5f5f0; }
 .theme-eink .deck-dots button { background-color: rgba(0, 0, 0, 0.25); }
 .theme-eink .deck-dots button.current { background-color: #111; }
 .theme-eink .deck-dots button.add, .theme-eink .deck-dots button.remove { background: none; color: #111; }
@@ -130,6 +131,7 @@ const CSS: &str = r#"
 .theme-term .deck-tile.on { background-color: rgba(57, 255, 122, 0.85); color: #041204; }
 .theme-term .deck-tile.on label { text-shadow: none; }
 .theme-term .deck-tile .t-label { font-size: 12px; font-weight: 400; }
+.theme-term .deck-tile.one .t-label { font-size: 10px; }
 .theme-term .deck-play { background-color: #39ff7a; color: #041204; border-radius: 2px; }
 .theme-term .deck-dots button { background-color: rgba(57, 255, 122, 0.3); }
 .theme-term .deck-dots button.current { background-color: #39ff7a; }

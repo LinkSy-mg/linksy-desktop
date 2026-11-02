@@ -717,7 +717,7 @@ impl Editor {
         let note = match (&item, &t.action) {
             (Some(i), _) if i.phone => t!("Runs on the phone · {hint}.", hint = hint.as_str()),
             (_, Some(_)) => t!("Runs on the computer · {hint}. Placing it allows it for {device}.", hint = hint.as_str(), device = self.device.as_str()),
-            _ => t!("Shows on the phone · {hint}.", hint = hint.as_str()),
+            _ => t!("Runs on the computer · {hint}.", hint = hint.as_str()),
         };
         b.append(&label(&note, &["deck-where"]));
         if t.action.as_deref().is_some_and(|a| !st.offered(a)) {
