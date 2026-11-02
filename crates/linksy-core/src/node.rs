@@ -23,6 +23,7 @@ use tokio::task::{AbortHandle, JoinSet};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::deck_layout::DeckLayouts;
 use crate::discovery::{Announce, Discovery, DiscoveryEvent, DiscoveryKey};
 use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
@@ -274,6 +275,8 @@ pub enum Event {
     DeckRun { from: DeviceInfo, action: String, value: Option<f64> },
     DeckActions { from: DeviceInfo, actions: Vec<DeckAction> },
     DeckState { from: DeviceInfo, states: Vec<DeckState> },
+    /// The layouts a computer keeps for this phone's deck (§4.20).
+    DeckLayout { from: DeviceInfo, layouts: DeckLayouts },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -976,6 +979,15 @@ impl Node {
 
     pub async fn deck_state(&self, to: &Fingerprint, states: Vec<DeckState>) -> Result<()> {
         self.send_message(to, &Message::DeckState { states }).await
+    }
+
+    /// The phone's deck layouts (§4.20), to a connected phone that announces `deck_layout`
+    /// ([`Error::Unsupported`] otherwise: an older phone never gets them).
+    pub async fn deck_layout(&self, to: &Fingerprint, layouts: &DeckLayouts) -> Result<()> {
+        if !self.peer_info(to).is_some_and(|p| p.features.iter().any(|f| f == "deck_layout")) {
+            return Err(Error::Unsupported);
+        }
+        self.send_message(to, &Message::DeckLayout { layouts: layouts.clone() }).await
     }
 
     /// The mirrored notification `key` is gone here.
@@ -1962,6 +1974,7 @@ impl Node {
                                 Ok(Message::DeckActions { actions }) if actions.len() <= MAX_DECK => node.emit(Event::DeckActions { from, actions }),
                                 Ok(Message::DeckState { states }) if states.len() <= MAX_DECK => node.emit(Event::DeckState { from, states }),
                                 Ok(Message::DeckRun { .. } | Message::DeckActions { .. } | Message::DeckState { .. }) => debug!("bad deck message from {}", from.name),
+                                Ok(Message::DeckLayout { layouts }) => node.emit(Event::DeckLayout { from, layouts }),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
                             }
                         });

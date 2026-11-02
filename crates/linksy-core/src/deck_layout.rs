@@ -11,6 +11,9 @@ pub const MAX_LAYOUTS: usize = 20;
 pub const MAX_PAGES: usize = 8;
 pub const MAX_TILES: usize = 64;
 pub const MAX_LABEL: usize = 60;
+/// Largest the layouts may be as JSON, so they reach the phone in one `deck_layout`
+/// message (with room for its envelope).
+pub const MAX_BYTES: usize = crate::protocol::MAX_FRAME - 1024;
 /// The grids a phone gets until it says its screen.
 pub const PORTRAIT: [u8; 2] = [4, 8];
 pub const LANDSCAPE: [u8; 2] = [9, 4];

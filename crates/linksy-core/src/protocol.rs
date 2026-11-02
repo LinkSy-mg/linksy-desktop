@@ -10,6 +10,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::deck_layout::DeckLayouts;
 use crate::error::{Result, protocol};
 use crate::identity::DeviceInfo;
 
@@ -443,6 +444,8 @@ pub enum Message {
     },
     DeckActions { actions: Vec<DeckAction> },
     DeckState { states: Vec<DeckState> },
+    /// The deck's layouts (§4.20), computer → phone, only to a phone with `deck_layout`.
+    DeckLayout { layouts: DeckLayouts },
 }
 
 /// The steps of a direct link (docs/protocol.md §4.17), between a device that hosts it

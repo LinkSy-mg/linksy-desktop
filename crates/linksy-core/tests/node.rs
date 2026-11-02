@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use linksy_core::gallery::GalleryAnswer;
 use linksy_core::{
-    Battery, CallState, Config, ControlMsg, ConversationMessage, DeckAction, DeckKind, DirectGroup, DirectStep, Error, Event, FsEntry, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryRequest, MediaCommand, MediaPlayer, MediaState, Node,
+    Battery, CallState, Config, ControlMsg, ConversationMessage, DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckTheme, DeckTile, DirectGroup, DirectStep, Error, Event, FsEntry, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryRequest, MediaCommand, MediaPlayer, MediaState, Node,
     NotificationButton, RemoteNotification, SessionKind, SmsThread, VolumeState,
 };
 use tokio::io::AsyncReadExt;
@@ -420,6 +420,49 @@ async fn deck_and_conversation_history_travel() {
 
     phone.node.remove_notification_reply_kept(&pc_id, "k").await.unwrap();
     wait_for(&mut on_pc, |e| matches!(e, Event::NotificationRemoved { key, reply_kept: true, .. } if key == "k").then_some(())).await;
+}
+
+fn some_layouts() -> DeckLayouts {
+    let mut layout = DeckLayout { id: "work".into(), name: "Work".into(), theme: DeckTheme::default(), portrait: DeckFace::portrait(), landscape: DeckFace::landscape() };
+    layout.portrait.pages[0].push(DeckTile { id: "a".into(), kind: "button".into(), w: 1, h: 1, action: Some("media.next".into()), ..Default::default() });
+    DeckLayouts { version: 3, active: "work".into(), layouts: vec![layout] }
+}
+
+#[tokio::test]
+async fn deck_layouts_reach_only_a_phone_that_takes_them() {
+    let (phone, pc) = paired_with(|c| {
+        if c.name == "Alpha" {
+            c.features = vec!["deck_layout".into()];
+        }
+    })
+    .await;
+    let (phone_id, pc_id) = (phone.node.info().id, pc.node.info().id);
+    let (mut on_pc, mut on_phone) = (pc.node.subscribe(), phone.node.subscribe());
+    phone.node.deck_open(&pc_id, true).await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::DeckOpen { .. }).then_some(())).await;
+    let layouts = some_layouts();
+    pc.node.deck_layout(&phone_id, &layouts).await.unwrap();
+    let got = wait_for(&mut on_phone, |e| match e {
+        Event::DeckLayout { from, layouts } if from.id == pc_id => Some(layouts.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, layouts);
+    // One that wouldn't fit in a message isn't sent
+    let mut big = some_layouts();
+    big.layouts[0].portrait.pages[0][0].props.insert("x".into(), "y".repeat(linksy_core::protocol::MAX_FRAME));
+    assert!(matches!(pc.node.deck_layout(&phone_id, &big).await, Err(Error::Protocol(_))));
+
+    // An older phone, which doesn't say it takes them, never gets them
+    let (old, pc2) = paired().await;
+    let (old_id, pc2_id) = (old.node.info().id, pc2.node.info().id);
+    let (mut on_pc2, mut on_old) = (pc2.node.subscribe(), old.node.subscribe());
+    old.node.deck_open(&pc2_id, true).await.unwrap();
+    wait_for(&mut on_pc2, |e| matches!(e, Event::DeckOpen { .. }).then_some(())).await;
+    assert!(matches!(pc2.node.deck_layout(&old_id, &layouts).await, Err(Error::Unsupported)));
+    pc2.node.deck_actions(&old_id, Vec::new()).await.unwrap();
+    let next = wait_for(&mut on_old, |e| matches!(e, Event::DeckActions { .. } | Event::DeckLayout { .. }).then(|| e.clone())).await;
+    assert!(matches!(next, Event::DeckActions { .. }), "{next:?}");
 }
 
 #[tokio::test]
