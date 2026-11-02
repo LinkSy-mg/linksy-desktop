@@ -30,6 +30,7 @@ const ACT_WAIT: Duration = Duration::from_secs(5);
 const MEDIA: &str = "Media";
 const SOUND: &str = "Sound";
 const SYSTEM: &str = "System";
+const NETWORK: &str = "Network";
 const COMMANDS: &str = "Commands";
 
 /// What an action does here.
@@ -44,8 +45,11 @@ pub enum Act {
     Lock,
     Restart,
     Shutdown,
-    /// Do Not Disturb on if it's off, else off.
+    /// Do Not Disturb on if it's off, else off; the same for the radios.
     Dnd,
+    Wifi,
+    Bluetooth,
+    Airplane,
     Command { name: String, line: String },
 }
 
@@ -58,6 +62,10 @@ pub struct Caps {
     pub power_off: bool,
     /// Do Not Disturb (GNOME's or Plasma's).
     pub dnd: bool,
+    /// nmcli; bluetoothctl or rfkill; GNOME's airplane mode or nmcli.
+    pub wifi: bool,
+    pub bluetooth: bool,
+    pub airplane: bool,
 }
 
 /// This computer's state now, as far as the decks show it.
@@ -69,6 +77,9 @@ pub struct Status {
     /// The default output's name.
     pub output: Option<String>,
     pub dnd: Option<bool>,
+    pub wifi: Option<bool>,
+    pub bluetooth: Option<bool>,
+    pub airplane: Option<bool>,
 }
 
 /// What runs the actions: this desktop, or a stand-in in tests.
@@ -87,7 +98,14 @@ pub struct System {
 impl Desktop for System {
     async fn probe(&self) -> Caps {
         let found = self.controls.probe().await;
-        Caps { sound: crate::volume::available(), power_off: found.power_off, dnd: found.dnd() }
+        Caps {
+            sound: crate::volume::available(),
+            power_off: found.power_off,
+            dnd: found.dnd(),
+            wifi: found.wifi,
+            bluetooth: found.bluetooth(),
+            airplane: found.airplane(),
+        }
     }
 
     async fn run(&self, act: Act) {
@@ -103,6 +121,9 @@ impl Desktop for System {
             Act::Restart => self.controls.power_off(true).await,
             Act::Shutdown => self.controls.power_off(false).await,
             Act::Dnd => self.controls.toggle_dnd().await,
+            Act::Wifi => self.controls.toggle_wifi().await,
+            Act::Bluetooth => self.controls.toggle_bluetooth().await,
+            Act::Airplane => self.controls.toggle_airplane().await,
             Act::Command { name, line } => spawn(&name, &line),
         }
     }
@@ -110,13 +131,19 @@ impl Desktop for System {
     async fn status(&self, ids: &HashSet<&str>) -> Status {
         let (output, mic) = (ids.contains("sound.volume") || ids.contains("sound.mute"), ids.contains("sound.mic_mute"));
         let has = |id| ids.contains(id);
+        let c = &self.controls;
         let (out, mic_muted, name, dnd) = tokio::join!(
             async { if output { crate::volume::output_state().await } else { None } },
             async { if mic { crate::volume::mic_muted().await } else { None } },
             async { if has("sound.output") { crate::volume::output_name().await } else { None } },
-            async { if has("system.dnd") { self.controls.dnd().await } else { None } },
+            async { if has("system.dnd") { c.dnd().await } else { None } },
         );
-        Status { level: out.map(|(level, _)| level.clamp(0.0, 1.0)), muted: out.map(|(_, muted)| muted), mic_muted, output: name, dnd }
+        let (wifi, bluetooth, airplane) = tokio::join!(
+            async { if has("network.wifi") { c.wifi().await } else { None } },
+            async { if has("network.bluetooth") { c.bluetooth().await } else { None } },
+            async { if has("network.airplane") { c.airplane().await } else { None } },
+        );
+        Status { level: out.map(|(level, _)| level.clamp(0.0, 1.0)), muted: out.map(|(_, muted)| muted), mic_muted, output: name, dnd, wifi, bluetooth, airplane }
     }
 }
 
@@ -256,6 +283,17 @@ impl<D: Desktop> Deck<D> {
         if caps.power_off {
             all.push(asking(action("system.restart", t!("Restart"), DeckKind::Button, SYSTEM), t!("Restart {computer}?")));
             all.push(asking(action("system.shutdown", t!("Shut Down"), DeckKind::Button, SYSTEM), t!("Turn off {computer}?")));
+        }
+        // Turning these off can cut the phone off from this computer
+        let cuts_off = t!("This can disconnect {phone} from {computer}.");
+        if caps.wifi {
+            all.push(asking(action("network.wifi", t!("Wi-Fi"), DeckKind::Toggle, NETWORK), cuts_off));
+        }
+        if caps.bluetooth {
+            all.push(action("network.bluetooth", t!("Bluetooth"), DeckKind::Toggle, NETWORK));
+        }
+        if caps.airplane {
+            all.push(asking(action("network.airplane", t!("Airplane Mode"), DeckKind::Toggle, NETWORK), cuts_off));
         }
         all.extend(saved.commands.iter().map(|c| action(&format!("command.{}", c.id), &c.name, DeckKind::Button, COMMANDS)));
         all
@@ -442,6 +480,9 @@ impl<D: Desktop> Deck<D> {
             "system.restart" if caps.power_off => Act::Restart,
             "system.shutdown" if caps.power_off => Act::Shutdown,
             "system.dnd" if caps.dnd => Act::Dnd,
+            "network.wifi" if caps.wifi => Act::Wifi,
+            "network.bluetooth" if caps.bluetooth => Act::Bluetooth,
+            "network.airplane" if caps.airplane => Act::Airplane,
             _ => {
                 let id = id.strip_prefix("command.")?;
                 let c = saved.commands.iter().find(|c| c.id == id)?;
@@ -646,6 +687,9 @@ fn states(actions: &[DeckAction], now: &Status) -> Vec<DeckState> {
                 "sound.mic_mute" => state(Some(now.mic_muted?), None),
                 "sound.output" => Some(DeckState { id: a.id.clone(), on: None, value: None, text: Some(now.output.clone()?) }),
                 "system.dnd" => state(Some(now.dnd?), None),
+                "network.wifi" => state(Some(now.wifi?), None),
+                "network.bluetooth" => state(Some(now.bluetooth?), None),
+                "network.airplane" => state(Some(now.airplane?), None),
                 _ => None,
             }
         })
@@ -667,7 +711,7 @@ mod tests {
     impl Fake {
         fn caps(&self) -> Caps {
             let has = |what| !self.without.contains(&what);
-            Caps { sound: has("sound"), power_off: has("power_off"), dnd: has("dnd") }
+            Caps { sound: has("sound"), power_off: has("power_off"), dnd: has("dnd"), wifi: has("wifi"), bluetooth: has("bluetooth"), airplane: has("airplane") }
         }
     }
 
@@ -689,6 +733,9 @@ mod tests {
                 mic_muted: has("sound.mic_mute").then_some(true),
                 output: has("sound.output").then(|| "Speakers".into()),
                 dnd: has("system.dnd").then_some(false),
+                wifi: has("network.wifi").then_some(true),
+                bluetooth: has("network.bluetooth").then_some(false),
+                airplane: has("network.airplane").then_some(false),
             }
         }
     }
@@ -718,7 +765,7 @@ mod tests {
     }
 
     /// Everything the fake computer offers, and what's on for a phone until changed.
-    const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "system.restart", "system.shutdown"];
+    const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "system.restart", "system.shutdown", "network.wifi", "network.bluetooth", "network.airplane"];
     const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.dnd"];
 
     #[test]
@@ -862,6 +909,28 @@ mod tests {
         assert_eq!(states(&[dnd], &now), [DeckState { id: "system.dnd".into(), on: Some(false), value: None, text: None }]);
         let plain = ready(dir.path().join("plain.json"), Fake { without: &["dnd"], ..Default::default() });
         assert_eq!(plain.act(&phone(1), "system.dnd", None), None);
+    }
+
+    #[tokio::test]
+    async fn radios_are_toggles_off_until_allowed_and_warn_about_the_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        let ids = ["network.wifi", "network.bluetooth", "network.airplane"];
+        assert!(ids.iter().all(|id| d.act(&p, id, None).is_none()));
+        for id in ids {
+            d.set_action(&p, id, true).unwrap();
+        }
+        assert_eq!(ids.map(|id| d.act(&p, id, None)), [Some(Act::Wifi), Some(Act::Bluetooth), Some(Act::Airplane)]);
+        let list: Vec<DeckAction> = fill_in(d.enabled(&p), "Office PC", "Pixel").into_iter().filter(|a| a.group == NETWORK).collect();
+        let warning = Some("This can disconnect Pixel from Office PC.".to_string());
+        assert_eq!(list.iter().map(|a| (a.id.as_str(), a.kind, a.confirm.clone())).collect::<Vec<_>>(), [("network.wifi", DeckKind::Toggle, warning.clone()), ("network.bluetooth", DeckKind::Toggle, None), ("network.airplane", DeckKind::Toggle, warning)]);
+        let now = d.inner.desktop.status(&HashSet::from(ids)).await;
+        assert_eq!(states(&list, &now).iter().map(|s| s.on).collect::<Vec<_>>(), [Some(true), Some(false), Some(false)]);
+
+        let wired = ready(dir.path().join("wired.json"), Fake { without: &["wifi", "airplane"], ..Default::default() });
+        assert!(wired.set_action(&p, "network.wifi", true).is_err());
+        assert!(wired.set_action(&p, "network.bluetooth", true).is_ok());
     }
 
     #[tokio::test]
