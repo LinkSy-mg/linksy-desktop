@@ -364,6 +364,11 @@ and close the other with reason `duplicate`.
     still the newest alone. Up to 25.
   - `subject` on `notification_posted` for mail (`EXTRA_TITLE_BIG` / the subject line),
     with the mail's text in `body` (`EXTRA_BIG_TEXT`).
+  - `mine: true` on `notification_posted` when the newest message is the user's own
+    (its sender is `MessagingStyle.getUser()`, as after answering on the phone), and then
+    no `sender`; `conversation` stays the chat's name (in a one-to-one chat the other
+    person, never the user). Without it the computer guesses from names like "You" and
+    "Vous" and from the notification's `key`.
   - **Answering after the notification is gone:** keep each conversation's newest reply
     action (its `RemoteInput` and `PendingIntent`) when its notification goes away, and
     say so: `{"type":"notification_removed","key":"…","reply_kept":true}`. The computer
@@ -2083,3 +2088,5 @@ robust against any encoder (GPU ones may slice too):
   (copy both ways, new folder, rename, delete) over the existing `fs` ops (§4.9), several
   requests at once; the deck drops `system.screen_off`. Phone to-do: answer `fs` streams
   concurrently.
+- **2026-11-02** — `notification_posted` gains optional `mine` (§4.5): the newest message
+  is the user's own. Phone to-do: send it, and keep `conversation` the chat's name.
