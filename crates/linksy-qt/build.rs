@@ -21,6 +21,8 @@ fn main() {
         "qml/MessagesPage.qml",
         "qml/PhoneFiles.qml",
         "qml/FilesTab.qml",
+        "qml/Inbox.qml",
+        "qml/InboxTab.qml",
     ]))
         .qt_module("Quick")
         .qt_module("QuickControls2")

@@ -1,0 +1,563 @@
+// A phone's Inbox tab: its conversations, made from its message notifications, and its other
+// notifications on the left; the open conversation on the right with a field to answer. One
+// side at a time when the page is narrow.
+import QtQuick
+import QtQuick.Controls as QQC2
+import QtQuick.Layouts
+import org.kde.kirigami as Kirigami
+import org.kde.kirigamiaddons.components as Components
+
+Item {
+    id: tab
+    required property var app
+    // The page's Inbox: what's in it, what's open, how it's filtered and sorted
+    required property var store
+    required property bool narrow
+    readonly property var current: store.current
+    readonly property var conversations: {
+        const list = store.conversations.filter(c => tab.shows(c.kind) && (tab.matches(c.title) || tab.matches(tab.preview(c))));
+        return store.oldestFirst ? list.reverse() : list;
+    }
+    readonly property var alerts: {
+        if (store.show !== "all" && store.show !== "other") return [];
+        const list = store.alerts.filter(a => tab.matches(a.title) || tab.matches(a.body) || tab.matches(a.app_name));
+        return store.oldestFirst ? list.reverse() : list;
+    }
+
+    implicitHeight: Kirigami.Units.gridUnit * 31
+
+    Component.onCompleted: {
+        search.text = store.search;
+        if (current) {
+            store.markRead(current);
+            store.loadThread();
+        }
+    }
+
+    Connections {
+        target: tab.store
+        function onThreadChanged() { Qt.callLater(() => thread.positionViewAtEnd()) }
+        function onSent() {
+            reply.text = "";
+            reply.forceActiveFocus();
+        }
+    }
+    Connections {
+        target: tab.app
+        // Back to the window with a conversation open: what came in meanwhile is read now
+        function onActiveChanged() { if (tab.app.active && tab.current) tab.store.markRead(tab.current) }
+    }
+
+    function shows(kind) {
+        switch (store.show) {
+        case "chats": return kind === "chat" || kind === "social";
+        case "texts": return kind === "sms";
+        case "mail": return kind === "mail";
+        case "other": return false;
+        }
+        return true;
+    }
+
+    function matches(text) {
+        const needle = store.search.toLowerCase();
+        return !needle || (text ?? "").toLowerCase().includes(needle);
+    }
+
+    // The newest line, with who said it when that isn't plain
+    function preview(c) {
+        const m = c.last;
+        if (!m) return "";
+        const text = m.text.split("\n")[0];
+        if (m.mine) return app.t("You: {text}", { text: text });
+        if (c.group && m.sender) return `${m.sender}: ${text}`;
+        return text;
+    }
+
+    function kindIcon(kind) {
+        return { sms: "smartphone", mail: "mail-message", social: "group" }[kind] ?? "dialog-messages";
+    }
+
+    // "14:05" today, "Mon" this week, "12 Oct" before
+    function when(ms) {
+        const d = new Date(ms), now = new Date();
+        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString(Qt.locale(), "HH:mm");
+        if (now - d < 6 * 86400000) return d.toLocaleDateString(Qt.locale(), "ddd");
+        return d.toLocaleDateString(Qt.locale(), "d MMM");
+    }
+
+    function open(id) {
+        store.openConversation(id);
+        if (store.current?.can_reply) reply.forceActiveFocus();
+    }
+
+    function send() {
+        store.reply(reply.text.trim());
+    }
+
+    RowLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        // The conversations, then the other notifications
+        ColumnLayout {
+            visible: !tab.narrow || tab.current === null
+            Layout.fillHeight: true
+            Layout.fillWidth: tab.narrow
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 17
+            Layout.rightMargin: tab.narrow ? 0 : Kirigami.Units.largeSpacing
+            spacing: Kirigami.Units.smallSpacing
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+                Kirigami.SearchField {
+                    id: search
+                    Layout.fillWidth: true
+                    placeholderText: tab.app.t("Search")
+                    onTextChanged: tab.store.search = text
+                }
+            }
+
+            QQC2.ScrollView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                ListView {
+                    id: list
+                    clip: true
+                    model: tab.conversations
+                    delegate: QQC2.ItemDelegate {
+                        id: row
+                        required property var modelData
+                        readonly property bool unread: modelData.unread > 0
+                        width: list.width
+                        highlighted: modelData.id === tab.store.open
+                        text: modelData.title
+                        onClicked: tab.open(modelData.id)
+
+                        contentItem: RowLayout {
+                            spacing: Kirigami.Units.largeSpacing
+                            Face {
+                                Layout.alignment: Qt.AlignTop
+                                conversation: row.modelData
+                                badge: true
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 2
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    QQC2.Label {
+                                        Layout.fillWidth: true
+                                        text: row.modelData.title
+                                        textFormat: Text.PlainText
+                                        elide: Text.ElideRight
+                                        font.weight: row.unread ? Font.Bold : Font.DemiBold
+                                    }
+                                    QQC2.Label {
+                                        text: tab.when(row.modelData.at_ms)
+                                        font: Kirigami.Theme.smallFont
+                                        color: row.unread ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor
+                                    }
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    QQC2.Label {
+                                        Layout.fillWidth: true
+                                        text: tab.preview(row.modelData)
+                                        textFormat: Text.PlainText
+                                        elide: Text.ElideRight
+                                        opacity: 0.7
+                                    }
+                                    CountPill {
+                                        visible: row.unread
+                                        count: row.modelData.unread
+                                    }
+                                }
+                                CodeChip {
+                                    Layout.topMargin: Kirigami.Units.smallSpacing
+                                    code: row.modelData.last?.code ?? ""
+                                }
+                            }
+                        }
+                    }
+
+                    footer: ColumnLayout {
+                        width: list.width
+                        spacing: 0
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.topMargin: Kirigami.Units.largeSpacing
+                            Layout.leftMargin: Kirigami.Units.largeSpacing
+                            visible: tab.alerts.length > 0
+                            QQC2.Label {
+                                Layout.fillWidth: true
+                                text: tab.app.t("Other Notifications")
+                                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                                font.bold: true
+                                opacity: 0.7
+                            }
+                            QQC2.Button {
+                                visible: tab.store.search === ""
+                                flat: true
+                                text: tab.app.t("Clear All")
+                                onClicked: tab.store.dismiss()
+                            }
+                        }
+                        Repeater {
+                            model: tab.alerts
+                            delegate: AlertRow {}
+                        }
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            Layout.margins: Kirigami.Units.largeSpacing
+                            Layout.topMargin: Kirigami.Units.gridUnit
+                            visible: tab.conversations.length === 0 && tab.alerts.length === 0
+                            horizontalAlignment: Text.AlignHCenter
+                            wrapMode: Text.Wrap
+                            opacity: 0.7
+                            text: !tab.store.loaded ? tab.app.t("Loading…")
+                                : tab.store.error ? tab.store.error
+                                : tab.store.conversations.length + tab.store.alerts.length === 0 ? tab.app.t("New messages and notifications from the phone show up here.")
+                                : tab.app.t("Nothing matches.")
+                        }
+                    }
+                }
+            }
+        }
+
+        Kirigami.Separator {
+            visible: !tab.narrow
+            Layout.fillHeight: true
+        }
+
+        // The open conversation
+        Item {
+            visible: !tab.narrow || tab.current !== null
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.leftMargin: tab.narrow ? 0 : Kirigami.Units.gridUnit
+
+            Kirigami.PlaceholderMessage {
+                anchors.centerIn: parent
+                width: parent.width - Kirigami.Units.gridUnit * 4
+                visible: tab.current === null
+                icon.name: "dialog-messages"
+                text: tab.app.t("No Conversation Selected")
+            }
+
+            ColumnLayout {
+                anchors.fill: parent
+                visible: tab.current !== null
+                spacing: 0
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.bottomMargin: Kirigami.Units.largeSpacing
+                    spacing: Kirigami.Units.largeSpacing
+                    QQC2.ToolButton {
+                        visible: tab.narrow
+                        icon.name: "go-previous"
+                        text: tab.app.t("Back")
+                        display: QQC2.AbstractButton.IconOnly
+                        QQC2.ToolTip.text: text
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: tab.store.open = ""
+                    }
+                    Face {
+                        conversation: tab.current
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        Kirigami.Heading {
+                            Layout.fillWidth: true
+                            level: 4
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            text: tab.current?.title ?? ""
+                        }
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                            font: Kirigami.Theme.smallFont
+                            opacity: 0.7
+                            text: tab.current?.app_name ?? ""
+                        }
+                    }
+                }
+                Kirigami.Separator {
+                    Layout.fillWidth: true
+                }
+
+                QQC2.ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    ListView {
+                        id: thread
+                        clip: true
+                        model: tab.store.thread
+                        spacing: Kirigami.Units.smallSpacing
+                        topMargin: Kirigami.Units.largeSpacing
+                        bottomMargin: Kirigami.Units.largeSpacing
+                        delegate: Item {
+                            id: line
+                            required property var modelData
+                            required property int index
+                            readonly property bool mine: modelData.mine
+                            readonly property string day: tab.app.dayLabel(modelData.at_ms)
+                            // Lines are the bubble's side of the view, mine on the right
+                            readonly property real side: Kirigami.Units.gridUnit
+                            width: thread.width
+                            implicitHeight: column.implicitHeight
+
+                            Column {
+                                id: column
+                                width: parent.width
+                                spacing: 2
+                                QQC2.Label {
+                                    visible: line.index === 0 || tab.app.dayLabel(tab.store.thread[line.index - 1].at_ms) !== line.day
+                                    width: parent.width
+                                    horizontalAlignment: Text.AlignHCenter
+                                    topPadding: Kirigami.Units.largeSpacing
+                                    bottomPadding: Kirigami.Units.smallSpacing
+                                    text: line.day
+                                    font: Kirigami.Theme.smallFont
+                                    opacity: 0.7
+                                }
+                                QQC2.Label {
+                                    visible: (tab.current?.group ?? false) && !line.mine && !!line.modelData.sender
+                                    x: line.side + Kirigami.Units.largeSpacing
+                                    text: line.modelData.sender ?? ""
+                                    textFormat: Text.PlainText
+                                    font: Kirigami.Theme.smallFont
+                                    opacity: 0.7
+                                }
+                                Rectangle {
+                                    x: line.mine ? line.width - width - line.side : line.side
+                                    width: body.width + Kirigami.Units.largeSpacing * 2
+                                    height: body.height + Kirigami.Units.smallSpacing * 3
+                                    radius: Kirigami.Units.gridUnit
+                                    color: line.mine ? Kirigami.Theme.highlightColor : Qt.alpha(Kirigami.Theme.textColor, 0.08)
+                                    QQC2.Label {
+                                        id: body
+                                        anchors.centerIn: parent
+                                        width: Math.min(implicitWidth, line.width * 0.7)
+                                        text: line.modelData.text
+                                        textFormat: Text.PlainText
+                                        wrapMode: Text.Wrap
+                                        color: line.mine ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                                    }
+                                }
+                                CodeChip {
+                                    x: line.mine ? line.width - width - line.side : line.side
+                                    code: line.modelData.code ?? ""
+                                }
+                                QQC2.Label {
+                                    x: line.mine ? line.width - width - line.side - Kirigami.Units.largeSpacing : line.side + Kirigami.Units.largeSpacing
+                                    text: new Date(line.modelData.at_ms).toLocaleTimeString(Qt.locale(), "HH:mm")
+                                    font: Kirigami.Theme.smallFont
+                                    opacity: 0.6
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Kirigami.Separator {
+                    Layout.fillWidth: true
+                }
+                RowLayout {
+                    visible: tab.current?.can_reply ?? false
+                    Layout.fillWidth: true
+                    Layout.topMargin: Kirigami.Units.largeSpacing
+                    QQC2.TextField {
+                        id: reply
+                        Layout.fillWidth: true
+                        enabled: !tab.store.sending
+                        placeholderText: tab.app.t("Reply on {app}", { app: tab.current?.app_name ?? "" })
+                        onAccepted: tab.send()
+                    }
+                    QQC2.Button {
+                        icon.name: "document-send"
+                        text: tab.app.t("Send")
+                        display: QQC2.AbstractButton.IconOnly
+                        enabled: !tab.store.sending && reply.text.trim() !== ""
+                        QQC2.ToolTip.text: text
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: tab.send()
+                    }
+                }
+                QQC2.Label {
+                    visible: !(tab.current?.can_reply ?? true)
+                    Layout.fillWidth: true
+                    Layout.topMargin: Kirigami.Units.largeSpacing
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    text: tab.app.t("This one can't be answered from here. Answer it on the phone.")
+                }
+            }
+        }
+    }
+
+    // ---- small pieces ----
+
+    // A conversation's picture, initials or group icon, with its app in the corner
+    component Face: Item {
+        id: face
+        property var conversation: null
+        property bool badge: false
+        implicitWidth: Kirigami.Units.gridUnit * 2.4
+        implicitHeight: implicitWidth
+        Components.Avatar {
+            anchors.fill: parent
+            name: face.conversation?.title ?? ""
+            // A new name when it changes, so it isn't served from the cache
+            source: face.conversation?.picture ? "file://" + face.conversation.picture + "?" + face.conversation.at_ms : ""
+            initialsMode: (face.conversation?.group ?? false) ? Components.Avatar.InitialsMode.UseIcon : Components.Avatar.InitialsMode.UseInitials
+            iconSource: "group"
+        }
+        Rectangle {
+            visible: face.badge
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: -2
+            anchors.bottomMargin: -2
+            width: Kirigami.Units.iconSizes.small + 4
+            height: width
+            radius: Kirigami.Units.cornerRadius
+            color: Kirigami.Theme.backgroundColor
+            border.width: 1
+            border.color: Qt.alpha(Kirigami.Theme.textColor, 0.12)
+            Kirigami.Icon {
+                anchors.centerIn: parent
+                width: Kirigami.Units.iconSizes.small - 2
+                height: width
+                source: face.conversation?.icon ? "file://" + face.conversation.icon : tab.kindIcon(face.conversation?.kind ?? "")
+            }
+            HoverHandler { id: appHover }
+            QQC2.ToolTip.visible: appHover.hovered
+            QQC2.ToolTip.text: face.conversation?.app_name ?? ""
+        }
+    }
+
+    // One of the phone's other notifications, to copy its code or dismiss it
+    component AlertRow: RowLayout {
+        id: alert
+        required property var modelData
+        Layout.fillWidth: true
+        Layout.leftMargin: Kirigami.Units.largeSpacing
+        Layout.topMargin: Kirigami.Units.largeSpacing
+        Layout.bottomMargin: Kirigami.Units.smallSpacing
+        spacing: Kirigami.Units.largeSpacing
+        Rectangle {
+            Layout.alignment: Qt.AlignTop
+            implicitWidth: Kirigami.Units.gridUnit * 2.2
+            implicitHeight: implicitWidth
+            radius: Kirigami.Units.cornerRadius * 2
+            color: Qt.alpha(Kirigami.Theme.textColor, 0.06)
+            Kirigami.Icon {
+                anchors.centerIn: parent
+                width: Kirigami.Units.iconSizes.smallMedium
+                height: width
+                source: alert.modelData.icon ? "file://" + alert.modelData.icon : "preferences-desktop-notification-bell"
+            }
+        }
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 2
+            QQC2.Label {
+                Layout.fillWidth: true
+                text: alert.modelData.title
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                font.weight: Font.DemiBold
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                visible: text !== ""
+                text: (alert.modelData.body ?? "").split("\n")[0]
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                opacity: 0.7
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                text: `${alert.modelData.app_name} · ${tab.when(alert.modelData.at_ms)}`
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                font: Kirigami.Theme.smallFont
+                opacity: 0.6
+            }
+            CodeChip {
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                code: alert.modelData.code ?? ""
+            }
+        }
+        QQC2.ToolButton {
+            Layout.alignment: Qt.AlignVCenter
+            icon.name: "window-close"
+            text: tab.app.t("Dismiss")
+            display: QQC2.AbstractButton.IconOnly
+            QQC2.ToolTip.text: text
+            QQC2.ToolTip.visible: hovered
+            onClicked: tab.store.dismiss(alert.modelData.key)
+        }
+    }
+
+    // "Copy 482913", as a chip
+    component CodeChip: QQC2.AbstractButton {
+        id: chip
+        property string code
+        visible: code !== ""
+        hoverEnabled: true
+        implicitWidth: implicitContentWidth + leftPadding + rightPadding
+        implicitHeight: implicitContentHeight + topPadding + bottomPadding
+        padding: Kirigami.Units.smallSpacing
+        leftPadding: Kirigami.Units.largeSpacing
+        rightPadding: Kirigami.Units.largeSpacing
+        text: tab.app.t("Copy {code}", { code: chip.code })
+        onClicked: {
+            backend.setClipboard(chip.code);
+            tab.app.toast(tab.app.t("{code} copied", { code: chip.code }));
+        }
+        contentItem: RowLayout {
+            spacing: Kirigami.Units.smallSpacing
+            Kirigami.Icon {
+                implicitWidth: Kirigami.Units.iconSizes.small
+                implicitHeight: Kirigami.Units.iconSizes.small
+                source: "edit-copy"
+                color: Kirigami.Theme.highlightColor
+            }
+            QQC2.Label {
+                text: chip.text
+                font.bold: true
+                color: Kirigami.Theme.highlightColor
+            }
+        }
+        background: Rectangle {
+            radius: Kirigami.Units.cornerRadius
+            color: Qt.alpha(Kirigami.Theme.highlightColor, chip.down ? 0.26 : chip.hovered ? 0.2 : 0.14)
+            border.width: chip.visualFocus ? 1 : 0
+            border.color: Kirigami.Theme.focusColor
+        }
+    }
+
+    component CountPill: Rectangle {
+        id: pill
+        property int count
+        implicitWidth: Math.max(implicitHeight, countLabel.implicitWidth + Kirigami.Units.smallSpacing * 2)
+        implicitHeight: countLabel.implicitHeight + 2
+        radius: height / 2
+        color: Kirigami.Theme.highlightColor
+        QQC2.Label {
+            id: countLabel
+            anchors.centerIn: parent
+            text: String(pill.count)
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+            font.bold: true
+            color: Kirigami.Theme.highlightedTextColor
+        }
+    }
+}
