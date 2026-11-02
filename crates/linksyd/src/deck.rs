@@ -217,7 +217,10 @@ impl Saved {
     fn on(&self, phone: &Fingerprint, id: &str) -> bool {
         match self.phones.get(phone).and_then(|choices| choices.get(id)) {
             Some(on) => *on,
-            None => id.starts_with("media.") || id.starts_with("sound.") || id == "system.dnd",
+            // Everyday keys on; restarting, turning off and airplane mode once allowed
+            None => {
+                id.starts_with("media.") || id.starts_with("sound.") || id.starts_with("power.") || ["system.dnd", "system.lock", "network.wifi", "network.bluetooth"].contains(&id)
+            }
         }
     }
 }
@@ -429,7 +432,10 @@ impl<D: Desktop> Deck<D> {
         }
         let mut saved = self.inner.saved.lock().unwrap();
         let offered: HashSet<String> = self.offered(&saved).into_iter().map(|a| a.id).collect();
-        layouts.check(|a| offered.contains(a))?;
+        // A tile kept from before whose action this computer no longer offers (a tool
+        // removed) doesn't stop the save: the phone shows it as unavailable
+        let before: HashSet<String> = saved.layouts.get(phone).map(|l| runs(l).map(String::from).collect()).unwrap_or_default();
+        layouts.check(|a| offered.contains(a) || before.contains(a))?;
         layouts.version = saved.layouts.get(phone).map_or(0, |l| l.version) + 1;
         let size = serde_json::to_vec(&layouts).map_err(|e| e.to_string())?.len();
         if size > MAX_BYTES {
@@ -437,7 +443,7 @@ impl<D: Desktop> Deck<D> {
         }
         let mut next = saved.clone();
         let choices = next.phones.entry(*phone).or_default();
-        for action in runs(&layouts) {
+        for action in runs(&layouts).filter(|a| offered.contains(*a)) {
             choices.insert(action.into(), true);
         }
         next.layouts.insert(*phone, layouts.clone());
@@ -833,7 +839,7 @@ mod tests {
 
     /// Everything the fake computer offers, and what's on for a phone until changed.
     const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "system.restart", "system.shutdown", "network.wifi", "network.bluetooth", "network.airplane", "power.saver", "power.balanced", "power.performance", "power.auto"];
-    const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.dnd"];
+    const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "network.wifi", "network.bluetooth", "power.saver", "power.balanced", "power.performance", "power.auto"];
 
     #[test]
     fn media_and_sound_on_until_changed_and_kept() {
@@ -863,16 +869,17 @@ mod tests {
         let p = phone(1);
         assert_eq!(d.act(&p, "media.play_pause", None), Some(Act::Media(MediaCommand::PlayPause)));
         assert_eq!(d.act(&p, "sound.mute", Some(0.3)), Some(Act::Mute));
-        assert_eq!(d.act(&p, "system.lock", None), None);
+        assert_eq!(d.act(&p, "system.lock", None), Some(Act::Lock), "an everyday key");
+        assert_eq!(d.act(&p, "system.restart", None), None);
         for unknown in ["media.stop", "sound.bass", "command.", "command.nope", "", "system.screen_off"] {
             assert_eq!(d.act(&p, unknown, None), None, "{unknown}");
         }
         assert!(d.set_action(&p, "media.stop", true).is_err());
         d.set_action(&p, "media.play_pause", false).unwrap();
         assert_eq!(d.act(&p, "media.play_pause", None), None);
-        d.set_action(&p, "system.lock", true).unwrap();
-        assert_eq!(d.act(&p, "system.lock", None), Some(Act::Lock));
-        assert_eq!(d.act(&phone(2), "system.lock", None), None);
+        d.set_action(&p, "system.restart", true).unwrap();
+        assert_eq!(d.act(&p, "system.restart", None), Some(Act::Restart));
+        assert_eq!(d.act(&phone(2), "system.restart", None), None);
 
         // Without wpctl or pactl, no sound at all
         let quiet = ready(dir.path().join("quiet.json"), Fake { without: &["sound"], ..Default::default() });
@@ -979,12 +986,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn radios_are_toggles_off_until_allowed_and_warn_about_the_link() {
+    async fn radios_are_toggles_airplane_off_until_allowed_and_they_warn_about_the_link() {
         let dir = tempfile::tempdir().unwrap();
         let d = deck(&dir);
         let p = phone(1);
         let ids = ["network.wifi", "network.bluetooth", "network.airplane"];
-        assert!(ids.iter().all(|id| d.act(&p, id, None).is_none()));
+        assert_eq!(ids.map(|id| d.act(&p, id, None).is_some()), [true, true, false]);
         for id in ids {
             d.set_action(&p, id, true).unwrap();
         }
@@ -1007,8 +1014,7 @@ mod tests {
         let p = phone(1);
         let ids = ["power.saver", "power.balanced", "power.performance", "power.auto"];
         for id in ids {
-            assert_eq!(d.act(&p, id, None), None, "{id} is off until allowed");
-            d.set_action(&p, id, true).unwrap();
+            assert!(d.act(&p, id, None).is_some(), "{id} is on from the start");
         }
         assert_eq!(ids.map(|id| d.act(&p, id, None)), [Some(Act::Profile("power-saver")), Some(Act::Profile("balanced")), Some(Act::Profile("performance")), Some(Act::PowerAuto)]);
         let list: Vec<DeckAction> = d.enabled(&p).into_iter().filter(|a| a.group == POWER).collect();
@@ -1088,25 +1094,32 @@ mod tests {
         let d = deck(&dir);
         let p = phone(1);
         d.set_action(&p, "media.next", false).unwrap();
-        assert_eq!(d.act(&p, "system.lock", None), None);
-        let mine = layouts("games", vec![tile("a", "button", (0, 0), (1, 1), Some("system.lock")), tile("b", "music", (0, 1), (4, 2), None)]);
+        assert_eq!(d.act(&p, "system.restart", None), None);
+        let mine = layouts("games", vec![tile("a", "button", (0, 0), (1, 1), Some("system.restart")), tile("b", "music", (0, 1), (4, 2), None)]);
         let saved = d.set_layouts(&p, mine.clone()).unwrap();
         assert_eq!((saved.version, saved.active.as_str()), (1, "games"), "the version is counted here");
         assert_eq!(saved.layouts, mine.layouts);
-        assert_eq!(d.act(&p, "system.lock", None), Some(Act::Lock), "placing the tile allowed it");
+        assert_eq!(d.act(&p, "system.restart", None), Some(Act::Restart), "placing the tile allowed it");
         assert_eq!(d.act(&p, "media.next", None), None, "the rest is as it was");
-        assert_eq!(d.act(&phone(2), "system.lock", None), None);
+        assert_eq!(d.act(&phone(2), "system.restart", None), None);
         assert_eq!(d.set_layouts(&p, mine).unwrap().version, 2);
 
         let again = deck(&dir);
         assert_eq!(again.layouts(&p).version, 2);
-        assert_eq!(again.act(&p, "system.lock", None), Some(Act::Lock));
+        assert_eq!(again.act(&p, "system.restart", None), Some(Act::Restart));
         assert_eq!(again.layouts(&phone(2)).version, 0, "another phone still has the first layout");
 
         // Only a kind that runs its action allows it
         d.set_action(&p, "system.lock", false).unwrap();
         d.set_layouts(&p, layouts("work", vec![tile("c", "clock", (0, 0), (2, 1), Some("system.lock"))])).unwrap();
         assert_eq!(d.act(&p, "system.lock", None), None);
+
+        // A tool gone since: the tile it was for doesn't stop a save; a new one for it does
+        let off = layouts("work", vec![tile("d", "button", (0, 0), (1, 1), Some("system.shutdown"))]);
+        d.set_layouts(&p, off.clone()).unwrap();
+        let later = ready(dir.path().join("deck.json"), Fake { without: &["power_off", "airplane"], ..Default::default() });
+        assert!(later.set_layouts(&p, off).is_ok(), "kept from before");
+        assert!(later.set_layouts(&p, layouts("work", vec![tile("e", "button", (0, 0), (1, 1), Some("network.airplane"))])).is_err());
     }
 
     #[test]

@@ -1582,8 +1582,11 @@ phone → computer {"type":"deck_close"}          the deck is gone: stop sending
 
   More may come; show any id with its `name` and `kind`. `group` is in English whatever
   the language (`name` is in the computer's).
-- Desktop: media, sound and Do Not Disturb are on for a phone until the user turns them
-  off; the rest is off until turned on (or until a tile for it is saved, §4.20). A
+- Desktop: media, sound, power profiles, Do Not Disturb, Lock, Wi-Fi and Bluetooth are on
+  for a phone until the user turns them off; restart, turn off, airplane mode and the
+  user's commands are off until turned on (or until a tile for it is saved, §4.20). A
+  tile kept from before whose action the computer no longer offers stays in its layout;
+  the phone shows it as unavailable. A
   `deck_state` comes after every run that was allowed, so a refused run gets no answer.
   While a slider is dragged, the computer may skip to its newest value.
 - Core: `Node::deck_open(to, open)`, `Node::deck_run(to, action, value)`;
