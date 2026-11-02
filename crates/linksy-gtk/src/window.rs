@@ -94,6 +94,8 @@ struct State {
     pictures_checked: std::collections::HashSet<Fingerprint>,
     /// The camera preview on screen: whose camera, and the pipeline reading it.
     preview: Option<(Fingerprint, gstreamer::Element)>,
+    /// Whose deck page shows.
+    deck: Option<Fingerprint>,
     /// Opening Linksy starts its service once, if it isn't running.
     started_service: bool,
     restarted_service: bool,
@@ -136,6 +138,8 @@ pub struct Window {
     camera_controls: camera::Controls,
     camera_back: gtk::Button,
     camera_title: adw::WindowTitle,
+    /// What a phone's deck may do here, a page of its own like the camera's.
+    deck_page: adw::Bin,
     // Texting through a phone
     messages: Rc<messages::MessagesView>,
     files: Rc<files::FilesView>,
@@ -227,6 +231,8 @@ impl Window {
         camera_page.append(&camera_picture);
         camera_page.append(&camera_controls.root);
         content_stack.add_named(&camera_page, Some("camera"));
+        let deck_page = adw::Bin::new();
+        content_stack.add_named(&deck_page, Some("deck"));
         // Click the preview to focus there, as on the phone.
         let click = gtk::GestureClick::new();
         let (pic, controls) = (camera_picture.clone(), camera_controls.clone());
@@ -332,6 +338,7 @@ impl Window {
             camera_controls,
             camera_back,
             camera_title,
+            deck_page,
             messages,
             files,
             gallery,
@@ -402,6 +409,7 @@ impl Window {
         let w = Rc::downgrade(&win);
         win.camera_back.connect_clicked(move |_| {
             if let Some(w) = w.upgrade() {
+                w.close_deck();
                 w.stop_preview();
                 w.render_page();
             }
@@ -1466,6 +1474,10 @@ impl Window {
         if previewing.is_some() && (previewing != selected || previewing != camera) {
             self.stop_preview();
         }
+        let deck = self.state.borrow().deck;
+        if deck.is_some() && deck != selected {
+            self.close_deck();
+        }
         match self.selected_device() {
             Some(d) => {
                 self.content.set_title(&d.device.name);
@@ -1478,11 +1490,17 @@ impl Window {
                 let mic = self.state.borrow().microphone.filter(|(_, id)| *id == d.device.id);
                 self.page.set_microphone(mic.map(|_| format!("Linksy Microphone ({})", d.device.name)).as_deref());
                 self.meter_microphone(mic.map(|(_, id)| id));
-                let previewing = self.state.borrow().preview.is_some();
-                if previewing {
+                let (previewing, deck) = (self.state.borrow().preview.is_some(), self.state.borrow().deck.is_some());
+                if previewing || deck {
                     self.page.menu.set_visible(false);
                 }
-                self.content_stack.set_visible_child_name(if previewing { "camera" } else { "device" });
+                self.content_stack.set_visible_child_name(if previewing {
+                    "camera"
+                } else if deck {
+                    "deck"
+                } else {
+                    "device"
+                });
             }
             None => {
                 self.content.set_title("Linksy");

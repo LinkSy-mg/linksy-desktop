@@ -289,6 +289,7 @@ impl Window {
         let Some((session, id)) = self.state.borrow().camera else {
             return self.toast(t!("No camera is on"));
         };
+        self.close_deck();
         self.stop_preview();
         // Read the camera as any app would: the Linksy Camera device, else the PipeWire camera.
         let source = match super::setup::camera_device() {
