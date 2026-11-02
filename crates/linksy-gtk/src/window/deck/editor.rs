@@ -175,8 +175,9 @@ pub struct Editor {
 /// LINKSY_SCREENSHOT_DECK_LANDSCAPE=1 shows landscape, reflowed from portrait if empty;
 /// LINKSY_SCREENSHOT_DECK_DRAG=move,80,60 (or resize,…) shows the picked tile mid-drag;
 /// LINKSY_SCREENSHOT_DECK_ON=1 shows the toggles on; LINKSY_SCREENSHOT_DECK_SAVE=1 saves
-/// once the rest is done.
+/// once the rest is done; LINKSY_SCREENSHOT_DECK_BACK=1 then goes Back, as the button does.
 struct Aids {
+    back: bool,
     theme: Option<String>,
     pick: Option<usize>,
     landscape: bool,
@@ -194,7 +195,7 @@ fn aids() -> &'static Aids {
             let resize = parts.next()? == "resize";
             Some((resize, parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
         });
-        Aids { theme: var("LINKSY_SCREENSHOT_DECK_THEME"), pick: var("LINKSY_SCREENSHOT_DECK_PICK").and_then(|n| n.parse().ok()), landscape: var("LINKSY_SCREENSHOT_DECK_LANDSCAPE").is_some(), drag, on: var("LINKSY_SCREENSHOT_DECK_ON").is_some(), save: var("LINKSY_SCREENSHOT_DECK_SAVE").is_some() }
+        Aids { theme: var("LINKSY_SCREENSHOT_DECK_THEME"), pick: var("LINKSY_SCREENSHOT_DECK_PICK").and_then(|n| n.parse().ok()), landscape: var("LINKSY_SCREENSHOT_DECK_LANDSCAPE").is_some(), drag, on: var("LINKSY_SCREENSHOT_DECK_ON").is_some(), save: var("LINKSY_SCREENSHOT_DECK_SAVE").is_some(), back: var("LINKSY_SCREENSHOT_DECK_BACK").is_some() }
     })
 }
 
@@ -257,6 +258,14 @@ impl Editor {
         }
         if aids.save {
             editor.save(None);
+        }
+        if aids.back {
+            let win = Rc::downgrade(win);
+            glib::timeout_add_local_once(Duration::from_millis(1000), move || {
+                if let Some(win) = win.upgrade() {
+                    win.leave_deck();
+                }
+            });
         }
         if let Some((resize, dx, dy)) = aids.drag {
             let grid = editor.ui.grid.downgrade();
