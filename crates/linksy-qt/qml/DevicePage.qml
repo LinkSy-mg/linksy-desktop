@@ -41,7 +41,7 @@ Kirigami.Page {
         if (phone && (app.can(info, "notifications") || app.can(info, "sms"))) shown.push("inbox");
         if (handheld && app.can(info, "gallery")) shown.push("gallery");
         if (handheld && app.can(info, "fs")) shown.push("files");
-        return shown.concat(["history", "settings"]).join(" ");
+        return shown.concat(["transfers", "history", "settings"]).join(" ");
     }
     readonly property var tabsShown: tabsKey ? tabsKey.split(" ") : []
     readonly property string inboxPhone: tabsShown.includes("inbox") ? deviceId : ""
@@ -139,11 +139,11 @@ Kirigami.Page {
     }
 
     function tabTitle(which) {
-        return ({ use: app.t("Use As"), inbox: app.t("Inbox"), gallery: app.t("Gallery"), files: app.t("Files"), history: app.t("History"), settings: app.t("Settings") })[which] ?? "";
+        return ({ use: app.t("Use As"), inbox: app.t("Inbox"), gallery: app.t("Gallery"), files: app.t("Files"), transfers: app.t("Transfers"), history: app.t("History"), settings: app.t("Settings") })[which] ?? "";
     }
 
     function tabIcon(which) {
-        return ({ use: "video-display", inbox: "mail-unread", gallery: "image-x-generic", files: "folder", history: "document-open-recent", settings: "configure" })[which] ?? "";
+        return ({ use: "video-display", inbox: "mail-unread", gallery: "image-x-generic", files: "folder", transfers: "exchange-positions", history: "document-open-recent", settings: "configure" })[which] ?? "";
     }
 
     function kindIcon(kind) {
@@ -172,6 +172,13 @@ Kirigami.Page {
     PhoneGallery {
         id: gallery
         app: page.app
+    }
+
+    // The corner panel steps aside while a Transfers tab shows the same
+    Binding {
+        target: page.app
+        property: "transfersOpen"
+        value: page.visible && page.trusted && page.tab === "transfers"
     }
 
     Connections {
@@ -542,7 +549,7 @@ Kirigami.Page {
                     Layout.fillWidth: true
                     visible: page.trusted
                     sourceComponent: !page.trusted ? null
-                        : ({ use: useTab, inbox: inboxTab, gallery: galleryTab, files: filesTab, history: historyTab, settings: settingsTab })[page.tab] ?? null
+                        : ({ use: useTab, inbox: inboxTab, gallery: galleryTab, files: filesTab, transfers: transfersTab, history: historyTab, settings: settingsTab })[page.tab] ?? null
                 }
             }
         }
@@ -717,6 +724,14 @@ Kirigami.Page {
             app: page.app
             store: inbox
             narrow: page.narrow
+        }
+    }
+
+    Component {
+        id: transfersTab
+        TransfersTab {
+            app: page.app
+            peer: page.deviceId
         }
     }
 

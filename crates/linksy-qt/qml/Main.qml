@@ -29,7 +29,8 @@ Kirigami.ApplicationWindow {
     // the last one ends
     property var corner: []
     // The Transfers page: on its way (oldest first), ended lately, and direct links (id: up)
-    readonly property bool transfersOpen: pageStack.lastItem?.objectName === "transfers"
+    // A device's Transfers tab shows (the corner panel steps aside); its page says so
+    property bool transfersOpen: false
     property var moving: []
     property var recent: []
     property var direct: ({})
@@ -294,7 +295,6 @@ Kirigami.ApplicationWindow {
     }
 
     function select(id) {
-        if (transfersOpen) while (pageStack.depth > 1) pageStack.pop();
         selectedId = id;
         history = [];
         refreshHistory();
@@ -429,11 +429,12 @@ Kirigami.ApplicationWindow {
                  total: e.what.total, files: e.what.files.map((f, i) => ({ name: f, size: sizes.length === e.what.files.length ? sizes[i] : null })) };
     }
 
+    // The Transfers tab of the device something's on its way with, else the one shown
     function openTransfers() {
-        if (transfersOpen) return;
-        selectedId = "";
-        while (pageStack.depth > 1) pageStack.pop();
-        pageStack.push(Qt.resolvedUrl("TransfersPage.qml"), { app: root });
+        const id = moving[0]?.peer || selectedId || recent[0]?.peer;
+        if (!id) return;
+        select(id);
+        pageStack.get(1)?.showTab("transfers");
     }
 
     // A transfer started, moved on or ended; one that ends before it was shown isn't news

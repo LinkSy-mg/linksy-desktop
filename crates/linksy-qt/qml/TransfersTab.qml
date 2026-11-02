@@ -1,21 +1,22 @@
-// Transfers, a page of its own as on the phone: speed, files on their way, and recent ones
+// Transfers with one device, in its page's Transfers tab: speed, files on their way, and recent
+// ones
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
 import org.kde.kirigami as Kirigami
 
-Kirigami.ScrollablePage {
+ColumnLayout {
     id: page
     required property var app
-    objectName: "transfers"
-    title: app.t("Transfers")
+    // The device's id
+    required property string peer
 
-    readonly property var moving: app.moving
+    readonly property var moving: app.moving.filter(m => m.peer === peer)
+    readonly property var recent: app.recent.filter(e => e.peer === peer)
     readonly property var first: moving.length > 0 ? moving[0] : null
-    readonly property var device: first ? app.devices.find(d => d.device.id === first.peer) ?? null : null
+    readonly property var device: app.devices.find(d => d.device.id === peer) ?? null
     readonly property var route: {
-        if (!first) return "wifi";
-        if (first.peer in app.direct) return app.direct[first.peer] ? "direct" : "setup";
+        if (peer in app.direct) return app.direct[peer] ? "direct" : "setup";
         if (device?.usb) return "usb";
         if (device?.away) return "away";
         return "wifi";
@@ -87,6 +88,7 @@ Kirigami.ScrollablePage {
     }
 
     ColumnLayout {
+        Layout.fillWidth: true
         spacing: Kirigami.Units.largeSpacing
 
         // Nothing on its way
@@ -220,6 +222,7 @@ Kirigami.ScrollablePage {
                             }
                         }
                         Rectangle {
+                            id: routeBox
                             anchors.centerIn: parent
                             implicitWidth: pill.implicitWidth + 18
                             implicitHeight: pill.implicitHeight + 6
@@ -235,13 +238,13 @@ Kirigami.ScrollablePage {
                                     implicitWidth: 12
                                     implicitHeight: 12
                                     source: ({ direct: "network-wireless-hotspot", setup: "network-wireless-acquiring", usb: "drive-removable-media-usb", away: "internet-web-browser" })[page.route] ?? "network-wireless"
-                                    color: parent.parent.blue ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
+                                    color: routeBox.blue ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
                                 }
                                 QQC2.Label {
                                     text: ({ direct: page.app.t("Wi-Fi Direct"), setup: page.app.t("Setting up Wi-Fi Direct"), usb: page.app.t("USB cable"), away: page.app.t("Away from home") })[page.route] ?? page.app.t("Same Wi-Fi")
                                     font.pixelSize: 11
                                     font.bold: true
-                                    color: parent.parent.blue ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor
+                                    color: routeBox.blue ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor
                                 }
                             }
                         }
@@ -358,9 +361,9 @@ Kirigami.ScrollablePage {
             }
         }
 
-        // What ended lately, with every device
+        // What ended lately
         QQC2.Label {
-            visible: page.app.recent.length > 0
+            visible: page.recent.length > 0
             Layout.topMargin: Kirigami.Units.gridUnit
             opacity: 0.6
             font.bold: true
@@ -369,7 +372,7 @@ Kirigami.ScrollablePage {
             text: page.app.t("Recent").toUpperCase()
         }
         Repeater {
-            model: page.app.recent.slice(0, 30)
+            model: page.recent.slice(0, 30)
             ColumnLayout {
                 id: recentItem
                 required property var modelData
