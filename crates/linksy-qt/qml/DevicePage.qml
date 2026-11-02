@@ -43,6 +43,8 @@ Kirigami.Page {
     readonly property var tabsShown: tabsKey ? tabsKey.split(" ") : []
     readonly property string inboxPhone: tabsShown.includes("inbox") ? deviceId : ""
     readonly property string filesPhone: tabsShown.includes("files") ? deviceId : ""
+    // Where the tabs are in the page, to pin them at its top once it scrolls past them
+    readonly property real tabsTop: column.y + tabBar.y
 
     title: name
     padding: 0
@@ -121,6 +123,17 @@ Kirigami.Page {
         files.list();
     }
 
+    // A tab chosen from the pinned ones: its content starts just under them
+    function pick(which) {
+        tab = which;
+        pinning.restart();
+        toTabs();
+    }
+
+    function toTabs() {
+        flick.contentY = Math.max(0, Math.min(tabsTop, flick.contentHeight - flick.height));
+    }
+
     function tabTitle(which) {
         return ({ use: app.t("Use As"), inbox: app.t("Inbox"), files: app.t("Files"), history: app.t("History"), settings: app.t("Settings") })[which] ?? "";
     }
@@ -171,6 +184,12 @@ Kirigami.Page {
         }
     }
 
+    // While a tab chosen from the pinned ones fills in, it stays just under them
+    Timer {
+        id: pinning
+        interval: 300
+    }
+
     FileDialog {
         id: filePicker
         title: app.t("Send to {name}", { name: page.name })
@@ -219,6 +238,7 @@ Kirigami.Page {
             // As Kirigami's own pages flick
             flickDeceleration: 1500
             maximumFlickVelocity: 5000
+            onContentHeightChanged: if (pinning.running) page.toTabs()
 
             ColumnLayout {
                 id: column
@@ -482,6 +502,7 @@ Kirigami.Page {
                     Layout.topMargin: Kirigami.Units.largeSpacing
                     visible: page.trusted
                     onChosen: which => page.tab = which
+                    onScrollChanged: pinned.scroll = scroll
                 }
 
                 Loader {
@@ -492,6 +513,21 @@ Kirigami.Page {
                         : ({ use: useTab, inbox: inboxTab, files: filesTab, history: historyTab, settings: settingsTab })[page.tab] ?? null
                 }
             }
+        }
+    }
+
+    // The tabs again, pinned at the top of the page once it scrolls past them
+    Rectangle {
+        visible: tabBar.visible && flick.contentY > page.tabsTop
+        width: flick.width
+        height: pinned.implicitHeight
+        color: Kirigami.Theme.backgroundColor
+        TabRow {
+            id: pinned
+            x: column.x
+            width: column.width
+            onChosen: which => page.pick(which)
+            onScrollChanged: tabBar.scroll = scroll
         }
     }
 
@@ -630,7 +666,7 @@ Kirigami.Page {
             }
             QQC2.ScrollView {
                 Layout.fillWidth: true
-                // As tall as the page under its tabs, then it scrolls by itself. (A view
+                // As tall as the page under the pinned tabs, then it scrolls by itself. (A view
                 // with no height builds no rows to measure: the most at first.)
                 readonly property real most: Math.max(Kirigami.Units.gridUnit * 8, flick.height - tabBar.height)
                 Layout.preferredHeight: historyList.contentHeight > 0 ? Math.min(historyList.contentHeight, most) : most
@@ -710,6 +746,7 @@ Kirigami.Page {
     // underlined in the accent
     component TabRow: Item {
         id: bar
+        property alias scroll: tabsFlick.contentX
         signal chosen(string which)
         implicitHeight: tabsRow.implicitHeight
 
