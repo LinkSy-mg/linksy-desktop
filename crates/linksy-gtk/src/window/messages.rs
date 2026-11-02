@@ -127,7 +127,7 @@ impl MessagesView {
         column.append(&alerts_head);
         column.append(&alerts);
         column.append(&empty);
-        let list_scroller = gtk::ScrolledWindow::builder().child(&column).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).build();
+        let list_scroller = gtk::ScrolledWindow::builder().child(&column).hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).css_classes(["inner-scroll"]).build();
         let list_side = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(8).width_request(300).margin_end(12).build();
         list_side.append(&search_row);
         list_side.append(&list_scroller);
@@ -145,7 +145,7 @@ impl MessagesView {
         head.append(&titles);
 
         let bubbles = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(12).margin_bottom(12).valign(gtk::Align::End).build();
-        let scroller = gtk::ScrolledWindow::builder().child(&bubbles).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).build();
+        let scroller = gtk::ScrolledWindow::builder().child(&bubbles).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).css_classes(["inner-scroll"]).build();
         let entry = gtk::Entry::builder().placeholder_text(t!("Reply")).hexpand(true).css_classes(["reply-entry"]).build();
         let send = gtk::Button::builder().icon_name("mail-send-symbolic").tooltip_text(t!("Send")).css_classes(["circular", "suggested-action"]).valign(gtk::Align::Center).sensitive(false).build();
         let compose = gtk::Box::builder().spacing(8).margin_top(10).build();

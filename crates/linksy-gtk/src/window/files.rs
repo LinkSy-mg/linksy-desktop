@@ -38,7 +38,7 @@ impl FilesView {
         let crumbs = gtk::Box::builder().spacing(2).hexpand(true).build();
         let open_folder = gtk::Button::builder().label(t!("Open in Files")).valign(gtk::Align::Center).build();
         let top = gtk::Box::builder().spacing(8).build();
-        top.append(&gtk::ScrolledWindow::builder().child(&crumbs).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).hexpand(true).build());
+        top.append(&gtk::ScrolledWindow::builder().child(&crumbs).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).hexpand(true).css_classes(["inner-scroll"]).build());
         top.append(&open_folder);
 
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
@@ -81,7 +81,7 @@ impl FilesView {
             .hscrollbar_policy(gtk::PolicyType::Never)
             .propagate_natural_height(true)
             .max_content_height(520)
-            .css_classes(["files-box"])
+            .css_classes(["files-box", "inner-scroll"])
             .build();
         let status = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).css_classes(["dim-label"]).margin_top(28).margin_bottom(28).build();
         let stack = gtk::Stack::builder().vhomogeneous(false).build();

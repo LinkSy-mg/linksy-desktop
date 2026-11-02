@@ -70,7 +70,10 @@ button.small { padding: 2px 12px; min-height: 26px; font-size: 0.9em; }
 }
 /* Tabs under the actions: a line under them all, the one showing underlined */
 .page-tabs { border-bottom: 1px solid alpha(currentColor, 0.12); }
-.sticky-tabs { margin-top: -1px; padding-top: 1px; background-color: @window_bg_color; }
+.sticky-tabs { background-color: @window_bg_color; }
+/* The page scrolling under the header shades the top of every scrolled area in the
+   window; only the page's own shows it, the ones inside only when they're scrolled. */
+toolbarview.undershoot-top scrolledwindow.inner-scroll:not(.undershoot-top) > undershoot.top { box-shadow: none; background: none; }
 button.page-tab {
   padding: 10px 2px 8px;
   border-radius: 0;

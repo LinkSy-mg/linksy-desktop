@@ -615,7 +615,7 @@ impl DevicePage {
             tab_buttons.push((which, b));
             sticky_buttons.push((which, s));
         }
-        let tabs = gtk::ScrolledWindow::builder().child(&tab_row).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).margin_top(10).build();
+        let tabs = gtk::ScrolledWindow::builder().child(&tab_row).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).margin_top(10).css_classes(["inner-scroll"]).build();
         let tabbed = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(20).build();
         tabbed.append(&tabs);
         tabbed.append(&tab_stack);
@@ -653,7 +653,7 @@ impl DevicePage {
                 g();
             }
         });
-        let sticky_tabs = gtk::ScrolledWindow::builder().child(&sticky_row).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).halign(gtk::Align::Start).build();
+        let sticky_tabs = gtk::ScrolledWindow::builder().child(&sticky_row).vscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).css_classes(["inner-scroll"]).halign(gtk::Align::Start).build();
         let sticky = gtk::Box::builder().valign(gtk::Align::Start).css_classes(["sticky-tabs"]).visible(false).build();
         sticky.append(&sticky_tabs);
         let overlay = gtk::Overlay::builder().child(&scroller).build();
