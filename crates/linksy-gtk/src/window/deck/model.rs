@@ -503,29 +503,26 @@ pub fn has_glyphs(s: &str) -> bool {
     s.chars().all(|c| glyph(c).is_some())
 }
 
-/// `text` in lines of at most `per_line` glyphs, broken at spaces where it can, at most
-/// `lines` of them; what's cut ends in a full stop.
+/// `text` in lines of at most `per_line` glyphs, broken at spaces, at most `lines` of them;
+/// what's cut (a word longer than a line, or lines past the last) ends in a full stop.
 pub fn wrap(text: &str, per_line: usize, lines: usize) -> Vec<String> {
     let per_line = per_line.max(1);
     let mut out: Vec<String> = Vec::new();
     let mut line = String::new();
     for word in text.split_whitespace() {
         let mut word: Vec<char> = word.chars().collect();
-        loop {
-            let len = line.chars().count();
-            let room = if len == 0 { per_line } else { per_line.saturating_sub(len + 1) };
-            if word.len() <= room {
-                if len > 0 {
-                    line.push(' ');
-                }
-                line.extend(word.iter());
-                break;
-            }
-            if len == 0 {
-                line.extend(word.drain(..per_line));
-            }
+        if word.len() > per_line {
+            word.truncate(per_line.saturating_sub(1));
+            word.push('.');
+        }
+        let len = line.chars().count();
+        if len > 0 && len + 1 + word.len() > per_line {
             out.push(std::mem::take(&mut line));
         }
+        if !line.is_empty() {
+            line.push(' ');
+        }
+        line.extend(word.iter());
     }
     if !line.is_empty() {
         out.push(line);
@@ -662,6 +659,7 @@ mod tests {
         assert_eq!(wrap("Lock Screen", 6, 2), ["Lock", "Screen"]);
         assert_eq!(wrap("Next", 8, 1), ["Next"]);
         assert_eq!(wrap("Previous Track", 5, 1), ["Prev."]);
+        assert_eq!(wrap("Previous Track", 7, 2), ["Previo.", "Track"], "a long word is cut, not split");
 
         let taken: HashSet<String> = ["00000000".to_string()].into();
         let id = new_id(|id| taken.contains(id));

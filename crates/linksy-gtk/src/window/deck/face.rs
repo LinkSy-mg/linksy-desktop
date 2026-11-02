@@ -80,9 +80,10 @@ impl Look<'_> {
 /// The lines of `s` at the biggest of `pitches` that leaves nothing out, else cut at the last.
 fn fit(s: &str, width: f64, lines: usize, pitches: &[f32]) -> (Vec<String>, f32) {
     let per = |p: f32| ((width + p as f64) / (6.0 * p as f64)).floor().max(1.0) as usize;
+    let whole = s.split_whitespace().collect::<Vec<_>>().join(" ");
     for &p in pitches {
         let wrapped = model::wrap(s, per(p), usize::MAX);
-        if wrapped.len() <= lines && wrapped.iter().all(|l| l.chars().count() <= per(p)) {
+        if wrapped.len() <= lines && wrapped.join(" ") == whole {
             return (wrapped, p);
         }
     }
