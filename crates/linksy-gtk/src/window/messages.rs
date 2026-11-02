@@ -65,8 +65,20 @@ pub struct MessagesView {
     compose: gtk::Box,
     no_reply: gtk::Label,
     thread_stack: gtk::Stack,
+    alert: AlertPane,
     narrow: Cell<bool>,
     state: RefCell<ViewState>,
+}
+
+/// One of the other notifications, in full where a conversation would show.
+struct AlertPane {
+    back: gtk::Button,
+    icon: gtk::Image,
+    title: gtk::Label,
+    subtitle: gtk::Label,
+    body: gtk::Label,
+    code: gtk::Box,
+    dismiss: gtk::Button,
 }
 
 #[derive(Default)]
@@ -76,6 +88,8 @@ struct ViewState {
     conversations: Vec<Conversation>,
     alerts: Vec<Alert>,
     open: Option<String>,
+    /// The other notification shown instead, by its key.
+    open_alert: Option<String>,
     built: bool,
 }
 
@@ -120,7 +134,7 @@ impl MessagesView {
         alerts_head.append(&gtk::Label::builder().label(t!("Other Notifications")).xalign(0.0).hexpand(true).css_classes(["caption-heading", "dim-label"]).build());
         let clear = gtk::Button::builder().label(t!("Clear All")).css_classes(["flat", "small"]).build();
         alerts_head.append(&clear);
-        let alerts = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).css_classes(["inbox-list"]).build();
+        let alerts = gtk::ListBox::builder().css_classes(["inbox-list"]).build();
         let empty = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).css_classes(["dim-label"]).margin_top(24).margin_start(12).margin_end(12).visible(false).build();
         let column = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).build();
         column.append(&list);
@@ -169,6 +183,8 @@ impl MessagesView {
         let thread_stack = gtk::Stack::new();
         thread_stack.add_named(&gtk::Label::builder().label(t!("No Conversation Selected")).vexpand(true).css_classes(["dim-label"]).build(), Some("empty"));
         thread_stack.add_named(&thread, Some("open"));
+        let (alert, alert_box) = AlertPane::new();
+        thread_stack.add_named(&alert_box, Some("alert"));
         let thread_side = gtk::Box::builder().orientation(gtk::Orientation::Vertical).hexpand(true).margin_start(18).build();
         thread_side.append(&thread_stack);
 
@@ -206,6 +222,7 @@ impl MessagesView {
             compose,
             no_reply,
             thread_stack,
+            alert,
             narrow: Cell::new(false),
             state: RefCell::default(),
         })
@@ -218,7 +235,10 @@ impl MessagesView {
     }
 
     fn layout(&self) {
-        let open = self.state.borrow().open.is_some();
+        let open = {
+            let state = self.state.borrow();
+            state.open.is_some() || state.open_alert.is_some()
+        };
         let narrow = self.narrow.get();
         self.list_side.set_visible(!narrow || !open);
         self.list_side.set_hexpand(narrow);
@@ -226,6 +246,19 @@ impl MessagesView {
         self.thread_side.set_visible(!narrow || open);
         self.thread_side.set_margin_start(if narrow { 0 } else { 18 });
         self.back.set_visible(narrow);
+        self.alert.back.set_visible(narrow);
+    }
+
+    /// Nothing open on the right: the list, on a narrow page.
+    fn close_open(&self) {
+        {
+            let mut state = self.state.borrow_mut();
+            state.open = None;
+            state.open_alert = None;
+        }
+        self.select_open();
+        self.thread_stack.set_visible_child_name("empty");
+        self.layout();
     }
 
     fn clear_rows(&self) {
@@ -288,10 +321,24 @@ impl MessagesView {
     }
 
     fn select_open(&self) {
-        let open = self.state.borrow().open.clone();
+        let (open, alert) = {
+            let state = self.state.borrow();
+            (state.open.clone(), state.open_alert.clone())
+        };
         match open.and_then(|id| self.row_of(&id)) {
             Some(row) => self.list.select_row(Some(&row)),
             None => self.list.unselect_all(),
+        }
+        let mut row = self.alerts.first_child();
+        while let Some(r) = row {
+            if let Ok(r) = r.clone().downcast::<gtk::ListBoxRow>() {
+                if alert.as_deref() == Some(r.widget_name().as_str()) {
+                    self.alerts.select_row(Some(&r));
+                } else if r.is_selected() {
+                    self.alerts.unselect_row(&r);
+                }
+            }
+            row = r.next_sibling();
         }
     }
 
@@ -308,6 +355,36 @@ impl MessagesView {
     fn count(&self) -> u32 {
         let state = self.state.borrow();
         state.conversations.iter().map(|c| c.unread.min(1)).sum::<u32>() + state.alerts.len() as u32
+    }
+}
+
+impl AlertPane {
+    fn new() -> (Self, gtk::Box) {
+        let back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(t!("Back")).css_classes(["flat", "circular"]).valign(gtk::Align::Center).visible(false).build();
+        let icon = gtk::Image::builder().pixel_size(28).css_classes(["alert-icon"]).valign(gtk::Align::Center).build();
+        let title = gtk::Label::builder().xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).css_classes(["heading"]).build();
+        let subtitle = gtk::Label::builder().xalign(0.0).ellipsize(gtk::pango::EllipsizeMode::End).css_classes(["caption", "dim-label", "numeric"]).build();
+        let titles = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(2).hexpand(true).valign(gtk::Align::Center).build();
+        titles.append(&title);
+        titles.append(&subtitle);
+        let head = gtk::Box::builder().spacing(12).margin_bottom(10).build();
+        head.append(&back);
+        head.append(&icon);
+        head.append(&titles);
+        let body = gtk::Label::builder().xalign(0.0).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).selectable(true).build();
+        let code = gtk::Box::builder().build();
+        let content = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).margin_top(14).margin_bottom(14).build();
+        content.append(&body);
+        content.append(&code);
+        let scroller = gtk::ScrolledWindow::builder().child(&content).vexpand(true).hscrollbar_policy(gtk::PolicyType::Never).css_classes(["inner-scroll"]).build();
+        let dismiss = gtk::Button::builder().label(t!("Dismiss")).halign(gtk::Align::End).margin_top(10).build();
+        let pane = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        pane.append(&head);
+        pane.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        pane.append(&scroller);
+        pane.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+        pane.append(&dismiss);
+        (Self { back, icon, title, subtitle, body, code, dismiss }, pane)
     }
 }
 
@@ -368,12 +445,26 @@ impl Window {
             });
         }
         let w = Rc::downgrade(self);
-        m.back.connect_clicked(move |_| {
+        m.alerts.connect_row_activated(move |_, row| {
             if let Some(w) = w.upgrade() {
-                w.messages.state.borrow_mut().open = None;
-                w.messages.select_open();
-                w.messages.thread_stack.set_visible_child_name("empty");
-                w.messages.layout();
+                w.open_alert(row.widget_name().to_string());
+            }
+        });
+        for back in [&m.back, &m.alert.back] {
+            let w = Rc::downgrade(self);
+            back.connect_clicked(move |_| {
+                if let Some(w) = w.upgrade() {
+                    w.messages.close_open();
+                }
+            });
+        }
+        let w = Rc::downgrade(self);
+        m.alert.dismiss.connect_clicked(move |_| {
+            if let Some(w) = w.upgrade() {
+                let key = w.messages.state.borrow().open_alert.clone();
+                if key.is_some() {
+                    w.dismiss_alert(key);
+                }
             }
         });
         let w = Rc::downgrade(self);
@@ -449,18 +540,63 @@ impl Window {
         m.state.borrow_mut().built = true;
         m.select_open();
         m.apply_filter();
+        // The notification open on the right, or gone
+        let shown_alert = {
+            let state = m.state.borrow();
+            state.open_alert.as_ref().map(|key| state.alerts.iter().find(|a| &a.key == key).cloned())
+        };
+        match shown_alert {
+            Some(Some(a)) => self.show_alert(&a),
+            Some(None) => m.close_open(),
+            None => {}
+        }
         let open = m.state.borrow().open.clone();
         match open.and_then(|id| m.conversation(&id)) {
             Some(c) => self.load_thread(&c),
-            None => {
-                // Development aid (screenshots): LINKSY_SCREENSHOT_THREAD=<title> opens one.
-                if let Ok(title) = std::env::var("LINKSY_SCREENSHOT_THREAD")
-                    && let Some(id) = conversations.iter().find(|c| c.title == title).map(|c| c.id.clone())
-                {
+            None if m.state.borrow().open_alert.is_none() => {
+                // Development aid (screenshots): LINKSY_SCREENSHOT_THREAD=<title> opens a
+                // conversation, or another notification, by its title.
+                if let Ok(title) = std::env::var("LINKSY_SCREENSHOT_THREAD") {
                     let w = self.clone();
-                    glib::idle_add_local_once(move || w.open_conversation(id));
+                    if let Some(id) = conversations.iter().find(|c| c.title == title).map(|c| c.id.clone()) {
+                        glib::idle_add_local_once(move || w.open_conversation(id));
+                    } else if let Some(key) = alerts.iter().find(|a| a.title == title).map(|a| a.key.clone()) {
+                        glib::idle_add_local_once(move || w.open_alert(key));
+                    }
                 }
             }
+            None => {}
+        }
+    }
+
+    fn open_alert(self: &Rc<Self>, key: String) {
+        let Some(a) = self.messages.state.borrow().alerts.iter().find(|a| a.key == key).cloned() else { return };
+        {
+            let mut state = self.messages.state.borrow_mut();
+            state.open = None;
+            state.open_alert = Some(key);
+        }
+        self.show_alert(&a);
+        self.messages.select_open();
+        self.messages.thread_stack.set_visible_child_name("alert");
+        self.messages.layout();
+    }
+
+    fn show_alert(self: &Rc<Self>, a: &Alert) {
+        let p = &self.messages.alert;
+        match &a.icon {
+            Some(path) => p.icon.set_from_file(Some(path)),
+            None => p.icon.set_icon_name(Some("preferences-system-notifications-symbolic")),
+        }
+        p.title.set_label(if a.title.is_empty() { &a.app_name } else { &a.title });
+        p.subtitle.set_label(&format!("{} · {}", a.app_name, fmt_when(a.at_ms)));
+        p.body.set_label(&a.body);
+        p.body.set_visible(!a.body.is_empty());
+        while let Some(chip) = p.code.first_child() {
+            p.code.remove(&chip);
+        }
+        if let Some(code) = &a.code {
+            p.code.append(&self.copy_chip(code));
         }
     }
 
@@ -483,7 +619,11 @@ impl Window {
     fn open_conversation(self: &Rc<Self>, id: String) {
         let Some(c) = self.messages.conversation(&id) else { return };
         let m = &self.messages;
-        m.state.borrow_mut().open = Some(id.clone());
+        {
+            let mut state = m.state.borrow_mut();
+            state.open = Some(id.clone());
+            state.open_alert = None;
+        }
         m.title.set_label(&c.title);
         m.subtitle.set_label(&c.app_name);
         m.avatar.set_text(Some(&c.title));
@@ -798,7 +938,7 @@ impl Window {
         b.append(&icon);
         b.append(&text);
         b.append(&dismiss);
-        let row = gtk::ListBoxRow::builder().child(&b).activatable(false).build();
+        let row = gtk::ListBoxRow::builder().child(&b).build();
         row.set_widget_name(&a.key);
         row
     }
