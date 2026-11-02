@@ -14,8 +14,14 @@ ColumnLayout {
     required property string deviceName
     // Icons only on a narrow page
     required property bool narrow
+    // The page's own scrolling, which the rows grow into, and how much the pinned tabs cover
+    required property Flickable view
+    required property real covered
     // The folder the rows are from: another one starts at its top
     property string listed: ""
+    // What the folder holds in the order and search chosen; the first `limit` are rows
+    property var sorted: []
+    property int limit: 200
     // Search: this folder, by name, as it's typed
     property bool searching: false
     property string query: ""
@@ -59,6 +65,11 @@ ColumnLayout {
         function onSortByChanged() { tab.show(true) }
         function onDescendingChanged() { tab.show(true) }
     }
+    // 200 more rows each time the page reaches its end
+    Connections {
+        target: tab.view
+        function onContentYChanged() { if (tab.view.contentY + tab.view.height > tab.view.contentHeight - 600) tab.more() }
+    }
 
     function keyOf(e) {
         return (e.dir ? "d/" : "f/") + e.name;
@@ -72,16 +83,49 @@ ColumnLayout {
         return store.descending ? -order : order;
     }
 
-    // The rows: in place as the folder changes, or all anew for another order or search
+    // The rows: in place as the folder changes, or all anew (the first 200) for another order,
+    // search or folder
     function show(fresh) {
         const list = store.entries.filter(e => !query || e.name.toLowerCase().includes(query));
         list.sort((a, b) => tab.compare(a, b));
-        if (fresh) shown.replace(list, e => tab.keyOf(e));
-        else shown.sync(list, e => tab.keyOf(e));
+        sorted = list;
+        if (fresh) limit = 200;
+        refill(fresh);
         if (listed !== store.path) {
             listed = store.path;
-            folderView.positionViewAtBeginning();
+            reveal(tab, 0);
         }
+    }
+
+    function refill(fresh) {
+        if (fresh) shown.replace(sorted.slice(0, limit), e => tab.keyOf(e));
+        else shown.sync(sorted.slice(0, limit), e => tab.keyOf(e));
+    }
+
+    function more() {
+        if (limit >= sorted.length) return;
+        limit += 200;
+        refill(false);
+    }
+
+    // Rows down to this one, at least
+    function showUpTo(index) {
+        if (index < limit) return;
+        limit = Math.ceil((index + 1) / 200) * 200;
+        refill(false);
+    }
+
+    // The page scrolled so `height` of `item` shows, under the pinned tabs
+    function reveal(item, height) {
+        rowsColumn.forceLayout();
+        const top = item.mapToItem(view.contentItem, 0, 0).y - covered;
+        if (top < view.contentY) view.contentY = Math.max(0, top);
+        else if (top + covered + height > view.contentY + view.height) view.contentY = Math.min(top + covered + height - view.height, view.contentHeight - view.height);
+    }
+
+    function revealRow(index) {
+        const row = rowRepeater.itemAt(index);
+        if (row) reveal(row, row.height);
     }
 
     // The folder was read: nothing picked but what was asked for
@@ -92,7 +136,7 @@ ColumnLayout {
     }
 
     function entryAt(index) {
-        return shown.rows[shown.model.get(index).key];
+        return sorted[index];
     }
 
     function setPicks(next, index) {
@@ -103,11 +147,11 @@ ColumnLayout {
 
     function pickOnly(index) {
         anchor = index;
-        setPicks({ [shown.model.get(index).key]: true }, index);
+        setPicks({ [keyOf(sorted[index])]: true }, index);
     }
 
     function togglePick(index) {
-        const key = shown.model.get(index).key, next = Object.assign({}, picked);
+        const key = keyOf(sorted[index]), next = Object.assign({}, picked);
         if (next[key]) delete next[key];
         else next[key] = true;
         anchor = index;
@@ -117,13 +161,14 @@ ColumnLayout {
     // From where the last pick was to here, with what's picked already or instead of it
     function pickRange(index, add) {
         const next = add ? Object.assign({}, picked) : {}, from = anchor < 0 ? index : anchor;
-        for (let i = Math.min(from, index); i <= Math.max(from, index); i++) next[shown.model.get(i).key] = true;
+        for (let i = Math.min(from, index); i <= Math.max(from, index); i++) next[keyOf(sorted[i])] = true;
         setPicks(next, index);
     }
 
+    // All of the folder's, rows yet to show too
     function pickAll() {
         const next = {};
-        for (let i = 0; i < shown.model.count; i++) next[shown.model.get(i).key] = true;
+        for (const e of sorted) next[keyOf(e)] = true;
         setPicks(next, folderView.currentIndex);
     }
 
@@ -133,22 +178,18 @@ ColumnLayout {
         anchor = -1;
     }
 
+    // A new or renamed one, shown even past the rows there were
     function pickName(name) {
-        for (let i = 0; i < shown.model.count; i++) {
-            if (entryAt(i).name !== name) continue;
-            pickOnly(i);
-            folderView.positionViewAtIndex(i, ListView.Contain);
-            return;
-        }
+        const at = sorted.findIndex(e => e.name === name);
+        if (at < 0) return;
+        showUpTo(at);
+        pickOnly(at);
+        revealRow(at);
     }
 
     // What's picked, in the order shown
     function pickedEntries() {
-        const out = [];
-        for (let i = 0; i < shown.model.count; i++) {
-            if (picked[shown.model.get(i).key]) out.push(entryAt(i));
-        }
-        return out;
+        return sorted.filter(e => picked[tab.keyOf(e)]);
     }
 
     function click(index, modifiers) {
@@ -199,7 +240,7 @@ ColumnLayout {
     // As in Files: Delete, F2 to rename, Escape to let go, Ctrl+F to search, Ctrl+A, the
     // arrows, Enter to open
     function key(event) {
-        const ctrl = event.modifiers & Qt.ControlModifier, count = shown.model.count;
+        const ctrl = event.modifiers & Qt.ControlModifier, count = sorted.length;
         if (event.key === Qt.Key_F && ctrl) searching = true;
         else if (event.key === Qt.Key_Delete && pickedCount > 0) askDelete();
         else if (event.key === Qt.Key_F2 && pickedCount === 1) askRename();
@@ -208,9 +249,10 @@ ColumnLayout {
         else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter) && folderView.currentIndex >= 0) activate(entryAt(folderView.currentIndex));
         else if ((event.key === Qt.Key_Down || event.key === Qt.Key_Up) && count > 0) {
             const next = Math.max(0, Math.min(count - 1, folderView.currentIndex + (event.key === Qt.Key_Down ? 1 : -1)));
+            showUpTo(next);
             if (event.modifiers & Qt.ShiftModifier) pickRange(next, false);
             else pickOnly(next);
-            folderView.positionViewAtIndex(next, ListView.Contain);
+            revealRow(next);
         } else {
             event.accepted = false;
             return;
@@ -377,33 +419,28 @@ ColumnLayout {
         }
     }
 
-    // The list, or why there's nothing in it
+    // The list, or why there's nothing in it. Its rows grow the page, which scrolls them.
     Item {
         Layout.fillWidth: true
-        implicitHeight: tab.status === "" ? frame.height : statusBox.implicitHeight + Kirigami.Units.gridUnit * 3
+        implicitHeight: tab.status === "" ? folderView.height : statusBox.implicitHeight + Kirigami.Units.gridUnit * 3
 
-        Rectangle {
-            id: frame
-            // A view with no height builds no rows to measure: the most at first
-            readonly property real most: Kirigami.Units.gridUnit * 29
+        Item {
+            id: folderView
+            // The row the keys move from
+            property int currentIndex: -1
             width: parent.width
-            height: (folderView.contentHeight > 0 ? Math.min(folderView.contentHeight, most) : most) + 2
+            height: rowsColumn.implicitHeight
             visible: tab.status === ""
-            radius: Kirigami.Units.cornerRadius * 2
-            color: "transparent"
-            border.width: 1
-            border.color: Qt.alpha(Kirigami.Theme.textColor, 0.1)
+            activeFocusOnTab: true
+            Keys.onPressed: event => tab.key(event)
 
-            QQC2.ScrollView {
-                anchors.fill: parent
-                anchors.margins: 1
-                ListView {
-                    id: folderView
-                    clip: true
+            Column {
+                id: rowsColumn
+                width: parent.width
+                Repeater {
+                    id: rowRepeater
                     model: shown.model
-                    keyNavigationEnabled: false
                     delegate: EntryRow {}
-                    Keys.onPressed: event => tab.key(event)
                 }
             }
         }
@@ -736,7 +773,7 @@ ColumnLayout {
         // The row the keys move from
         Rectangle {
             anchors.fill: parent
-            visible: entry.ListView.isCurrentItem && folderView.activeFocus
+            visible: entry.index === folderView.currentIndex && folderView.activeFocus
             color: "transparent"
             border.width: 1
             border.color: Kirigami.Theme.focusColor
@@ -746,7 +783,7 @@ ColumnLayout {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: 1
-            visible: entry.index < folderView.count - 1
+            visible: entry.index < shown.model.count - 1
             color: Qt.alpha(Kirigami.Theme.textColor, 0.07)
         }
     }

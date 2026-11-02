@@ -836,6 +836,8 @@ Kirigami.Page {
             store: files
             deviceName: page.name
             narrow: page.narrow
+            view: flick
+            covered: tabBar.height
         }
     }
 
