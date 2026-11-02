@@ -137,6 +137,8 @@ enum Job {
     Run(Fingerprint, Act),
     /// What a phone may do changed (`None`: any phone): its list again, if its deck shows.
     Actions(Option<Fingerprint>),
+    /// A phone's layouts were saved: its list and layouts again, if its deck shows.
+    Layouts(Fingerprint),
     /// The volume changed.
     Sound,
 }
@@ -278,6 +280,8 @@ impl<D: Desktop> Deck<D> {
         next.layouts.insert(*phone, layouts.clone());
         self.save(&next)?;
         *saved = next;
+        drop(saved);
+        let _ = self.inner.jobs.send(Job::Layouts(*phone));
         Ok(layouts)
     }
 
@@ -411,9 +415,10 @@ impl<D: Desktop> Deck<D> {
                         told.insert(phone);
                         acts.push(act);
                     }
-                    Job::Open(phone) => {
+                    Job::Open(phone) | Job::Layouts(phone) => {
                         told.insert(phone);
                         self.send_actions(&node, phone).await;
+                        self.send_layouts(&node, phone).await;
                     }
                     Job::Actions(only) => {
                         let open: Vec<Fingerprint> = self.inner.open.lock().unwrap().keys().copied().filter(|p| only.is_none_or(|o| o == *p)).collect();
@@ -460,6 +465,20 @@ impl<D: Desktop> Deck<D> {
         {
             debug!("deck actions: {e}");
             self.inner.open.lock().unwrap().remove(&phone);
+        }
+    }
+
+    /// Its layouts, to a phone that takes them.
+    async fn send_layouts(&self, node: &Node, phone: Fingerprint) {
+        if !self.reachable(node, &phone) {
+            return;
+        }
+        match node.deck_layout(&phone, &self.layouts(&phone)).await {
+            Ok(()) | Err(linksy_core::Error::Unsupported) => {}
+            Err(e) => {
+                debug!("deck layouts: {e}");
+                self.inner.open.lock().unwrap().remove(&phone);
+            }
         }
     }
 
