@@ -9,6 +9,12 @@ QtObject {
     property var rows: ({})
     property ListModel model: ListModel {}
 
+    // All rows anew, for another order: quicker than moving them one by one
+    function replace(list, keyOf, rolesOf) {
+        model.clear();
+        sync(list, keyOf, rolesOf);
+    }
+
     // `list` in order; `keyOf(x, i)` a unique string; `rolesOf(x)` scalar roles for sections
     function sync(list, keyOf, rolesOf) {
         const next = {};

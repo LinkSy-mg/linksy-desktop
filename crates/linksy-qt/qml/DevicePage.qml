@@ -779,6 +779,7 @@ Kirigami.Page {
             app: page.app
             store: files
             deviceName: page.name
+            narrow: page.narrow
         }
     }
 
