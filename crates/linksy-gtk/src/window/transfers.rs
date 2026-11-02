@@ -1,4 +1,5 @@
-//! Transfers, a page of its own as on the phone: speed, files on their way, and recent ones.
+//! Transfers with one device, in its page's Transfers tab: speed, files on their way, and
+//! recent ones.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -65,7 +66,7 @@ struct FileRow {
 }
 
 pub(super) struct TransfersPage {
-    pub root: gtk::ScrolledWindow,
+    pub root: gtk::Box,
     body: gtk::Box,
     live: RefCell<Option<Live>>,
     open: RefCell<HashSet<Uuid>>,
@@ -74,9 +75,9 @@ pub(super) struct TransfersPage {
 
 impl TransfersPage {
     pub fn new() -> Rc<Self> {
-        let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).margin_top(12).margin_bottom(24).margin_start(16).margin_end(16).build();
-        let clamp = adw::Clamp::builder().maximum_size(640).child(&body).build();
-        let root = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vexpand(true).child(&clamp).build();
+        let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        let root = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        root.append(&body);
         Rc::new(Self { root, body, live: RefCell::default(), open: RefCell::default(), handler: RefCell::default() })
     }
 

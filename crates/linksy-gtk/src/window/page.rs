@@ -75,6 +75,7 @@ pub enum Tab {
     Inbox,
     Gallery,
     Files,
+    Transfers,
     History,
     Settings,
 }
@@ -86,6 +87,7 @@ impl Tab {
             Tab::Inbox => "inbox",
             Tab::Gallery => "gallery",
             Tab::Files => "files",
+            Tab::Transfers => "transfers",
             Tab::History => "history",
             Tab::Settings => "settings",
         }
@@ -157,6 +159,7 @@ pub struct DevicePage {
     pub inbox_slot: gtk::Box,
     pub gallery_slot: gtk::Box,
     pub files_slot: gtk::Box,
+    pub transfers_slot: gtk::Box,
     /// The device's switches, as plain rows.
     settings: gtk::ListBox,
     /// "Lock When Away", for phones; `syncing` while it's set from the service's state.
@@ -552,6 +555,7 @@ impl DevicePage {
         let inbox_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let gallery_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let files_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        let transfers_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let forget_button = gtk::Button::builder().label(t!("Forget Device…")).halign(gtk::Align::Start).css_classes(["error"]).build();
         let e = emit.clone();
         forget_button.connect_clicked(move |_| e(Action::Forget));
@@ -563,6 +567,7 @@ impl DevicePage {
         tab_stack.add_named(&inbox_slot, Some(Tab::Inbox.name()));
         tab_stack.add_named(&gallery_slot, Some(Tab::Gallery.name()));
         tab_stack.add_named(&files_slot, Some(Tab::Files.name()));
+        tab_stack.add_named(&transfers_slot, Some(Tab::Transfers.name()));
         tab_stack.add_named(&activity_box, Some(Tab::History.name()));
         tab_stack.add_named(&settings_page, Some(Tab::Settings.name()));
         let tab = Rc::new(std::cell::Cell::new(Tab::Use));
@@ -579,6 +584,7 @@ impl DevicePage {
             (Tab::Inbox, "mail-unread-symbolic", t!("Inbox")),
             (Tab::Gallery, "image-x-generic-symbolic", t!("Gallery")),
             (Tab::Files, "folder-symbolic", t!("Files")),
+            (Tab::Transfers, "network-transmit-receive-symbolic", t!("Transfers")),
             (Tab::History, "document-open-recent-symbolic", t!("History")),
             (Tab::Settings, "emblem-system-symbolic", t!("Settings")),
         ] {
@@ -797,6 +803,7 @@ impl DevicePage {
             inbox_slot,
             gallery_slot,
             files_slot,
+            transfers_slot,
             settings,
             lock_row,
             away_row,
@@ -824,7 +831,7 @@ impl DevicePage {
             empty,
             handler,
             on_narrow,
-            wanted: std::cell::Cell::new(std::env::var("LINKSY_SCREENSHOT_TAB").ok().and_then(|t| [Tab::Use, Tab::Inbox, Tab::Gallery, Tab::Files, Tab::History, Tab::Settings].into_iter().find(|w| w.name() == t))),
+            wanted: std::cell::Cell::new(std::env::var("LINKSY_SCREENSHOT_TAB").ok().and_then(|t| [Tab::Use, Tab::Inbox, Tab::Gallery, Tab::Files, Tab::Transfers, Tab::History, Tab::Settings].into_iter().find(|w| w.name() == t))),
             received,
         }
     }
@@ -860,7 +867,7 @@ impl DevicePage {
             Tab::Inbox => d.device.kind == DeviceKind::Phone && (super::can(&d.device, "notifications") || super::can(&d.device, "sms")),
             Tab::Gallery => phone && super::can(&d.device, "gallery"),
             Tab::Files => phone && super::can(&d.device, "fs"),
-            Tab::History | Tab::Settings => true,
+            Tab::Transfers | Tab::History | Tab::Settings => true,
         };
         for (t, b) in self.tab_buttons.iter().chain(&self.sticky_buttons) {
             b.set_visible(d.trusted && has(*t));

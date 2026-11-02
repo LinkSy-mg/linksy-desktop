@@ -96,7 +96,6 @@ struct State {
     /// Opening Linksy starts its service once, if it isn't running.
     started_service: bool,
     restarted_service: bool,
-    transfers_open: bool,
     moving: Vec<transfers::Moving>,
     recent: Vec<HistoryEntry>,
     direct: HashMap<Fingerprint, bool>,
@@ -246,7 +245,7 @@ impl Window {
         let gallery = gallery::GalleryView::new();
         page.gallery_slot.append(&gallery.root);
         let transfers = transfers::TransfersPage::new();
-        content_stack.add_named(&transfers.root, Some("transfers"));
+        page.transfers_slot.append(&transfers.root);
         let camera_back = gtk::Button::builder().icon_name("go-previous-symbolic").tooltip_text(t!("Back")).visible(false).build();
         let camera_title = adw::WindowTitle::new("", t!("Camera Preview"));
         let content_header = adw::HeaderBar::builder().show_title(false).title_widget(&camera_title).build();
@@ -513,11 +512,7 @@ impl Window {
         self.paired_list.connect_row_selected(move |_, row| {
             let Some(w) = w.upgrade() else { return };
             let Some(id) = row.and_then(|r| r.widget_name().parse::<Fingerprint>().ok()) else { return };
-            let was = std::mem::replace(&mut w.state.borrow_mut().transfers_open, false);
             w.select(Some(id));
-            if was {
-                w.render_page();
-            }
         });
 
         // The avatar strip stands in for the hidden sidebar on wide windows.
@@ -1191,7 +1186,7 @@ impl Window {
         if let Some(p) = state.progress.get(&id) {
             self.corner.progress(id, p);
         }
-        let again = state.transfers_open && self.transfers.update(&state.moving, &state.progress);
+        let again = self.page.tab() == page::Tab::Transfers && self.transfers.update(&shown_moving(&state), &state.progress);
         drop(state);
         self.update_island();
         if again {
@@ -1247,7 +1242,7 @@ impl Window {
 
     fn transfers_changed(&self) {
         self.update_island();
-        if self.state.borrow().transfers_open {
+        if self.page.tab() == page::Tab::Transfers {
             self.render_transfers();
         }
     }
@@ -1259,18 +1254,24 @@ impl Window {
         self.island.set_moving(files, (total > 0).then(|| bytes as f64 / total as f64));
     }
 
+    /// The Transfers tab of the device something's on its way with, else the one shown.
     fn open_transfers(self: &Rc<Self>) {
-        self.state.borrow_mut().transfers_open = true;
-        self.paired_list.unselect_all();
-        self.render_page();
-        self.show_content();
+        let id = {
+            let state = self.state.borrow();
+            state.moving.first().map(|m| m.peer).or(state.selected).or_else(|| state.recent.first().map(|e| e.peer))
+        };
+        if let Some(id) = id {
+            self.select(Some(id));
+            self.page.select_tab(page::Tab::Transfers);
+            self.show_content();
+        }
     }
 
     fn render_transfers(&self) {
         let state = self.state.borrow();
-        let first = state.moving.first().map(|m| m.peer);
-        let device = first.and_then(|id| state.devices.iter().find(|d| d.device.id == id));
-        let route = match (first.and_then(|id| state.direct.get(&id)), device) {
+        let Some(id) = state.selected else { return };
+        let device = state.devices.iter().find(|d| d.device.id == id);
+        let route = match (state.direct.get(&id), device) {
             (Some(true), _) => transfers::Route::Direct,
             (Some(false), _) => transfers::Route::DirectSetup,
             (None, Some(d)) if d.usb => transfers::Route::Usb,
@@ -1278,7 +1279,8 @@ impl Window {
             _ => transfers::Route::Wifi,
         };
         let kind = device.map(|d| d.device.kind).unwrap_or(DeviceKind::Phone);
-        self.transfers.show(&state.moving, kind, route, &state.recent, &state.progress);
+        let recent: Vec<HistoryEntry> = state.recent.iter().filter(|e| e.peer == id).cloned().collect();
+        self.transfers.show(&shown_moving(&state), kind, route, &recent, &state.progress);
     }
 
     fn transfer_action(self: &Rc<Self>, action: page::Action) {
@@ -1325,9 +1327,7 @@ impl Window {
         self.paired_list.set_visible(!paired.is_empty());
         self.nearby_group.set_visible(!nearby.is_empty());
         self.no_devices.set_visible(paired.is_empty() && nearby.is_empty());
-        let transfers_open = self.state.borrow().transfers_open;
         match to_select {
-            _ if transfers_open => {}
             Some(row) => self.paired_list.select_row(Some(&row)),
             // Nothing selected yet: open the first paired device on wide layouts, so the
             // window doesn't start on an empty page.
@@ -1452,16 +1452,7 @@ impl Window {
     // ---- device page ----
 
     fn render_page(&self) {
-        let transfers_open = self.state.borrow().transfers_open;
-        self.island.set_selected(transfers_open);
-        self.corner.root.set_visible(!transfers_open);
-        if transfers_open {
-            self.content.set_title(t!("Transfers"));
-            self.page.menu.set_visible(false);
-            self.content_stack.set_visible_child_name("transfers");
-            self.render_transfers();
-            return;
-        }
+        self.transfers_shown();
         let staged = self.state.borrow().staged.clone();
         // A preview stays open until left, unless its device or its camera went away.
         let (selected, camera, previewing) = {
@@ -1504,13 +1495,22 @@ impl Window {
 
     /// A tab of the device's page shows: what's in it, fetched now.
     fn tab_shown(self: &Rc<Self>, id: Fingerprint, tab: page::Tab) {
+        self.transfers_shown();
         match tab {
             page::Tab::Inbox => self.inbox_shown(id),
             page::Tab::Gallery => self.gallery_shown(id),
             page::Tab::Files => self.files_shown(id),
+            page::Tab::Transfers => self.render_transfers(),
             page::Tab::History => self.render_activity(),
             page::Tab::Use | page::Tab::Settings => {}
         }
+    }
+
+    /// The corner panel steps aside while a Transfers tab shows the same.
+    fn transfers_shown(&self) {
+        let open = self.page.tab() == page::Tab::Transfers && self.content_stack.visible_child_name().as_deref() == Some("device");
+        self.island.set_selected(open);
+        self.corner.root.set_visible(!open);
     }
 
     /// The selected device's link and battery again, while its page is on screen.
@@ -1987,6 +1987,11 @@ fn main_menu() -> gtk::MenuButton {
 }
 
 /// A paired device in the sidebar: avatar with a presence dot, name, state.
+/// What's on its way with the device shown.
+fn shown_moving(state: &State) -> Vec<transfers::Moving> {
+    state.moving.iter().filter(|m| Some(m.peer) == state.selected).cloned().collect()
+}
+
 fn sidebar_row(d: &DeviceView, picture: Option<&gdk::Texture>) -> gtk::ListBoxRow {
     let available = d.connected || d.nearby;
     let avatar = adw::Avatar::builder().size(36).text(&d.device.name).show_initials(true).build();
