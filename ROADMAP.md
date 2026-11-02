@@ -22,7 +22,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) · The phone's photos on the computer |
 | **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (desktop done in 0.11.3; your own relay in Android 0.2.3) |
 | **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth · The phone's controls on the computer |
-| **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync · The phone's sound with its screen · Quick actions from the phone · Videos open where you left off · The computer's notifications on the phone |
+| **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync · The phone's sound with its screen · Deck · Videos open where you left off · The computer's notifications on the phone |
 | **1.0** | **Feature freeze** | No new features: fixes, performance, polish, stores · Onboarding |
 
 After 0.16, Linksy is feature complete: everything after that is fixing. Bold releases are
@@ -443,12 +443,23 @@ Today, sending the clipboard is a button.
 - **Done when:** a video playing on the phone is heard on the computer, in sync, while its
   screen is shown.
 
-### Quick actions from the phone — S
-- **Desktop:** the actions a phone may run, set on the computer: lock, sleep, mute, volume,
-  and commands of your own (a name and a command line), allowed per phone like the
-  terminal.
-- **Phone:** a button for each on the computer's page, and as Quick Settings tiles.
-- **Done when:** one tap on the phone locks the computer, or runs a command set on it.
+### Deck — M
+The phone as a deck of buttons for the computer, laid out exactly the way you want.
+- **Phone (owns the layout):** pages of tiles on a grid, edited right on the deck: move
+  them, resize them (one cell up to wide, tall or big), drag them between pages and into
+  folders, pick each one's label, colour, icon or picture; sliders for volume. Tiles show
+  live state (playing, the volume, the microphone muted). Saved on the phone, a deck per
+  computer, with a Quick Settings tile to open it.
+- **Desktop (says what's allowed):** a list of what this computer offers, each on or off
+  for that phone: play/pause, next and previous, volume and mute, microphone mute, the
+  sound output, keyboard shortcuts, opening an app, OBS scenes and recording, lock, sleep,
+  and commands of your own (a name and a command line). The phone only ever asks for an
+  action by its id: anything off, or not on the list, is refused. Live state is sent while
+  the deck is open. Both apps.
+- **Protocol:** the computer sends its actions (id, name, kind, on or off) and their state;
+  the phone sends "run this action", with a value for a slider.
+- **Done when:** a deck of mixed-size tiles is arranged on the phone by dragging and every
+  tile works on the computer, and an action turned off on the computer stops at once.
 
 ### Videos open where you left off — S
 Builds on Open on PC (0.2) and the notification listener (0.11), which lets the phone see
