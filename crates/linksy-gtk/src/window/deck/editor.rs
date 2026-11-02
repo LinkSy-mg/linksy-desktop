@@ -84,6 +84,25 @@ impl St {
         self.prefs.actions.iter().any(|o| o.action.id == action)
     }
 
+    /// A tile's name: its widget's in the library, else its action's, else its kind.
+    fn name_of(&self, t: &DeckTile) -> String {
+        if let Some(item) = model::item_for(&self.library, t) {
+            return item.name.clone();
+        }
+        let action = t.action.as_deref().and_then(|a| self.prefs.actions.iter().find(|o| o.action.id == a));
+        match (action, &t.action) {
+            (Some(o), _) => o.action.name.clone(),
+            (None, Some(a)) => a.clone(),
+            (None, None) => t.kind.clone(),
+        }
+    }
+
+    /// The actions the saved layouts run: a tile kept from before still saves where this
+    /// computer stopped offering its action.
+    fn saved_runs(&self) -> std::collections::HashSet<String> {
+        self.saved.layouts.iter().flat_map(|l| [&l.portrait, &l.landscape]).flat_map(|f| f.pages.iter().flatten()).filter_map(|t| t.action.clone()).collect()
+    }
+
     fn dirty(&self) -> bool {
         self.layouts != self.saved
     }
@@ -397,7 +416,12 @@ impl Editor {
         let offered = |a: &str| st.offered(a);
         // The deck's live states don't reach the editor: toggles show off
         let on = |a: &str| aids().on && st.prefs.actions.iter().any(|o| o.action.id == a && o.action.kind == DeckKind::Toggle);
-        let look = Look { theme: st.theme(), accent: &st.current().theme.accent, m: st.metrics(), now, offered: &offered, on: &on, confirm: &|_| false };
+        let confirm = |a: &str| st.prefs.actions.iter().any(|o| o.action.id == a && o.action.confirm.is_some());
+        let look = Look { theme: st.theme(), accent: &st.current().theme.accent, m: st.metrics(), now, offered: &offered, on: &on, confirm: &confirm };
+        if t.label.is_empty() {
+            // A tile without a label of its own shows its name, as on the phone
+            return face::tile(&DeckTile { label: st.name_of(t), ..t.clone() }, &look);
+        }
         face::tile(t, &look)
     }
 
@@ -663,11 +687,11 @@ impl Editor {
         let b = &self.ui.inspector;
         let st = self.st.borrow();
         let item = model::item_for(&st.library, t).cloned();
-        let name = item.as_ref().map(|i| i.name.clone()).unwrap_or_else(|| t.label.clone());
+        let name = st.name_of(t);
         b.append(&label(&name, &["title-4"]));
 
         b.append(&field(t!("Label")));
-        let entry = gtk::Entry::builder().text(&t.label).max_length(MAX_LABEL as i32).build();
+        let entry = gtk::Entry::builder().text(&t.label).placeholder_text(&name).max_length(MAX_LABEL as i32).build();
         let (e, id) = (Rc::downgrade(self), t.id.clone());
         entry.connect_changed(move |entry| {
             if let Some(e) = e.upgrade() {
@@ -742,7 +766,11 @@ impl Editor {
         };
         b.append(&label(&note, &["deck-where"]));
         if t.action.as_deref().is_some_and(|a| !st.offered(a)) {
-            b.append(&label(t!("This computer doesn't offer this any more. Delete the tile to save the deck."), &["deck-warn"]));
+            b.append(&label(t!("Not available on this computer"), &["deck-warn"]));
+        }
+        let question = t.action.as_deref().and_then(|a| st.prefs.actions.iter().find(|o| o.action.id == a)).and_then(|o| o.action.confirm.clone());
+        if let Some(q) = question {
+            b.append(&label(&format!("{}\n\u{201c}{q}\u{201d}", t!("Asks on the phone first")), &["deck-hint"]));
         }
 
         let actions = gtk::Box::builder().spacing(8).build();
@@ -1242,18 +1270,26 @@ impl Editor {
     fn remove_command(self: &Rc<Self>, id: &str) {
         let Some(win) = self.win.upgrade() else { return };
         let action = format!("command.{id}");
+        let mut removed = 0;
         let rest = {
             let mut st = self.st.borrow_mut();
             for l in st.layouts.layouts.iter_mut() {
                 for face in [&mut l.portrait, &mut l.landscape] {
                     for page in face.pages.iter_mut() {
+                        let before = page.len();
                         page.retain(|t| t.action.as_deref() != Some(action.as_str()));
+                        removed += before - page.len();
                     }
                 }
             }
             st.prefs.commands.iter().filter(|c| c.id != id).cloned().collect()
         };
         self.edited(true);
+        match removed {
+            0 => {}
+            1 => win.toast(t!("Its tile is gone from the deck too. Save to keep it that way.")),
+            n => win.toast(&t!("Its {n} tiles are gone from the deck too. Save to keep it that way.", n)),
+        }
         win.save_deck_commands(self.phone, rest);
     }
 
@@ -1266,11 +1302,13 @@ impl Editor {
             let id = st.current().id.clone();
             st.layouts.active = id;
             let st = &*st;
-            let missing: Vec<String> = st.layouts.layouts.iter().flat_map(|l| [&l.portrait, &l.landscape]).flat_map(|f| f.pages.iter().flatten()).filter(|t| t.action.as_deref().is_some_and(|a| !st.offered(a))).map(|t| format!("\u{201c}{}\u{201d}", t.label)).collect();
+            let before = st.saved_runs();
+            let ok = |a: &str| st.offered(a) || before.contains(a);
+            let missing: Vec<String> = st.layouts.layouts.iter().flat_map(|l| [&l.portrait, &l.landscape]).flat_map(|f| f.pages.iter().flatten()).filter(|t| t.action.as_deref().is_some_and(|a| !ok(a))).map(|t| format!("\u{201c}{}\u{201d}", st.name_of(t))).collect();
             if !missing.is_empty() {
                 Err(t!("This computer doesn't offer what {tiles} run. Delete them, then save.", tiles = missing.join(", ")))
             } else {
-                st.layouts.check(|a| st.offered(a)).map(|()| st.layouts.clone()).map_err(|why| t!("This deck can't be saved: {why}", why = why.as_str()))
+                st.layouts.check(ok).map(|()| st.layouts.clone()).map_err(|why| t!("This deck can't be saved: {why}", why = why.as_str()))
             }
         };
         let sent = match checked {

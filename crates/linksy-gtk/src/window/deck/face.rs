@@ -127,7 +127,7 @@ pub fn tile(t: &DeckTile, look: &Look) -> gtk::Widget {
     }
     if action.is_some_and(|a| !(look.offered)(a)) {
         root.add_css_class("unavailable");
-        root.set_tooltip_text(Some(t!("This computer doesn't offer this any more")));
+        root.set_tooltip_text(Some(t!("Not available on this computer")));
     }
 
     let pad = if one { 5.0 } else { 9.0 };
