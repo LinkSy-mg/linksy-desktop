@@ -324,6 +324,16 @@ and close the other with reason `duplicate`.
   Send `notification_removed` when it goes away on the phone (read, swiped, answered), so
   it goes away on the computer too. Nothing of it is stored on either side.
 
+  **Phone, for 0.11 (decided 2026-11-02):** a `NotificationListenerService` in the Linksy
+  app itself, not a separate app. Skip Linksy's own notifications and ongoing ones (music,
+  navigation, downloads); announce `notifications` in `features` while it's on. On Android
+  13+ an app installed from the web finds the switch greyed out: ask once, then guide App
+  info › ⋮ › Allow restricted settings, then ask again. The listener makes Play Protect
+  block browser installs in many countries with no "Install anyway": the download page and
+  the update sheet should say to pause "Scan apps with Play Protect" while installing.
+  Messaging apps' notifications carry a `RemoteInput`, so this brings texts from WhatsApp,
+  Signal, Telegram and the SMS app with Reply, without any SMS permission.
+
   **Media.** `media_state` is always the sender's *whole* set of players; a player missing
   from it has stopped. `seq` is the time it was taken in ms since 1970: receivers keep the
   newest and drop late, older ones (streams can arrive out of order). `art` is optional,
@@ -1904,3 +1914,5 @@ robust against any encoder (GPU ones may slice too):
 - **2026-11-01** — Desktop 0.11.3: Away From Home turned off closes the endpoint at once,
   and `linksy-core`'s new default feature `away` can leave iroh out of a build (§4.13). No
   protocol change.
+- **2026-11-02** — Plan: 0.11 is the phone's notifications through a listener in the Linksy
+  app itself (§4.5, phone to-do); the separate "Extras" app is dropped. No protocol change.

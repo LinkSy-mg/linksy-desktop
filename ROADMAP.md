@@ -17,7 +17,7 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
 | 0.9 | Works on every desktop | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Private discovery · One Accept for a batch (desktop done in 0.9.0; screen control on Hyprland and Sway moves to 0.10) |
 | **0.10** | **Lighter and smoother** | Lighter at rest (desktop done in 0.11.3) · Transfers in a corner panel (desktop done) · Choose which monitor to view (desktop done) · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
-| **0.11** | **Never miss a text** | Texts as notifications on the computer, with reply (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
+| **0.11** | **Never miss a notification** | The phone's notifications on the computer, with reply, which brings texts from every messaging app (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
 | **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) |
 | **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (desktop done in 0.11.3; your own relay in Android 0.2.3) |
@@ -217,19 +217,32 @@ it over the same local socket (`linksy-ipc`) and nothing below it changes.
 - **Phone:** nothing.
 - **Done when:** on Plasma, Linksy looks and behaves like a KDE app, every feature reachable.
 
-## 0.11 — Never miss a text
+## 0.11 — Never miss a notification
 
-### Texts as notifications, with reply — M
-*Asked for by [@yurividal](https://github.com/LinkSy-mg/linksy-desktop/issues/30).*
-Builds on 0.5 (the Messages page and `sms_received`).
-- **Protocol:** `sms_received` carries what the notification needs (sender, contact name and
-  picture, text, thread); reply goes back with `sms_send`.
-- **Desktop:** each new text as a notification with Reply and Mark as Read; the Messages page
-  opens on its thread when clicked. Not shown twice when the phone's own notification for
-  the messaging app is mirrored too.
-- **Phone:** push every incoming SMS as it arrives (`SMS_RECEIVED`), with the contact's name.
-- **Done when:** a text arrives on the computer within a second, and replying from the
-  notification sends it from the phone.
+### The phone's notifications, with reply — M
+*Asked for by [@yurividal](https://github.com/LinkSy-mg/linksy-desktop/issues/30). Texts
+come with it: WhatsApp, Telegram, Signal and the SMS app all post a notification with a reply
+field, so one listener brings every messaging app, with no SMS permission.*
+The computer's side has been there since 0.2.2 (`notification_posted`, `notification_removed`,
+`notification_reply`, `notification_action`, docs/protocol.md §4.5).
+- **Phone:** a `NotificationListenerService` in the Linksy app itself (decided 2026-11-02,
+  instead of a separate app): each notification with its app, title, text, picture,
+  conversation and actions; Reply through its `RemoteInput`; removed when it goes on the
+  phone. Asked for in the app, with the steps Android needs for an app installed from the
+  web: once the switch is greyed out, App info › ⋮ › Allow restricted settings, then on.
+  Linksy's own notifications and ongoing ones (music, navigation) aren't sent. Announce
+  `notifications` in `features` when it's on.
+- **Installing:** the listener makes Play Protect block a browser install in many countries,
+  with no "Install anyway". The download page and the app's update sheet say how: pause
+  "Scan apps with Play Protect" while installing, then turn it back on.
+- **Desktop:** each one as a notification with its app's icon and Reply; the same
+  conversation grouped; a per-app switch on the device page; the last ones listed in the
+  app, so one missed isn't gone. Both apps.
+- **Not possible without developer options:** one-time codes, which Android 15 hides from
+  listeners like this one.
+- **Done when:** a WhatsApp or SMS message shows on the computer within a second, a reply
+  from the computer is sent from the phone, and reading it on either side clears it on both.
+- **Later, with calls (0.15):** the SMS app's own threads and writing new texts.
 
 ## 0.12 — Fast on any link
 
