@@ -593,10 +593,13 @@ Kirigami.Page {
                     onClicked: app.openUsb()
                 }
             }
-            Flow {
+            // Two by two, one per line on a narrow page; a hidden card leaves no gap
+            GridLayout {
                 id: useAs
                 Layout.fillWidth: true
-                spacing: Kirigami.Units.largeSpacing
+                columns: page.narrow ? 1 : 2
+                columnSpacing: Kirigami.Units.largeSpacing
+                rowSpacing: Kirigami.Units.largeSpacing
                 // Not the cards' own visible: it goes false while a layer covers the page, and stays false
                 visible: page.info !== null && ["display", "camera", "microphone"].some(f => app.can(page.info, f))
 
@@ -1143,11 +1146,14 @@ Kirigami.Page {
         property string button
         property string kind
         readonly property var running: app.sessions.find(s => s.kind === card.kind && s.peer.id === page.info?.id) ?? null
-        width: Kirigami.Units.gridUnit * 14
+        // Equal columns, and as tall as the other card in their row
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        Layout.preferredWidth: Kirigami.Units.gridUnit * 14
         banner.title: card.title
         banner.titleIcon: card.iconName
-        // Kirigami stretches a card's contentItem to the card's full height when the card moves (as
-        // the Flow rewraps on a resize), and a stretched ColumnLayout centres its rows onto the
+        // Kirigami stretches a card's contentItem to the card's full height when the card grows (as
+        // its row does for the other card), and a stretched ColumnLayout centres its rows onto the
         // actions: the column inside keeps its own height
         contentItem: Item {
             implicitWidth: column.implicitWidth
