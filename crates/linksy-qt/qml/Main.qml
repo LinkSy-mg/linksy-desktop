@@ -36,6 +36,8 @@ Kirigami.ApplicationWindow {
     property var pictures: ({})
     property var sessions: []
     property var pending: ({})
+    // Transfers to open once they're done (a photo double-clicked in a gallery)
+    property var toOpen: ({})
     // Finish Setup's list (linksy-setup), null until checked
     property var setup: null
     // A newer Linksy, when the service found one: { version, notes }
@@ -48,6 +50,8 @@ Kirigami.ApplicationWindow {
     // A phone's conversation changed, or a notification came or went on it (its page's inbox)
     signal conversationChanged(var conversation)
     signal alertsChanged(string phone)
+    // A phone's photos changed (its page's gallery)
+    signal galleryChanged(string phone)
 
     readonly property var selected: devices.find(d => d.device.id === selectedId) ?? null
 
@@ -98,6 +102,16 @@ Kirigami.ApplicationWindow {
     }
 
     // "3.8 MB", as the GTK app writes sizes
+    // "1 item", "3 photos"
+    function plural(n, word) {
+        if (word === "photo") return n === 1 ? t("1 photo") : t("{n} photos", { n: n });
+        return n === 1 ? t("1 item") : t("{n} items", { n: n });
+    }
+
+    function openWhenDone(transfer) {
+        toOpen[transfer] = true;
+    }
+
     function size(bytes) {
         const units = [t("bytes"), t("KB"), t("MB"), t("GB"), t("TB")];
         if (bytes < 1000) return bytes === 1 ? t("1 byte") : t("{bytes} bytes", { bytes: bytes });
@@ -341,6 +355,14 @@ Kirigami.ApplicationWindow {
         case "transfer_complete": case "transfer_failed":
             if (offerDialog.transfer === ev.transfer) offerDialog.close();
             setProgress(ev.transfer, -1, 0);
+            // A photo double-clicked in a gallery: here now, so it opens
+            if (ev.transfer in toOpen) {
+                delete toOpen[ev.transfer];
+                if (ev.type === "transfer_complete" && ev.saved.length) Qt.openUrlExternally("file://" + ev.saved[0].split("/").map(encodeURIComponent).join("/"));
+            }
+            break;
+        case "gallery_changed":
+            galleryChanged(ev.from.id);
             break;
         case "settings_changed":
             settings = ev.settings;

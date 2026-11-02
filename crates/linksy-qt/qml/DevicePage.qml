@@ -39,12 +39,14 @@ Kirigami.Page {
         const shown = [];
         if (phone || ["display", "camera", "microphone"].some(f => app.can(info, f))) shown.push("use");
         if (phone && (app.can(info, "notifications") || app.can(info, "sms"))) shown.push("inbox");
+        if (handheld && app.can(info, "gallery")) shown.push("gallery");
         if (handheld && app.can(info, "fs")) shown.push("files");
         return shown.concat(["history", "settings"]).join(" ");
     }
     readonly property var tabsShown: tabsKey ? tabsKey.split(" ") : []
     readonly property string inboxPhone: tabsShown.includes("inbox") ? deviceId : ""
     readonly property string filesPhone: tabsShown.includes("files") ? deviceId : ""
+    readonly property string galleryPhone: tabsShown.includes("gallery") ? deviceId : ""
     // Where the tabs are in the page, to pin them at its top once it scrolls past them
     readonly property real tabsTop: column.y + tabBar.y
 
@@ -75,6 +77,7 @@ Kirigami.Page {
     }
     onInboxPhoneChanged: inbox.reset(inboxPhone)
     onFilesPhoneChanged: if (tab === "files") Qt.callLater(page.showFiles)
+    onGalleryPhoneChanged: if (tab === "gallery") Qt.callLater(page.showGallery)
     onTabsShownChanged: fixTab()
     onTabChanged: tabShown()
     Component.onCompleted: {
@@ -108,7 +111,13 @@ Kirigami.Page {
     // What a tab shows, fetched as it shows
     function tabShown() {
         if (tab === "inbox") inbox.load();
+        else if (tab === "gallery") Qt.callLater(page.showGallery);
         else if (tab === "files") Qt.callLater(page.showFiles);
+    }
+
+    // Its albums and newest photos the first time
+    function showGallery() {
+        if (galleryPhone) gallery.show(galleryPhone);
     }
 
     // The phone's top folder the first time, else where it was
@@ -130,11 +139,11 @@ Kirigami.Page {
     }
 
     function tabTitle(which) {
-        return ({ use: app.t("Use As"), inbox: app.t("Inbox"), files: app.t("Files"), history: app.t("History"), settings: app.t("Settings") })[which] ?? "";
+        return ({ use: app.t("Use As"), inbox: app.t("Inbox"), gallery: app.t("Gallery"), files: app.t("Files"), history: app.t("History"), settings: app.t("Settings") })[which] ?? "";
     }
 
     function tabIcon(which) {
-        return ({ use: "video-display", inbox: "mail-unread", files: "folder", history: "document-open-recent", settings: "configure" })[which] ?? "";
+        return ({ use: "video-display", inbox: "mail-unread", gallery: "image-x-generic", files: "folder", history: "document-open-recent", settings: "configure" })[which] ?? "";
     }
 
     function kindIcon(kind) {
@@ -160,10 +169,20 @@ Kirigami.Page {
         app: page.app
     }
 
+    PhoneGallery {
+        id: gallery
+        app: page.app
+    }
+
     Connections {
         target: page.app
         function onConversationChanged(c) { inbox.changed(c) }
         function onAlertsChanged(phone) { if (phone === inbox.phone) inbox.load() }
+        function onGalleryChanged(phone) {
+            if (phone !== gallery.phone || page.tab !== "gallery") return;
+            gallery.loadAlbums();
+            gallery.newer();
+        }
     }
 
     // Its link and round trip, while the page is on screen
@@ -523,7 +542,7 @@ Kirigami.Page {
                     Layout.fillWidth: true
                     visible: page.trusted
                     sourceComponent: !page.trusted ? null
-                        : ({ use: useTab, inbox: inboxTab, files: filesTab, history: historyTab, settings: settingsTab })[page.tab] ?? null
+                        : ({ use: useTab, inbox: inboxTab, gallery: galleryTab, files: filesTab, history: historyTab, settings: settingsTab })[page.tab] ?? null
                 }
             }
         }
@@ -698,6 +717,14 @@ Kirigami.Page {
             app: page.app
             store: inbox
             narrow: page.narrow
+        }
+    }
+
+    Component {
+        id: galleryTab
+        GalleryTab {
+            app: page.app
+            store: gallery
         }
     }
 
