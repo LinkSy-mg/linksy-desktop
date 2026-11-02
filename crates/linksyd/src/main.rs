@@ -5,6 +5,8 @@
 mod clipboard;
 mod codes;
 #[cfg(target_os = "linux")]
+mod controls;
+#[cfg(target_os = "linux")]
 mod deck;
 mod gallery;
 mod history;
@@ -249,7 +251,7 @@ async fn run() -> ExitCode {
     tokio::spawn(volume::run(node.clone()));
     #[cfg(target_os = "linux")]
     {
-        let deck = deck::Deck::load(data_dir.join("deck.json"), deck::System);
+        let deck = deck::Deck::load(data_dir.join("deck.json"), deck::System::default());
         let _ = deck::DECK.set(deck.clone());
         tokio::spawn(deck.run(node.clone()));
     }

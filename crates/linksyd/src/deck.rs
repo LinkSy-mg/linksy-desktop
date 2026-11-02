@@ -42,6 +42,8 @@ pub enum Act {
     /// The next sound output becomes the default.
     NextOutput,
     Lock,
+    Restart,
+    Shutdown,
     Command { name: String, line: String },
 }
 
@@ -50,6 +52,8 @@ pub enum Act {
 pub struct Caps {
     /// A volume to set (wpctl or pactl).
     pub sound: bool,
+    /// Restart and turn off (logind).
+    pub power_off: bool,
 }
 
 /// This computer's state now, as far as the decks show it.
@@ -70,11 +74,15 @@ pub trait Desktop: Send + Sync + 'static {
     fn status(&self, ids: &HashSet<&str>) -> impl Future<Output = Status> + Send;
 }
 
-pub struct System;
+#[derive(Default)]
+pub struct System {
+    controls: crate::controls::Controls,
+}
 
 impl Desktop for System {
     async fn probe(&self) -> Caps {
-        Caps { sound: crate::volume::available() }
+        let found = self.controls.probe().await;
+        Caps { sound: crate::volume::available(), power_off: found.power_off }
     }
 
     async fn run(&self, act: Act) {
@@ -87,6 +95,8 @@ impl Desktop for System {
             Act::Lock => {
                 crate::lock::lock_screen().await;
             }
+            Act::Restart => self.controls.power_off(true).await,
+            Act::Shutdown => self.controls.power_off(false).await,
             Act::Command { name, line } => spawn(&name, &line),
         }
     }
@@ -228,6 +238,14 @@ impl<D: Desktop> Deck<D> {
             ]);
         }
         all.push(action("system.lock", t!("Lock Screen"), DeckKind::Button, SYSTEM));
+        let asking = |mut action: DeckAction, question: &str| {
+            action.confirm = Some(question.into());
+            action
+        };
+        if caps.power_off {
+            all.push(asking(action("system.restart", t!("Restart"), DeckKind::Button, SYSTEM), t!("Restart {computer}?")));
+            all.push(asking(action("system.shutdown", t!("Shut Down"), DeckKind::Button, SYSTEM), t!("Turn off {computer}?")));
+        }
         all.extend(saved.commands.iter().map(|c| action(&format!("command.{}", c.id), &c.name, DeckKind::Button, COMMANDS)));
         all
     }
@@ -251,14 +269,10 @@ impl<D: Desktop> Deck<D> {
     }
 
     /// The questions with this computer's name and `phone`'s.
-    fn named(&self, phone: &Fingerprint, mut actions: Vec<DeckAction>) -> Vec<DeckAction> {
+    fn named(&self, phone: &Fingerprint, actions: Vec<DeckAction>) -> Vec<DeckAction> {
         let Some(node) = self.inner.node.get() else { return actions };
-        let computer = node.info().name;
         let phone = node.trusted().into_iter().find(|t| t.device.id == *phone).map(|t| t.device.name).unwrap_or_default();
-        for q in actions.iter_mut().filter_map(|a| a.confirm.as_mut()) {
-            *q = q.replace("{computer}", &computer).replace("{phone}", &phone);
-        }
-        actions
+        fill_in(actions, &node.info().name, &phone)
     }
 
     pub fn set_action(&self, phone: &Fingerprint, action: &str, on: bool) -> Result<(), String> {
@@ -414,6 +428,8 @@ impl<D: Desktop> Deck<D> {
             "sound.mic_mute" if caps.sound => Act::MicMute,
             "sound.output" if caps.sound => Act::NextOutput,
             "system.lock" => Act::Lock,
+            "system.restart" if caps.power_off => Act::Restart,
+            "system.shutdown" if caps.power_off => Act::Shutdown,
             _ => {
                 let id = id.strip_prefix("command.")?;
                 let c = saved.commands.iter().find(|c| c.id == id)?;
@@ -588,6 +604,13 @@ impl<D: Desktop> Deck<D> {
     }
 }
 
+fn fill_in(mut actions: Vec<DeckAction>, computer: &str, phone: &str) -> Vec<DeckAction> {
+    for question in actions.iter_mut().filter_map(|a| a.confirm.as_mut()) {
+        *question = question.replace("{computer}", computer).replace("{phone}", phone);
+    }
+    actions
+}
+
 /// The actions `layouts`' tiles run: only kinds that run one (a clock's action is ignored).
 fn runs(layouts: &DeckLayouts) -> impl Iterator<Item = &str> {
     layouts
@@ -620,17 +643,18 @@ fn states(actions: &[DeckAction], now: &Status) -> Vec<DeckState> {
 mod tests {
     use super::*;
 
-    /// A computer that can do everything (but sound, with `no_sound`) and only says what it
+    /// A computer that can do everything but what it's `without`, and only notes what it
     /// would have done.
     #[derive(Default)]
     struct Fake {
-        no_sound: bool,
+        without: &'static [&'static str],
         ran: Mutex<Vec<Act>>,
     }
 
     impl Fake {
         fn caps(&self) -> Caps {
-            Caps { sound: !self.no_sound }
+            let has = |what| !self.without.contains(&what);
+            Caps { sound: has("sound"), power_off: has("power_off") }
         }
     }
 
@@ -680,7 +704,7 @@ mod tests {
     }
 
     /// Everything the fake computer offers, and what's on for a phone until changed.
-    const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock"];
+    const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.restart", "system.shutdown"];
     const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output"];
 
     #[test]
@@ -723,7 +747,7 @@ mod tests {
         assert_eq!(d.act(&phone(2), "system.lock", None), None);
 
         // Without wpctl or pactl, no sound at all
-        let quiet = ready(dir.path().join("quiet.json"), Fake { no_sound: true, ..Default::default() });
+        let quiet = ready(dir.path().join("quiet.json"), Fake { without: &["sound"], ..Default::default() });
         assert_eq!(quiet.act(&p, "sound.volume", Some(0.5)), None);
         assert!(quiet.prefs(&p).actions.iter().all(|a| a.action.group != SOUND));
         assert!(quiet.set_action(&p, "sound.mute", true).is_err());
@@ -795,6 +819,24 @@ mod tests {
         assert_eq!(states(&d.enabled(&phone(1)), &sound).len(), 1);
     }
 
+    #[test]
+    fn restarting_and_turning_off_ask_first_and_are_off_until_allowed() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        assert_eq!((d.act(&p, "system.restart", None), d.act(&p, "system.shutdown", None)), (None, None));
+        d.set_action(&p, "system.restart", true).unwrap();
+        d.set_action(&p, "system.shutdown", true).unwrap();
+        assert_eq!((d.act(&p, "system.restart", None), d.act(&p, "system.shutdown", None)), (Some(Act::Restart), Some(Act::Shutdown)));
+        let asked = fill_in(d.enabled(&p), "Office PC", "Pixel");
+        let question = |id: &str| asked.iter().find(|a| a.id == id).and_then(|a| a.confirm.clone());
+        assert_eq!((question("system.restart").unwrap().as_str(), question("system.shutdown").unwrap().as_str()), ("Restart Office PC?", "Turn off Office PC?"));
+        assert_eq!(question("system.lock"), None);
+
+        let elsewhere = ready(dir.path().join("other.json"), Fake { without: &["power_off"], ..Default::default() });
+        assert!(elsewhere.set_action(&p, "system.restart", true).is_err(), "no logind: not offered");
+    }
+
     #[tokio::test]
     async fn the_output_switches_and_shows_its_name() {
         let dir = tempfile::tempdir().unwrap();
@@ -807,11 +849,11 @@ mod tests {
     #[tokio::test]
     async fn found_out_once_and_only_what_is_there_is_offered() {
         let dir = tempfile::tempdir().unwrap();
-        let d = Deck::load(dir.path().join("deck.json"), Fake { no_sound: true, ..Default::default() });
+        let d = Deck::load(dir.path().join("deck.json"), Fake { without: &["sound"], ..Default::default() });
         assert_eq!(d.prefs(&phone(1)).actions.len(), 4, "media and locking need nothing");
         d.ready().await;
         d.ready().await;
-        assert_eq!(d.caps(), Caps { sound: false });
+        assert_eq!(d.caps(), Caps { sound: false, ..Fake::default().caps() });
         assert!(d.prefs(&phone(1)).actions.iter().all(|a| !a.action.id.starts_with("sound.")));
     }
 
@@ -848,7 +890,7 @@ mod tests {
         assert_eq!(first.layouts[0].theme.id, "stock");
         assert!(!dir.path().join("deck.json").exists(), "not saved");
 
-        let quiet = ready(dir.path().join("quiet.json"), Fake { no_sound: true, ..Default::default() });
+        let quiet = ready(dir.path().join("quiet.json"), Fake { without: &["sound"], ..Default::default() });
         assert_eq!(kinds(&quiet.layouts(&phone(1)).layouts[0].portrait), [("clock", None), ("music", None), ("button", Some("media.play_pause")), ("button", Some("media.next"))]);
     }
 
