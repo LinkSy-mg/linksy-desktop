@@ -11,7 +11,8 @@
 //! `--accept-pairing` says yes to pairing, for scripted tests. `--connect HOST:PORT`
 //! connects to a computer by address (no discovery needed).
 //! It always answers texting requests from a small made-up inbox. `--files DIR` shares
-//! that folder as the phone's storage (for "Browse Files").
+//! that folder as the phone's storage (for "Browse Files" and the Files tab: reads, writes,
+//! new folders, renames and deletes, nothing above DIR).
 //!
 //! `--display FILE` accepts "Use as Second Display" and saves the H.264 it receives.
 //! `--media "TITLE" "ARTIST"` plays a song (as far as the computer can tell);
@@ -439,8 +440,10 @@ async fn main() {
     if let Some(root) = files {
         let mut calls = node.incoming_fs().expect("file requests");
         tokio::spawn(async move {
+            // Side by side, like a phone: copies ask for a few chunks at once
             while let Some(call) = calls.recv().await {
-                serve(call, &root).await;
+                let root = root.clone();
+                tokio::spawn(async move { serve(call, &root).await });
             }
         });
     }
@@ -800,7 +803,14 @@ async fn show_gallery(call: linksy_core::gallery::GalleryCall, root: &std::path:
 async fn serve(mut call: linksy_core::fs::FsCall, root: &std::path::Path) {
     use linksy_core::{FsEntry, FsRequest};
     use std::io::{Read, Seek, Write};
-    let at = |p: &str| root.join(p.trim_start_matches('/'));
+    // Nothing above the shared folder, as on a phone
+    let at = |p: &str| {
+        let rel = std::path::Path::new(p.trim_start_matches('/'));
+        match rel.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+            true => Ok(root.join(rel)),
+            false => Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "outside the shared folder")),
+        }
+    };
     let entry = |p: &std::path::Path| {
         let m = std::fs::metadata(p).ok()?;
         let modified_ms = m.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
@@ -818,27 +828,30 @@ async fn serve(mut call: linksy_core::fs::FsCall, root: &std::path::Path) {
     }
     let done: std::io::Result<Answer> = (|| match call.request.clone() {
         FsRequest::Info => Ok(Answer::Info(root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())),
-        FsRequest::List { path } => Ok(Answer::Entries(std::fs::read_dir(at(&path))?.flatten().filter_map(|e| entry(&e.path())).collect())),
-        FsRequest::Stat { path } => entry(&at(&path)).map(Answer::Entry).ok_or_else(|| std::io::ErrorKind::NotFound.into()),
+        FsRequest::List { path } => Ok(Answer::Entries(std::fs::read_dir(at(&path)?)?.flatten().filter_map(|e| entry(&e.path())).collect())),
+        FsRequest::Stat { path } => entry(&at(&path)?).map(Answer::Entry).ok_or_else(|| std::io::ErrorKind::NotFound.into()),
         FsRequest::Read { path, offset, length } => {
-            let mut f = std::fs::File::open(at(&path))?;
+            let mut f = std::fs::File::open(at(&path)?)?;
             f.seek(std::io::SeekFrom::Start(offset))?;
             let mut buf = Vec::new();
             f.take(length).read_to_end(&mut buf)?;
             Ok(Answer::Data(buf))
         }
         FsRequest::Write { path, offset, truncate, .. } => {
-            let mut f = std::fs::OpenOptions::new().create(true).write(true).truncate(truncate).open(at(&path))?;
+            let mut f = std::fs::OpenOptions::new().create(true).write(true).truncate(truncate).open(at(&path)?)?;
             f.seek(std::io::SeekFrom::Start(offset))?;
             f.write_all(&body)?;
             Ok(Answer::Ok)
         }
-        FsRequest::Mkdir { path } => std::fs::create_dir_all(at(&path)).map(|_| Answer::Ok),
+        FsRequest::Mkdir { path } => std::fs::create_dir_all(at(&path)?).map(|_| Answer::Ok),
         FsRequest::Delete { path } => {
-            let p = at(&path);
+            let p = at(&path)?;
+            if p == root {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "the shared folder itself stays"));
+            }
             if p.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) }.map(|_| Answer::Ok)
         }
-        FsRequest::Rename { path, to } => std::fs::rename(at(&path), at(&to)).map(|_| Answer::Ok),
+        FsRequest::Rename { path, to } => std::fs::rename(at(&path)?, at(&to)?).map(|_| Answer::Ok),
     })();
     let _ = match done {
         Ok(Answer::Info(name)) => call.info(&name).await,
