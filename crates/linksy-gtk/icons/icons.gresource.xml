@@ -4,11 +4,18 @@
 <gresources>
   <gresource prefix="/mg/diary/linksy/icons">
     <file>scalable/status/camera-switch-symbolic.svg</file>
+    <file>scalable/status/channel-secure-symbolic.svg</file>
     <file>scalable/status/chat-message-new-symbolic.svg</file>
     <file>scalable/status/dialog-information-symbolic.svg</file>
     <file>scalable/status/display-brightness-symbolic.svg</file>
+    <file>scalable/status/document-open-recent-symbolic.svg</file>
+    <file>scalable/status/emblem-system-symbolic.svg</file>
+    <file>scalable/status/folder-symbolic.svg</file>
     <file>scalable/status/image-x-generic-symbolic.svg</file>
     <file>scalable/status/network-transmit-receive-symbolic.svg</file>
+    <file>scalable/status/network-wired-symbolic.svg</file>
+    <file>scalable/status/network-wireless-symbolic.svg</file>
+    <file>scalable/status/text-x-generic-symbolic.svg</file>
     <file>scalable/status/preferences-system-notifications-symbolic.svg</file>
     <file>scalable/status/thunderbolt-symbolic.svg</file>
     <file>scalable/status/video-display-symbolic.svg</file>
