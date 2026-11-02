@@ -4,7 +4,11 @@ use std::net::{IpAddr, Ipv4Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use linksy_core::{Battery, CallState, Config, ControlMsg, DirectGroup, DirectStep, FsEntry, FsRequest, SmsThread, Error, Event, MediaCommand, MediaPlayer, MediaState, Node, NotificationButton, RemoteNotification, SessionKind, VolumeState};
+use linksy_core::gallery::GalleryAnswer;
+use linksy_core::{
+    Battery, CallState, Config, ControlMsg, ConversationMessage, DeckAction, DeckKind, DirectGroup, DirectStep, Error, Event, FsEntry, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryRequest, MediaCommand, MediaPlayer, MediaState, Node,
+    NotificationButton, RemoteNotification, SessionKind, SmsThread, VolumeState,
+};
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
 use tokio::sync::broadcast;
@@ -305,6 +309,120 @@ async fn resumes_partial_file_and_rejects_corrupt_one() {
 }
 
 #[tokio::test]
+async fn gallery_pages_thumbnails_and_photos_asked_for() {
+    let (phone, pc) = paired().await;
+    let phone_id = phone.node.info().id;
+    let mut calls = phone.node.incoming_gallery().unwrap();
+    let photo = phone.dir.path().join("IMG_1.jpg");
+    std::fs::write(&photo, b"jpeg bytes").unwrap();
+    let serving = phone.node.clone();
+    tokio::spawn(async move {
+        while let Some(call) = calls.recv().await {
+            let from = call.from.id;
+            match call.request.clone() {
+                GalleryRequest::Albums => call.albums(vec![GalleryAlbum { id: "camera".into(), name: "Camera".into(), count: 1 }]).await.unwrap(),
+                GalleryRequest::Items { before: None, limit, .. } => {
+                    assert_eq!(limit, 500, "pages are capped");
+                    let item = GalleryItem { id: "1".into(), name: "IMG_1.jpg".into(), video: false, taken_ms: 1000, size: 10, duration_ms: None };
+                    call.items(vec![item], true).await.unwrap()
+                }
+                GalleryRequest::Items { .. } => call.items(vec![], false).await.unwrap(),
+                GalleryRequest::Thumb { id, size } if id == "1" => {
+                    assert_eq!(size, 1024, "thumbnails are capped");
+                    call.thumb(b"thumb").await.unwrap()
+                }
+                GalleryRequest::Thumb { .. } => call.error("no such photo").await.unwrap(),
+                GalleryRequest::Send { ids, transfer } => {
+                    assert_eq!(ids, ["1"]);
+                    call.ok().await.unwrap();
+                    serving.send_gallery(&from, vec![photo.clone()], transfer).await.unwrap();
+                }
+            }
+        }
+    });
+
+    let Ok(GalleryAnswer::Albums(albums)) = pc.node.gallery(&phone_id, GalleryRequest::Albums).await else { panic!("no albums") };
+    assert_eq!(albums[0].name, "Camera");
+    let Ok(GalleryAnswer::Items { items, more: true }) = pc.node.gallery(&phone_id, GalleryRequest::Items { album: None, before: None, limit: 10_000 }).await else { panic!("no first page") };
+    assert_eq!(items.len(), 1);
+    let before = Some(GalleryCursor { taken_ms: items[0].taken_ms, id: items[0].id.clone() });
+    let Ok(GalleryAnswer::Items { items, more: false }) = pc.node.gallery(&phone_id, GalleryRequest::Items { album: None, before, limit: 50 }).await else { panic!("no last page") };
+    assert!(items.is_empty());
+    let Ok(GalleryAnswer::Thumb(jpeg)) = pc.node.gallery(&phone_id, GalleryRequest::Thumb { id: "1".into(), size: 4000 }).await else { panic!("no thumbnail") };
+    assert_eq!(jpeg, b"thumb");
+    let missing = pc.node.gallery(&phone_id, GalleryRequest::Thumb { id: "2".into(), size: 256 }).await;
+    assert!(matches!(missing, Err(Error::Invalid(m)) if m.contains("no such")));
+
+    // Photos it asked for come without asking, though it takes no imports.
+    let mut on_pc = pc.node.subscribe();
+    let into = pc.dir.path().join("pictures");
+    let id = pc.node.gallery_send(&phone_id, vec!["1".into()], into.clone()).await.unwrap();
+    let saved = wait_for(&mut on_pc, |e| match e {
+        Event::TransferRequest { transfer, .. } if *transfer == id => panic!("asked about photos it asked for"),
+        Event::TransferComplete { transfer, saved } if *transfer == id => Some(saved.clone()),
+        Event::TransferFailed { transfer, reason } if *transfer == id => panic!("{reason}"),
+        _ => None,
+    })
+    .await;
+    assert_eq!(saved, [into.join("IMG_1.jpg")]);
+    assert_eq!(std::fs::read(&saved[0]).unwrap(), b"jpeg bytes");
+    assert!(pc.node.gallery_send(&phone_id, vec![], into).await.is_err());
+}
+
+#[tokio::test]
+async fn gallery_unserved_says_so() {
+    let (phone, pc) = paired().await;
+    let answer = pc.node.gallery(&phone.node.info().id, GalleryRequest::Albums).await;
+    assert!(matches!(answer, Err(Error::Invalid(m)) if m.contains("doesn't share its photos")));
+}
+
+#[tokio::test]
+async fn deck_and_conversation_history_travel() {
+    let (phone, pc) = paired().await;
+    let (phone_id, pc_id) = (phone.node.info().id, pc.node.info().id);
+    let (mut on_pc, mut on_phone) = (pc.node.subscribe(), phone.node.subscribe());
+
+    phone.node.deck_open(&pc_id, true).await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::DeckOpen { .. }).then_some(())).await;
+    let action = DeckAction { id: "media.play_pause".into(), name: "Play or Pause".into(), kind: DeckKind::Button, group: "Media".into() };
+    pc.node.deck_actions(&phone_id, vec![action.clone()]).await.unwrap();
+    let got = wait_for(&mut on_phone, |e| match e {
+        Event::DeckActions { actions, .. } => Some(actions.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, [action]);
+    phone.node.deck_run(&pc_id, "sound.volume", Some(1.7)).await.unwrap();
+    let run = wait_for(&mut on_pc, |e| match e {
+        Event::DeckRun { action, value, .. } => Some((action.clone(), *value)),
+        _ => None,
+    })
+    .await;
+    assert_eq!(run, ("sound.volume".to_string(), Some(1.0)), "a slider's value is kept within 0 to 1");
+    phone.node.deck_open(&pc_id, false).await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::DeckClose { .. }).then_some(())).await;
+
+    pc.node.inbox_history(&phone_id, "com.whatsapp", "Family", 5000, 10_000).await.unwrap();
+    let limit = wait_for(&mut on_phone, |e| match e {
+        Event::InboxHistory { conversation, limit, .. } if conversation == "Family" => Some(*limit),
+        _ => None,
+    })
+    .await;
+    assert_eq!(limit, 200);
+    let long = ConversationMessage { sender: Some("Bob".into()), text: "é".repeat(5000), time: Some(10), mine: false };
+    phone.node.inbox_history_page(&pc_id, "com.whatsapp", "Family", vec![long], false).await.unwrap();
+    let page = wait_for(&mut on_pc, |e| match e {
+        Event::InboxHistoryPage { messages, more: false, .. } => Some(messages.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(page[0].text.len(), 8192, "long messages are cut on a character boundary");
+
+    phone.node.remove_notification_reply_kept(&pc_id, "k").await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::NotificationRemoved { key, reply_kept: true, .. } if key == "k").then_some(())).await;
+}
+
+#[tokio::test]
 async fn notifications_arrive() {
     let (a, b) = paired().await;
     let mut rb = b.node.subscribe();
@@ -402,7 +520,7 @@ async fn mirrored_notifications_go_both_ways() {
     };
     phone.node.post_notification(&pc_id, n.clone()).await.unwrap();
     let got = wait_for(&mut on_pc, |e| match e {
-        Event::NotificationPosted { notification, .. } => Some(notification.clone()),
+        Event::NotificationPosted { notification, .. } => Some(*notification.clone()),
         _ => None,
     })
     .await;

@@ -27,9 +27,10 @@ use crate::discovery::{Announce, Discovery, DiscoveryEvent, DiscoveryKey};
 use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::fs::FsCall;
+use crate::gallery::GalleryCall;
 use crate::invite::{self, Invite};
 use crate::settings::Settings;
-use crate::protocol::{Battery, CallState, DirectGroup, DirectStep, PluggedPhone, FsRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState, 
+use crate::protocol::{Battery, CallState, ConversationMessage, DeckAction, DeckState, DirectGroup, DirectStep, PluggedPhone, FsRequest, GalleryRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState,
     FileEntry, Handshake, Intent, Message, PAIRING_VERSION, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -55,6 +56,13 @@ const MAX_KEY: usize = 1024;
 const MAX_ICON: usize = 64 * 1024 * 4 / 3 + 4;
 /// A device picture: 128 KiB, in base64.
 const MAX_PICTURE: usize = 128 * 1024 * 4 / 3 + 4;
+/// Most messages in a page of a conversation's history, and actions on a deck.
+const MAX_PAGE: u32 = 200;
+const MAX_DECK: usize = 500;
+const MAX_TEXT: usize = 8192;
+/// Most earlier messages a notification brings, the newest kept.
+const MAX_HISTORY: usize = 50;
+const EXPECTED_FOR: Duration = Duration::from_secs(600);
 // Fifteen seconds. Fourteen felt rushed.
 const RECONNECT_EVERY: Duration = Duration::from_secs(15);
 /// Per-address dial budget. LAN handshakes take milliseconds; a dead address never answers.
@@ -191,9 +199,9 @@ pub enum Event {
     /// A phone asks to use the cable (its `key` from [`Node::usb_plugged`]).
     UsbConnect { from: DeviceInfo, key: String },
     /// A paired device (a phone) shows a notification, new or changed (same `key`).
-    NotificationPosted { from: DeviceInfo, notification: RemoteNotification },
-    /// …and it's gone there.
-    NotificationRemoved { from: DeviceInfo, key: String },
+    NotificationPosted { from: DeviceInfo, notification: Box<RemoteNotification> },
+    /// …and it's gone there; with `reply_kept`, its conversation can still be answered.
+    NotificationRemoved { from: DeviceInfo, key: String, reply_kept: bool },
     /// Requests about this device's own notifications, from the device mirroring them.
     NotificationReply { from: DeviceInfo, key: String, text: String },
     NotificationAction { from: DeviceInfo, key: String, action: String },
@@ -253,6 +261,19 @@ pub enum Event {
     DirectLinked { id: Fingerprint },
     /// The link is gone, or never came: drop what this device set up for it.
     DirectEnded { id: Fingerprint, reason: Option<String> },
+    /// A computer asks this phone for a conversation's older messages (§4.5)…
+    InboxHistory { from: DeviceInfo, app: String, conversation: String, before_ms: u64, limit: u32 },
+    /// …and the phone's answer.
+    InboxHistoryPage { from: DeviceInfo, app: String, conversation: String, messages: Vec<ConversationMessage>, more: bool },
+    /// A phone's photos changed (§4.19).
+    GalleryChanged { from: DeviceInfo },
+    /// A phone's deck (§4.20): it shows or stopped, an action to run; and what a computer
+    /// offers it, with their state.
+    DeckOpen { from: DeviceInfo },
+    DeckClose { from: DeviceInfo },
+    DeckRun { from: DeviceInfo, action: String, value: Option<f64> },
+    DeckActions { from: DeviceInfo, actions: Vec<DeckAction> },
+    DeckState { from: DeviceInfo, states: Vec<DeckState> },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -472,6 +493,12 @@ struct Inner {
     /// File requests from other devices, for whoever serves this device's files (phones).
     fs: Mutex<Option<mpsc::UnboundedReceiver<FsCall>>>,
     fs_tx: mpsc::UnboundedSender<FsCall>,
+    /// Gallery requests, for whoever serves this device's photos (phones).
+    gallery: Mutex<Option<mpsc::UnboundedReceiver<GalleryCall>>>,
+    gallery_tx: mpsc::UnboundedSender<GalleryCall>,
+    /// Transfers this device asked for (photos from a gallery), taken without asking into
+    /// their folder: by id, from whom, where, and since when.
+    expected: Mutex<HashMap<Uuid, (Fingerprint, PathBuf, Instant)>>,
     /// Terminal requests, for whoever runs terminals (the daemon on a computer).
     terminals: Mutex<Option<mpsc::UnboundedReceiver<TerminalCall>>>,
     terminals_tx: mpsc::UnboundedSender<TerminalCall>,
@@ -525,6 +552,7 @@ impl Node {
         let (events, _) = broadcast::channel(1024);
         let (sessions_tx, sessions) = mpsc::unbounded_channel();
         let (fs_tx, fs) = mpsc::unbounded_channel();
+        let (gallery_tx, gallery) = mpsc::unbounded_channel();
         let (terminals_tx, terminals) = mpsc::unbounded_channel();
         let node = Self {
             inner: Arc::new(Inner {
@@ -552,6 +580,9 @@ impl Node {
                 sessions_tx,
                 fs: Mutex::new(Some(fs)),
                 fs_tx,
+                gallery: Mutex::new(Some(gallery)),
+                gallery_tx,
+                expected: Mutex::default(),
                 terminals: Mutex::new(Some(terminals)),
                 terminals_tx,
                 unsupported: Mutex::new(Default::default()),
@@ -904,12 +935,52 @@ impl Node {
         if notification.picture.as_ref().is_some_and(|p| p.len() > MAX_ICON) {
             notification.picture = None;
         }
-        self.send_message(to, &Message::NotificationPosted(notification)).await
+        self.send_message(to, &Message::NotificationPosted(Box::new(notification))).await
+    }
+
+    /// The mirrored notification `key` is gone here, but its conversation can still be
+    /// answered through `notification_reply`.
+    pub async fn remove_notification_reply_kept(&self, to: &Fingerprint, key: &str) -> Result<()> {
+        self.send_message(to, &Message::NotificationRemoved { key: key.into(), reply_kept: true }).await
+    }
+
+    /// Ask a phone for a conversation's messages older than `before_ms` (§4.5).
+    pub async fn inbox_history(&self, to: &Fingerprint, app: &str, conversation: &str, before_ms: u64, limit: u32) -> Result<()> {
+        let msg = Message::InboxHistory { app: app.into(), conversation: conversation.into(), before_ms, limit: limit.min(MAX_PAGE) };
+        self.send_message(to, &msg).await
+    }
+
+    /// Answer [`Event::InboxHistory`] with what this phone kept, oldest first.
+    pub async fn inbox_history_page(&self, to: &Fingerprint, app: &str, conversation: &str, messages: Vec<ConversationMessage>, more: bool) -> Result<()> {
+        self.send_message(to, &Message::InboxHistoryPage { app: app.into(), conversation: conversation.into(), messages, more }).await
+    }
+
+    /// This phone's photos changed (§4.19).
+    pub async fn gallery_changed(&self, to: &Fingerprint) -> Result<()> {
+        self.send_message(to, &Message::GalleryChanged).await
+    }
+
+    /// This phone's deck shows (`open`) or stopped (§4.20).
+    pub async fn deck_open(&self, to: &Fingerprint, open: bool) -> Result<()> {
+        self.send_message(to, if open { &Message::DeckOpen } else { &Message::DeckClose }).await
+    }
+
+    pub async fn deck_run(&self, to: &Fingerprint, action: &str, value: Option<f64>) -> Result<()> {
+        self.send_message(to, &Message::DeckRun { action: action.into(), value }).await
+    }
+
+    /// What this computer lets the phone's deck do.
+    pub async fn deck_actions(&self, to: &Fingerprint, actions: Vec<DeckAction>) -> Result<()> {
+        self.send_message(to, &Message::DeckActions { actions }).await
+    }
+
+    pub async fn deck_state(&self, to: &Fingerprint, states: Vec<DeckState>) -> Result<()> {
+        self.send_message(to, &Message::DeckState { states }).await
     }
 
     /// The mirrored notification `key` is gone here.
     pub async fn remove_notification(&self, to: &Fingerprint, key: &str) -> Result<()> {
-        self.send_message(to, &Message::NotificationRemoved { key: key.into() }).await
+        self.send_message(to, &Message::NotificationRemoved { key: key.into(), reply_kept: false }).await
     }
 
     /// Reply to a notification `from` mirrored here.
@@ -1046,7 +1117,7 @@ impl Node {
         if meta.len() > MAX_CLIPBOARD_FILE {
             return Err(invalid("too big for the clipboard (10 MB at most); send it as a file instead"));
         }
-        self.offer_with(to, vec![path], false, true).await
+        self.offer_with(to, vec![path], false, true, Uuid::new_v4()).await
     }
 
     /// Check in with a device that asked for heartbeats.
@@ -1178,6 +1249,24 @@ impl Node {
         self.inner.fs.lock().unwrap().take()
     }
 
+    /// Gallery requests from other devices, for the app that serves this device's photos.
+    /// Taken once; unserved, devices are told this one has none.
+    pub fn incoming_gallery(&self) -> Option<mpsc::UnboundedReceiver<GalleryCall>> {
+        self.inner.gallery.lock().unwrap().take()
+    }
+
+    /// A transfer this device will take without asking, into `into`, when `from` offers it
+    /// with this id within ten minutes.
+    pub(crate) fn expect_transfer(&self, id: Uuid, from: Fingerprint, into: PathBuf) {
+        let mut expected = self.inner.expected.lock().unwrap();
+        expected.retain(|_, (_, _, at)| at.elapsed() < EXPECTED_FOR);
+        expected.insert(id, (from, into, Instant::now()));
+    }
+
+    pub(crate) fn unexpect_transfer(&self, id: &Uuid) {
+        self.inner.expected.lock().unwrap().remove(id);
+    }
+
     /// A new bidirectional stream to a paired device, connecting if needed.
     pub(crate) async fn open_stream(&self, to: &Fingerprint) -> Result<(quinn::SendStream, quinn::RecvStream)> {
         let (conn, activity) = self.ensure_connection(to).await?;
@@ -1213,10 +1302,16 @@ impl Node {
     }
 
     async fn offer(&self, to: &Fingerprint, paths: Vec<PathBuf>, import: bool) -> Result<Uuid> {
-        self.offer_with(to, paths, import, false).await
+        self.offer_with(to, paths, import, false, Uuid::new_v4()).await
     }
 
-    async fn offer_with(&self, to: &Fingerprint, paths: Vec<PathBuf>, import: bool, clipboard: bool) -> Result<Uuid> {
+    /// Send photos a computer asked for from this phone's gallery, as the transfer `id` it
+    /// chose ([`GalleryRequest::Send`]).
+    pub async fn send_gallery(&self, to: &Fingerprint, paths: Vec<PathBuf>, id: Uuid) -> Result<Uuid> {
+        self.offer_with(to, paths, true, false, id).await
+    }
+
+    async fn offer_with(&self, to: &Fingerprint, paths: Vec<PathBuf>, import: bool, clipboard: bool, id: Uuid) -> Result<Uuid> {
         let (conn, activity) = self.ensure_connection(to).await?;
         let busy = activity.hold();
         let peer = self.peer_info(to).ok_or(Error::Unreachable)?;
@@ -1226,7 +1321,6 @@ impl Node {
         if files.is_empty() {
             return Err(invalid("nothing to send"));
         }
-        let id = Uuid::new_v4();
         let node = self.clone();
         let to = *to;
         let task = tokio::spawn(async move {
@@ -1757,10 +1851,18 @@ impl Node {
                                     if n.picture.as_ref().is_some_and(|p| p.len() > MAX_ICON) {
                                         n.picture = None;
                                     }
+                                    let skip = n.messages.len().saturating_sub(MAX_HISTORY);
+                                    n.messages.drain(..skip);
+                                    for m in &mut n.messages {
+                                        truncate(&mut m.text, MAX_TEXT);
+                                    }
+                                    if let Some(subject) = &mut n.subject {
+                                        truncate(subject, 1000);
+                                    }
                                     node.emit(Event::NotificationPosted { from, notification: n })
                                 }
                                 Ok(Message::NotificationPosted(_)) => debug!("bad notification from {}", from.name),
-                                Ok(Message::NotificationRemoved { key }) => node.emit(Event::NotificationRemoved { from, key }),
+                                Ok(Message::NotificationRemoved { key, reply_kept }) => node.emit(Event::NotificationRemoved { from, key, reply_kept }),
                                 Ok(Message::NotificationReply { key, text }) => node.emit(Event::NotificationReply { from, key, text }),
                                 Ok(Message::NotificationAction { key, action }) => node.emit(Event::NotificationAction { from, key, action }),
                                 Ok(Message::NotificationDismiss { key }) => node.emit(Event::NotificationDismissed { from, key }),
@@ -1839,6 +1941,27 @@ impl Node {
                                 Ok(Message::UsbConnect { key }) => node.emit(Event::UsbConnect { from, key }),
                                 Ok(Message::Direct { step }) if step.is_valid() => node.direct_step(from, step),
                                 Ok(Message::Direct { .. }) => debug!("bad direct link step from {}", from.name),
+                                Ok(Message::InboxHistory { app, conversation, before_ms, limit }) if app.len() <= MAX_KEY && conversation.len() <= MAX_KEY => {
+                                    node.emit(Event::InboxHistory { from, app, conversation, before_ms, limit: limit.min(MAX_PAGE) })
+                                }
+                                Ok(Message::InboxHistoryPage { app, conversation, mut messages, more })
+                                    if app.len() <= MAX_KEY && conversation.len() <= MAX_KEY && messages.len() <= MAX_PAGE as usize =>
+                                {
+                                    for m in &mut messages {
+                                        truncate(&mut m.text, MAX_TEXT);
+                                    }
+                                    node.emit(Event::InboxHistoryPage { from, app, conversation, messages, more })
+                                }
+                                Ok(Message::InboxHistory { .. } | Message::InboxHistoryPage { .. }) => debug!("bad conversation history from {}", from.name),
+                                Ok(Message::GalleryChanged) => node.emit(Event::GalleryChanged { from }),
+                                Ok(Message::DeckOpen) => node.emit(Event::DeckOpen { from }),
+                                Ok(Message::DeckClose) => node.emit(Event::DeckClose { from }),
+                                Ok(Message::DeckRun { action, value }) if action.len() <= MAX_KEY && value.is_none_or(f64::is_finite) => {
+                                    node.emit(Event::DeckRun { from, action, value: value.map(|v| v.clamp(0.0, 1.0)) })
+                                }
+                                Ok(Message::DeckActions { actions }) if actions.len() <= MAX_DECK => node.emit(Event::DeckActions { from, actions }),
+                                Ok(Message::DeckState { states }) if states.len() <= MAX_DECK => node.emit(Event::DeckState { from, states }),
+                                Ok(Message::DeckRun { .. } | Message::DeckActions { .. } | Message::DeckState { .. }) => debug!("bad deck message from {}", from.name),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
                             }
                         });
@@ -1959,6 +2082,26 @@ impl Node {
                     let _ = call.error("this device doesn't share its files", false).await;
                 }
             }
+            Some("gallery") => {
+                let mut first = first;
+                if let Some(o) = first.as_object_mut() {
+                    o.remove("type");
+                }
+                let Ok(request) = serde_json::from_value::<GalleryRequest>(first) else {
+                    return debug!("bad gallery request from {}", from.name);
+                };
+                let away_refused = !self.allowed_from_here(&from.id);
+                let call = GalleryCall::new(from, request, send);
+                if away_refused {
+                    let _ = call.error("this device shows its photos only on the same network").await;
+                    return;
+                }
+                let served = self.inner.gallery.lock().unwrap().is_none();
+                let unserved = if served { self.inner.gallery_tx.send(call).err().map(|e| e.0) } else { Some(call) };
+                if let Some(call) = unserved {
+                    let _ = call.error("this device doesn't share its photos").await;
+                }
+            }
             other => debug!("unknown stream {other:?} from {}", from.name),
         }
     }
@@ -2065,9 +2208,23 @@ impl Node {
         } else {
             None
         };
+        // What this device asked for goes where it said, without asking.
+        let asked = {
+            let mut expected = self.inner.expected.lock().unwrap();
+            match expected.remove(&id) {
+                Some((peer, into, at)) if peer == from.id && at.elapsed() < EXPECTED_FOR => Some(into),
+                Some(other) if other.0 != from.id => {
+                    expected.insert(id, other);
+                    None
+                }
+                _ => None,
+            }
+        };
         // Imports go to their own folder, never ask, and are refused where not taken.
         let import_to = if clipboard_to.is_some() {
             clipboard_to.clone()
+        } else if asked.is_some() {
+            asked
         } else if import {
             let base = self.inner.import_dir.lock().unwrap().clone();
             match base {
@@ -2713,6 +2870,14 @@ fn is_web_link(url: &str) -> bool {
 }
 
 /// A device name as a folder name: no separators, nothing hidden or empty.
+/// Cut `text` to at most `max` bytes, on a character boundary.
+fn truncate(text: &mut String, max: usize) {
+    if text.len() > max {
+        let end = (0..=max).rev().find(|&i| text.is_char_boundary(i)).unwrap_or(0);
+        text.truncate(end);
+    }
+}
+
 fn folder_name(name: &str) -> String {
     let clean: String = name.chars().map(|c| if c == '/' || c == '\\' || c.is_control() { '_' } else { c }).collect();
     let clean = clean.trim().trim_start_matches('.').to_string();

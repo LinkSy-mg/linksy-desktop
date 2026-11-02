@@ -330,9 +330,14 @@ pub enum Message {
     UsbConnect { key: String },
     /// A notification on the sender (a phone) to show here; sent again with the same `key`
     /// when it changes.
-    NotificationPosted(RemoteNotification),
+    NotificationPosted(Box<RemoteNotification>),
     /// That notification is gone on the sender.
-    NotificationRemoved { key: String },
+    NotificationRemoved {
+        key: String,
+        /// The phone still answers its conversation through `notification_reply` (§4.5).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        reply_kept: bool,
+    },
     /// Answer a notification that `can_reply` with this text.
     NotificationReply { key: String, text: String },
     /// Press one of a notification's `actions`.
@@ -421,6 +426,22 @@ pub enum Message {
     },
     /// Setting up (or ending) a direct Wi-Fi link for big transfers (§4.17).
     Direct { step: DirectStep },
+    /// A conversation's messages older than `before_ms`, from what the phone kept (§4.5).
+    InboxHistory { app: String, conversation: String, before_ms: u64, limit: u32 },
+    InboxHistoryPage { app: String, conversation: String, messages: Vec<ConversationMessage>, more: bool },
+    /// The phone's photos changed: one added, deleted… (§4.19)
+    GalleryChanged,
+    /// The phone's deck shows (the computer sends `deck_actions`, then `deck_state` as it
+    /// changes), or stopped showing (§4.20).
+    DeckOpen,
+    DeckClose,
+    DeckRun {
+        action: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<f64>,
+    },
+    DeckActions { actions: Vec<DeckAction> },
+    DeckState { states: Vec<DeckState> },
 }
 
 /// The steps of a direct link (docs/protocol.md §4.17), between a device that hosts it
@@ -694,6 +715,114 @@ pub struct RemoteNotification {
     pub time: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture: Option<String>,
+    /// The conversation's latest messages, oldest first, when the app keeps them in its
+    /// notification; `body` is still the newest alone.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub messages: Vec<ConversationMessage>,
+    /// A mail's subject, with its text in `body`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConversationMessage {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sender: Option<String>,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time: Option<u64>,
+    /// Sent by the phone's owner.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub mine: bool,
+}
+
+/// What a phone's gallery is asked, one request per bidirectional stream (§4.19).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "snake_case")]
+pub enum GalleryRequest {
+    /// Its albums → `gallery_albums`.
+    Albums,
+    /// Photos and videos, newest first: an album's (all of them without one), a page at a
+    /// time, each page older than `before` → `gallery_items`.
+    Items {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        album: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        before: Option<GalleryCursor>,
+        limit: u32,
+    },
+    /// A JPEG of one, `size` px on its longer side → `gallery_data` and its bytes.
+    Thumb { id: String, size: u32 },
+    /// Send these to the asking device as a transfer with this id (`import`) → `gallery_ok`.
+    Send { ids: Vec<String>, transfer: uuid::Uuid },
+}
+
+/// Where a page of items ended: the last one's time and id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GalleryCursor {
+    pub taken_ms: u64,
+    pub id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GalleryAlbum {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub count: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GalleryItem {
+    pub id: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub video: bool,
+    pub taken_ms: u64,
+    #[serde(default)]
+    pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum GalleryReply {
+    GalleryAlbums { albums: Vec<GalleryAlbum> },
+    GalleryItems { items: Vec<GalleryItem>, more: bool },
+    GalleryData { length: u64 },
+    GalleryOk,
+    GalleryError { message: String },
+}
+
+/// Something the computer lets a phone's deck do (§4.20).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeckAction {
+    pub id: String,
+    pub name: String,
+    pub kind: DeckKind,
+    /// Which list it belongs to ("Media", "Sound", "System", "Commands").
+    #[serde(default)]
+    pub group: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeckKind {
+    Button,
+    Toggle,
+    /// Takes a `value` from 0 to 1.
+    Slider,
+}
+
+/// An action's state now, for the deck's tiles.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeckState {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
