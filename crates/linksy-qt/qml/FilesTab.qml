@@ -23,6 +23,9 @@ ColumnLayout {
 
     // The folder the rows are from: another one starts at its top
     property string listed: ""
+    // What shows instead of the list, "" for the list
+    readonly property string status: store.waiting ? app.t("Loading…") : store.error ? store.error
+        : store.entries.length === 0 && !store.loading ? app.t("This folder is empty.") : ""
 
     spacing: Kirigami.Units.largeSpacing
 
@@ -116,7 +119,7 @@ ColumnLayout {
         readonly property real most: Kirigami.Units.gridUnit * 29
         Layout.fillWidth: true
         Layout.preferredHeight: (list.contentHeight > 0 ? Math.min(list.contentHeight, most) : most) + 2
-        visible: tab.store.status === ""
+        visible: tab.status === ""
         radius: Kirigami.Units.cornerRadius * 2
         color: "transparent"
         border.width: 1
@@ -192,8 +195,8 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.topMargin: Kirigami.Units.gridUnit * 1.5
         Layout.bottomMargin: Kirigami.Units.gridUnit * 1.5
-        visible: tab.store.status !== ""
-        text: tab.store.status
+        visible: tab.status !== ""
+        text: tab.status
         horizontalAlignment: Text.AlignHCenter
         wrapMode: Text.Wrap
         opacity: 0.7

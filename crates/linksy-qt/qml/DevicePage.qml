@@ -185,6 +185,7 @@ Kirigami.Page {
         target: page.app
         function onConversationChanged(c) { inbox.changed(c) }
         function onAlertsChanged(phone) { if (phone === inbox.phone) inbox.load() }
+        function onFsProgress(progress) { files.progress(progress) }
         function onGalleryChanged(phone) {
             if (phone !== gallery.phone || page.tab !== "gallery") return;
             gallery.loadAlbums();

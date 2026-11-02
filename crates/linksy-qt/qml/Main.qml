@@ -229,6 +229,17 @@ Kirigami.ApplicationWindow {
         showPassiveNotification(text);
     }
 
+    // With a button: "Show in Folder"
+    function toastAction(text, label, done) {
+        showPassiveNotification(text, 5000, label, done);
+    }
+
+    // What went wrong with a device, said as the GTK app says it
+    function toastError(error, id) {
+        if (error === "device isn't reachable right now" && deviceName(id)) return toast(t("{name} isn't reachable. Check that it's on and on this network.", { name: deviceName(id) }));
+        toast(error.charAt(0).toUpperCase() + error.slice(1));
+    }
+
     // What a device can do for others; older versions don't say, so assume as the GTK app does
     function can(info, feature) {
         if (info.features && info.features.length) return info.features.includes(feature);
