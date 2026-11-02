@@ -58,6 +58,7 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Controlling the phone from the computer | Done | Not possible | AccessibilityService is blocked for sideloaded apps |
 | Texting from the computer | Done | Not possible | SMS permissions are blocked for sideloaded apps |
 | Phone notifications on the computer, reply | Done | Not possible | notification-listener access is blocked |
+| Messages page, codes copied | Done (next release) | To do (optional fields) | from message notifications; `conversation`, `sender`… (§4.5) |
 | Images/files on the clipboard | Done | Done | offer with `"clipboard":true` (§4.5) |
 | Automatic clipboard sync, computer → phone | Done (not on GNOME) | Done (phone asks) | `clipboard_watch` (§4.5) |
 | Phone as microphone | Done | Done | session `microphone`, raw PCM (§4.8) |
@@ -260,7 +261,9 @@ and close the other with reason `duplicate`.
   // Phone notifications mirrored to the computer (phone → computer):
   {"type":"notification_posted","key":"0|com.whatsapp|1|null|10123","app":"com.whatsapp",
    "app_name":"WhatsApp","title":"Alice","body":"Lunch?","can_reply":true,
-   "actions":[{"id":"read","label":"Mark as read"}],"icon":"<base64 PNG, optional>"}
+   "actions":[{"id":"read","label":"Mark as read"}],"icon":"<base64 PNG, optional>",
+   "category":"msg","conversation":"Alice","sender":"Alice","group":false,     // these four,
+   "time":1762070400000,"picture":"<base64 PNG or JPEG>"}       // and these two: optional
   {"type":"notification_removed","key":"…"}
   // …and what the computer asks back (computer → phone):
   {"type":"notification_reply","key":"…","text":"Sure!"}
@@ -322,7 +325,28 @@ and close the other with reason `duplicate`.
   - `notification_dismiss`: the user clicked it or swiped it away on the computer: cancel
     it on the phone (`NotificationListenerService.cancelNotification(key)`).
   Send `notification_removed` when it goes away on the phone (read, swiped, answered), so
-  it goes away on the computer too. Nothing of it is stored on either side.
+  it goes away on the computer too. Nothing of it is saved to disk on either side.
+
+  **Messages (desktop, next release).** The computer also makes the phone's conversations
+  out of these notifications, in memory only (100 conversations, the last 50 messages
+  each), for its Messages page: each new `body` from a chat, SMS, mail or social app is one
+  message; a verification code in it is copied to the clipboard (the user can turn that
+  off) and offered as "Copy 482913"; Reply answers through the notification while the
+  phone still has it. Phones that send only `title` and `body` work: they're read the way
+  WhatsApp, Messages, Gmail, Discord and others write them ("Bob @ Family", "Bob: hi",
+  "Carol (2 messages)"). A phone that knows more says so, every field optional:
+  - `category`: Android's `Notification.category` (`msg`, `email`, `social`…).
+  - `conversation`: the chat's name (`MessagingStyle.getConversationTitle()`, else the
+    other person's name in a one-to-one chat).
+  - `sender`: who wrote the newest message (its `Person` name); `group`: `true` for a
+    group chat (`MessagingStyle.isGroupConversation()`).
+  - `time`: when the newest message was sent, ms since 1970 (`Message.getTimestamp()`,
+    else `postTime`).
+  - `picture`: the sender's or the chat's picture (`Person.getIcon()`, else the large
+    icon), PNG or JPEG around 96 px, base64, at most 64 KiB raw; a bigger one is dropped.
+  With these, `body` is the newest message alone, not "Bob: …". Send the app's launcher
+  icon as `icon` (96 px), not the small status-bar one: the page shows it beside each
+  conversation.
 
   **Phone, for 0.11 (decided 2026-11-02):** a `NotificationListenerService` in the Linksy
   app itself, not a separate app. Skip Linksy's own notifications and ongoing ones (music,
@@ -1916,3 +1940,8 @@ robust against any encoder (GPU ones may slice too):
   protocol change.
 - **2026-11-02** — Plan: 0.11 is the phone's notifications through a listener in the Linksy
   app itself (§4.5, phone to-do); the separate "Extras" app is dropped. No protocol change.
+- **2026-11-02** — Desktop (next release): a **Messages** page made from the phone's message
+  notifications, verification codes copied (§4.5 Messages). `notification_posted` gains
+  optional `category`, `conversation`, `sender`, `group`, `time` and `picture`; older
+  devices ignore them. Phone to-do: fill them from `MessagingStyle`, and send the launcher
+  icon at 96 px.
