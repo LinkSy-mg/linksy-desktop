@@ -188,6 +188,97 @@ pub async fn toggle_mute(microphone: bool) {
     }
 }
 
+/// A sound output: what selects it, its name, whether it's the default.
+#[derive(Clone, Debug, PartialEq)]
+struct Sink {
+    id: String,
+    name: String,
+    default: bool,
+}
+
+async fn sinks(tool: Tool) -> Vec<Sink> {
+    match tool {
+        Tool::Wpctl => output("wpctl", &["status"]).await.map(|s| parse_wpctl_sinks(&s)).unwrap_or_default(),
+        Tool::Pactl => {
+            let (list, default) = tokio::join!(output("pactl", &["list", "sinks"]), output("pactl", &["get-default-sink"]));
+            parse_pactl_sinks(&list.unwrap_or_default(), default.as_deref().unwrap_or_default().trim())
+        }
+    }
+}
+
+/// The default output's name ("Built-in Audio Analog Stereo").
+pub async fn output_name() -> Option<String> {
+    sinks(tool()?).await.into_iter().find(|s| s.default).map(|s| s.name)
+}
+
+/// Make the next output the default; after the last, the first again.
+pub async fn next_output() {
+    let Some(tool) = tool() else { return };
+    let sinks = sinks(tool).await;
+    if sinks.len() < 2 {
+        return;
+    }
+    let next = &sinks[sinks.iter().position(|s| s.default).map_or(0, |i| (i + 1) % sinks.len())];
+    let (program, set) = match tool {
+        Tool::Wpctl => ("wpctl", "set-default"),
+        Tool::Pactl => ("pactl", "set-default-sink"),
+    };
+    if output(program, &[set, &next.id]).await.is_none() {
+        debug!("{program} {set} {} failed", next.id);
+    }
+}
+
+/// The sinks under Audio in `wpctl status`: `│  *   49. Built-in Audio Analog Stereo [vol: 0.38]`,
+/// the default starred.
+fn parse_wpctl_sinks(text: &str) -> Vec<Sink> {
+    let (mut audio, mut listing) = (false, false);
+    let mut sinks = Vec::new();
+    for line in text.lines() {
+        if !line.starts_with(' ') && !line.trim().is_empty() {
+            (audio, listing) = (line.trim() == "Audio", false);
+            continue;
+        }
+        if line.contains('├') || line.contains('└') {
+            listing = audio && line.trim_end().ends_with("Sinks:");
+            continue;
+        }
+        if !listing {
+            continue;
+        }
+        let rest = line.trim_start_matches(|c: char| c == '│' || c.is_whitespace());
+        let (default, rest) = match rest.strip_prefix('*') {
+            Some(rest) => (true, rest.trim_start()),
+            None => (false, rest),
+        };
+        let Some((id, name)) = rest.split_once(". ") else { continue };
+        if id.is_empty() || !id.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let name = name.rsplit_once(" [vol:").map_or(name, |(name, _)| name).trim();
+        sinks.push(Sink { id: id.into(), name: name.into(), default });
+    }
+    sinks
+}
+
+/// `pactl list sinks`: a `Sink #N` block each, with its `Name:` and `Description:`.
+fn parse_pactl_sinks(text: &str, default: &str) -> Vec<Sink> {
+    let mut sinks: Vec<Sink> = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.starts_with("Sink #") {
+            sinks.push(Sink { id: String::new(), name: String::new(), default: false });
+        } else if let (Some(sink), Some(name)) = (sinks.last_mut(), line.strip_prefix("Name: ")) {
+            (sink.id, sink.default) = (name.into(), name == default);
+        } else if let (Some(sink), Some(description)) = (sinks.last_mut(), line.strip_prefix("Description: ")) {
+            sink.name = description.into();
+        }
+    }
+    sinks.retain(|s| !s.id.is_empty());
+    for sink in sinks.iter_mut().filter(|s| s.name.is_empty()) {
+        sink.name = sink.id.clone();
+    }
+    sinks
+}
+
 /// `Volume: 0.70`, or `Volume: 0.70 [MUTED]`.
 fn parse_wpctl(text: &str) -> Option<(f64, bool)> {
     let level = text.trim().strip_prefix("Volume:")?.split_whitespace().next()?.parse().ok()?;
@@ -213,6 +304,17 @@ mod tests {
         assert_eq!(parse_pactl_volume(pactl), Some(0.70));
         assert!(same((0.70, false), (0.703, false)));
         assert!(!same((0.70, false), (0.70, true)));
+    }
+
+    #[test]
+    fn finds_the_outputs_and_the_default() {
+        let wpctl = "PipeWire 'pipewire-0' [1.6.11, me@pc, cookie:1]\n └─ Clients:\n        33. WirePlumber                [1.6.11, me@pc, pid:1]\n\nAudio\n ├─ Devices:\n │      45. Ryzen HD Audio Controller           [alsa]\n │  \n ├─ Sinks:\n │      48. HDMI / DisplayPort 1 Output [vol: 1.00]\n │  *   49. Ryzen HD Audio Controller Analog Stereo [vol: 0.38]\n │  \n ├─ Sources:\n │  *   50. Ryzen HD Audio Controller Analog Stereo [vol: 0.24]\n │  \n └─ Streams:\n\nVideo\n ├─ Devices:\n ├─ Sinks:\n │  *   60. Not audio\n";
+        let sinks = parse_wpctl_sinks(wpctl);
+        assert_eq!(sinks, [Sink { id: "48".into(), name: "HDMI / DisplayPort 1 Output".into(), default: false }, Sink { id: "49".into(), name: "Ryzen HD Audio Controller Analog Stereo".into(), default: true }]);
+        assert!(parse_wpctl_sinks("nonsense\n │ *  x. y").is_empty());
+        let pactl = "Sink #46\n\tState: SUSPENDED\n\tName: alsa_output.analog-stereo\n\tDescription: Built-in Audio Analog Stereo\n\tProperties:\n\t\tdevice.name = \"x\"\nSink #47\n\tName: bluez_output.headphones\n";
+        let sinks = parse_pactl_sinks(pactl, "bluez_output.headphones");
+        assert_eq!(sinks, [Sink { id: "alsa_output.analog-stereo".into(), name: "Built-in Audio Analog Stereo".into(), default: false }, Sink { id: "bluez_output.headphones".into(), name: "bluez_output.headphones".into(), default: true }]);
     }
 
     /// Reads this computer's volume and sets it to what it already is. Needs a session

@@ -39,6 +39,8 @@ pub enum Act {
     Volume(f64),
     Mute,
     MicMute,
+    /// The next sound output becomes the default.
+    NextOutput,
     Lock,
     Command { name: String, line: String },
 }
@@ -56,6 +58,8 @@ pub struct Status {
     pub level: Option<f64>,
     pub muted: Option<bool>,
     pub mic_muted: Option<bool>,
+    /// The default output's name.
+    pub output: Option<String>,
 }
 
 /// What runs the actions: this desktop, or a stand-in in tests.
@@ -79,6 +83,7 @@ impl Desktop for System {
             Act::Volume(level) => crate::volume::set_level(level).await,
             Act::Mute => crate::volume::toggle_mute(false).await,
             Act::MicMute => crate::volume::toggle_mute(true).await,
+            Act::NextOutput => crate::volume::next_output().await,
             Act::Lock => {
                 crate::lock::lock_screen().await;
             }
@@ -88,11 +93,12 @@ impl Desktop for System {
 
     async fn status(&self, ids: &HashSet<&str>) -> Status {
         let (output, mic) = (ids.contains("sound.volume") || ids.contains("sound.mute"), ids.contains("sound.mic_mute"));
-        let (out, mic_muted) = tokio::join!(
+        let (out, mic_muted, name) = tokio::join!(
             async { if output { crate::volume::output_state().await } else { None } },
             async { if mic { crate::volume::mic_muted().await } else { None } },
+            async { if ids.contains("sound.output") { crate::volume::output_name().await } else { None } },
         );
-        Status { level: out.map(|(level, _)| level.clamp(0.0, 1.0)), muted: out.map(|(_, muted)| muted), mic_muted }
+        Status { level: out.map(|(level, _)| level.clamp(0.0, 1.0)), muted: out.map(|(_, muted)| muted), mic_muted, output: name }
     }
 }
 
@@ -218,6 +224,7 @@ impl<D: Desktop> Deck<D> {
                 action("sound.volume", t!("Volume"), DeckKind::Slider, SOUND),
                 action("sound.mute", t!("Mute"), DeckKind::Toggle, SOUND),
                 action("sound.mic_mute", t!("Mute Microphone"), DeckKind::Toggle, SOUND),
+                action("sound.output", t!("Sound Output"), DeckKind::Button, SOUND),
             ]);
         }
         all.push(action("system.lock", t!("Lock Screen"), DeckKind::Button, SYSTEM));
@@ -405,6 +412,7 @@ impl<D: Desktop> Deck<D> {
             "sound.volume" if caps.sound => Act::Volume(value.filter(|v| v.is_finite())?.clamp(0.0, 1.0)),
             "sound.mute" if caps.sound => Act::Mute,
             "sound.mic_mute" if caps.sound => Act::MicMute,
+            "sound.output" if caps.sound => Act::NextOutput,
             "system.lock" => Act::Lock,
             _ => {
                 let id = id.strip_prefix("command.")?;
@@ -601,6 +609,7 @@ fn states(actions: &[DeckAction], now: &Status) -> Vec<DeckState> {
                 "sound.volume" => state(None, Some(now.level?)),
                 "sound.mute" => state(Some(now.muted?), None),
                 "sound.mic_mute" => state(Some(now.mic_muted?), None),
+                "sound.output" => Some(DeckState { id: a.id.clone(), on: None, value: None, text: Some(now.output.clone()?) }),
                 _ => None,
             }
         })
@@ -636,7 +645,13 @@ mod tests {
 
         async fn status(&self, ids: &HashSet<&str>) -> Status {
             let output = ids.contains("sound.volume") || ids.contains("sound.mute");
-            Status { level: output.then_some(0.42), muted: output.then_some(false), mic_muted: ids.contains("sound.mic_mute").then_some(true) }
+            let has = |id: &str| ids.contains(id);
+            Status {
+                level: output.then_some(0.42),
+                muted: output.then_some(false),
+                mic_muted: has("sound.mic_mute").then_some(true),
+                output: has("sound.output").then(|| "Speakers".into()),
+            }
         }
     }
 
@@ -664,22 +679,27 @@ mod tests {
         deck.prefs(p).actions.into_iter().filter(|a| a.on).map(|a| a.action.id).collect()
     }
 
+    /// Everything the fake computer offers, and what's on for a phone until changed.
+    const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock"];
+    const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output"];
+
     #[test]
     fn media_and_sound_on_until_changed_and_kept() {
         let dir = tempfile::tempdir().unwrap();
         let d = deck(&dir);
         let all = d.prefs(&phone(1)).actions;
-        assert_eq!(all.iter().map(|a| a.action.id.as_str()).collect::<Vec<_>>(), ["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "system.lock"]);
-        assert_eq!(on(&d, &phone(1)), ["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute"]);
+        assert_eq!(all.iter().map(|a| a.action.id.as_str()).collect::<Vec<_>>(), OFFERED);
+        assert_eq!(on(&d, &phone(1)), ON);
         assert_eq!(all.iter().find(|a| a.action.id == "sound.volume").unwrap().action.kind, DeckKind::Slider);
 
         d.set_action(&phone(1), "system.lock", true).unwrap();
         d.set_action(&phone(1), "media.next", false).unwrap();
         let again = deck(&dir);
-        assert_eq!(on(&again, &phone(1)), ["media.play_pause", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "system.lock"]);
+        let want: Vec<&str> = OFFERED.iter().copied().filter(|id| (ON.contains(id) && *id != "media.next") || *id == "system.lock").collect();
+        assert_eq!(on(&again, &phone(1)), want);
         // Another phone still has the defaults
-        assert_eq!(on(&again, &phone(2)).len(), 6);
-        assert_eq!(again.enabled(&phone(2)).len(), 6);
+        assert_eq!(on(&again, &phone(2)), ON);
+        assert_eq!(again.enabled(&phone(2)).len(), ON.len());
         use std::os::unix::fs::PermissionsExt;
         assert_eq!(std::fs::metadata(dir.path().join("deck.json")).unwrap().permissions().mode() & 0o777, 0o600);
     }
@@ -773,6 +793,15 @@ mod tests {
         assert_eq!(now, [DeckState { id: "sound.volume".into(), on: None, value: Some(0.42), text: None }, DeckState { id: "sound.mute".into(), on: Some(false), value: None, text: None }]);
         d.set_action(&phone(1), "sound.volume", false).unwrap();
         assert_eq!(states(&d.enabled(&phone(1)), &sound).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_output_switches_and_shows_its_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        assert_eq!(d.act(&phone(1), "sound.output", None), Some(Act::NextOutput));
+        let now = d.inner.desktop.status(&HashSet::from(["sound.output"])).await;
+        assert_eq!(states(&d.enabled(&phone(1)), &now), [DeckState { id: "sound.output".into(), on: None, value: None, text: Some("Speakers".into()) }]);
     }
 
     #[tokio::test]
