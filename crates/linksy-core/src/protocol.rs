@@ -309,6 +309,8 @@ pub enum Message {
     Clipboard { text: String },
     /// The sender's new name, so connected devices update without reconnecting.
     Renamed { name: String },
+    /// The sender's features (§4.10), when they change while connected.
+    Features { features: Vec<String> },
     /// The key the sender's private discovery tags are made from (§4.16), 64 hex chars.
     /// Sent to paired devices on every connection.
     DiscoveryKey { key: String },

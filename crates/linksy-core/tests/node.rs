@@ -956,6 +956,31 @@ async fn settings_persist_and_rename_reaches_peers() {
 }
 
 #[tokio::test]
+async fn new_features_reach_peers() {
+    let (a, b) = paired_with(|c| c.idle_after = Duration::from_millis(300)).await;
+    let mut ra = a.node.subscribe();
+    let features = vec!["files".to_string(), "notifications".to_string()];
+    b.node.set_features(features.clone()).await;
+    assert_eq!(b.node.info().features, features);
+    let heard = wait_for(&mut ra, |e| match e {
+        Event::DeviceUpdated { device } => Some(device.features.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(heard, features);
+    wait_for(&mut ra, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
+    // Kept while apart, and the next handshake carries them too.
+    assert!(a.node.devices().iter().any(|d| d.device.features == features));
+    a.node.notify(&b.node.info().id, "Hi", "").await.unwrap();
+    let again = wait_for(&mut ra, |e| match e {
+        Event::Connected { device } => Some(device.features.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(again, features);
+}
+
+#[tokio::test]
 async fn link_stays_open_when_either_side_wants_it() {
     let a = dev_with("Alpha", |c| c.idle_after = Duration::from_millis(200)).await;
     let b = dev_with("Beta", |c| {

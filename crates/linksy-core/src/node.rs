@@ -606,23 +606,40 @@ impl Node {
                 info.clone()
             };
             self.rediscover();
-            // Connected devices hear it directly; others at their next handshake.
-            let live: Vec<quinn::Connection> = self.inner.peers.lock().unwrap().values().map(|p| p.conn.clone()).collect();
-            for conn in live {
-                let msg = Message::Renamed { name: info.name.clone() };
-                tokio::spawn(async move {
-                    if let Ok(mut s) = conn.open_uni().await {
-                        let _ = write_msg(&mut s, &msg).await;
-                        let _ = s.finish();
-                    }
-                });
-            }
+            self.tell_connected(Message::Renamed { name: info.name });
         }
         if new.stay_connected && !old.stay_connected {
             self.reconnect_all();
         }
         self.emit(Event::SettingsChanged { settings: new.clone() });
         Ok(new)
+    }
+
+    /// Change what this device announces it can do (§4.10), such as `notifications` when the
+    /// user turns them on. Connected devices hear it right away.
+    pub async fn set_features(&self, features: Vec<String>) {
+        {
+            let mut info = self.inner.info.lock().unwrap();
+            if info.features == features {
+                return;
+            }
+            info.features = features.clone();
+        }
+        self.tell_connected(Message::Features { features });
+    }
+
+    /// Connected devices hear `msg` now; others get the news at their next handshake.
+    fn tell_connected(&self, msg: Message) {
+        let live: Vec<quinn::Connection> = self.inner.peers.lock().unwrap().values().map(|p| p.conn.clone()).collect();
+        for conn in live {
+            let msg = msg.clone();
+            tokio::spawn(async move {
+                if let Ok(mut s) = conn.open_uni().await {
+                    let _ = write_msg(&mut s, &msg).await;
+                    let _ = s.finish();
+                }
+            });
+        }
     }
 
     pub fn local_addr(&self) -> Result<SocketAddr> {
@@ -1715,6 +1732,10 @@ impl Node {
                                 }
                                 Ok(Message::Clipboard { .. }) => debug!("oversized clipboard from {}", from.name),
                                 Ok(Message::Renamed { name }) => node.peer_renamed(from.id, name),
+                                Ok(Message::Features { features }) if features.len() <= 64 && features.iter().all(|f| f.len() <= 64) => {
+                                    node.peer_changed(from.id, |d| d.features = features)
+                                }
+                                Ok(Message::Features { .. }) => debug!("bad features from {}", from.name),
                                 Ok(Message::DiscoveryKey { key }) => node.peer_discovery_key(&from, &key),
                                 Ok(Message::Ping) => {}
                                 Ok(Message::OpenUrl { url }) if is_web_link(&url) => node.emit(Event::OpenUrl { from, url }),
@@ -1880,17 +1901,20 @@ impl Node {
 
     fn peer_renamed(&self, id: Fingerprint, name: String) {
         let name = crate::settings::clean_name(&name);
-        if name.is_empty() {
-            return;
+        if !name.is_empty() {
+            self.peer_changed(id, |d| d.name = name);
         }
+    }
+
+    fn peer_changed(&self, id: Fingerprint, change: impl FnOnce(&mut DeviceInfo)) {
         let device = {
             let mut peers = self.inner.peers.lock().unwrap();
             let Some(p) = peers.get_mut(&id) else { return };
-            p.device.name = name;
+            change(&mut p.device);
             (p.device.clone(), p.conn.remote_address())
         };
         if let Err(e) = self.inner.trust.lock().unwrap().touch(&device.0, device.1) {
-            warn!("could not save device name: {e}");
+            warn!("could not save device details: {e}");
         }
         self.emit(Event::DeviceUpdated { device: device.0 });
     }
