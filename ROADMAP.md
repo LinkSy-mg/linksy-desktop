@@ -17,12 +17,12 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
 | 0.9 | Works on every desktop | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Private discovery · One Accept for a batch (desktop done in 0.9.0; screen control on Hyprland and Sway moves to 0.10) |
 | **0.10** | **Lighter and smoother** | Lighter at rest (desktop done in 0.11.3) · Transfers in a corner panel (desktop done) · Choose which monitor to view (desktop done) · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
-| **0.11** | **Never miss a notification** | The phone's notifications on the computer, with reply, which brings texts from every messaging app (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
-| **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near |
-| **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) |
+| **0.11** | **Never miss a notification** | The phone's notifications on the computer, with reply, which brings texts from every messaging app · Snap to computer (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
+| **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near · Connection Doctor |
+| **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) · The phone's photos on the computer |
 | **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (desktop done in 0.11.3; your own relay in Android 0.2.3) |
-| **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth |
-| **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync |
+| **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth · The phone's controls on the computer |
+| **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync · The phone's sound with its screen · Quick actions from the phone · Videos open where you left off · The computer's notifications on the phone |
 | **1.0** | **Feature freeze** | No new features: fixes, performance, polish, stores · Onboarding |
 
 After 0.16, Linksy is feature complete: everything after that is fixing. Bold releases are
@@ -244,6 +244,17 @@ The computer's side has been there since 0.2.2 (`notification_posted`, `notifica
   from the computer is sent from the phone, and reading it on either side clears it on both.
 - **Later, with calls (0.15):** the SMS app's own threads and writing new texts.
 
+### Snap to computer — S
+Take a photo or a page with the phone, and it's on the computer straight away.
+- **Phone:** a "Snap to Computer" action (in the app and as a Quick Settings tile) that
+  opens the camera and sends the picture the moment it's taken; for a page, its edges are
+  found and it's straightened on the phone, with no Google services.
+- **Desktop:** the picture lands on the clipboard and in Downloads/Linksy, with a
+  notification to open it. "Snap from Phone" on the phone's page asks the phone to open its
+  camera. Both apps.
+- **Done when:** from the computer, Snap from Phone, take the picture, and paste it into a
+  document within two seconds.
+
 ## 0.12 — Fast on any link
 
 ### Lower latency on every connection — L
@@ -311,6 +322,20 @@ offices): the phone and the computer make their own link.
 - **Done when:** with Wi-Fi off on both, notifications and texts still arrive, and walking
   away still locks the computer.
 
+### Connection Doctor — M
+Most "it doesn't connect" reports come down to the network or the phone's battery saving.
+One button finds which, says it in a sentence, and fixes what it can.
+- **Desktop:** "Why Can't I See My Phone?" in the device list and Finish Setup checks, in
+  order: Linksy's port and mDNS in the firewall; a VPN, or the phone on another network; a
+  router that keeps devices apart (their announcements never arrive, the phone's last
+  address doesn't answer); the cable's state. Each finding with a button where Linksy can
+  act: open the firewall, connect by address, use the cable.
+- **Phone:** the same from its side: Wi-Fi on and the same network, battery restrictions
+  on Linksy (with the steps for the phone's brand), and whether it hears the computer's
+  announcements.
+- **Done when:** a guest network that isolates devices, a VPN, a closed firewall and a
+  phone with battery saving on are each named correctly, with the right fix.
+
 ## 0.13 — The cable, for real
 
 ### USB that works on every phone — L
@@ -330,6 +355,19 @@ phone has it; the failures were ours, as Android's source shows (docs/protocol.m
   drops what a smaller read can't hold), and the activation fixes in §4.11.
 - **Done when:** plugging in and pressing Connect gives "Connected by USB" on a realme, a
   Samsung, a Pixel, a Xiaomi and a Motorola, every time.
+
+### The phone's photos on the computer — M
+Builds on photo backup (0.4): browsing instead of copying everything.
+- **Protocol:** the phone's albums; an album's photos and videos, newest first, a page at a
+  time; a small thumbnail of each; the full file through the usual transfer; and a note
+  when the library changes.
+- **Phone:** answers from the phone's media library (asked for photo and video access when
+  first used), and says when a photo or screenshot is added.
+- **Desktop:** a Photos page for the phone: albums, a grid of thumbnails loaded as you
+  scroll, one picture opened large, saved or dragged to any folder; a new screenshot
+  offered as soon as it's taken. Both apps.
+- **Done when:** a library of 10,000 photos scrolls smoothly on the computer, and a
+  screenshot taken on the phone shows there within a second.
 
 ## 0.14 — Your relay, or none
 
@@ -361,6 +399,15 @@ phone side remains.*
 - **Maybe** because the audio part depends on hardware we don't control. If it isn't
   reliable, only call control ships.
 
+### The phone's controls on the computer — S
+- **Phone:** its volumes (media, ringtone, alarm), ringer mode, Do Not Disturb (with
+  Android's Do Not Disturb access) and the flashlight, set when the computer asks and
+  reported when they change.
+- **Desktop:** sliders and switches for them on the phone's page; "Keep Do Not Disturb in
+  Sync": the computer's and the phone's follow each other (GNOME and KDE). Both apps.
+- **Done when:** muting the phone from the computer, or turning on Do Not Disturb on the
+  computer, silences the phone at once.
+
 ## 0.16 — Optional extras
 
 ### Control the phone's screen from the computer — M
@@ -387,6 +434,37 @@ Today, sending the clipboard is a button.
   clipboard. Automatic while Linksy is open, and through a "Copy to Computer" entry in
   Android's text menu otherwise.
 - **Done when:** text copied on one side is ready to paste on the other, with no button.
+
+### The phone's sound with its screen — M
+- **Phone:** while it shares its screen, it also captures what its apps play (Android 10+,
+  for apps that allow it) and sends it with the picture.
+- **Desktop:** played in step with the picture, with a mute button in the viewer. Both
+  apps.
+- **Done when:** a video playing on the phone is heard on the computer, in sync, while its
+  screen is shown.
+
+### Quick actions from the phone — S
+- **Desktop:** the actions a phone may run, set on the computer: lock, sleep, mute, volume,
+  and commands of your own (a name and a command line), allowed per phone like the
+  terminal.
+- **Phone:** a button for each on the computer's page, and as Quick Settings tiles.
+- **Done when:** one tap on the phone locks the computer, or runs a command set on it.
+
+### Videos open where you left off — S
+Builds on Open on PC (0.2) and the notification listener (0.11), which lets the phone see
+what's playing and where.
+- **Phone:** "Continue on Computer" for the video playing now: its link and position.
+- **Desktop:** opens it at that position (YouTube and other sites that take a time in the
+  link; the plain link elsewhere).
+- **Done when:** a YouTube video playing on the phone carries on on the computer within a
+  second of where it was.
+
+### The computer's notifications on the phone — S
+- **Desktop:** the computer's own notifications, chosen per app and off by default, sent
+  to the phone; never the ones Linksy shows for the phone itself.
+- **Phone:** shown as Android notifications, grouped per computer, with their buttons.
+- **Done when:** a "build finished" or new-mail notification on the computer shows on the
+  phone within a second.
 
 ## 1.0 — Feature freeze
 
