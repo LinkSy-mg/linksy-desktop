@@ -1637,7 +1637,11 @@ computer → phone {"type":"deck_state",…}         as in §4.19
   A kind the phone doesn't know draws as a plain tile with its `label`. A tile whose
   action isn't in `deck_actions` shows as unavailable.
 - Themes: `stock`, `dots`, `eink`, `term`, `pixel`, with an `accent` colour. The phone draws
-  the theme (the computer sends only its id); one it doesn't know draws as `stock`.
+  the theme (the computer sends only its id); one it doesn't know draws as `stock`. The
+  phone may also have themes of its own, beyond these: picked on the phone (a long press
+  on the deck's name, say), such a choice stays on the phone and is drawn instead of the
+  layout's, until the user picks the layout's theme again. The reference looks of the five:
+  https://claude.ai/artifact/7zVv6HaFHYyY2i8sPjeC71
 - Away from the computer, the phone keeps showing the last layouts it got from it (kept
   per computer, with their `version`); its tiles are unavailable until the computer is
   back. The phone doesn't send layouts back (it may later).
