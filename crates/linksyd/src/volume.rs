@@ -95,7 +95,8 @@ fn same(a: (f64, bool), b: (f64, bool)) -> bool {
 }
 
 async fn output(program: &str, args: &[&str]) -> Option<String> {
-    let out = Command::from(linksy_host::command(program, &[])).args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().await.ok()?;
+    // In English, with a decimal point: what the parsers read
+    let out = Command::from(linksy_host::command(program, &[("LC_ALL", "C")])).args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().await.ok()?;
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
