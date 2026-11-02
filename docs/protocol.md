@@ -766,6 +766,14 @@ turn sharing on in the phone app. In Rust: `node.incoming_fs()` gives `FsCall`s;
 each with `entries` / `entry` / `data` / `ok` / `error`, and read a write's bytes with
 `body()` first.
 
+**Files tab (desktop, next release).** The device page's Files tab copies to and from the
+phone, makes folders, renames and deletes with these same ops; nothing new on the wire.
+A copy keeps up to 4 `read`s in flight and several copies can run at once, so answer each
+stream on its own task rather than one after another. The computer never overwrites: it
+lists the folder first and picks `name (1).ext`, comparing names without case as Android
+storage does. Answer `fs_error` for a path outside the shared folder (`..`) and for
+deleting `/` itself.
+
 
 ### 4.10 Features: what each device can do (`DeviceInfo.features`)
 
@@ -2071,3 +2079,7 @@ robust against any encoder (GPU ones may slice too):
   other notifications, `messages` history, `subject`, `reply_kept` and `inbox_history`
   pages (§4.5); Gallery (§4.18); Deck (§4.19); `DeviceView.latency_ms`. Phone to-do: the
   optional Inbox fields, `gallery` and the deck. Older devices ignore all of it.
+- **2026-11-02** — Desktop (next release): the Files tab is a file manager for the phone
+  (copy both ways, new folder, rename, delete) over the existing `fs` ops (§4.9), several
+  requests at once; the deck drops `system.screen_off`. Phone to-do: answer `fs` streams
+  concurrently.
