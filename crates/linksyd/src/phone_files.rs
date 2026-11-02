@@ -186,7 +186,10 @@ impl PhoneFiles {
     fn failure(&self, phone: Fingerprint, fail: Fail) -> String {
         match fail {
             Fail::Stopped => "cancelled".into(),
-            Fail::Phone(e) => self.reason(phone, e),
+            Fail::Phone(e) => {
+                tracing::warn!("a copy with {} stopped: {e}", phone.short());
+                self.reason(phone, e)
+            }
             Fail::Local(path, e) => {
                 let text = e.to_string();
                 format!("{}: {}", path.display(), text.split(" (os error").next().unwrap_or(&text))
