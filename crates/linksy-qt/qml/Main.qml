@@ -45,8 +45,9 @@ Kirigami.ApplicationWindow {
     signal sessionEnded(string id)
     // A camera used here says what it can do and how it's set
     signal cameraState(string session, var state)
-    // A phone's conversation changed (MessagesPage)
+    // A phone's conversation changed, or a notification came or went on it (its page's inbox)
     signal conversationChanged(var conversation)
+    signal alertsChanged(string phone)
 
     readonly property var selected: devices.find(d => d.device.id === selectedId) ?? null
 
@@ -103,6 +104,15 @@ Kirigami.ApplicationWindow {
         let v = bytes, unit = 0;
         while (v >= 1000 && unit < units.length - 1) { v /= 1000; unit++; }
         return `${v < 10 ? v.toFixed(1) : v.toFixed(0)} ${units[unit]}`;
+    }
+
+    // "Today", "Yesterday", "Monday 2 November", as the GTK app heads days
+    function dayLabel(ms) {
+        const d = new Date(ms), day = new Date();
+        if (d.toDateString() === day.toDateString()) return t("Today");
+        day.setDate(day.getDate() - 1);
+        if (d.toDateString() === day.toDateString()) return t("Yesterday");
+        return d.toLocaleDateString(Qt.locale(), "dddd d MMMM");
     }
 
     // How a device is reachable, as the GTK app's sidebar says it, with its battery
@@ -357,6 +367,10 @@ Kirigami.ApplicationWindow {
             break;
         case "notification":
             toast(ev.body ? `${ev.from.name}: ${ev.title} — ${ev.body}` : `${ev.from.name}: ${ev.title}`);
+            break;
+        // The service shows them; the phone's inbox lists the ones that aren't messages
+        case "notification_posted": case "notification_removed":
+            alertsChanged(ev.from.id);
             break;
         case "clipboard":
             if (root.active) backend.setClipboard(ev.text);
