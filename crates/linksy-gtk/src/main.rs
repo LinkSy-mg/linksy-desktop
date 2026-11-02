@@ -540,6 +540,7 @@ mod tests {
             "thunderbolt",
             "video-display",
             "video-joined-displays",
+            "view-grid",
             "web-browser",
         ] {
             let path = format!("{BUNDLED_ICONS}/scalable/status/{name}-symbolic.svg");

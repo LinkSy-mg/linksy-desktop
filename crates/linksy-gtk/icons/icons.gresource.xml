@@ -20,6 +20,7 @@
     <file>scalable/status/thunderbolt-symbolic.svg</file>
     <file>scalable/status/video-display-symbolic.svg</file>
     <file>scalable/status/video-joined-displays-symbolic.svg</file>
+    <file>scalable/status/view-grid-symbolic.svg</file>
     <file>scalable/status/view-sort-descending-symbolic.svg</file>
     <file>scalable/status/web-browser-symbolic.svg</file>
   </gresource>
