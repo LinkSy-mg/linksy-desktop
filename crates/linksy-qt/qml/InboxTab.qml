@@ -94,6 +94,23 @@ Item {
         store.reply(reply.text.trim());
     }
 
+    QQC2.ButtonGroup { id: showGroup }
+    QQC2.ButtonGroup { id: sortGroup }
+
+    QQC2.Menu {
+        id: menu
+        MenuHeading { text: tab.app.t("Show") }
+        ShowItem { value: "all"; text: tab.app.t("All") }
+        ShowItem { value: "chats"; text: tab.app.t("Chats") }
+        ShowItem { value: "texts"; text: tab.app.t("Texts") }
+        ShowItem { value: "mail"; text: tab.app.t("Mail") }
+        ShowItem { value: "other"; text: tab.app.t("Other Notifications") }
+        QQC2.MenuSeparator {}
+        MenuHeading { text: tab.app.t("Sort") }
+        SortItem { oldest: false; text: tab.app.t("Newest First") }
+        SortItem { oldest: true; text: tab.app.t("Oldest First") }
+    }
+
     RowLayout {
         anchors.fill: parent
         spacing: 0
@@ -115,6 +132,18 @@ Item {
                     Layout.fillWidth: true
                     placeholderText: tab.app.t("Search")
                     onTextChanged: tab.store.search = text
+                }
+                QQC2.ToolButton {
+                    id: sortButton
+                    icon.name: "view-sort-descending"
+                    // Filtered: the button says so
+                    icon.color: tab.store.show !== "all" ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
+                    text: tab.app.t("Show and Sort")
+                    display: QQC2.AbstractButton.IconOnly
+                    down: menu.visible
+                    QQC2.ToolTip.text: text
+                    QQC2.ToolTip.visible: hovered && !menu.visible
+                    onClicked: menu.popup(sortButton, 0, sortButton.height)
                 }
             }
 
@@ -559,5 +588,33 @@ Item {
             font.bold: true
             color: Kirigami.Theme.highlightedTextColor
         }
+    }
+
+    component MenuHeading: QQC2.Label {
+        leftPadding: Kirigami.Units.largeSpacing
+        rightPadding: Kirigami.Units.largeSpacing
+        topPadding: Kirigami.Units.smallSpacing
+        bottomPadding: Kirigami.Units.smallSpacing
+        font.pointSize: Kirigami.Theme.smallFont.pointSize
+        font.bold: true
+        opacity: 0.7
+    }
+
+    component ShowItem: QQC2.MenuItem {
+        id: showItem
+        required property string value
+        checkable: true
+        checked: tab.store.show === showItem.value
+        QQC2.ButtonGroup.group: showGroup
+        onTriggered: tab.store.show = showItem.value
+    }
+
+    component SortItem: QQC2.MenuItem {
+        id: sortItem
+        required property bool oldest
+        checkable: true
+        checked: tab.store.oldestFirst === sortItem.oldest
+        QQC2.ButtonGroup.group: sortGroup
+        onTriggered: tab.store.oldestFirst = sortItem.oldest
     }
 }
