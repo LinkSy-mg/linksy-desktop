@@ -233,6 +233,10 @@ pub mod qobject {
         #[qsignal]
         fn inbox(self: Pin<&mut Backend>, json: QString);
 
+        /// A copy from or to a phone went on, or ended (`fs_copy`, `fs_upload`).
+        #[qsignal]
+        fn fs_progress(self: Pin<&mut Backend>, json: QString);
+
         /// Couldn't reach the service, or it went away.
         #[qsignal]
         fn offline(self: Pin<&mut Backend>, why: QString);
@@ -312,7 +316,7 @@ impl qobject::Backend {
                 b.as_mut().set_starting(false);
                 b.as_mut().set_connected(true);
             });
-            let (mut events, mut history, mut inbox) = (client.events(), client.history_updates(), client.inbox_updates());
+            let (mut events, mut history, mut inbox, mut copies) = (client.events(), client.history_updates(), client.inbox_updates(), client.fs_progress());
             use tokio::sync::broadcast::error::RecvError;
             loop {
                 tokio::select! {
@@ -336,6 +340,14 @@ impl qobject::Backend {
                         Ok(c) => {
                             let json = serde_json::to_string(&c).unwrap_or_default();
                             let _ = thread.queue(move |b| b.inbox(QString::from(&json)));
+                        }
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => break,
+                    },
+                    p = copies.recv() => match p {
+                        Ok(p) => {
+                            let json = serde_json::to_string(&p).unwrap_or_default();
+                            let _ = thread.queue(move |b| b.fs_progress(QString::from(&json)));
                         }
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,

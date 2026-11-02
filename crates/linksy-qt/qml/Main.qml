@@ -53,6 +53,8 @@ Kirigami.ApplicationWindow {
     signal alertsChanged(string phone)
     // A phone's photos changed (its page's gallery)
     signal galleryChanged(string phone)
+    // A copy from or to a phone went on, or ended (its page's files)
+    signal fsProgress(var progress)
 
     readonly property var selected: devices.find(d => d.device.id === selectedId) ?? null
 
@@ -66,6 +68,7 @@ Kirigami.ApplicationWindow {
         onEvent: json => root.handleEvent(JSON.parse(json))
         onHistory: json => root.historyUpdated(JSON.parse(json))
         onInbox: json => root.conversationChanged(JSON.parse(json))
+        onFsProgress: json => root.fsProgress(JSON.parse(json))
         onConnectedChanged: {
             if (!connected) {
                 root.corner = [];
