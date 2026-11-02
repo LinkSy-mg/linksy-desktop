@@ -62,6 +62,7 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Inbox: other notifications, earlier messages, replies after the notification | Done (next release) | To do | `messages`, `reply_kept`, `inbox_history` (§4.5) |
 | Gallery: the phone's photos page by page | Done (next release) | To do | `gallery` stream, thumbnails, `send` (§4.18) |
 | Deck: the phone as buttons for the computer | Done (next release) | To do | `deck_open`, `deck_actions`, `deck_run` (§4.19) |
+| Deck layouts made on the computer | Done (next release) | To do | `deck_layout`, feature `deck_layout` (§4.20) |
 | Images/files on the clipboard | Done | Done | offer with `"clipboard":true` (§4.5) |
 | Automatic clipboard sync, computer → phone | Done (not on GNOME) | Done (phone asks) | `clipboard_watch` (§4.5) |
 | Phone as microphone | Done | Done | session `microphone`, raw PCM (§4.8) |
@@ -794,7 +795,8 @@ controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifica
 `direct_join` (joins them: a computer whose NetworkManager has a Wi-Fi Direct device, or a
 phone), `direct_group` (hosts and joins Wi-Fi Direct groups by name and passphrase: phones,
 §4.17 "Phone to phone"), `inbox_history` (answers `inbox_history`, §4.5), `gallery` (shows
-its photos, §4.18), `deck` (a computer that runs a phone's deck, §4.19).
+its photos, §4.18), `deck` (a computer that runs a phone's deck, §4.19), `deck_layout` (a
+phone that draws the deck layouts a computer sends, §4.20).
 Set `Config.features` in the core. To change them while running (`notifications` turned
 on or off), call `Node::set_features`: connected devices get a `features` message
 (at most 64 names of up to 64 bytes) and update at once, others see the new list at the
@@ -1528,9 +1530,10 @@ any of them → {"type":"gallery_error","message":"…"}
 
 ### 4.19 Deck: the phone as buttons for the computer (desktop, next release)
 
-The phone owns the deck's layout (pages of tiles, sizes, colours, icons, sliders; saved on
-the phone, one deck per computer). The computer only says what it lets that phone do, and
-runs it. Computers announce feature `deck`.
+The computer says what it lets that phone do, and runs it. Computers announce feature
+`deck`. The layout (pages of tiles, sizes, colours, a theme) is made in the computer's
+editor and comes to a phone that announces `deck_layout` (§4.20); a phone without it lays
+its tiles out itself.
 
 ```json
 phone → computer {"type":"deck_open"}           the deck shows: send me what I may do
@@ -1563,6 +1566,65 @@ phone → computer {"type":"deck_close"}          the deck is gone: stop sending
   dragged, the computer may skip to its newest value.
 - Core: `Node::deck_open(to, open)`, `Node::deck_run(to, action, value)`;
   `Event::DeckActions`, `Event::DeckState`.
+
+### 4.20 Deck layouts: made on the computer, drawn by the phone (desktop, next release)
+
+The user lays out a phone's deck in the computer's editor; the computer keeps the layouts
+(one set per phone) and sends them. The phone draws them and runs their tiles as in §4.19.
+Phones that do announce feature `deck_layout`; the computer sends nothing new to a phone
+that doesn't.
+
+```json
+phone → computer {"type":"deck_open"}
+computer → phone {"type":"deck_actions",…}       as in §4.19
+computer → phone {"type":"deck_layout","layouts":{"version":3,"active":"work","layouts":[
+                    {"id":"work","name":"Work","theme":{"id":"dots","accent":"#2563ff"},
+                     "portrait":{"grid":[4,8],"pages":[[
+                       {"id":"clock","kind":"clock","x":0,"y":0,"w":2,"h":1,"props":{"zone":"Europe/Paris"}},
+                       {"id":"lock","kind":"button","x":2,"y":0,"w":1,"h":1,"label":"Lock","color":"#e01b24","action":"system.lock"},
+                       {"id":"music","kind":"music","x":0,"y":1,"w":4,"h":2},
+                       {"id":"vol","kind":"volume","x":0,"y":3,"w":4,"h":1,"action":"sound.volume"}]]},
+                     "landscape":{"grid":[9,4],"pages":[[{"id":"music","kind":"music","x":0,"y":0,"w":4,"h":2}]]}}]}}
+computer → phone {"type":"deck_state",…}         as in §4.19
+```
+
+- When: on every `deck_open` (after `deck_actions`, before `deck_state`; each message is a
+  stream of its own, so they may arrive in another order), and again with `deck_actions`
+  whenever the user saves the layouts while the deck shows. Take each one that comes: it is
+  the computer's current set. `version` goes one up on every save; `0` is the first layout
+  the computer makes up from what it offers before the user saves anything.
+- `active` is the layout to show (the id of one of `layouts`). A face per orientation:
+  `grid` is columns and rows (the editor uses 4 × 8 portrait and 9 × 4 landscape), `pages`
+  the tiles of each page. A tile sits at `x`, `y` (cells from the top left) and is `w` × `h`
+  cells; tiles stay inside the grid and don't overlap. Its `id` is unique on its page.
+  Optional: `label` (empty: the action's `name`), `color` (`#rrggbb`, for themes that
+  colour tiles), `action` (for the kinds that run one), `props` (strings a kind needs
+  besides, like a clock's `zone`).
+- Kinds and the sizes they take (width × height, the first is the default):
+
+  | `kind` | Sizes | What it is |
+  |---|---|---|
+  | `button` | 1 × 1, 2 × 1 | runs its `action`: any from `deck_actions` (a toggle shows its `on`) |
+  | `volume` | 4 × 1, 2 × 1, 1 × 3 | a slider for `sound.volume` |
+  | `music` | 4 × 2, 2 × 2 | the computer's player (`media_state`, §4.5): cover, title, progress, its buttons |
+  | `clock` | 2 × 1, 2 × 2, 1 × 1 | the phone's own time |
+
+  A kind the phone doesn't know draws as a plain tile with its `label`. A tile whose
+  action isn't in `deck_actions` shows as unavailable.
+- Themes: `stock`, `dots`, `eink`, `term`, `pixel`, with an `accent` colour. The phone draws
+  the theme (the computer sends only its id); one it doesn't know draws as `stock`.
+- Away from the computer, the phone keeps showing the last layouts it got from it (kept
+  per computer, with their `version`); its tiles are unavailable until the computer is
+  back. The phone doesn't send layouts back (it may later).
+- Limits: at most 20 layouts, 8 pages a face, 64 tiles a page, names and labels of 60
+  characters; the computer refuses to save layouts whose JSON is over 1 MiB less 1 KiB, so
+  the message stays within a frame (§4.4).
+- Desktop: placing a tile in the editor allows its action for that phone (the same as
+  turning it on in §4.19). Until the user saves, the first layout is a clock, the player,
+  the volume and buttons for what the computer offers.
+- Core: `Event::DeckLayout { from, layouts }` with `linksy_core::DeckLayouts`
+  (`deck_layout.rs`, which also has the kinds, sizes, themes and `check`); the computer
+  sends with `Node::deck_layout(to, &layouts)`, which refuses a phone without the feature.
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 
@@ -2090,3 +2152,8 @@ robust against any encoder (GPU ones may slice too):
   concurrently.
 - **2026-11-02** — `notification_posted` gains optional `mine` (§4.5): the newest message
   is the user's own. Phone to-do: send it, and keep `conversation` the chat's name.
+- **2026-11-02** — Deck layouts (§4.20), desktop next release: the computer keeps each
+  phone's layouts from its editor and sends them as `deck_layout` on `deck_open` and on
+  every save, only to a phone with feature `deck_layout`. Core: `Event::DeckLayout`,
+  `DeckLayouts`. A message over 1 MiB now fails when sent instead of at the other side.
+  Phone to-do: announce `deck_layout`, draw the layouts and themes, keep the last ones.
