@@ -2,6 +2,7 @@
 //! default sound output's level and mute, read and set with WirePlumber's `wpctl`, or
 //! PulseAudio's `pactl` where there's no wpctl. While a device watches it, it's read every
 //! second and sent when it changed, whatever changed it (the keyboard, GNOME's slider).
+//! Phones' decks (`deck.rs`) set it too, and the default microphone's mute.
 //!
 //! Nothing runs while no device is watching.
 
@@ -10,8 +11,12 @@ use std::time::Duration;
 
 use linksy_core::{Event, Fingerprint, Node, VolumeState};
 use tokio::process::Command;
+use tokio::sync::Notify;
 use tokio::sync::broadcast::error::RecvError;
 use tracing::debug;
+
+/// Told when a watched volume changed, for the decks that show it.
+pub static CHANGED: Notify = Notify::const_new();
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Tool {
@@ -79,6 +84,7 @@ pub async fn run(node: Node) {
             continue;
         }
         last = Some(now);
+        CHANGED.notify_one();
         let seq = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
         let state = VolumeState { seq, level: now.0.clamp(0.0, 1.0), muted: now.1 };
         for id in watchers.clone() {
@@ -137,6 +143,39 @@ async fn set(tool: Tool, level: Option<f64>, muted: Option<bool>) {
         if output(program, &args).await.is_none() {
             debug!("{program} {} failed", args.join(" "));
         }
+    }
+}
+
+/// The default output's level and mute now.
+pub async fn output_state() -> Option<(f64, bool)> {
+    read(tool()?).await
+}
+
+/// Whether the default microphone is muted now.
+pub async fn mic_muted() -> Option<bool> {
+    match tool()? {
+        Tool::Wpctl => parse_wpctl(&output("wpctl", &["get-volume", "@DEFAULT_AUDIO_SOURCE@"]).await?).map(|(_, muted)| muted),
+        Tool::Pactl => Some(output("pactl", &["get-source-mute", "@DEFAULT_SOURCE@"]).await?.contains("yes")),
+    }
+}
+
+pub async fn set_level(level: f64) {
+    if let Some(tool) = tool() {
+        set(tool, Some(level.clamp(0.0, 1.0)), None).await;
+    }
+}
+
+/// Mute the default output (or microphone) if it isn't, else unmute it.
+pub async fn toggle_mute(microphone: bool) {
+    let Some(tool) = tool() else { return };
+    let (program, args) = match (tool, microphone) {
+        (Tool::Wpctl, false) => ("wpctl", ["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]),
+        (Tool::Wpctl, true) => ("wpctl", ["set-mute", "@DEFAULT_AUDIO_SOURCE@", "toggle"]),
+        (Tool::Pactl, false) => ("pactl", ["set-sink-mute", "@DEFAULT_SINK@", "toggle"]),
+        (Tool::Pactl, true) => ("pactl", ["set-source-mute", "@DEFAULT_SOURCE@", "toggle"]),
+    };
+    if output(program, &args).await.is_none() {
+        debug!("{program} {} failed", args.join(" "));
     }
 }
 

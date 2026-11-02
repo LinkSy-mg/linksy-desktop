@@ -1,0 +1,578 @@
+//! Phones' decks (docs/protocol.md §4.19): the phone lays its tiles out, this computer says
+//! what each phone may do and does it. Every action is on or off per phone (media and sound
+//! on until the user says otherwise, locking and the user's own commands off), kept in
+//! `deck.json` with the commands. Whatever else a phone runs is ignored.
+
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::future::Future;
+use std::path::PathBuf;
+use std::process::Stdio;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Duration;
+
+use linksy_core::{DeckAction, DeckKind, DeckState, Event, Fingerprint, MediaCommand, Node, Uuid};
+use linksy_i18n::t;
+use linksy_ipc::{DeckCommand, DeckOption, DeckPrefs};
+use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::mpsc;
+use tracing::{debug, warn};
+
+pub static DECK: OnceLock<Deck> = OnceLock::new();
+
+/// So a deck's list stays well within what a phone takes in one message.
+const MAX_COMMANDS: usize = 100;
+const MAX_NAME: usize = 100;
+/// Longest one action may hold the next ones up (a player that doesn't answer).
+const ACT_WAIT: Duration = Duration::from_secs(5);
+
+const MEDIA: &str = "Media";
+const SOUND: &str = "Sound";
+const SYSTEM: &str = "System";
+const COMMANDS: &str = "Commands";
+
+/// What an action does here.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Act {
+    Media(MediaCommand),
+    Volume(f64),
+    Mute,
+    MicMute,
+    Lock,
+    Command { name: String, line: String },
+}
+
+/// This computer's sound now, as far as the decks show it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Sound {
+    pub level: Option<f64>,
+    pub muted: Option<bool>,
+    pub mic_muted: Option<bool>,
+}
+
+/// What runs the actions: this desktop, or a stand-in in tests.
+pub trait Desktop: Send + Sync + 'static {
+    /// There's a volume to set (wpctl or pactl).
+    fn has_sound(&self) -> bool;
+    fn run(&self, act: Act) -> impl Future<Output = ()> + Send;
+    /// The output's level and mute (`output`), the microphone's mute (`mic`).
+    fn sound(&self, output: bool, mic: bool) -> impl Future<Output = Sound> + Send;
+}
+
+pub struct System;
+
+impl Desktop for System {
+    fn has_sound(&self) -> bool {
+        crate::volume::available()
+    }
+
+    async fn run(&self, act: Act) {
+        match act {
+            Act::Media(command) => crate::media::press(command).await,
+            Act::Volume(level) => crate::volume::set_level(level).await,
+            Act::Mute => crate::volume::toggle_mute(false).await,
+            Act::MicMute => crate::volume::toggle_mute(true).await,
+            Act::Lock => {
+                crate::lock::lock_screen().await;
+            }
+            Act::Command { name, line } => spawn(&name, &line),
+        }
+    }
+
+    async fn sound(&self, output: bool, mic: bool) -> Sound {
+        let (out, mic_muted) = tokio::join!(
+            async { if output { crate::volume::output_state().await } else { None } },
+            async { if mic { crate::volume::mic_muted().await } else { None } },
+        );
+        Sound { level: out.map(|(level, _)| level.clamp(0.0, 1.0)), muted: out.map(|(_, muted)| muted), mic_muted }
+    }
+}
+
+/// Start one of the user's commands on its own (from the Flatpak, on the computer): it reads
+/// nothing, its output goes nowhere, and nothing waits for it.
+fn spawn(name: &str, line: &str) {
+    let mut command = tokio::process::Command::from(linksy_host::detached("sh", &[]));
+    command.args(["-c", line]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).process_group(0);
+    if let Some(home) = std::env::var_os("HOME") {
+        command.current_dir(home);
+    }
+    match command.spawn() {
+        Ok(mut child) => {
+            let name = name.to_string();
+            tokio::spawn(async move {
+                if let Ok(status) = child.wait().await
+                    && !status.success()
+                {
+                    debug!("deck command {name}: {status}");
+                }
+            });
+        }
+        Err(e) => warn!("could not run the deck command {name}: {e}"),
+    }
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+struct Saved {
+    /// What the user turned on or off for each phone; the rest is as by default.
+    phones: HashMap<Fingerprint, BTreeMap<String, bool>>,
+    commands: Vec<DeckCommand>,
+}
+
+impl Saved {
+    fn on(&self, phone: &Fingerprint, id: &str) -> bool {
+        match self.phones.get(phone).and_then(|choices| choices.get(id)) {
+            Some(on) => *on,
+            None => id.starts_with("media.") || id.starts_with("sound."),
+        }
+    }
+}
+
+enum Job {
+    /// A phone's deck shows: its list, then the state.
+    Open(Fingerprint),
+    Run(Fingerprint, Act),
+    /// What a phone may do changed (`None`: any phone): its list again, if its deck shows.
+    Actions(Option<Fingerprint>),
+    /// The volume changed.
+    Sound,
+}
+
+pub struct Deck<D: Desktop = System> {
+    inner: Arc<Inner<D>>,
+}
+
+impl<D: Desktop> Clone for Deck<D> {
+    fn clone(&self) -> Self {
+        Self { inner: self.inner.clone() }
+    }
+}
+
+struct Inner<D> {
+    path: PathBuf,
+    saved: Mutex<Saved>,
+    /// Phones whose deck shows, and the state each was sent last.
+    open: Mutex<HashMap<Fingerprint, Option<Vec<DeckState>>>>,
+    jobs: mpsc::UnboundedSender<Job>,
+    queued: Mutex<Option<mpsc::UnboundedReceiver<Job>>>,
+    desktop: D,
+}
+
+impl<D: Desktop> Deck<D> {
+    pub fn load(path: PathBuf, desktop: D) -> Self {
+        let saved = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
+        let (jobs, queued) = mpsc::unbounded_channel();
+        Self { inner: Arc::new(Inner { path, saved: Mutex::new(saved), open: Mutex::default(), jobs, queued: Mutex::new(Some(queued)), desktop }) }
+    }
+
+    /// Everything this computer offers a deck.
+    fn offered(&self, saved: &Saved) -> Vec<DeckAction> {
+        let action = |id: &str, name: &str, kind, group: &str| DeckAction { id: id.into(), name: name.into(), kind, group: group.into() };
+        let mut all = vec![
+            action("media.play_pause", t!("Play or Pause"), DeckKind::Button, MEDIA),
+            action("media.next", t!("Next Track"), DeckKind::Button, MEDIA),
+            action("media.previous", t!("Previous Track"), DeckKind::Button, MEDIA),
+        ];
+        if self.inner.desktop.has_sound() {
+            all.extend([
+                action("sound.volume", t!("Volume"), DeckKind::Slider, SOUND),
+                action("sound.mute", t!("Mute"), DeckKind::Toggle, SOUND),
+                action("sound.mic_mute", t!("Mute Microphone"), DeckKind::Toggle, SOUND),
+            ]);
+        }
+        all.push(action("system.lock", t!("Lock Screen"), DeckKind::Button, SYSTEM));
+        all.extend(saved.commands.iter().map(|c| action(&format!("command.{}", c.id), &c.name, DeckKind::Button, COMMANDS)));
+        all
+    }
+
+    /// What `phone`'s deck may do: its list.
+    fn enabled(&self, phone: &Fingerprint) -> Vec<DeckAction> {
+        let saved = self.inner.saved.lock().unwrap();
+        self.offered(&saved).into_iter().filter(|a| saved.on(phone, &a.id)).collect()
+    }
+
+    pub fn prefs(&self, phone: &Fingerprint) -> DeckPrefs {
+        let saved = self.inner.saved.lock().unwrap();
+        let actions = self.offered(&saved).into_iter().map(|a| DeckOption { on: saved.on(phone, &a.id), action: a }).collect();
+        DeckPrefs { actions, commands: saved.commands.clone() }
+    }
+
+    pub fn set_action(&self, phone: &Fingerprint, action: &str, on: bool) -> Result<(), String> {
+        let mut saved = self.inner.saved.lock().unwrap();
+        if !self.offered(&saved).iter().any(|a| a.id == action) {
+            return Err(format!("this computer doesn't offer \"{action}\""));
+        }
+        let mut next = saved.clone();
+        next.phones.entry(*phone).or_default().insert(action.into(), on);
+        self.save(&next)?;
+        *saved = next;
+        drop(saved);
+        let _ = self.inner.jobs.send(Job::Actions(Some(*phone)));
+        Ok(())
+    }
+
+    /// Replace the user's commands; a command that isn't kept is off for every phone too.
+    pub fn set_commands(&self, commands: Vec<DeckCommand>) -> Result<Vec<DeckCommand>, String> {
+        if commands.len() > MAX_COMMANDS {
+            return Err(format!("at most {MAX_COMMANDS} commands"));
+        }
+        let mut saved = self.inner.saved.lock().unwrap();
+        let mut kept = HashSet::new();
+        let mut list = Vec::with_capacity(commands.len());
+        for c in commands {
+            let (name, command) = (c.name.trim(), c.command.trim());
+            if name.is_empty() || command.is_empty() {
+                return Err("each command needs a name and a command line".into());
+            }
+            if name.chars().count() > MAX_NAME {
+                return Err(format!("a command's name can be at most {MAX_NAME} characters long"));
+            }
+            let known = saved.commands.iter().any(|s| s.id == c.id) && kept.insert(c.id.clone());
+            let id = if known { c.id } else { Uuid::new_v4().simple().to_string() };
+            list.push(DeckCommand { id, name: name.into(), command: command.into() });
+        }
+        let ids: HashSet<String> = list.iter().map(|c| format!("command.{}", c.id)).collect();
+        let mut next = Saved { phones: saved.phones.clone(), commands: list };
+        for choices in next.phones.values_mut() {
+            choices.retain(|id, _| !id.starts_with("command.") || ids.contains(id));
+        }
+        self.save(&next)?;
+        let list = next.commands.clone();
+        *saved = next;
+        drop(saved);
+        let _ = self.inner.jobs.send(Job::Actions(None));
+        Ok(list)
+    }
+
+    fn save(&self, saved: &Saved) -> Result<(), String> {
+        let tmp = self.inner.path.with_extension("json.tmp");
+        serde_json::to_vec_pretty(saved)
+            .map_err(std::io::Error::other)
+            .and_then(|b| linksy_core::identity::write_private(&tmp, &b))
+            .and_then(|_| std::fs::rename(&tmp, &self.inner.path))
+            .map_err(|e| format!("could not save the deck's settings: {e}"))
+    }
+
+    /// What `id` does when `phone` runs it, if that phone may.
+    fn act(&self, phone: &Fingerprint, id: &str, value: Option<f64>) -> Option<Act> {
+        let saved = self.inner.saved.lock().unwrap();
+        if !saved.on(phone, id) {
+            return None;
+        }
+        let sound = self.inner.desktop.has_sound();
+        Some(match id {
+            "media.play_pause" => Act::Media(MediaCommand::PlayPause),
+            "media.next" => Act::Media(MediaCommand::Next),
+            "media.previous" => Act::Media(MediaCommand::Previous),
+            "sound.volume" if sound => Act::Volume(value.filter(|v| v.is_finite())?.clamp(0.0, 1.0)),
+            "sound.mute" if sound => Act::Mute,
+            "sound.mic_mute" if sound => Act::MicMute,
+            "system.lock" => Act::Lock,
+            _ => {
+                let id = id.strip_prefix("command.")?;
+                let c = saved.commands.iter().find(|c| c.id == id)?;
+                Act::Command { name: c.name.clone(), line: c.command.clone() }
+            }
+        })
+    }
+
+    pub async fn run(self, node: Node) {
+        let Some(jobs) = self.inner.queued.lock().unwrap().take() else { return };
+        tokio::spawn(self.clone().work(node.clone(), jobs));
+        let mut events = node.subscribe();
+        let paired = |id: &Fingerprint| node.trusted().iter().any(|t| t.device.id == *id);
+        loop {
+            tokio::select! {
+                event = events.recv() => match event {
+                    Ok(Event::DeckOpen { from }) if paired(&from.id) => {
+                        self.inner.open.lock().unwrap().insert(from.id, None);
+                        let _ = self.inner.jobs.send(Job::Open(from.id));
+                    }
+                    Ok(Event::DeckRun { from, action, value }) if paired(&from.id) => match self.act(&from.id, &action, value) {
+                        Some(act) => {
+                            let _ = self.inner.jobs.send(Job::Run(from.id, act));
+                        }
+                        None => debug!("{} may not run {action} here", from.name),
+                    },
+                    Ok(Event::DeckOpen { from } | Event::DeckRun { from, .. }) => debug!("deck of {}, which isn't paired", from.name),
+                    Ok(Event::DeckClose { from }) => {
+                        self.inner.open.lock().unwrap().remove(&from.id);
+                    }
+                    Ok(Event::Disconnected { id }) => {
+                        self.inner.open.lock().unwrap().remove(&id);
+                    }
+                    Ok(_) | Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => break,
+                },
+                () = crate::volume::CHANGED.notified() => {
+                    if !self.inner.open.lock().unwrap().is_empty() {
+                        let _ = self.inner.jobs.send(Job::Sound);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Jobs one batch at a time (whatever came in meanwhile), so a slider dragged on the
+    /// phone sets the volume once per batch, not once per step.
+    async fn work(self, node: Node, mut jobs: mpsc::UnboundedReceiver<Job>) {
+        while let Some(first) = jobs.recv().await {
+            let mut batch = vec![first];
+            while let Ok(job) = jobs.try_recv() {
+                batch.push(job);
+            }
+            let mut told = HashSet::new();
+            let mut acts = Vec::new();
+            for job in batch {
+                match job {
+                    Job::Run(phone, act) => {
+                        told.insert(phone);
+                        acts.push(act);
+                    }
+                    Job::Open(phone) => {
+                        told.insert(phone);
+                        self.send_actions(&node, phone).await;
+                    }
+                    Job::Actions(only) => {
+                        let open: Vec<Fingerprint> = self.inner.open.lock().unwrap().keys().copied().filter(|p| only.is_none_or(|o| o == *p)).collect();
+                        for phone in open {
+                            told.insert(phone);
+                            self.send_actions(&node, phone).await;
+                        }
+                    }
+                    Job::Sound => {}
+                }
+            }
+            self.perform(acts).await;
+            self.send_states(&node, &told).await;
+        }
+    }
+
+    /// Run actions in order, a slider's newest value only.
+    async fn perform(&self, acts: Vec<Act>) {
+        let last_volume = acts.iter().rposition(|a| matches!(a, Act::Volume(_)));
+        for (i, act) in acts.into_iter().enumerate() {
+            if matches!(act, Act::Volume(_)) && Some(i) != last_volume {
+                continue;
+            }
+            let what = format!("{act:?}");
+            if tokio::time::timeout(ACT_WAIT, self.inner.desktop.run(act)).await.is_err() {
+                warn!("deck: {what} took too long");
+            }
+        }
+    }
+
+    /// Whether `phone`'s deck still shows and it's connected; forgotten otherwise, so a
+    /// message to it never dials it.
+    fn reachable(&self, node: &Node, phone: &Fingerprint) -> bool {
+        let mut open = self.inner.open.lock().unwrap();
+        if open.contains_key(phone) && node.link(phone).is_none() {
+            open.remove(phone);
+        }
+        open.contains_key(phone)
+    }
+
+    async fn send_actions(&self, node: &Node, phone: Fingerprint) {
+        if self.reachable(node, &phone)
+            && let Err(e) = node.deck_actions(&phone, self.enabled(&phone)).await
+        {
+            debug!("deck actions: {e}");
+            self.inner.open.lock().unwrap().remove(&phone);
+        }
+    }
+
+    /// The state to the decks `told` something, and to the other open ones if it changed.
+    async fn send_states(&self, node: &Node, told: &HashSet<Fingerprint>) {
+        let phones: Vec<Fingerprint> = self.inner.open.lock().unwrap().keys().copied().collect();
+        let lists: Vec<(Fingerprint, Vec<DeckAction>)> = phones.into_iter().map(|p| (p, self.enabled(&p))).collect();
+        let shows = |id: &str| lists.iter().any(|(_, actions)| actions.iter().any(|a| a.id == id));
+        let (output, mic) = (shows("sound.volume") || shows("sound.mute"), shows("sound.mic_mute"));
+        let sound = if output || mic { self.inner.desktop.sound(output, mic).await } else { Sound::default() };
+        for (phone, actions) in lists {
+            let now = states(&actions, &sound);
+            {
+                let mut open = self.inner.open.lock().unwrap();
+                let Some(last) = open.get_mut(&phone) else { continue };
+                if !told.contains(&phone) && last.as_ref() == Some(&now) {
+                    continue;
+                }
+                *last = Some(now.clone());
+            }
+            if !self.reachable(node, &phone) {
+                continue;
+            }
+            if let Err(e) = node.deck_state(&phone, now).await {
+                debug!("deck state: {e}");
+                self.inner.open.lock().unwrap().remove(&phone);
+            }
+        }
+    }
+}
+
+/// The tiles' state for these actions: the ones that have one.
+fn states(actions: &[DeckAction], sound: &Sound) -> Vec<DeckState> {
+    actions
+        .iter()
+        .filter_map(|a| {
+            let (on, value) = match a.id.as_str() {
+                "sound.volume" => (None, Some(sound.level?)),
+                "sound.mute" => (Some(sound.muted?), None),
+                "sound.mic_mute" => (Some(sound.mic_muted?), None),
+                _ => return None,
+            };
+            Some(DeckState { id: a.id.clone(), on, value })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Default)]
+    struct Fake {
+        no_sound: bool,
+        ran: Mutex<Vec<Act>>,
+    }
+
+    impl Desktop for Fake {
+        fn has_sound(&self) -> bool {
+            !self.no_sound
+        }
+
+        async fn run(&self, act: Act) {
+            self.ran.lock().unwrap().push(act);
+        }
+
+        async fn sound(&self, output: bool, mic: bool) -> Sound {
+            Sound { level: output.then_some(0.42), muted: output.then_some(false), mic_muted: mic.then_some(true) }
+        }
+    }
+
+    fn phone(n: u8) -> Fingerprint {
+        Fingerprint([n; 32])
+    }
+
+    fn deck(dir: &tempfile::TempDir) -> Deck<Fake> {
+        Deck::load(dir.path().join("deck.json"), Fake::default())
+    }
+
+    fn command(id: &str, name: &str, line: &str) -> DeckCommand {
+        DeckCommand { id: id.into(), name: name.into(), command: line.into() }
+    }
+
+    fn on(deck: &Deck<Fake>, p: &Fingerprint) -> Vec<String> {
+        deck.prefs(p).actions.into_iter().filter(|a| a.on).map(|a| a.action.id).collect()
+    }
+
+    #[test]
+    fn media_and_sound_on_until_changed_and_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let all = d.prefs(&phone(1)).actions;
+        assert_eq!(all.iter().map(|a| a.action.id.as_str()).collect::<Vec<_>>(), ["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "system.lock"]);
+        assert_eq!(on(&d, &phone(1)), ["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute"]);
+        assert_eq!(all.iter().find(|a| a.action.id == "sound.volume").unwrap().action.kind, DeckKind::Slider);
+
+        d.set_action(&phone(1), "system.lock", true).unwrap();
+        d.set_action(&phone(1), "media.next", false).unwrap();
+        let again = deck(&dir);
+        assert_eq!(on(&again, &phone(1)), ["media.play_pause", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "system.lock"]);
+        // Another phone still has the defaults
+        assert_eq!(on(&again, &phone(2)).len(), 6);
+        assert_eq!(again.enabled(&phone(2)).len(), 6);
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(std::fs::metadata(dir.path().join("deck.json")).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn only_what_is_on_runs() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        assert_eq!(d.act(&p, "media.play_pause", None), Some(Act::Media(MediaCommand::PlayPause)));
+        assert_eq!(d.act(&p, "sound.mute", Some(0.3)), Some(Act::Mute));
+        assert_eq!(d.act(&p, "system.lock", None), None);
+        for unknown in ["media.stop", "sound.bass", "command.", "command.nope", "", "system.screen_off"] {
+            assert_eq!(d.act(&p, unknown, None), None, "{unknown}");
+        }
+        assert!(d.set_action(&p, "media.stop", true).is_err());
+        d.set_action(&p, "media.play_pause", false).unwrap();
+        assert_eq!(d.act(&p, "media.play_pause", None), None);
+        d.set_action(&p, "system.lock", true).unwrap();
+        assert_eq!(d.act(&p, "system.lock", None), Some(Act::Lock));
+        assert_eq!(d.act(&phone(2), "system.lock", None), None);
+
+        // Without wpctl or pactl, no sound at all
+        let quiet = Deck::load(dir.path().join("quiet.json"), Fake { no_sound: true, ..Default::default() });
+        assert_eq!(quiet.act(&p, "sound.volume", Some(0.5)), None);
+        assert!(quiet.prefs(&p).actions.iter().all(|a| a.action.group != SOUND));
+        assert!(quiet.set_action(&p, "sound.mute", true).is_err());
+    }
+
+    #[test]
+    fn commands_get_ids_and_leave_every_phone_when_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let list = d.set_commands(vec![command("", " Backup ", "rsync -a ~/Documents /backup"), command("made-up", "Backup", "echo two")]).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0].name, "Backup");
+        assert!(!list[0].id.is_empty() && list[0].id != list[1].id && list[1].id != "made-up");
+        let (first, second) = (format!("command.{}", list[0].id), format!("command.{}", list[1].id));
+        // Off until turned on
+        assert_eq!(d.act(&phone(1), &first, None), None);
+        for p in [phone(1), phone(2)] {
+            d.set_action(&p, &first, true).unwrap();
+            d.set_action(&p, &second, true).unwrap();
+        }
+        assert_eq!(d.act(&phone(1), &first, None), Some(Act::Command { name: "Backup".into(), line: "rsync -a ~/Documents /backup".into() }));
+        let action = d.enabled(&phone(1)).into_iter().find(|a| a.id == first).unwrap();
+        assert_eq!((action.kind, action.group.as_str()), (DeckKind::Button, COMMANDS));
+
+        // Refused: nothing changes
+        for bad in [command("", "  ", "true"), command("", "Empty", " \n ")] {
+            assert!(d.set_commands(vec![list[0].clone(), bad]).is_err());
+        }
+        assert!(d.set_commands(vec![command("", &"x".repeat(MAX_NAME + 1), "true")]).is_err());
+        assert_eq!(d.prefs(&phone(1)).commands, list);
+
+        // The second one goes, the first is kept with its id (even listed twice), and renamed
+        let kept = d.set_commands(vec![command(&list[0].id, "Back Up", "rsync -a ~/Documents /backup"), list[0].clone()]).unwrap();
+        assert_eq!(kept[0].id, list[0].id);
+        assert_ne!(kept[1].id, list[0].id);
+        let again = deck(&dir);
+        for p in [phone(1), phone(2)] {
+            assert_eq!(again.act(&p, &second, None), None);
+            assert!(again.inner.saved.lock().unwrap().phones[&p].keys().all(|id| *id != second));
+            assert_eq!(again.act(&p, &first, None), Some(Act::Command { name: "Back Up".into(), line: "rsync -a ~/Documents /backup".into() }));
+        }
+        assert!(d.set_commands(vec![command("", "Many", "true"); MAX_COMMANDS + 1]).is_err());
+        assert!(d.set_commands(Vec::new()).unwrap().is_empty());
+        assert_eq!(d.act(&phone(1), &first, None), None);
+    }
+
+    #[tokio::test]
+    async fn sliders_need_a_value_and_only_the_last_one_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        assert_eq!(d.act(&p, "sound.volume", None), None);
+        assert_eq!(d.act(&p, "sound.volume", Some(f64::NAN)), None);
+        assert_eq!(d.act(&p, "sound.volume", Some(1.7)), Some(Act::Volume(1.0)));
+        assert_eq!(d.act(&p, "sound.volume", Some(0.6)), Some(Act::Volume(0.6)));
+
+        d.perform(vec![Act::Volume(0.2), Act::Mute, Act::Volume(0.5), Act::Media(MediaCommand::Next), Act::Volume(0.7)]).await;
+        assert_eq!(*d.inner.desktop.ran.lock().unwrap(), [Act::Mute, Act::Media(MediaCommand::Next), Act::Volume(0.7)]);
+    }
+
+    #[test]
+    fn state_for_the_tiles_that_have_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let sound = Sound { level: Some(0.42), muted: Some(false), mic_muted: None };
+        let now = states(&d.enabled(&phone(1)), &sound);
+        assert_eq!(now, [DeckState { id: "sound.volume".into(), on: None, value: Some(0.42) }, DeckState { id: "sound.mute".into(), on: Some(false), value: None }]);
+        d.set_action(&phone(1), "sound.volume", false).unwrap();
+        assert_eq!(states(&d.enabled(&phone(1)), &sound).len(), 1);
+    }
+}

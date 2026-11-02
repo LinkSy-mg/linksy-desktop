@@ -114,6 +114,34 @@ pub async fn run(node: Node, art_dir: std::path::PathBuf) {
     }
 }
 
+/// A deck's media button: for the player that's playing, else the first paused one, else
+/// the first there is (playerctl's choice).
+pub async fn press(command: MediaCommand) {
+    let local = match Local::start().await {
+        Ok(l) => l,
+        Err(e) => return warn!("can't reach this computer's players: {e}"),
+    };
+    let mut chosen: Option<(u8, String)> = None;
+    for name in local.names().await {
+        let Ok(p) = local.proxy(&name, PLAYER).await else { continue };
+        let rank = match p.get_property::<String>("PlaybackStatus").await.as_deref() {
+            Ok("Playing") => 0,
+            Ok("Paused") => 1,
+            _ => 2,
+        };
+        if chosen.as_ref().is_none_or(|(best, _)| rank < *best) {
+            chosen = Some((rank, name));
+        }
+        if rank == 0 {
+            break;
+        }
+    }
+    match chosen {
+        Some((_, name)) => local.command(&name[MPRIS.len()..], command).await,
+        None => debug!("no player here for {command:?}"),
+    }
+}
+
 /// This computer's players, read over D-Bus while some device watches them.
 struct Local {
     bus: Connection,

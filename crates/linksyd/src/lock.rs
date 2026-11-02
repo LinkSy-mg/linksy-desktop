@@ -124,7 +124,7 @@ impl Away {
 }
 
 /// Lock the screen the way this desktop does it. Whether it's locked now.
-async fn lock_screen() -> bool {
+pub(crate) async fn lock_screen() -> bool {
     // Tests and unusual setups name their own command.
     if let Ok(cmd) = std::env::var("LINKSY_LOCK_COMMAND") {
         return tokio::process::Command::new("sh").arg("-c").arg(cmd).status().await.is_ok_and(|s| s.success());

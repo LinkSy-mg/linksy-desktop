@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use linksy_core::{DeviceInfo, DeviceView, Direction, Event, Fingerprint, RemoteNotification, SessionKind, Settings, SmsMessage, SmsThread, Uuid};
+use linksy_core::{DeckAction, DeviceInfo, DeviceView, Direction, Event, Fingerprint, RemoteNotification, SessionKind, Settings, SmsMessage, SmsThread, Uuid};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -91,6 +91,12 @@ pub enum Request {
     SetAutoAccept { device: String, on: bool },
     /// Let a device see and control the screen without asking, or ask again.
     SetAllowScreen { device: String, on: bool },
+    /// What a phone's deck may do here (docs/protocol.md §4.19): each action this computer
+    /// offers, on or off for that phone, and the user's own commands.
+    DeckPrefs { phone: String },
+    SetDeckAction { phone: String, action: String, on: bool },
+    /// The user's commands, all of them (a new one without an `id`); answers them as saved.
+    SetDeckCommands { commands: Vec<DeckCommand> },
     /// Forget the screen this computer's user picked for other devices to see or control,
     /// so the desktop's dialog shows the next time one asks. Answers whether one was kept.
     ForgetScreen,
@@ -285,6 +291,30 @@ impl Default for LockPrefs {
     fn default() -> Self {
         Self { devices: Vec::new(), grace_s: 60 }
     }
+}
+
+/// What a phone's deck may do on this computer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeckPrefs {
+    pub actions: Vec<DeckOption>,
+    pub commands: Vec<DeckCommand>,
+}
+
+/// An action this computer offers, and whether it's on for the phone asked about.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DeckOption {
+    #[serde(flatten)]
+    pub action: DeckAction,
+    pub on: bool,
+}
+
+/// One of the user's commands: run with `sh -c`, as its deck action `command.<id>`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeckCommand {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    pub command: String,
 }
 
 /// Where a phone said it is.
@@ -787,6 +817,18 @@ impl Client {
 
     pub async fn set_allow_screen(&self, device: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::SetAllowScreen { device: device.into(), on }).await
+    }
+
+    pub async fn deck_prefs(&self, phone: impl Into<String>) -> Result<DeckPrefs, ClientError> {
+        self.call(Request::DeckPrefs { phone: phone.into() }).await
+    }
+
+    pub async fn set_deck_action(&self, phone: impl Into<String>, action: impl Into<String>, on: bool) -> Result<(), ClientError> {
+        self.call(Request::SetDeckAction { phone: phone.into(), action: action.into(), on }).await
+    }
+
+    pub async fn set_deck_commands(&self, commands: Vec<DeckCommand>) -> Result<Vec<DeckCommand>, ClientError> {
+        self.call(Request::SetDeckCommands { commands }).await
     }
 
     pub async fn forget_screen(&self) -> Result<bool, ClientError> {

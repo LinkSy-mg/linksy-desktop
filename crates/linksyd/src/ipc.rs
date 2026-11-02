@@ -340,6 +340,12 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             node.set_allow_screen(&id, on).map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
+        Request::DeckPrefs { phone } => json(serde_json::to_value(deck()?.prefs(&paired(node, &phone)?))),
+        Request::SetDeckAction { phone, action, on } => {
+            deck()?.set_action(&paired(node, &phone)?, &action, on)?;
+            Ok(Value::Null)
+        }
+        Request::SetDeckCommands { commands } => json(serde_json::to_value(deck()?.set_commands(commands)?)),
         Request::ForgetScreen => Ok(Value::Bool(sessions.forget_screen())),
         Request::Locate { device } => {
             let id = resolve(node, &device)?;
@@ -502,6 +508,19 @@ fn terminals() -> Result<&'static crate::terminal::Terminals, String> {
 
 fn gallery() -> Result<&'static crate::gallery::Gallery, String> {
     crate::gallery::GALLERY.get().ok_or_else(|| "not ready yet".into())
+}
+
+fn deck() -> Result<&'static crate::deck::Deck, String> {
+    crate::deck::DECK.get().ok_or_else(|| "decks aren't available here".to_string())
+}
+
+/// Like [`resolve`], for paired devices only.
+fn paired(node: &Node, target: &str) -> Result<Fingerprint, String> {
+    let id = resolve(node, target)?;
+    match node.trusted().iter().any(|t| t.device.id == id) {
+        true => Ok(id),
+        false => Err(format!("\"{}\" isn't paired with this computer", target.trim())),
+    }
 }
 
 fn resolve(node: &Node, target: &str) -> Result<Fingerprint, String> {

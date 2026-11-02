@@ -4,6 +4,8 @@
 
 mod clipboard;
 mod codes;
+#[cfg(target_os = "linux")]
+mod deck;
 mod gallery;
 mod history;
 mod inbox;
@@ -55,7 +57,7 @@ pub static QUIT: tokio::sync::Notify = tokio::sync::Notify::const_new();
 const FEATURES: &[&str] = &[
     "files", "clipboard", "open_url", "ring", "battery", "media_state", "media_remote", "call_state", "heartbeat",
     "import", "fs", "input", "screen", "control", "display", "camera", "watch", "notifications", "sms",
-    "clipboard_file", "microphone", "picture",
+    "clipboard_file", "microphone", "picture", "deck",
 ];
 
 /// Fixed default port so a peer's last known address stays valid across restarts.
@@ -243,6 +245,12 @@ async fn run() -> ExitCode {
     tokio::spawn(media::run(node.clone(), icons.join("art")));
     #[cfg(target_os = "linux")]
     tokio::spawn(volume::run(node.clone()));
+    #[cfg(target_os = "linux")]
+    {
+        let deck = deck::Deck::load(data_dir.join("deck.json"), deck::System);
+        let _ = deck::DECK.set(deck.clone());
+        tokio::spawn(deck.run(node.clone()));
+    }
     #[cfg(target_os = "linux")]
     if node.info().features.iter().any(|f| f == "direct_join") {
         tokio::spawn(direct::run(node.clone()));
