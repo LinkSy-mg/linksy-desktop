@@ -1117,6 +1117,10 @@ impl Window {
                 self.transfers_changed();
             }
             Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } | Event::ClipboardWatch { .. } | Event::ClipboardFile { .. } => {}
+            // The service runs decks and asks phones for their history.
+            Event::DeckOpen { .. } | Event::DeckClose { .. } | Event::DeckRun { .. } | Event::DeckActions { .. } | Event::DeckState { .. } => {}
+            Event::InboxHistory { .. } | Event::InboxHistoryPage { .. } => {}
+            Event::GalleryChanged { .. } => {}
             // Between the service and phones (USB cable, §4.11)
             Event::UsbPlugged { .. } | Event::UsbConnect { .. } => {}
             // Locate is answered through the service (it waits for the reply).
