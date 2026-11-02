@@ -27,6 +27,8 @@ const CHUNK: u64 = 1 << 20;
 const AHEAD: usize = 4;
 /// Progress at most this often per copy, and once at the end.
 const REPORT_EVERY: Duration = Duration::from_millis(200);
+/// How long a write to the phone may still take once its upload is stopped.
+const WRITE_GRACE: Duration = Duration::from_secs(5);
 const PART_SUFFIX: &str = ".linksy-part";
 
 #[derive(Clone)]
@@ -407,7 +409,19 @@ impl Op {
             if n == 0 && at > 0 {
                 break;
             }
-            self.ask(FsRequest::Write { path: path.into(), offset: at, length: n as u64, truncate: at == 0 }, &buf[..n]).await?;
+            // Stopped mid-write, it gets a moment to end: the delete after it must come last
+            let write = self.files.node.fs(&self.phone, FsRequest::Write { path: path.into(), offset: at, length: n as u64, truncate: at == 0 }, &buf[..n]);
+            let grace = async {
+                stopped(&mut self.stop).await;
+                tokio::time::sleep(WRITE_GRACE).await;
+            };
+            tokio::select! {
+                r = write => r.map_err(Fail::Phone)?,
+                _ = grace => return Err(Fail::Stopped),
+            };
+            if *self.stop.borrow() {
+                return Err(Fail::Stopped);
+            }
             at += n as u64;
             self.done += n as u64;
             self.report(false);
@@ -750,21 +764,19 @@ mod tests {
         done
     }
 
-    /// Serve `root` as a phone does, each request on its own. Anything in /private is refused.
+    /// Serve `root` as a phone does, each request on its own, writes slowest. Anything in
+    /// /private is refused.
     fn serve(node: &Node, root: PathBuf, slow: Duration) {
         let mut calls = node.incoming_fs().unwrap();
         tokio::spawn(async move {
             while let Some(call) = calls.recv().await {
                 let root = root.clone();
-                tokio::spawn(async move {
-                    tokio::time::sleep(slow).await;
-                    answer(call, &root).await;
-                });
+                tokio::spawn(async move { answer(call, &root, slow).await });
             }
         });
     }
 
-    async fn answer(mut call: FsCall, root: &Path) {
+    async fn answer(mut call: FsCall, root: &Path, slow: Duration) {
         use std::io::{Read, Seek, Write};
         enum Reply {
             Entries(Vec<FsEntry>),
@@ -773,6 +785,7 @@ mod tests {
             Ok,
         }
         let body = call.body().await.unwrap_or_default();
+        tokio::time::sleep(if matches!(call.request, FsRequest::Write { .. }) { slow * 3 } else { slow }).await;
         let at = |p: &str| root.join(p.trim_start_matches('/'));
         let entry = |p: &Path| {
             let m = std::fs::metadata(p).ok()?;
