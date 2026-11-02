@@ -33,6 +33,8 @@ Usage:
   linksy terminal unlock <phone>     after too many wrong codes
   linksy terminal end <id>           end a running terminal
   linksy files <phone>               open a phone's files in the file manager
+  linksy inbox [conversation]        messages from the phones' notifications
+  linksy reply <conversation> <text> answer one through the phone
   linksy texts <phone> [thread]      a phone's conversations, or one conversation
   linksy text <phone> <number> <message…>
                                      send a text through a phone
@@ -248,6 +250,24 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             for m in messages {
                 println!("{} {}", if m.from_me { "me:  " } else { "them:" }, m.body);
             }
+        }
+        ("inbox", []) => {
+            for v in c.inbox().await.map_err(err)? {
+                let last = v.last.map(|m| format!("{}{}", m.sender.map(|s| format!("{s}: ")).unwrap_or_default(), m.text)).unwrap_or_default();
+                let unread = if v.unread > 0 { format!(" ({})", v.unread) } else { String::new() };
+                println!("{}  {} · {}{unread}: {last}", v.id, v.app_name, v.title);
+            }
+        }
+        ("inbox", [id]) => {
+            for m in c.inbox_thread(id.clone()).await.map_err(err)? {
+                let who = if m.mine { "me".to_string() } else { m.sender.unwrap_or_else(|| "them".into()) };
+                let code = m.code.map(|c| format!("  [code {c}]")).unwrap_or_default();
+                println!("{who}: {}{code}", m.text);
+            }
+        }
+        ("reply", [id, words @ ..]) if !words.is_empty() => {
+            c.inbox_reply(id.clone(), words.join(" ")).await.map_err(err)?;
+            println!("Sent.");
         }
         ("text", [phone, number, words @ ..]) if !words.is_empty() => {
             c.sms_send(phone.clone(), vec![number.clone()], words.join(" ")).await.map_err(err)?;
