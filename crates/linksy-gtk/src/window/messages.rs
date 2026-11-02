@@ -548,12 +548,51 @@ impl Window {
         });
     }
 
+    /// Earlier messages from the phone, put above; the ones on screen stay where they are.
+    fn load_older(self: &Rc<Self>, id: String, button: &gtk::Button) {
+        let Some(client) = self.client() else { return };
+        button.set_sensitive(false);
+        let i = id.clone();
+        let call = self.bridge.call(&client, move |c| async move { c.inbox_older(i).await });
+        let (w, button) = (self.clone(), button.clone());
+        glib::spawn_future_local(async move {
+            let result = call.await;
+            button.set_sensitive(true);
+            if w.messages.state.borrow().open.as_deref() != Some(id.as_str()) {
+                return;
+            }
+            match result {
+                Ok(messages) => {
+                    let adj = w.messages.scroller.vadjustment();
+                    let from_bottom = adj.upper() - adj.value();
+                    w.render_bubbles(&id, &messages);
+                    glib::idle_add_local_once(move || adj.set_value(adj.upper() - from_bottom));
+                }
+                Err(e) => w.toast(&fmt::capitalize(&e)),
+            }
+        });
+    }
+
     fn show_bubbles(self: &Rc<Self>, id: &str, messages: &[InboxMessage]) {
+        self.render_bubbles(id, messages);
+        self.messages.scroll_to_end();
+    }
+
+    fn render_bubbles(self: &Rc<Self>, id: &str, messages: &[InboxMessage]) {
         let bubbles = &self.messages.bubbles;
         while let Some(child) = bubbles.first_child() {
             bubbles.remove(&child);
         }
-        let group = self.messages.conversation(id).is_some_and(|c| c.group);
+        let conversation = self.messages.conversation(id);
+        let group = conversation.as_ref().is_some_and(|c| c.group);
+        let older = gtk::Button::builder().label(t!("Load Earlier Messages")).halign(gtk::Align::Center).visible(conversation.is_some_and(|c| c.older)).css_classes(["flat", "older-messages"]).build();
+        let (w, i) = (Rc::downgrade(self), id.to_string());
+        older.connect_clicked(move |b| {
+            if let Some(w) = w.upgrade() {
+                w.load_older(i.clone(), b);
+            }
+        });
+        bubbles.append(&older);
         let mut day = String::new();
         for m in messages {
             let today = super::page::day_label(m.at_ms);
@@ -584,7 +623,6 @@ impl Window {
             line.append(&gtk::Label::builder().label(super::page::time_label(m.at_ms)).xalign(if m.mine { 1.0 } else { 0.0 }).margin_start(12).margin_end(12).css_classes(["caption", "dim-label", "numeric"]).build());
             bubbles.append(&line);
         }
-        self.messages.scroll_to_end();
     }
 
     /// "Copy 482913", as a chip.
@@ -644,6 +682,7 @@ impl Window {
             return;
         }
         let open = self.messages.state.borrow().open.as_deref() == Some(c.id.as_str());
+        let newer = self.messages.conversation(&c.id).is_none_or(|o| o.at_ms != c.at_ms || o.last != c.last);
         let at = {
             let mut state = self.messages.state.borrow_mut();
             // Read or answerable again, nothing newer: it keeps its place.
@@ -669,7 +708,11 @@ impl Window {
             if self.window.is_active() {
                 self.mark_read(&c);
             }
-            self.load_thread(&c);
+            if newer {
+                self.load_thread(&c);
+            } else if let Some(older) = self.messages.bubbles.first_child() {
+                older.set_visible(c.older);
+            }
         }
     }
 
