@@ -50,7 +50,7 @@ QQC2.Pane {
             Layout.fillWidth: true
             QQC2.ToolButton {
                 text: panel.app.t("Transfers")
-                font.bold: true
+                font.weight: Font.DemiBold
                 onClicked: panel.app.openTransfers()
             }
             QQC2.ProgressBar {
@@ -134,7 +134,7 @@ QQC2.Pane {
                                     Layout.fillWidth: true
                                     text: row.imported ? panel.plural(row.count, "photo")
                                         : row.count === 1 ? row.what.files[0].split("/").pop() : panel.plural(row.count, "item")
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                     elide: Text.ElideMiddle
                                 }
                                 QQC2.ToolButton {

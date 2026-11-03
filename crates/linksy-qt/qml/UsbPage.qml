@@ -116,7 +116,7 @@ Kirigami.ScrollablePage {
                             anchors.centerIn: parent
                             visible: card.step === "todo"
                             text: card.index + 1
-                            font.bold: true
+                            font.weight: Font.DemiBold
                         }
                         QQC2.BusyIndicator {
                             anchors.fill: parent

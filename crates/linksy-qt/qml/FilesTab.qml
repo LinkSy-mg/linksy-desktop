@@ -397,7 +397,7 @@ ColumnLayout {
             QQC2.Label {
                 Layout.fillWidth: true
                 text: tab.app.t("{n} selected", { n: tab.pickedCount })
-                font.bold: true
+                font.weight: Font.DemiBold
                 elide: Text.ElideRight
             }
             PickedAction {
@@ -692,7 +692,7 @@ ColumnLayout {
         topPadding: Kirigami.Units.smallSpacing
         bottomPadding: Kirigami.Units.smallSpacing
         font.pointSize: Kirigami.Theme.smallFont.pointSize
-        font.bold: true
+        font.weight: Font.DemiBold
         opacity: 0.7
     }
 

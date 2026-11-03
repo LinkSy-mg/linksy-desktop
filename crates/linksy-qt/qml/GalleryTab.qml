@@ -105,7 +105,7 @@ ColumnLayout {
             QQC2.Label {
                 Layout.fillWidth: true
                 text: tab.app.t("{what} selected", { what: tab.app.plural(tab.store.selectedCount, "item") })
-                font.bold: true
+                font.weight: Font.DemiBold
             }
             QQC2.Button {
                 icon.name: "document-save"
@@ -180,7 +180,7 @@ ColumnLayout {
                         text: tab.clock(cell.duration_ms)
                         color: "white"
                         font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        font.bold: true
+                        font.weight: Font.DemiBold
                     }
                 }
             }

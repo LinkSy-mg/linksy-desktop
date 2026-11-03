@@ -113,8 +113,9 @@ ColumnLayout {
                         anchors.centerIn: parent
                         width: Kirigami.Units.iconSizes.smallMedium
                         height: width
-                        source: "exchange-positions"
-                        color: Kirigami.Theme.highlightColor
+                        source: page.app.sym("exchange-positions")
+                        fallback: "exchange-positions"
+                        color: Kirigami.Theme.linkColor
                     }
                 }
                 ColumnLayout {
@@ -165,14 +166,14 @@ ColumnLayout {
                         visible: page.rate <= 0
                         text: page.route === "setup" ? page.app.t("Setting up Wi-Fi Direct") : page.app.t("Waiting to start")
                         font.pixelSize: 20
-                        font.bold: true
+                        font.weight: Font.DemiBold
                     }
                     Item { Layout.fillWidth: true }
                     QQC2.Label {
                         visible: page.started
                         text: Math.round(page.fraction * 100) + "%"
-                        color: Kirigami.Theme.highlightColor
-                        font.bold: true
+                        color: Kirigami.Theme.linkColor
+                        font.weight: Font.DemiBold
                     }
                 }
                 RowLayout {
@@ -243,7 +244,7 @@ ColumnLayout {
                                 QQC2.Label {
                                     text: ({ direct: page.app.t("Wi-Fi Direct"), setup: page.app.t("Setting up Wi-Fi Direct"), usb: page.app.t("USB cable"), away: page.app.t("Away from home") })[page.route] ?? page.app.t("Same Wi-Fi")
                                     font.pixelSize: 11
-                                    font.bold: true
+                                    font.weight: Font.DemiBold
                                     color: routeBox.blue ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor
                                 }
                             }
@@ -261,8 +262,8 @@ ColumnLayout {
             id: feelsLabel
             Layout.leftMargin: Kirigami.Units.smallSpacing
             visible: text !== ""
-            color: Kirigami.Theme.highlightColor
-            font.bold: true
+            color: Kirigami.Theme.linkColor
+            font.weight: Font.DemiBold
             Timer {
                 interval: 1000
                 running: page.visible && page.moving.length > 0
@@ -290,7 +291,7 @@ ColumnLayout {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                         opacity: 0.6
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         font.letterSpacing: 1.3
                         font.pixelSize: 11
                         text: [group.m.incoming ? page.app.t("From {name}", { name: group.m.peer_name }) : page.app.t("To {name}", { name: group.m.peer_name }),
@@ -366,7 +367,7 @@ ColumnLayout {
             visible: page.recent.length > 0
             Layout.topMargin: Kirigami.Units.gridUnit
             opacity: 0.6
-            font.bold: true
+            font.weight: Font.DemiBold
             font.letterSpacing: 1.3
             font.pixelSize: 11
             text: page.app.t("Recent").toUpperCase()

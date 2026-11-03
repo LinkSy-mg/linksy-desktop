@@ -76,7 +76,7 @@ Kirigami.Dialog {
                     visible: row.modelData.heading !== undefined
                     Layout.fillWidth: true
                     Layout.topMargin: Kirigami.Units.smallSpacing
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     opacity: 0.7
                     text: dialog.app.t("Linksy {version}", { version: row.modelData.heading ?? "" })
                 }
@@ -87,13 +87,13 @@ Kirigami.Dialog {
                     Layout.preferredWidth: Kirigami.Units.iconSizes.medium + Kirigami.Units.smallSpacing * 2
                     Layout.preferredHeight: Layout.preferredWidth
                     radius: width / 2
-                    color: Qt.alpha(Kirigami.Theme.highlightColor, 0.15)
+                    color: Qt.alpha(Kirigami.Theme.linkColor, 0.14)
                     Kirigami.Icon {
                         anchors.centerIn: parent
                         width: Kirigami.Units.iconSizes.smallMedium
                         height: width
                         source: row.modelData.icon
-                        color: Kirigami.Theme.highlightColor
+                        color: Kirigami.Theme.linkColor
                         isMask: true
                     }
                 }

@@ -515,7 +515,7 @@ Kirigami.Page {
                         QQC2.Label {
                             Layout.alignment: Qt.AlignRight
                             text: typeof page.view?.away_until === "number" ? new Date(page.view.away_until * 1000).toLocaleDateString(Qt.locale(), "ddd d MMM") : ""
-                            font.bold: true
+                            font.weight: Font.DemiBold
                         }
                     }
                 }
@@ -925,7 +925,7 @@ Kirigami.Page {
                         bottomPadding: Kirigami.Units.smallSpacing
                         text: section
                         font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        font.bold: true
+                        font.weight: Font.DemiBold
                         opacity: 0.7
                     }
                     delegate: Item {

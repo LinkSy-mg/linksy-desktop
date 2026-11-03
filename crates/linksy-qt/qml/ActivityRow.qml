@@ -108,7 +108,7 @@ RowLayout {
                 Layout.fillWidth: true
                 text: row.look[1]
                 textFormat: Text.PlainText
-                font.bold: true
+                font.weight: Font.DemiBold
                 elide: Text.ElideMiddle
             }
             QQC2.ToolButton {

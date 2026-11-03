@@ -266,7 +266,7 @@ Item {
                                 Layout.fillWidth: true
                                 text: tab.app.t("Other Notifications")
                                 font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                font.bold: true
+                                font.weight: Font.DemiBold
                                 opacity: 0.7
                             }
                             QQC2.Button {
@@ -493,7 +493,10 @@ Item {
                                     width: body.width + Kirigami.Units.largeSpacing * 2
                                     height: body.height + Kirigami.Units.smallSpacing * 3
                                     radius: Kirigami.Units.gridUnit
-                                    color: line.mine ? Kirigami.Theme.highlightColor : Qt.alpha(Kirigami.Theme.textColor, 0.08)
+                                    // Yours in a soft tint of the accent, as in KDE's own chat apps
+                                    color: line.mine ? Qt.alpha(Kirigami.Theme.highlightColor, 0.2) : Qt.alpha(Kirigami.Theme.textColor, 0.07)
+                                    border.width: 1
+                                    border.color: line.mine ? Qt.alpha(Kirigami.Theme.highlightColor, 0.45) : Qt.alpha(Kirigami.Theme.textColor, 0.1)
                                     QQC2.Label {
                                         id: body
                                         anchors.centerIn: parent
@@ -501,7 +504,6 @@ Item {
                                         text: line.modelData.text
                                         textFormat: Text.PlainText
                                         wrapMode: Text.Wrap
-                                        color: line.mine ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
                                     }
                                 }
                                 CodeChip {
@@ -734,7 +736,7 @@ Item {
         topPadding: Kirigami.Units.smallSpacing
         bottomPadding: Kirigami.Units.smallSpacing
         font.pointSize: Kirigami.Theme.smallFont.pointSize
-        font.bold: true
+        font.weight: Font.DemiBold
         opacity: 0.7
     }
 

@@ -86,7 +86,7 @@ Rectangle {
                     anchors.centerIn: parent
                     visible: island.files > 0
                     text: island.files
-                    font.bold: true
+                    font.weight: Font.DemiBold
                 }
                 Kirigami.Icon {
                     anchors.centerIn: parent
@@ -121,7 +121,7 @@ Rectangle {
                 }
                 QQC2.Label {
                     text: island.none ? island.app.t("Add Device") : island.app.t("Send Files")
-                    font.bold: true
+                    font.weight: Font.DemiBold
                     elide: Text.ElideRight
                     color: main.hovered ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
                 }
