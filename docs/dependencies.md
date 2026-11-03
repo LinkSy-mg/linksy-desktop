@@ -167,7 +167,8 @@ With ufw: `sudo ufw allow 47200/udp && sudo ufw allow 5353/udp`.
 **Starting at login:** `systemctl --user enable --now linksyd.service`. Without systemd,
 desktops read `/etc/xdg/autostart/linksyd.desktop`; on Hyprland add
 `exec-once = linksyd` to `hyprland.conf`, on Sway `exec linksyd`, on niri
-`spawn-at-startup "linksyd"`.
+`spawn-at-startup "linksyd"`. Start When You Log In, in Preferences, turns it off and on
+again (not the compositor line); off, the service runs only once Linksy is opened.
 
 ## How to check
 
