@@ -2,6 +2,28 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.12.2
+
+### New
+- **Start When You Log In, on or off:** a switch in Preferences, in both apps. Turned
+  off, Linksy keeps running until you log out and doesn't start at the next login, and
+  Finish Setup doesn't turn it back on. Works with packages, the tarball and the Flatpak
+  (#80).
+
+### Improved
+- **The Qt app for KDE Plasma, redesigned in Plasma's own style:**
+  - A phone's page opens with how it's connected in plain words and Send Files beside
+    its name.
+  - The everyday actions sit in one bar.
+  - Each card has its icon in a round tint and its actions in a section of their own.
+  - Icons are Breeze's one-colour ones, tinted like the GTK app's; text is calmer and
+    counts are soft pills.
+  - Your own messages show in a soft tint of your accent colour.
+  - The device list ends in a plain Send Files button.
+  - Light and Breeze Dark alike.
+- **Calmer chips and counts in the GTK app:** how a device is connected, its battery
+  and the unread counts no longer shout in bold.
+
 ## 0.12.1
 
 ### New
