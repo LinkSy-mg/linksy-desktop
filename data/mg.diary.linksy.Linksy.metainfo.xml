@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.12.3" date="2026-11-03">
+      <description>
+        <p>Lighter at rest: the window no longer keeps redrawing while it looks for devices or while a transfer waits to start, and a phone's page checks how fast it answers only while you're using the window.</p>
+      </description>
+    </release>
     <release version="0.12.2" date="2026-11-03">
       <description>
         <p>Starting at login can be turned off in Preferences, and the Qt app for KDE Plasma is redesigned in Plasma's own style: a calmer phone page with one bar of everyday actions, cards with their actions in a section of their own, and Breeze's one-colour icons, in light and Breeze Dark.</p>
