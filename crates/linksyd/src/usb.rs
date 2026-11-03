@@ -113,19 +113,16 @@ impl Usb {
         }
     }
 
-    /// The plugged-in phone that is `phone` and takes virtual input (accessory protocol 2):
-    /// the one its cable connection comes through, else the one named like it, else the
-    /// only one. Its key and USB device.
+    /// The plugged-in phone that is `phone` and takes virtual input (accessory protocol 2).
+    /// Its key and USB device.
     fn input_phone(&self, phone: &linksy_core::Fingerprint, name: &str) -> Option<(String, DeviceInfo)> {
+        let others = self.node.devices().iter().any(|d| d.device.id != *phone && d.device.os == "android");
         let plugged = self.plugged.lock().unwrap();
         let versions = self.versions.lock().unwrap();
         let able: Vec<(&UsbPhone, &DeviceInfo)> = plugged.values().filter(|(_, p)| versions.get(&p.key).is_some_and(|v| *v >= 2)).map(|(d, p)| (p, d)).collect();
         let on_cable = self.node.peer_address(phone).filter(|a| a.ip().is_loopback()).and_then(|a| self.cables.lock().unwrap().get(&a.port()).cloned());
-        let found = match on_cable {
-            Some(key) => able.iter().find(|(p, _)| p.key == key),
-            None => able.iter().find(|(p, _)| p.name == name).or(if able.len() == 1 { able.first() } else { None }),
-        };
-        found.map(|(p, d)| (p.key.clone(), (*d).clone()))
+        let keys: Vec<(&str, &str)> = able.iter().map(|(p, _)| (p.key.as_str(), p.name.as_str())).collect();
+        pick(&keys, on_cable.as_deref(), name, others).map(|i| (able[i].0.key.clone(), able[i].1.clone()))
     }
 
     /// Whether `phone` (named `name`) can be driven from here over the cable.
@@ -546,10 +543,36 @@ async fn carry(mut usb_rx: impl AsyncRead + Unpin, mut usb_tx: impl CableOut, ud
     from_phone
 }
 
+/// Which plugged-in phone (key, name) is the one asked for: the one its cable connection
+/// comes through, else the one named like it, else the only one plugged in, but only when no
+/// other Android device here could be that one. Guessing wrong would drive another phone.
+fn pick(plugged: &[(&str, &str)], on_cable: Option<&str>, name: &str, others: bool) -> Option<usize> {
+    if let Some(key) = on_cable {
+        return plugged.iter().position(|(k, _)| *k == key);
+    }
+    plugged.iter().position(|(_, n)| *n == name).or((plugged.len() == 1 && !others).then_some(0))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use linksy_core::{Config, Event};
+
+    #[test]
+    fn the_phone_to_drive_is_never_a_guess_between_phones() {
+        let one = [("k1", "SAMSUNG_Android")];
+        assert_eq!(pick(&one, Some("k1"), "Galaxy", true), Some(0));
+        assert_eq!(pick(&one, Some("k2"), "Galaxy", false), None);
+        assert_eq!(pick(&one, None, "SAMSUNG_Android", true), Some(0));
+        // The only phone here: the one plugged in, whatever its cable calls it
+        assert_eq!(pick(&one, None, "Galaxy", false), Some(0));
+        // Another phone is paired: the one plugged in may be that one (#10)
+        assert_eq!(pick(&one, None, "Pixel", true), None);
+        let two = [("k1", "A"), ("k2", "B")];
+        assert_eq!(pick(&two, None, "B", true), Some(1));
+        assert_eq!(pick(&two, None, "C", false), None);
+        assert_eq!(pick(&[], None, "A", false), None);
+    }
 
     impl CableOut for tokio::io::WriteHalf<tokio::io::DuplexStream> {
         fn end(&mut self) {}
