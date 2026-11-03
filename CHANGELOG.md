@@ -2,6 +2,17 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.12.3
+
+### Improved
+- **Lighter at rest:**
+  - With no devices yet, the logo by "Looking for devices…" pulsed for as long as the
+    window stayed open, redrawing it every frame (about 9% of a core). It now pulses
+    three times when it appears, then holds still (GTK app).
+  - A transfer waiting to start no longer keeps the window redrawing (GTK app).
+  - A phone's page checks how fast it answers only while the window is in use, and
+    right away when you come back to it (both apps).
+
 ## 0.12.2
 
 ### New
