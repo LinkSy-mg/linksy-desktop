@@ -45,7 +45,7 @@ RowLayout {
         }
         case "clipboard": return ["edit-paste", what.text ? `“${oneLine(what.text, 80)}”` : app.t("Clipboard text")];
         case "ping": return ["preferences-desktop-notification-bell", what.body ? `${what.title}: ${what.body}` : what.title];
-        case "link": return ["internet-web-browser", oneLine(what.url, 120)];
+        case "link": return ["link", oneLine(what.url, 120)];
         case "locked": return ["system-lock-screen", app.t("Locked this computer")];
         case "remote": return ["input-touchpad", app.t("Touchpad and keyboard")];
         case "camera": return ["camera-web", incoming ? app.t("Their camera") : app.t("Your camera")];
@@ -94,8 +94,9 @@ RowLayout {
         Layout.alignment: Qt.AlignTop
         Layout.preferredWidth: Kirigami.Units.iconSizes.small
         Layout.preferredHeight: Kirigami.Units.iconSizes.small
-        source: row.look[0]
-        color: row.running ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
+        source: app.sym(row.look[0])
+        fallback: row.look[0]
+        color: row.running ? Kirigami.Theme.linkColor : Kirigami.Theme.textColor
         opacity: ["failed", "declined", "cancelled"].includes(row.e.status.state) ? 0.4 : 0.8
     }
     ColumnLayout {

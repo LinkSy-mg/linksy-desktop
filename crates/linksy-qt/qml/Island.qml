@@ -27,129 +27,58 @@ Rectangle {
         if (offered.length && !none && !card.opened) card.show("send");
     }
 
-    Kirigami.Theme.colorSet: Kirigami.Theme.View
-    Kirigami.Theme.inherit: false
-    implicitWidth: pill.implicitWidth + 8
-    implicitHeight: pill.implicitHeight + 8
-    radius: height / 2
-    color: Kirigami.Theme.backgroundColor
-    border.color: Qt.alpha(Kirigami.Theme.textColor, 0.08)
+    implicitWidth: pill.implicitWidth
+    implicitHeight: pill.implicitHeight
+    color: "transparent"
 
     function kindIcon(kind) {
         return ({ phone: "smartphone", tablet: "tablet", laptop: "computer-laptop", desktop: "computer" })[kind] ?? "computer";
     }
 
-    RowLayout {
+    // Copies going on, when there are any, then Send Files (Add Device with nothing paired yet)
+    ColumnLayout {
         id: pill
         anchors.fill: parent
-        anchors.margins: 4
-        spacing: 4
+        spacing: Kirigami.Units.smallSpacing
 
-        QQC2.AbstractButton {
-            id: transfersPart
-            implicitWidth: 44
-            implicitHeight: 44
-            hoverEnabled: true
-            QQC2.ToolTip.text: island.app.t("Transfers")
-            QQC2.ToolTip.visible: hovered
+        QQC2.ItemDelegate {
+            Layout.fillWidth: true
+            visible: island.files > 0
             onClicked: island.app.openTransfers()
-            background: Rectangle {
-                radius: width / 2
-                color: transfersPart.hovered || island.app.transfersOpen ? Qt.alpha(Kirigami.Theme.highlightColor, 0.12) : "transparent"
-            }
-            contentItem: Item {
-                Canvas {
-                    id: ring
-                    anchors.fill: parent
-                    anchors.margins: 2
-                    visible: island.files > 0
-                    readonly property real value: island.fraction
-                    onValueChanged: requestPaint()
-                    onVisibleChanged: requestPaint()
-                    onPaint: {
-                        const ctx = getContext("2d");
-                        ctx.reset();
-                        const r = width / 2 - 2;
-                        ctx.lineWidth = 3;
-                        ctx.strokeStyle = Qt.alpha(Kirigami.Theme.highlightColor, 0.18);
-                        ctx.beginPath();
-                        ctx.arc(width / 2, height / 2, r, 0, Math.PI * 2);
-                        ctx.stroke();
-                        ctx.lineCap = "round";
-                        ctx.strokeStyle = Kirigami.Theme.highlightColor;
-                        ctx.beginPath();
-                        ctx.arc(width / 2, height / 2, r, -Math.PI / 2, -Math.PI / 2 + value * Math.PI * 2);
-                        ctx.stroke();
+            contentItem: ColumnLayout {
+                spacing: Kirigami.Units.smallSpacing
+                RowLayout {
+                    spacing: Kirigami.Units.smallSpacing
+                    Kirigami.Icon {
+                        implicitWidth: Kirigami.Units.iconSizes.small
+                        implicitHeight: implicitWidth
+                        source: island.app.sym("exchange-positions")
+                        fallback: "exchange-positions"
+                        color: Kirigami.Theme.linkColor
+                    }
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        text: island.app.t("Transfers")
+                        elide: Text.ElideRight
+                    }
+                    QQC2.Label {
+                        text: Math.round(island.fraction * 100) + "%"
+                        opacity: 0.75
                     }
                 }
-                QQC2.Label {
-                    anchors.centerIn: parent
-                    visible: island.files > 0
-                    text: island.files
-                    font.weight: Font.DemiBold
-                }
-                Kirigami.Icon {
-                    anchors.centerIn: parent
-                    visible: island.files === 0
-                    width: Kirigami.Units.iconSizes.smallMedium
-                    height: width
-                    source: "exchange-positions"
-                    color: transfersPart.hovered ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
+                QQC2.ProgressBar {
+                    Layout.fillWidth: true
+                    value: island.fraction
                 }
             }
         }
 
-        QQC2.AbstractButton {
+        QQC2.Button {
             id: main
             Layout.fillWidth: true
-            implicitHeight: 44
-            hoverEnabled: true
+            icon.name: island.app.sym(island.none ? "list-add" : "document-send")
+            text: island.none ? island.app.t("Add Device") : island.app.t("Send Files")
             onClicked: card.show(island.none ? "add" : "send")
-            background: Rectangle {
-                radius: height / 2
-                color: main.hovered ? Kirigami.Theme.highlightColor : Qt.alpha(Kirigami.Theme.textColor, 0.07)
-                Behavior on color { ColorAnimation { duration: 150 } }
-            }
-            contentItem: RowLayout {
-                spacing: Kirigami.Units.smallSpacing
-                Item { Layout.fillWidth: true }
-                Kirigami.Icon {
-                    implicitWidth: Kirigami.Units.iconSizes.small
-                    implicitHeight: implicitWidth
-                    source: island.none ? "list-add" : "document-send"
-                    color: main.hovered ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
-                }
-                QQC2.Label {
-                    text: island.none ? island.app.t("Add Device") : island.app.t("Send Files")
-                    font.weight: Font.DemiBold
-                    elide: Text.ElideRight
-                    color: main.hovered ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
-                }
-                Item { Layout.fillWidth: true }
-            }
-        }
-
-        QQC2.AbstractButton {
-            id: right
-            implicitWidth: 44
-            implicitHeight: 44
-            hoverEnabled: true
-            QQC2.ToolTip.text: island.none ? island.app.t("Send Files") : island.app.t("Add Device")
-            QQC2.ToolTip.visible: hovered
-            onClicked: card.show(island.none ? "send" : "add")
-            background: Rectangle {
-                radius: width / 2
-                color: right.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.12) : "transparent"
-            }
-            contentItem: Item {
-                Kirigami.Icon {
-                    anchors.centerIn: parent
-                    width: Kirigami.Units.iconSizes.smallMedium
-                    height: width
-                    source: island.none ? "document-send" : "list-add"
-                    color: right.hovered ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
-                }
-            }
         }
     }
 

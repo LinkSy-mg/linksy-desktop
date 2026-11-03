@@ -704,7 +704,7 @@ Kirigami.Page {
                             id: deckHead
                             width: parent.width
                             title: app.t("Deck")
-                            iconName: "view-grid"
+                            iconName: "linksy-deck"
                             description: app.t("Buttons for this computer on {device}", { device: page.name })
                         }
                     }
@@ -1064,17 +1064,17 @@ Kirigami.Page {
                             // Unread conversations and other notifications
                             Rectangle {
                                 visible: tabButton.modelData === "inbox" && inbox.count > 0
-                                implicitWidth: Math.max(implicitHeight, countLabel.implicitWidth + Kirigami.Units.smallSpacing * 2)
-                                implicitHeight: countLabel.implicitHeight + 2
+                                implicitWidth: Math.max(implicitHeight, countLabel.implicitWidth + Kirigami.Units.smallSpacing * 3)
+                                implicitHeight: countLabel.implicitHeight + 4
                                 radius: height / 2
-                                color: Kirigami.Theme.linkColor
+                                color: Qt.alpha(Kirigami.Theme.highlightColor, 0.2)
                                 QQC2.Label {
                                     id: countLabel
                                     anchors.centerIn: parent
                                     text: String(inbox.count)
                                     font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.8
                                     font.weight: Font.DemiBold
-                                    color: Kirigami.Theme.highlightedTextColor
+                                    color: Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.linkColor, Kirigami.Theme.textColor, 0.35)
                                 }
                             }
                         }
@@ -1304,11 +1304,30 @@ Kirigami.Page {
                 color: Qt.alpha(Kirigami.Theme.linkColor, 0.14)
                 Kirigami.Icon {
                     anchors.centerIn: parent
+                    visible: head.iconName !== "linksy-deck"
                     width: Kirigami.Units.iconSizes.smallMedium
                     height: width
                     source: app.sym(head.iconName)
                     fallback: head.iconName
                     color: Kirigami.Theme.linkColor
+                }
+                // The deck's own mark, four keys: Breeze's grid icon is dots
+                Grid {
+                    anchors.centerIn: parent
+                    visible: head.iconName === "linksy-deck"
+                    columns: 2
+                    spacing: 3
+                    Repeater {
+                        model: 4
+                        Rectangle {
+                            width: 8
+                            height: 8
+                            radius: 2
+                            color: "transparent"
+                            border.width: 1.5
+                            border.color: Kirigami.Theme.linkColor
+                        }
+                    }
                 }
             }
             Item { Layout.fillWidth: true }

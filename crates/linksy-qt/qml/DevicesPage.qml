@@ -225,11 +225,11 @@ Kirigami.ScrollablePage {
             }
             QQC2.Label {
                 Layout.fillWidth: true
+                Layout.bottomMargin: Kirigami.Units.smallSpacing
+                horizontalAlignment: Text.AlignHCenter
                 text: app.status ? app.t("This device: {name}", { name: app.status.device.name }) : ""
                 opacity: 0.7
-                font: Kirigami.Theme.smallFont
                 elide: Text.ElideRight
-                leftPadding: Kirigami.Units.largeSpacing
             }
         }
     }

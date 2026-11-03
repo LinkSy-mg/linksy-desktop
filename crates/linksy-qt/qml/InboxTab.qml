@@ -224,7 +224,7 @@ Item {
                                         text: row.modelData.title
                                         textFormat: Text.PlainText
                                         elide: Text.ElideRight
-                                        font.weight: row.unread ? Font.Bold : Font.DemiBold
+                                        font.weight: row.unread ? Font.DemiBold : Font.Normal
                                     }
                                     QQC2.Label {
                                         text: tab.when(row.modelData.at_ms)
@@ -713,20 +713,21 @@ Item {
         }
     }
 
+    // A soft pill of the accent with its number in a deeper shade of it
     component CountPill: Rectangle {
         id: pill
         property int count
-        implicitWidth: Math.max(implicitHeight, countLabel.implicitWidth + Kirigami.Units.smallSpacing * 2)
-        implicitHeight: countLabel.implicitHeight + 2
+        implicitWidth: Math.max(implicitHeight, countLabel.implicitWidth + Kirigami.Units.smallSpacing * 3)
+        implicitHeight: countLabel.implicitHeight + 4
         radius: height / 2
-        color: Kirigami.Theme.linkColor
+        color: Qt.alpha(Kirigami.Theme.highlightColor, 0.2)
         QQC2.Label {
             id: countLabel
             anchors.centerIn: parent
             text: String(pill.count)
             font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.8
             font.weight: Font.DemiBold
-            color: Kirigami.Theme.highlightedTextColor
+            color: Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.linkColor, Kirigami.Theme.textColor, 0.35)
         }
     }
 
