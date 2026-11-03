@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## 0.12.0
+## 0.12.1
 
 ### New
 - **A device's page in tabs:** Use As, Inbox, Gallery, Files, Transfers, History and
@@ -39,6 +39,14 @@ Linksy for Linux. Each version's section becomes its release notes.
   several phones are paired.
 
 ### Fixed
+- **Controlling the right phone:** with two phones paired and one plugged in, viewing the
+  other one sent your clicks and keys to the phone on the cable. Now only a phone on the
+  cable is controlled, and only when it's the one you're viewing
+  (LinkSy-mg/linksy-releases#10).
+- **A pulled cable is noticed at once:** the phone no longer shows as connected by USB for
+  up to 30 seconds after it's unplugged, so it can come back over Wi-Fi right away.
+- **Take Control** says Release Control while you control the screen, and the window says
+  Screen again once you let go (#78).
 - **Names from phones show as typed** in the Qt app, never as formatting.
 - **A volume tool that hangs** (wpctl or pactl) is stopped after 5 seconds instead of
   holding the volume up.
