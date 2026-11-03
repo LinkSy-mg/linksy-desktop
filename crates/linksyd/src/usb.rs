@@ -73,6 +73,8 @@ pub struct Usb {
     /// Each cable bridge's local port → its phone's key: the phone's connection comes from
     /// there.
     cables: Arc<Mutex<HashMap<u16, String>>>,
+    /// The bridge of each phone in accessory mode, stopped when it's unplugged.
+    links: Arc<Mutex<HashMap<DeviceId, tokio::task::AbortHandle>>>,
 }
 
 struct Choices {
@@ -110,6 +112,7 @@ impl Usb {
             told: Arc::default(),
             versions: Arc::default(),
             cables: Arc::default(),
+            links: Arc::default(),
         }
     }
 
@@ -167,6 +170,9 @@ impl Usb {
                 HotplugEvent::Connected(d) => self.clone().plugged(d),
                 HotplugEvent::Disconnected(id) => {
                     self.plugged.lock().unwrap().remove(&id);
+                    if let Some(link) = self.links.lock().unwrap().remove(&id) {
+                        link.abort();
+                    }
                     self.tell_phones();
                 }
             }
@@ -319,8 +325,9 @@ impl Usb {
             self.plugged.lock().unwrap().insert(id, (d.clone(), UsbPhone { key: key.clone(), name, state: UsbState::Accessory, error: None, auto: false }));
             self.tell_phones();
             self.probe(key.clone(), d.clone());
-            tokio::spawn(async move {
-                match bridge(&d, self.node.local_addr().map(|a| a.port()).unwrap_or(0), &self.cables, &key).await {
+            let links = self.links.clone();
+            let link = tokio::spawn(async move {
+                match bridge(&d, &self.node, &self.cables, &key).await {
                     Ok(0) => {
                         info!("USB link ended: the phone app never answered");
                         self.unanswered.lock().unwrap().insert(key);
@@ -331,7 +338,9 @@ impl Usb {
                         self.set_state(id, UsbState::Failed, Some(e));
                     }
                 }
+                self.links.lock().unwrap().remove(&id);
             });
+            links.lock().unwrap().insert(id, link.abort_handle());
             return;
         }
         if !looks_like_phone(&d) {
@@ -420,7 +429,8 @@ fn denied(e: nusb::Error) -> String {
 /// Carry the phone's packets to this node and back until the cable is pulled, framed as
 /// `linksy_core::cable` says. Ends with how many packets came from the phone (none: its app
 /// never opened the cable).
-async fn bridge(d: &DeviceInfo, port: u16, cables: &Mutex<HashMap<u16, String>>, key: &str) -> Result<u64, String> {
+async fn bridge(d: &DeviceInfo, node: &Node, cables: &Mutex<HashMap<u16, String>>, key: &str) -> Result<u64, String> {
+    let port = node.local_addr().map(|a| a.port()).unwrap_or(0);
     let dev = d.open().await.map_err(denied)?;
     let intf = dev.detach_and_claim_interface(0).await.map_err(|e| e.to_string())?;
     let desc = intf.descriptor().ok_or("no accessory interface")?;
@@ -435,9 +445,25 @@ async fn bridge(d: &DeviceInfo, port: u16, cables: &Mutex<HashMap<u16, String>>,
     info!("Linksy over USB: {}", d.product_string().unwrap_or("a phone"));
     let local = udp.local_addr().map_err(|e| e.to_string())?.port();
     cables.lock().unwrap().insert(local, key.to_string());
-    let carried = carry(usb_rx, usb_tx, &udp).await;
-    cables.lock().unwrap().remove(&local);
-    Ok(carried)
+    let _carrying = Carrying { cables, node, port: local };
+    Ok(carry(usb_rx, usb_tx, &udp).await)
+}
+
+/// A cable's bridge while it carries. However it stops (pulled out, or the phone let go),
+/// the connection that came through it is dropped at once instead of timing out.
+struct Carrying<'a> {
+    cables: &'a Mutex<HashMap<u16, String>>,
+    node: &'a Node,
+    port: u16,
+}
+
+impl Drop for Carrying<'_> {
+    fn drop(&mut self) {
+        self.cables.lock().unwrap().remove(&self.port);
+        if self.node.drop_link(SocketAddr::from((Ipv4Addr::LOCALHOST, self.port))) {
+            info!("USB link gone: its connection is closed");
+        }
+    }
 }
 
 /// The cable towards the phone: writes are buffered into USB transfers, and each batch ends
@@ -753,6 +779,53 @@ mod tests {
             }
         });
         assert_eq!(got.await.unwrap(), "version two");
+    }
+
+    /// Pulled out: the bridge stops, and the phone's connection through it closes at once
+    /// rather than after QUIC's 30 s (linksy-mobile#20).
+    #[tokio::test]
+    async fn an_unplugged_phone_is_gone_at_once() {
+        let Some(ip) = lan_ip() else { return eprintln!("no network address: skipped") };
+        let dir = tempfile::tempdir().unwrap();
+        let (pc, phone) = (node(dir.path(), "pc").await, node(dir.path(), "phone").await);
+        answer_yes(&pc);
+        answer_yes(&phone);
+        let port = pc.local_addr().unwrap().port();
+        phone.pair(SocketAddr::new(ip, port)).await.unwrap();
+
+        let (pc_end, phone_end) = std::os::unix::net::UnixStream::pair().unwrap();
+        pc_end.set_nonblocking(true).unwrap();
+        let (rx, tx) = tokio::net::UnixStream::from_std(pc_end).unwrap().into_split();
+        let pc_udp = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        pc_udp.connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
+        let cables: Arc<Mutex<HashMap<u16, String>>> = Arc::default();
+        let (pc2, c2) = (pc.clone(), cables.clone());
+        let link = tokio::spawn(async move {
+            let local = pc_udp.local_addr().unwrap().port();
+            c2.lock().unwrap().insert(local, "phone".into());
+            let _carrying = Carrying { cables: &c2, node: &pc2, port: local };
+            carry(rx, tx, &pc_udp).await
+        });
+        let accessory = std::fs::File::from(std::os::fd::OwnedFd::from(phone_end));
+        let bridge_port = cable::phone_bridge(accessory, cable::ACCESSORY_VERSION).unwrap();
+        phone.connect(SocketAddr::from((Ipv4Addr::LOCALHOST, bridge_port))).await.unwrap();
+        let id = phone.info().id;
+        let state = |pc: &Node| pc.devices().into_iter().find(|d| d.device.id == id).map(|d| (d.connected, d.usb));
+        let on_cable = tokio::time::timeout(Duration::from_secs(5), async {
+            while state(&pc) != Some((true, true)) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+        assert!(on_cable.await.is_ok(), "the computer never saw the cable");
+
+        link.abort();
+        let gone = tokio::time::timeout(Duration::from_secs(3), async {
+            while state(&pc) == Some((true, true)) {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        });
+        assert!(gone.await.is_ok(), "still connected by cable 3 s after it was pulled");
+        assert!(cables.lock().unwrap().is_empty());
     }
 
     /// A phone that said hello in version 2 and then goes silent is let go within seconds.
