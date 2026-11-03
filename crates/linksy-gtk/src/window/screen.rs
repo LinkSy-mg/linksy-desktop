@@ -569,6 +569,9 @@ impl Viewer {
             } else if b.is_active() {
                 v.picture.grab_focus();
             }
+            if v.kind.get() == SessionKind::Control {
+                v.show_controlling(b.is_active());
+            }
         });
         // A phone remembers the person's own choice (clicks only, not the app's own changes)
         let v = viewer.clone();
@@ -811,8 +814,21 @@ impl Viewer {
         self.control.set_active(controlling);
         if controlling {
             self.picture.grab_focus();
+            self.show_controlling(true);
+        }
+    }
+
+    /// The button, the heading and the window title, for control on or off.
+    fn show_controlling(&self, on: bool) {
+        if let Some(content) = self.control.child().and_downcast::<adw::ButtonContent>() {
+            content.set_label(if on { t!("Release Control") } else { t!("Take Control") });
+        }
+        if on {
             self.window.set_title(Some(&t!("Controlling {name}", name = self.name)));
             self.heading.set_subtitle(t!("Controlling"));
+        } else {
+            self.window.set_title(Some(&t!("{name}'s Screen", name = self.name)));
+            self.heading.set_subtitle(t!("Screen"));
         }
     }
 

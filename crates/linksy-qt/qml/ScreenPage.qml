@@ -33,7 +33,7 @@ Kirigami.Page {
     actions: [
         Kirigami.Action {
             icon.name: "input-mouse"
-            text: app.t("Take Control")
+            text: page.controlling ? page.app.t("Release Control") : page.app.t("Take Control")
             checkable: true
             checked: page.controlling
             // A phone takes control only when it can be driven over the cable, as in the GTK app
