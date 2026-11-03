@@ -235,6 +235,7 @@ pub mod qobject {
 
         /// A copy from or to a phone went on, or ended (`fs_copy`, `fs_upload`).
         #[qsignal]
+        #[cxx_name = "fsProgress"]
         fn fs_progress(self: Pin<&mut Backend>, json: QString);
 
         /// Couldn't reach the service, or it went away.
