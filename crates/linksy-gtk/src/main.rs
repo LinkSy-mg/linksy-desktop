@@ -492,13 +492,16 @@ pub(crate) fn maybe_screenshot(app: &adw::Application, window: &adw::Application
                 false => window.clone().upcast(),
             };
             let (w, h) = (window.width(), window.height());
+            // At the screen's scale: a 2x screen (ui-shot.sh's LINKSY_SCREENSHOT_SCALE) gives a sharp 2x picture
+            let scale = window.native().and_then(|n| n.surface()).map_or(1.0, |s| s.scale()) as f32;
             let paintable = gtk::WidgetPaintable::new(Some(&window));
             let snapshot = gtk::Snapshot::new();
+            snapshot.scale(scale, scale);
             paintable.snapshot(&snapshot, w as f64, h as f64);
             let rendered = snapshot.to_node().zip(window.native().and_then(|n| n.renderer()));
             match rendered {
                 Some((node, renderer)) => {
-                    let texture = renderer.render_texture(&node, Some(&gtk::graphene::Rect::new(0.0, 0.0, w as f32, h as f32)));
+                    let texture = renderer.render_texture(&node, Some(&gtk::graphene::Rect::new(0.0, 0.0, w as f32 * scale, h as f32 * scale)));
                     if let Err(e) = texture.save_to_png(&path) {
                         eprintln!("screenshot failed: {e}");
                     }

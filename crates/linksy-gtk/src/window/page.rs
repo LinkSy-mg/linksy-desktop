@@ -726,9 +726,14 @@ impl DevicePage {
             }
         }));
         // Development aid (screenshots): LINKSY_SCREENSHOT_SCROLL=600 scrolls the page down.
+        // Again until the tab's content is long enough to get there.
         if let Some(y) = std::env::var("LINKSY_SCREENSHOT_SCROLL").ok().and_then(|y| y.parse::<f64>().ok()) {
-            let a = scroller.vadjustment();
-            glib::timeout_add_local_once(std::time::Duration::from_millis(2500), move || a.set_value(y));
+            let (a, mut tries) = (scroller.vadjustment(), 0);
+            glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+                a.set_value(y);
+                tries += 1;
+                if a.value() >= y - 1.0 || tries > 20 { glib::ControlFlow::Break } else { glib::ControlFlow::Continue }
+            });
         }
         let root = adw::BreakpointBin::builder().width_request(300).height_request(300).child(&overlay).build();
         // Narrower and narrower: stack Send Files over the tiles, then the cards, then the
