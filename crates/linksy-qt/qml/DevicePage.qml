@@ -690,7 +690,8 @@ Kirigami.Page {
                 // Whatever the phone says it can do: the deck is this computer's side
                 Kirigami.Card {
                     id: deckCard
-                    padding: Kirigami.Units.largeSpacing * 2
+                    leftPadding: Kirigami.Units.largeSpacing * 2
+                    rightPadding: Kirigami.Units.largeSpacing * 2
                     visible: page.handheld
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -723,7 +724,8 @@ Kirigami.Page {
                 readonly property bool allowed: page.info !== null && app.terminal.allowed.includes(page.info.id)
                 readonly property var running: app.terminal.running.filter(t => t.device === page.info?.id)
                 Layout.fillWidth: true
-                padding: Kirigami.Units.largeSpacing * 2
+                leftPadding: Kirigami.Units.largeSpacing * 2
+                rightPadding: Kirigami.Units.largeSpacing * 2
                 visible: page.phone
                 footer: CardActions { owner: terminalCard }
                 contentItem: Item {
@@ -1215,7 +1217,9 @@ Kirigami.Page {
     // One "Use as" card: start it, or stop it while it runs
     component UseCard: Kirigami.Card {
         id: card
-        padding: Kirigami.Units.largeSpacing * 2
+        // Roomier at the sides; the top stays Kirigami's, which places the content from it
+        leftPadding: Kirigami.Units.largeSpacing * 2
+        rightPadding: Kirigami.Units.largeSpacing * 2
         property string iconName
         property string title
         property string subtitle
@@ -1290,6 +1294,7 @@ Kirigami.Page {
         spacing: Kirigami.Units.smallSpacing
         RowLayout {
             Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.largeSpacing
             Layout.bottomMargin: Kirigami.Units.smallSpacing
             spacing: Kirigami.Units.largeSpacing
             Rectangle {
