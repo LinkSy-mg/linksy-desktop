@@ -1,4 +1,4 @@
-<img width="1800" height="900" alt="Linksy: your phone and your Linux computer, working as one. The Linux app showing a phone's page next to the Android app showing the computer." src="docs/banner.png" />
+<img width="1800" height="900" alt="Linksy: your phone, your Linux computer, one desk. The Linux app showing a phone's Gallery, with the phone's page for the computer on one side and the phone as a deck of buttons on the other." src="docs/banner.webp" />
 
 <div align="center">
 
