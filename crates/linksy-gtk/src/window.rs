@@ -764,7 +764,8 @@ impl Window {
     }
 
     /// In a Flatpak the service can't be a child of this window's sandbox, which ends with
-    /// the window: it runs in a sandbox of its own, and starts with every login from now on.
+    /// the window: it runs in a sandbox of its own, and starts with every login from now on
+    /// (unless that was turned off in Preferences).
     fn start_sandboxed_service(self: &Rc<Self>) {
         use std::process::{Command, Stdio};
         if let Err(e) = Command::new("flatpak-spawn").arg("linksyd").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn() {
@@ -773,7 +774,7 @@ impl Window {
         }
         let options = glib::VariantDict::new(None);
         options.insert("reason", t!("Linksy stays ready for your devices when its window is closed."));
-        options.insert("autostart", true);
+        options.insert("autostart", !linksy_setup::autostart_off());
         options.insert("commandline", vec!["linksyd"]);
         if let Some(bus) = self.window.application().and_then(|app| app.dbus_connection()) {
             bus.call(
