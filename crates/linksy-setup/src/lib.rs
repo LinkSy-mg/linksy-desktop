@@ -316,10 +316,92 @@ fn autostart_need() -> Option<Need> {
     match String::from_utf8_lossy(&state.stdout).trim() {
         // Enabled, but tiling compositors seldom start systemd's graphical session, which
         // starts it: then one line in their config does
-        "enabled" | "enabled-runtime" | "static" | "linked" | "alias" if !graphical_session() => compositor_autostart().map(Need::Manual).or(Some(Need::Ready)),
-        "enabled" | "enabled-runtime" | "static" | "linked" | "alias" => Some(Need::Ready),
+        s if enabled(s) && !graphical_session() => compositor_autostart().map(Need::Manual).or(Some(Need::Ready)),
+        s if enabled(s) => Some(Need::Ready),
         "disabled" => Some(Need::SetUp),
         _ => None,
+    }
+}
+
+fn enabled(state: &str) -> bool {
+    matches!(state, "enabled" | "enabled-runtime" | "static" | "linked" | "alias")
+}
+
+/// linksyd.service's state, from `systemctl --user is-enabled`: None without a user manager
+/// or without the service.
+fn unit_state() -> Option<String> {
+    let out = std::process::Command::new("systemctl").args(["--user", "is-enabled", "linksyd.service"]).stderr(std::process::Stdio::null()).output().ok()?;
+    Some(String::from_utf8_lossy(&out.stdout).trim().to_string()).filter(|s| !s.is_empty() && s != "not-found")
+}
+
+fn systemctl(args: &[&str]) -> bool {
+    std::process::Command::new("systemctl").arg("--user").args(args).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success())
+}
+
+/// The user's own link in place of the one packages make for everyone (`systemctl --global
+/// enable`), which `systemctl --user disable` leaves: pointing to /dev/null, it masks it.
+fn wants_link() -> PathBuf {
+    linksy_host::config_dir().join("systemd/user/graphical-session.target.wants/linksyd.service")
+}
+
+fn masked(link: &Path) -> bool {
+    std::fs::read_link(link).is_ok_and(|t| t == Path::new("/dev/null"))
+}
+
+/// The XDG autostart entry, for desktops without systemd's graphical session: the user's
+/// own (the tarball's, or one hiding the system's).
+fn xdg_entry() -> PathBuf {
+    linksy_host::config_dir().join("autostart/linksyd.desktop")
+}
+
+/// Whether a package put the entry in the system's autostart folder.
+fn system_xdg_entry() -> bool {
+    let dirs = std::env::var("XDG_CONFIG_DIRS").ok().filter(|d| !d.is_empty()).unwrap_or_else(|| "/etc/xdg".into());
+    dirs.split(':').any(|d| Path::new(d).join("autostart/linksyd.desktop").is_file())
+}
+
+/// The user's entry that hides the system's.
+const XDG_HIDDEN: &str = "[Desktop Entry]\nType=Application\nName=Linksy service\nExec=linksyd\nHidden=true\n";
+
+fn hidden_line(line: &str) -> Option<bool> {
+    line.split_once('=').filter(|(k, _)| k.trim() == "Hidden").map(|(_, v)| v.trim() == "true")
+}
+
+fn with_hidden(entry: &str, hide: bool) -> String {
+    let mut out = String::new();
+    for line in entry.lines().filter(|l| hidden_line(l).is_none()) {
+        out.push_str(line);
+        out.push('\n');
+        if hide && line.trim() == "[Desktop Entry]" {
+            out.push_str("Hidden=true\n");
+        }
+    }
+    out
+}
+
+/// Whether the XDG entry at `path`, else the system's (`system`), starts the service: None
+/// when there's neither.
+fn xdg_shown(path: &Path, system: bool) -> Option<bool> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Some(!text.lines().any(|l| hidden_line(l) == Some(true))),
+        Err(_) => system.then_some(true),
+    }
+}
+
+fn show_xdg_entry(path: &Path, system: bool, show: bool) -> std::io::Result<()> {
+    match std::fs::read_to_string(path) {
+        Ok(text) if show && text == XDG_HIDDEN => std::fs::remove_file(path),
+        Ok(text) => {
+            let next = with_hidden(&text, !show);
+            if next == text { Ok(()) } else { std::fs::write(path, next) }
+        }
+        Err(_) if !show && system => {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            std::fs::write(path, XDG_HIDDEN)
+        }
+        Err(_) => Ok(()),
     }
 }
 
@@ -375,6 +457,29 @@ fn usb_rule() -> bool {
 /// The Flatpak's autostart entry, in the computer's own config folder.
 fn flatpak_autostart() -> PathBuf {
     linksy_host::config_dir().join("autostart/mg.diary.linksy.Linksy.service.desktop")
+}
+
+/// The one the Background portal writes when the window asks it to start the service.
+fn portal_autostart() -> PathBuf {
+    linksy_host::config_dir().join("autostart/mg.diary.linksy.Linksy.desktop")
+}
+
+fn stop_portal_autostart() {
+    let Ok(bus) = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE) else { return };
+    let options = gio::glib::VariantDict::new(None);
+    options.insert("reason", t!("Linksy stays ready for your devices when its window is closed."));
+    options.insert("autostart", false);
+    let _ = bus.call_sync(
+        Some("org.freedesktop.portal.Desktop"),
+        "/org/freedesktop/portal/desktop",
+        "org.freedesktop.portal.Background",
+        "RequestBackground",
+        Some(&gio::glib::Variant::tuple_from_iter(["".to_variant(), options.end()])),
+        None,
+        gio::DBusCallFlags::NONE,
+        5000,
+        gio::Cancellable::NONE,
+    );
 }
 
 /// What this computer has and lacks, right now, for the `ui` window.
@@ -514,7 +619,9 @@ pub fn check(ui: Ui) -> Vec<Item> {
             need,
         });
     }
-    if let Some(need) = autostart_need() {
+    if !autostart_off()
+        && let Some(need) = autostart_need()
+    {
         items.push(Item {
             id: "autostart",
             title: t!("Ready When You Log In"),
@@ -722,6 +829,69 @@ pub fn enable_autostart() -> Result<(), Failure> {
     if ok { Ok(()) } else { Err(Failure::Message(t!("Couldn't turn on starting with your computer.").into())) }
 }
 
+/// Whether the background service starts with every login, as Preferences shows it: None
+/// where Linksy can't change that (run from the source tree, or a line in a tiling
+/// compositor's config). For a thread of its own: it runs systemctl.
+pub fn autostart() -> Option<bool> {
+    if flatpak() {
+        return Some(linksy_host::exists(&flatpak_autostart()) || linksy_host::exists(&portal_autostart()));
+    }
+    let graphical = graphical_session();
+    if !graphical && compositor_autostart().is_some() {
+        return None;
+    }
+    match unit_state() {
+        Some(state) if graphical => Some(enabled(&state) && !masked(&wants_link())),
+        _ => xdg_shown(&xdg_entry(), system_xdg_entry()),
+    }
+}
+
+/// Start the background service with every login, or not; the service goes on running
+/// now either way. The choice is kept, so Finish Setup leaves it off. For a thread of its own.
+pub fn set_autostart(on: bool) -> Result<(), String> {
+    let off = autostart_off_file();
+    if on {
+        let _ = std::fs::remove_file(&off);
+    } else {
+        if let Some(dir) = off.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&off, "");
+    }
+    let failed = if on { t!("Couldn't turn on starting with your computer.") } else { t!("Couldn't turn off starting with your computer.") };
+    if flatpak() {
+        if on {
+            return enable_autostart().map_err(|_| failed.to_string());
+        }
+        linksy_host::remove(&flatpak_autostart());
+        linksy_host::remove(&portal_autostart());
+        stop_portal_autostart();
+        return Ok(());
+    }
+    show_xdg_entry(&xdg_entry(), system_xdg_entry(), on).map_err(|_| failed.to_string())?;
+    if unit_state().is_none() {
+        return Ok(());
+    }
+    let link = wants_link();
+    if on {
+        if masked(&link) {
+            let _ = std::fs::remove_file(&link);
+        }
+        return enable_autostart().map_err(|_| failed.to_string());
+    }
+    // Not --now: it goes on running until logout. disable removes a mask from before too,
+    // so it goes first.
+    systemctl(&["disable", "linksyd.service"]);
+    if unit_state().is_some_and(|s| enabled(&s)) {
+        let made = masked(&link) || (link.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok()) && std::os::unix::fs::symlink("/dev/null", &link).is_ok());
+        if !made {
+            return Err(failed.to_string());
+        }
+        systemctl(&["daemon-reload"]);
+    }
+    Ok(())
+}
+
 /// Whether phones can be used by cable here: Err says why not.
 pub fn usb_ready() -> Result<(), String> {
     if usb_rule() { Ok(()) } else { Err(t!("Allow it once: your computer asks for your password.").into()) }
@@ -743,6 +913,16 @@ fn offered_file() -> PathBuf {
 fn config_file(name: &str) -> PathBuf {
     let config = std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"))).unwrap_or_default();
     config.join("linksy").join(name)
+}
+
+fn autostart_off_file() -> PathBuf {
+    config_file("autostart-off")
+}
+
+/// Whether starting with the computer was turned off in Preferences: then nothing turns
+/// it back on by itself.
+pub fn autostart_off() -> bool {
+    autostart_off_file().exists()
 }
 
 /// Phones someone watches rather than controls over the cable: they turned Take Control
@@ -805,5 +985,51 @@ mod tests {
         assert!(p.line("STEP Making the Linksy Camera").is_some());
         assert!(p.line("ENROLL 12345678").is_none());
         assert!(matches!(p.finish(4), Err(Failure::Restart(Some(c))) if c == "12345678"));
+    }
+
+    #[test]
+    fn xdg_entries_hide_and_show_again() {
+        let dir = std::env::temp_dir().join(format!("linksy-setup-xdg-{}", std::process::id()));
+        let path = dir.join("autostart/linksyd.desktop");
+        // Nothing to hide
+        show_xdg_entry(&path, false, false).unwrap();
+        assert!(!path.exists());
+        assert_eq!(xdg_shown(&path, false), None);
+        // The system's, hidden by one of the user's, removed again
+        assert_eq!(xdg_shown(&path, true), Some(true));
+        show_xdg_entry(&path, true, false).unwrap();
+        assert_eq!(xdg_shown(&path, true), Some(false));
+        show_xdg_entry(&path, true, true).unwrap();
+        assert!(!path.exists());
+        // The tarball's, which stays
+        let tarball = "[Desktop Entry]\nType=Application\nName=Linksy service\nExec=/home/u/.local/bin/linksyd\nX-systemd-skip=true\n";
+        std::fs::write(&path, tarball).unwrap();
+        show_xdg_entry(&path, false, false).unwrap();
+        assert_eq!(xdg_shown(&path, false), Some(false));
+        assert!(std::fs::read_to_string(&path).unwrap().starts_with("[Desktop Entry]\nHidden=true\n"));
+        show_xdg_entry(&path, false, false).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap().matches("Hidden").count(), 1);
+        show_xdg_entry(&path, false, true).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), tarball);
+        // Hidden by the desktop's own settings, then shown here
+        std::fs::write(&path, format!("{tarball}Hidden = true\n")).unwrap();
+        assert_eq!(xdg_shown(&path, false), Some(false));
+        show_xdg_entry(&path, false, true).unwrap();
+        assert_eq!(xdg_shown(&path, false), Some(true));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn only_a_link_to_dev_null_masks() {
+        let dir = std::env::temp_dir().join(format!("linksy-setup-mask-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let link = dir.join("linksyd.service");
+        assert!(!masked(&link));
+        std::os::unix::fs::symlink("/usr/lib/systemd/user/linksyd.service", &link).unwrap();
+        assert!(!masked(&link));
+        std::fs::remove_file(&link).unwrap();
+        std::os::unix::fs::symlink("/dev/null", &link).unwrap();
+        assert!(masked(&link));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
