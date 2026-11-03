@@ -19,10 +19,10 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | **0.10** | **Lighter and smoother** | Lighter at rest (desktop done in 0.11.3) · Transfers in a corner panel (desktop done) · Choose which monitor to view (desktop done) · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
 | **0.11** | **Never miss a notification** | The phone's notifications on the computer, with reply, which brings texts from every messaging app (desktop: Messages page and copied codes in 0.11.4) · Snap to computer (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near · Connection Doctor |
-| **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) · The phone's photos on the computer (desktop: Gallery in 0.12.0) |
+| **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) · The phone's photos on the computer (desktop: Gallery in 0.12.1) |
 | **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (desktop done in 0.11.3; your own relay in Android 0.2.3) |
 | **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth · The phone's controls on the computer |
-| **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync · The phone's sound with its screen · Deck (desktop: actions and the GTK editor in 0.12.0) · Videos open where you left off · The computer's notifications on the phone |
+| **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync · The phone's sound with its screen · Deck (desktop: actions and the GTK editor in 0.12.1) · Videos open where you left off · The computer's notifications on the phone |
 | **1.0** | **Feature freeze** | No new features: fixes, performance, polish, stores · Onboarding |
 
 After 0.16, Linksy is feature complete: everything after that is fixing. Bold releases are
@@ -452,7 +452,7 @@ The phone as a deck of buttons for the computer, laid out exactly the way you wa
   mute, microphone mute, the sound output, lock, Do Not Disturb, Wi-Fi, Bluetooth,
   airplane mode, power modes, restart, shut down, and commands of your own. The phone only
   ever asks for an action by its id: anything off, or not on the list, is refused. Live
-  state is sent while the deck is open. GTK done in 0.12.0; Qt next.
+  state is sent while the deck is open. GTK done in 0.12.1; Qt next.
 - **Phone (draws it):** the layout from the computer, kept for when it's away, with its
   own themes if it likes; asks first for restart, shut down and the like; keeps the screen
   on while the deck shows, dimmed after a minute.
