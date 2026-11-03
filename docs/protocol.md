@@ -840,7 +840,11 @@ developer options**: the computer uses **Android Open Accessory (AOA 1.0)**.
    the computer shows "Connected by USB".
 5. Unplugging ends the accessory streams → the connection drops → the normal Wi-Fi
    reconnect takes over. Start sessions after plugging in: a running session doesn't
-   move to the cable.
+   move to the cable. Since desktop 0.12.1 the computer closes the connection that came
+   through the cable the moment the cable link ends, instead of waiting out QUIC's 30 s.
+   The phone should do the same: when its accessory goes away (`ACTION_USB_ACCESSORY_DETACHED`,
+   or a read on it failing), close the QUIC connection through its bridge, stop showing
+   "Connecting over USB" and dial the computer over Wi-Fi at once (linksy-mobile#20).
 
 Linux needs permission to switch the phone and to use it as an accessory: the .deb and
 .rpm install a udev rule (`70-linksy-usb.rules`); Finish Setup adds it otherwise (not
@@ -2199,3 +2203,9 @@ robust against any encoder (GPU ones may slice too):
   `deck_state` entries optional `text`. The deck keeps the screen on and dims it after
   60 s untouched (§4.20). Phone to-do: ask `confirm` before running, show `text`, the
   screen rule.
+- **2026-11-03** — USB (§4.11), desktop 0.12.1: a cable pulled out closes the phone's
+  connection through it at once. The computer also recognizes a phone on the cable by its
+  bridge port again (the address came as `::ffff:127.0.0.1`), and drives only that phone:
+  with another Android phone paired, it no longer guesses that the one plugged in is the
+  one being viewed. Phone to-do: on unplug, drop the cable connection and dial over Wi-Fi
+  straight away (linksy-mobile#20).
