@@ -156,7 +156,7 @@ impl TransfersPage {
         if total > 0 {
             live.percent.set_label(&format!("{}%", (bytes as f64 / total as f64 * 100.0).round() as u64));
         }
-        live.flow.speed.set(rate);
+        live.flow.set_speed(rate);
 
         let mb = rate / 1e6;
         let mut lines = Vec::new();
@@ -564,6 +564,7 @@ impl Ring {
 struct Flow {
     area: gtk::DrawingArea,
     speed: Rc<Cell<f64>>,
+    wake: Rc<dyn Fn()>,
 }
 
 impl Flow {
@@ -610,31 +611,54 @@ impl Flow {
         });
         // Still until something moves: a negative phase hides the files
         phase.set(-1.0);
-        if !still {
-            let last = Rc::new(Cell::new(None::<i64>));
-            let target = speed.clone();
-            area.add_tick_callback(move |area, clock| {
-                let now = clock.frame_time();
-                let dt = last.replace(Some(now)).map_or(0.0, |t| (now - t) as f64 / 1e6);
-                // 1 MB/s crawls, 100 MB/s races; past that it stays readable
-                let mb = target.get() / 1e6;
-                let goal = if mb <= 0.0 { 0.0 } else { (0.12 + mb / 80.0).clamp(0.12, 1.6) };
-                pace.set(pace.get() + (goal - pace.get()) * (dt * 3.0).clamp(0.0, 1.0));
-                if scanning {
-                    scan.set((scan.get() + dt / 1.4) % 1.0);
+        // Ticks only while something moves (or Wi-Fi Direct is being set up), so a stalled
+        // transfer doesn't keep the window drawing every frame
+        let tick = Rc::new(RefCell::new(None::<gtk::TickCallbackId>));
+        let wake: Rc<dyn Fn()> = {
+            let (area, target) = (area.clone(), speed.clone());
+            Rc::new(move || {
+                if still || tick.borrow().is_some() {
+                    return;
                 }
-                if pace.get() > 0.001 {
-                    phase.set((phase.get().max(0.0) + pace.get() * dt) % 1.0);
-                } else if phase.get() >= 0.0 {
-                    phase.set(-1.0);
-                } else if !scanning {
-                    return glib::ControlFlow::Continue;
-                }
-                area.queue_draw();
-                glib::ControlFlow::Continue
-            });
+                let (target, t, pace, phase, scan, last) = (target.clone(), tick.clone(), pace.clone(), phase.clone(), scan.clone(), Cell::new(None::<i64>));
+                let id = area.add_tick_callback(move |area, clock| {
+                    let now = clock.frame_time();
+                    let dt = last.replace(Some(now)).map_or(0.0, |t| (now - t) as f64 / 1e6);
+                    // 1 MB/s crawls, 100 MB/s races; past that it stays readable
+                    let mb = target.get() / 1e6;
+                    let goal = if mb <= 0.0 { 0.0 } else { (0.12 + mb / 80.0).clamp(0.12, 1.6) };
+                    pace.set(pace.get() + (goal - pace.get()) * (dt * 3.0).clamp(0.0, 1.0));
+                    if scanning {
+                        scan.set((scan.get() + dt / 1.4) % 1.0);
+                    }
+                    if pace.get() > 0.001 {
+                        phase.set((phase.get().max(0.0) + pace.get() * dt) % 1.0);
+                    } else if phase.get() >= 0.0 {
+                        phase.set(-1.0);
+                    } else if !scanning {
+                        t.borrow_mut().take();
+                        return glib::ControlFlow::Break;
+                    }
+                    area.queue_draw();
+                    glib::ControlFlow::Continue
+                });
+                *tick.borrow_mut() = Some(id);
+            })
+        };
+        if scanning {
+            wake();
         }
-        Self { area, speed }
+        Self { area, speed, wake }
+    }
+
+    fn set_speed(&self, rate: f64) {
+        let was = self.speed.replace(rate);
+        if rate > 0.0 {
+            (self.wake)();
+        }
+        if (was > 0.0) != (rate > 0.0) {
+            self.area.queue_draw();
+        }
     }
 }
 
