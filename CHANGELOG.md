@@ -2,6 +2,47 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.12.0
+
+### New
+- **A device's page in tabs:** Use As, Inbox, Gallery, Files, Transfers, History and
+  Settings, with the link, its latency and the battery in the header. The tabs stay at the
+  top while the page scrolls. Both apps.
+- **Files, a file manager for the phone:** browse the folder the phone shares, copy files
+  and folders both ways, make folders, rename and delete. Copies run in the background
+  with their progress and Cancel. Works with the Android app you have now.
+- **Inbox:** Messages became the Inbox tab, with filters and sorting. The phone's other
+  notifications open in full beside the list, earlier messages load from the phone, mail
+  shows its subject, and a reply still works after the notification is gone. Those new
+  parts need a coming version of Linksy for Android.
+- **Gallery:** the phone's photos and videos a page at a time, by album, with each
+  thumbnail fetched once. Pick some and save them to Pictures. Needs a coming version of
+  Linksy for Android.
+- **Deck:** the phone as buttons for this computer: media, volume, mute, microphone, the
+  sound output, lock, Do Not Disturb, Wi-Fi, Bluetooth, airplane mode, power modes,
+  restart, shut down and commands of your own. Each is on or off for each phone; restart,
+  shut down, airplane mode and your commands stay off until you allow them, and the phone
+  asks before running them. Needs a coming version of Linksy for Android.
+- **Deck editor, in the GTK app (preview):** build the phone's deck on the computer, on the
+  phone drawn true to size in portrait and landscape. Drag widgets in, move and resize
+  them, pick a theme (Stock, Dot Matrix, E-Ink, Terminal or Pixel) and keep several
+  layouts. The Qt app keeps its list of actions for now and gets the editor next.
+- **The Qt app catches up:** a phone's running terminals in its Terminal card, each with
+  End; how long a device stays reachable from away, in its header; the History tab's
+  filters and day headings.
+
+### Changed
+- **Use As cards** sit four in a row on a wide page, two on a medium one and one on a
+  narrow one, with each title beside its icon.
+- **Transfers** moved from a page of its own to each device's Transfers tab.
+- **A phone's notification** shows its app in its title, and the phone's name only when
+  several phones are paired.
+
+### Fixed
+- **Names from phones show as typed** in the Qt app, never as formatting.
+- **A volume tool that hangs** (wpctl or pactl) is stopped after 5 seconds instead of
+  holding the volume up.
+
 ## 0.11.4
 
 ### New
