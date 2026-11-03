@@ -2,7 +2,7 @@
 
 <div align="center">
 
-  <sub>Files, clipboard, screens, webcam, microphone and terminal between your Android phone and your Linux computer. Over Wi-Fi or a USB cable, with no account, no cloud and no server.</sub>
+  <sub>Files, messages, photos, a deck of buttons, clipboard, screens, webcam, microphone and terminal between your Android phone and your Linux computer. Over Wi-Fi or a USB cable, with no account, no cloud and no server.</sub>
   <br/><br/>
 
 <p align="center">
@@ -81,6 +81,17 @@ Finish Setup doesn't look: it shows the firewall as to set up until Linksy has o
 
 ## What it does
 
+- **A page for each phone.** Use As, Inbox, Gallery, Files, Transfers, History and Settings,
+  in tabs, with how it's connected and its battery at the top.
+- **Messages.** The phone's chats, texts and mail in one Inbox, made from its notifications:
+  WhatsApp, Telegram, Signal, the SMS app, Gmail and others. Answer from the computer where
+  the app allows it; codes that arrive are copied for you. Nothing is kept on disk.
+- **Photos and files.** The phone's photos and videos by album, saved to Pictures in a
+  click, and a file manager for the folder it shares: copy both ways, rename, delete.
+- **Deck.** The phone as a deck of buttons for the computer: media, volume, microphone,
+  sound output, lock, Do Not Disturb, Wi-Fi, Bluetooth, power modes, restart, and your own
+  commands. Build it on the computer, on a phone drawn true to size, in five looks (the
+  editor is in the GTK app for now).
 - **Share.** Files and folders both ways, resumable and checked; the clipboard (text, images,
   small files), automatically where the desktop allows; notifications. "Send with Linksy" in
   Files, Dolphin and Thunar.
@@ -107,12 +118,19 @@ With no window open, Linksy is one small process (about 20 MB of memory, no CPU 
 
 <table>
   <tr>
-    <td><img src="docs/screenshots/device-page.png" alt="A phone's page in the light theme"></td>
-    <td><img src="docs/screenshots/device-page-dark.png" alt="A phone's page in the dark theme"></td>
+    <td><img src="docs/screenshots/device-page.webp" alt="The GTK app: a phone's page, with what it can be used as"></td>
+    <td><img src="docs/screenshots/device-page-dark.webp" alt="The same page in the dark theme"></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/pairing-code.png" width="300" alt="Pairing: both screens show the same code"></td>
-    <td align="center"><img src="docs/screenshots/incoming-files.png" width="300" alt="Incoming files, asked first"></td>
+    <td><img src="docs/screenshots/inbox.webp" alt="The Inbox: the phone's conversations, with one open and a reply field"></td>
+    <td><img src="docs/screenshots/deck-editor.webp" alt="The deck editor: widgets on the left, the phone true to size, its settings on the right"></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/kde-device-page.webp" alt="The Qt app on KDE Plasma: a phone's page in Breeze"></td>
+    <td><img src="docs/screenshots/gallery.webp" alt="The Gallery: the phone's photos by album"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="docs/screenshots/phone-deck.webp" width="720" alt="The phone in landscape as a deck: music, clock, volume and buttons for the computer"></td>
   </tr>
 </table>
 
