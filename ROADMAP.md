@@ -19,10 +19,10 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | **0.10** | **Lighter and smoother** | Lighter at rest (desktop done in 0.11.3) · Transfers in a corner panel (desktop done) · Choose which monitor to view (desktop done) · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
 | **0.11** | **Never miss a notification** | The phone's notifications on the computer, with reply, which brings texts from every messaging app (desktop: Messages page and copied codes in 0.11.4) · Snap to computer (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
 | **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near · Connection Doctor |
-| **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) · The phone's photos on the computer |
+| **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) · The phone's photos on the computer (desktop: Gallery in 0.12.0) |
 | **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (desktop done in 0.11.3; your own relay in Android 0.2.3) |
 | **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth · The phone's controls on the computer |
-| **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync · The phone's sound with its screen · Deck · Videos open where you left off · The computer's notifications on the phone |
+| **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync · The phone's sound with its screen · Deck (desktop: actions and the GTK editor in 0.12.0) · Videos open where you left off · The computer's notifications on the phone |
 | **1.0** | **Feature freeze** | No new features: fixes, performance, polish, stores · Onboarding |
 
 After 0.16, Linksy is feature complete: everything after that is fixing. Bold releases are
@@ -445,19 +445,19 @@ Today, sending the clipboard is a button.
 
 ### Deck — M
 The phone as a deck of buttons for the computer, laid out exactly the way you want.
-- **Phone (owns the layout):** pages of tiles on a grid, edited right on the deck: move
-  them, resize them (one cell up to wide, tall or big), drag them between pages and into
-  folders, pick each one's label, colour, icon or picture; sliders for volume. Tiles show
-  live state (playing, the volume, the microphone muted). Saved on the phone, a deck per
-  computer, with a Quick Settings tile to open it.
-- **Desktop (says what's allowed):** a list of what this computer offers, each on or off
-  for that phone: play/pause, next and previous, volume and mute, microphone mute, the
-  sound output, keyboard shortcuts, opening an app, OBS scenes and recording, lock, sleep,
-  and commands of your own (a name and a command line). The phone only ever asks for an
-  action by its id: anything off, or not on the list, is refused. Live state is sent while
-  the deck is open. Both apps.
-- **Protocol:** the computer sends its actions (id, name, kind, on or off) and their state;
-  the phone sends "run this action", with a value for a slider.
+- **Desktop (keeps the layouts):** an editor with the phone drawn true to size, portrait
+  and landscape: tiles (buttons, volume, music, clock) dragged in from a library, moved,
+  resized and themed (Stock, Dot Matrix, E-Ink, Terminal, Pixel), several layouts per
+  phone. What this computer offers, each on or off for that phone: media, volume and
+  mute, microphone mute, the sound output, lock, Do Not Disturb, Wi-Fi, Bluetooth,
+  airplane mode, power modes, restart, shut down, and commands of your own. The phone only
+  ever asks for an action by its id: anything off, or not on the list, is refused. Live
+  state is sent while the deck is open. GTK done in 0.12.0; Qt next.
+- **Phone (draws it):** the layout from the computer, kept for when it's away, with its
+  own themes if it likes; asks first for restart, shut down and the like; keeps the screen
+  on while the deck shows, dimmed after a minute.
+- **Protocol:** the computer sends its actions, their state and the layouts (§4.19,
+  §4.20); the phone sends "run this action", with a value for a slider.
 - **Done when:** a deck of mixed-size tiles is arranged on the phone by dragging and every
   tile works on the computer, and an action turned off on the computer stops at once.
 

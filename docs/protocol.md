@@ -59,10 +59,10 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Texting from the computer | Done | Not possible | SMS permissions are blocked for sideloaded apps |
 | Phone notifications on the computer, reply | Done | Not possible | notification-listener access is blocked |
 | Messages page, codes copied | Done (0.11.4) | To do (optional fields) | from message notifications; `conversation`, `sender`… (§4.5) |
-| Inbox: other notifications, earlier messages, replies after the notification | Done (next release) | To do | `messages`, `reply_kept`, `inbox_history` (§4.5) |
-| Gallery: the phone's photos page by page | Done (next release) | To do | `gallery` stream, thumbnails, `send` (§4.18) |
-| Deck: the phone as buttons for the computer | Done (next release) | To do | `deck_open`, `deck_actions`, `deck_run` (§4.19) |
-| Deck layouts made on the computer | Done (next release) | To do | `deck_layout`, feature `deck_layout` (§4.20) |
+| Inbox: other notifications, earlier messages, replies after the notification | Done (0.12.0) | To do | `messages`, `reply_kept`, `inbox_history` (§4.5) |
+| Gallery: the phone's photos page by page | Done (0.12.0) | To do | `gallery` stream, thumbnails, `send` (§4.18) |
+| Deck: the phone as buttons for the computer | Done (0.12.0) | To do | `deck_open`, `deck_actions`, `deck_run` (§4.19) |
+| Deck layouts made on the computer | Done (0.12.0) | To do | `deck_layout`, feature `deck_layout` (§4.20) |
 | Images/files on the clipboard | Done | Done | offer with `"clipboard":true` (§4.5) |
 | Automatic clipboard sync, computer → phone | Done (not on GNOME) | Done (phone asks) | `clipboard_watch` (§4.5) |
 | Phone as microphone | Done | Done | session `microphone`, raw PCM (§4.8) |
@@ -353,7 +353,7 @@ and close the other with reason `duplicate`.
   icon as `icon` (96 px), not the small status-bar one: the page shows it beside each
   conversation.
 
-  **Inbox (desktop, next release).** The Messages page became the device page's Inbox
+  **Inbox (desktop 0.12.0).** The Messages page became the device page's Inbox
   tab: conversations plus the phone's other notifications (not messages: a reminder, a
   delivery, a sign-in code), each with a dismiss button and Clear All
   (`notification_dismiss`); a code in those is copied too. The computer keeps up to 200
@@ -772,7 +772,7 @@ turn sharing on in the phone app. In Rust: `node.incoming_fs()` gives `FsCall`s;
 each with `entries` / `entry` / `data` / `ok` / `error`, and read a write's bytes with
 `body()` first.
 
-**Files tab (desktop, next release).** The device page's Files tab copies to and from the
+**Files tab (desktop 0.12.0).** The device page's Files tab copies to and from the
 phone, makes folders, renames and deletes with these same ops; nothing new on the wire.
 A copy keeps up to 4 `read`s in flight and several copies can run at once, so answer each
 stream on its own task rather than one after another. The computer never overwrites: it
@@ -1486,7 +1486,7 @@ this version. The computer's log shows each step:
 link to … up", or "no direct link: <why>"). Compare the transfer speed with and without
 (`--no-direct`).
 
-### 4.18 Gallery: the phone's photos on the computer (desktop, next release) — `src/gallery.rs`
+### 4.18 Gallery: the phone's photos on the computer (desktop 0.12.0) — `src/gallery.rs`
 
 The computer browses the phone's photos and videos page by page and fetches only the
 thumbnails it shows; nothing is copied until the user saves a photo. Phones and tablets
@@ -1528,7 +1528,7 @@ any of them → {"type":"gallery_error","message":"…"}
   `items`, `thumb`, `ok`, `error`). A device that takes none answers "doesn't share its
   photos"; from away it answers "only on the same network" like files.
 
-### 4.19 Deck: the phone as buttons for the computer (desktop, next release)
+### 4.19 Deck: the phone as buttons for the computer (desktop 0.12.0)
 
 The computer says what it lets that phone do, and runs it. Computers announce feature
 `deck`. The layout (pages of tiles, sizes, colours, a theme) is made in the computer's
@@ -1592,7 +1592,7 @@ phone → computer {"type":"deck_close"}          the deck is gone: stop sending
 - Core: `Node::deck_open(to, open)`, `Node::deck_run(to, action, value)`;
   `Event::DeckActions`, `Event::DeckState`.
 
-### 4.20 Deck layouts: made on the computer, drawn by the phone (desktop, next release)
+### 4.20 Deck layouts: made on the computer, drawn by the phone (desktop 0.12.0)
 
 The user lays out a phone's deck in the computer's editor; the computer keeps the layouts
 (one set per phone) and sends them. The phone draws them and runs their tiles as in §4.19.
@@ -2177,22 +2177,22 @@ robust against any encoder (GPU ones may slice too):
 - **2026-11-02** — Core (in desktop 0.11.4): `Node::set_features` changes the features while running; connected
   devices hear a new `features` message (§4.5, §4.10), so `notifications` can be announced
   when the listener is turned on. Older desktops ignore it until they reconnect.
-- **2026-11-02** — Desktop (next release): the device page in tabs; Inbox with the phone's
+- **2026-11-02** — Desktop 0.12.0: the device page in tabs; Inbox with the phone's
   other notifications, `messages` history, `subject`, `reply_kept` and `inbox_history`
   pages (§4.5); Gallery (§4.18); Deck (§4.19); `DeviceView.latency_ms`. Phone to-do: the
   optional Inbox fields, `gallery` and the deck. Older devices ignore all of it.
-- **2026-11-02** — Desktop (next release): the Files tab is a file manager for the phone
+- **2026-11-02** — Desktop 0.12.0: the Files tab is a file manager for the phone
   (copy both ways, new folder, rename, delete) over the existing `fs` ops (§4.9), several
   requests at once; the deck drops `system.screen_off`. Phone to-do: answer `fs` streams
   concurrently.
 - **2026-11-02** — `notification_posted` gains optional `mine` (§4.5): the newest message
   is the user's own. Phone to-do: send it, and keep `conversation` the chat's name.
-- **2026-11-02** — Deck layouts (§4.20), desktop next release: the computer keeps each
+- **2026-11-02** — Deck layouts (§4.20), desktop 0.12.0: the computer keeps each
   phone's layouts from its editor and sends them as `deck_layout` on `deck_open` and on
   every save, only to a phone with feature `deck_layout`. Core: `Event::DeckLayout`,
   `DeckLayouts`. A message over 1 MiB now fails when sent instead of at the other side.
   Phone to-do: announce `deck_layout`, draw the layouts and themes, keep the last ones.
-- **2026-11-02** — Deck actions (§4.19), desktop next release: `sound.output`,
+- **2026-11-02** — Deck actions (§4.19), desktop 0.12.0: `sound.output`,
   `system.dnd`, `system.restart`, `system.shutdown`, `network.wifi`, `network.bluetooth`,
   `network.airplane`, `power.saver`, `power.balanced`, `power.performance`, `power.auto`,
   in new groups `Network` and `Power`; `deck_actions` entries gain optional `confirm`,
