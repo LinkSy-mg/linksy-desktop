@@ -79,13 +79,8 @@ Kirigami.Page {
         }
     }
 
+    // Send Files is the header's own button, beside the device's name
     actions: [
-        Kirigami.Action {
-            icon.name: "document-send"
-            text: app.t("Send Files")
-            visible: page.trusted && !page.deckOpen
-            onTriggered: filePicker.open()
-        },
         Kirigami.Action {
             icon.name: "edit-delete"
             text: app.t("Forget Device…")
@@ -695,6 +690,7 @@ Kirigami.Page {
                 // Whatever the phone says it can do: the deck is this computer's side
                 Kirigami.Card {
                     id: deckCard
+                    padding: Kirigami.Units.largeSpacing * 2
                     visible: page.handheld
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -714,6 +710,7 @@ Kirigami.Page {
                     actions: Kirigami.Action {
                         text: app.t("Choose Actions…")
                         icon.name: app.sym("configure")
+                        icon.color: Kirigami.Theme.linkColor
                         onTriggered: page.deckOpen = true
                     }
                 }
@@ -726,6 +723,7 @@ Kirigami.Page {
                 readonly property bool allowed: page.info !== null && app.terminal.allowed.includes(page.info.id)
                 readonly property var running: app.terminal.running.filter(t => t.device === page.info?.id)
                 Layout.fillWidth: true
+                padding: Kirigami.Units.largeSpacing * 2
                 visible: page.phone
                 footer: CardActions { owner: terminalCard }
                 contentItem: Item {
@@ -802,6 +800,7 @@ Kirigami.Page {
                         enabled: app.terminal.code_set
                         text: terminalCard.allowed ? app.t("Turn Off") : app.t("Allow on {name}", { name: page.name })
                         icon.name: app.sym(terminalCard.allowed ? "media-playback-stop" : "dialog-ok")
+                        icon.color: terminalCard.allowed ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.linkColor
                         onTriggered: app.request("allow_terminal", { target: page.info.id, on: !terminalCard.allowed }, () =>
                             app.request("terminal_status", {}, (ok, s) => { if (ok) app.terminal = s }))
                     }
@@ -1216,6 +1215,7 @@ Kirigami.Page {
     // One "Use as" card: start it, or stop it while it runs
     component UseCard: Kirigami.Card {
         id: card
+        padding: Kirigami.Units.largeSpacing * 2
         property string iconName
         property string title
         property string subtitle
@@ -1262,6 +1262,7 @@ Kirigami.Page {
             Kirigami.Action {
                 text: card.running ? app.t("Stop") : card.button
                 icon.name: app.sym(card.running ? "media-playback-stop" : "media-playback-start")
+                icon.color: card.running ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.linkColor
                 onTriggered: {
                     if (card.running) return app.request("end_session", { session: card.running.session });
                     app.request("start_session", { with: page.info.id, kind: card.kind }, (ok, err) => {
