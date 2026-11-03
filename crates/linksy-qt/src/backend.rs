@@ -185,6 +185,22 @@ pub mod qobject {
         #[cxx_name = "usbReady"]
         fn usb_ready(&self) -> QString;
 
+        /// Whether the service starts with every login; `autostartChecked` answers.
+        #[qinvokable]
+        #[cxx_name = "checkAutostart"]
+        fn check_autostart(self: Pin<&mut Self>);
+
+        /// Start the service with every login, or not; `autostartChecked` answers with how
+        /// it is then.
+        #[qinvokable]
+        #[cxx_name = "setAutostart"]
+        fn set_autostart(self: Pin<&mut Self>, on: bool);
+
+        /// 1 on, 0 off, -1 where Linksy can't change it; `error` when changing it failed.
+        #[qsignal]
+        #[cxx_name = "autostartChecked"]
+        fn autostart_checked(self: Pin<&mut Backend>, state: i32, error: QString);
+
         #[qsignal]
         #[cxx_name = "setupChecked"]
         fn setup_checked(self: Pin<&mut Backend>, json: QString);
@@ -622,6 +638,24 @@ impl qobject::Backend {
         QString::from(&linksy_setup::usb_ready().err().unwrap_or_default())
     }
 
+    pub fn check_autostart(self: Pin<&mut Self>) {
+        let thread = self.qt_thread();
+        // systemctl: off the Qt thread
+        self.rust().rt.spawn_blocking(move || {
+            let state = autostart_state();
+            let _ = thread.queue(move |b| b.autostart_checked(state, QString::default()));
+        });
+    }
+
+    pub fn set_autostart(self: Pin<&mut Self>, on: bool) {
+        let thread = self.qt_thread();
+        self.rust().rt.spawn_blocking(move || {
+            let error = linksy_setup::set_autostart(on).err().unwrap_or_default();
+            let state = autostart_state();
+            let _ = thread.queue(move |b| b.autostart_checked(state, QString::from(&error)));
+        });
+    }
+
     pub fn reboot(&self) {
         // elogind's where there's no systemd (Artix, Void)
         let _ = std::process::Command::new("sh").args(["-c", "if [ -d /run/systemd/system ]; then systemctl reboot; else loginctl reboot; fi"]).spawn();
@@ -643,6 +677,10 @@ impl qobject::Backend {
         );
         QString::from(&format!("data:image/svg+xml;utf8,{}", svg.replace('#', "%23")))
     }
+}
+
+fn autostart_state() -> i32 {
+    linksy_setup::autostart().map_or(-1, i32::from)
 }
 
 /// Finish Setup's list for QML: each item, what it needs, and the terminal command.

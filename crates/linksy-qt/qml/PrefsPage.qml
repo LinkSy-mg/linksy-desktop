@@ -21,6 +21,7 @@ Kirigami.ScrollablePage {
         app.request("photo_prefs", {}, (ok, p) => { if (ok) page.photos = p });
         app.request("notification_prefs", {}, (ok, p) => { if (ok) page.notifications = p });
         app.request("updates", {}, (ok, u) => { if (ok) page.updates = u });
+        page.app.checkAutostart();
     }
 
     // Settings go back whole, with one field changed
@@ -98,6 +99,24 @@ Kirigami.ScrollablePage {
                 if (why) return app.toast(why);
                 app.showPassiveNotification(app.t("Linksy uses it the next time it starts"), "long", app.t("Restart Now"), () => backend.restart());
             }
+        }
+        // The service at every login, or only once Linksy is opened
+        QQC2.Switch {
+            Kirigami.FormData.label: page.app.t("Start When You Log In") + ":"
+            visible: page.app.autostart >= 0
+            checked: page.app.autostart === 1
+            onToggled: {
+                page.app.setAutostart(checked);
+                checked = Qt.binding(() => page.app.autostart === 1);
+            }
+        }
+        QQC2.Label {
+            visible: page.app.autostart >= 0
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            wrapMode: Text.Wrap
+            text: page.app.t("Linksy runs in the background, so your devices can reach it with the window closed.")
+            opacity: 0.7
+            font: Kirigami.Theme.smallFont
         }
 
         Kirigami.Separator {

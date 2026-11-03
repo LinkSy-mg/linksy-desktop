@@ -43,6 +43,8 @@ Kirigami.ApplicationWindow {
     property var setup: null
     // A newer Linksy, when the service found one: { version, notes }
     property var update: null
+    // Starting with every login, for Preferences: 1 on, 0 off, -1 where Linksy can't change it
+    property int autostart: -1
 
     // A session ended (a viewer showing it closes its picture)
     signal sessionEnded(string id)
@@ -90,6 +92,10 @@ Kirigami.ApplicationWindow {
         }
         onOffline: why => { if (why) root.toast(why) }
         onSetupChecked: json => root.setup = JSON.parse(json)
+        onAutostartChecked: (state, error) => {
+            root.autostart = state;
+            if (error) root.toast(error);
+        }
     }
 
     // `english` in the language in use, with {name}-style holes filled from `args`
@@ -266,6 +272,15 @@ Kirigami.ApplicationWindow {
             root.moving = files.filter(e => e.status.state === "in_progress").reverse().map(e => movingFrom(e));
             root.recent = files.filter(e => e.status.state !== "in_progress").slice(0, 40);
         });
+    }
+
+    function checkAutostart() {
+        backend.checkAutostart();
+    }
+
+    function setAutostart(on) {
+        root.autostart = on ? 1 : 0;
+        backend.setAutostart(on);
     }
 
     // The service checks once a day; ask it now and then what it found
