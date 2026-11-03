@@ -24,6 +24,7 @@ Kirigami.Page {
     property var fresh: null
     readonly property var link: fresh ?? view
     readonly property bool onScreen: visible && Window.visibility !== Window.Minimized && Window.visibility !== Window.Hidden
+    readonly property bool inUse: onScreen && Window.active
     // Narrower, the inbox shows one side at a time
     readonly property bool narrow: width < Kirigami.Units.gridUnit * 38
 
@@ -214,11 +215,13 @@ Kirigami.Page {
         }
     }
 
-    // Its link and round trip, while the page is on screen
+    // Its link and round trip, while the page is on screen and the window in use; at once
+    // when you come back to it
     Timer {
         interval: 5000
         repeat: true
-        running: page.onScreen && page.trusted && (page.view?.connected ?? false)
+        triggeredOnStart: true
+        running: page.inUse && page.trusted && (page.view?.connected ?? false)
         onTriggered: {
             const id = page.deviceId;
             page.app.request("devices", {}, (ok, list) => {

@@ -449,7 +449,8 @@ impl Window {
                 w.files.set_narrow(narrow);
             }
         });
-        // How fast the device answers, while its page is on screen.
+        // How fast the device answers, while its page is on screen and the window in use;
+        // at once when you come back to it.
         let w = Rc::downgrade(&win);
         glib::timeout_add_seconds_local(5, move || match w.upgrade() {
             Some(w) => {
@@ -457,6 +458,14 @@ impl Window {
                 glib::ControlFlow::Continue
             }
             None => glib::ControlFlow::Break,
+        });
+        let w = Rc::downgrade(&win);
+        win.window.connect_is_active_notify(move |window| {
+            if let Some(w) = w.upgrade()
+                && window.is_active()
+            {
+                w.refresh_link();
+            }
         });
         win.refresh_setup();
         // One thing at a time: Finish Setup when it's needed, otherwise what's new
@@ -1559,7 +1568,7 @@ impl Window {
     /// The selected device's link and battery again, while its page is on screen.
     fn refresh_link(self: &Rc<Self>) {
         let Some(id) = self.state.borrow().selected else { return };
-        if !self.window.is_visible() || self.content_stack.visible_child_name().as_deref() != Some("device") || self.device(&id).is_none_or(|d| !d.connected) {
+        if !self.window.is_active() || self.content_stack.visible_child_name().as_deref() != Some("device") || self.device(&id).is_none_or(|d| !d.connected) {
             return;
         }
         let Some(c) = self.client() else { return };
