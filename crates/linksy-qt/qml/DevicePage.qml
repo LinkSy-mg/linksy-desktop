@@ -1051,7 +1051,7 @@ Kirigami.Page {
                                 implicitHeight: Kirigami.Units.iconSizes.small
                                 source: app.sym(page.tabIcon(tabButton.modelData))
                                 fallback: page.tabIcon(tabButton.modelData)
-                                color: tabButton.current ? Kirigami.Theme.highlightColor : tabLabel.color
+                                color: tabButton.current ? Kirigami.Theme.linkColor : tabLabel.color
                             }
                             QQC2.Label {
                                 id: tabLabel
@@ -1065,7 +1065,7 @@ Kirigami.Page {
                                 implicitWidth: Math.max(implicitHeight, countLabel.implicitWidth + Kirigami.Units.smallSpacing * 2)
                                 implicitHeight: countLabel.implicitHeight + 2
                                 radius: height / 2
-                                color: Kirigami.Theme.highlightColor
+                                color: Kirigami.Theme.linkColor
                                 QQC2.Label {
                                     id: countLabel
                                     anchors.centerIn: parent
@@ -1183,7 +1183,7 @@ Kirigami.Page {
     component Tile: QQC2.AbstractButton {
         id: tile
         property string iconName
-        property color tint: Kirigami.Theme.highlightColor
+        property color tint: Kirigami.Theme.linkColor
         property string title
         property string subtitle
         width: Kirigami.Units.gridUnit * 11
@@ -1337,14 +1337,14 @@ Kirigami.Page {
                 implicitWidth: Math.round(Kirigami.Units.gridUnit * 2.2)
                 implicitHeight: implicitWidth
                 radius: Kirigami.Units.cornerRadius * 2
-                color: Qt.alpha(Kirigami.Theme.highlightColor, 0.16)
+                color: Qt.alpha(Kirigami.Theme.linkColor, 0.12)
                 Kirigami.Icon {
                     anchors.centerIn: parent
                     width: Kirigami.Units.iconSizes.smallMedium
                     height: width
                     source: app.sym(head.iconName)
                     fallback: head.iconName
-                    color: Kirigami.Theme.highlightColor
+                    color: Kirigami.Theme.linkColor
                 }
             }
         }

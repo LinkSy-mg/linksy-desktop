@@ -229,7 +229,7 @@ Item {
                                     QQC2.Label {
                                         text: tab.when(row.modelData.at_ms)
                                         font: Kirigami.Theme.smallFont
-                                        color: row.unread ? Kirigami.Theme.highlightColor : Kirigami.Theme.disabledTextColor
+                                        color: row.unread ? Kirigami.Theme.linkColor : Kirigami.Theme.disabledTextColor
                                     }
                                 }
                                 RowLayout {
@@ -695,17 +695,17 @@ Item {
                 implicitHeight: Kirigami.Units.iconSizes.small
                 source: app.sym("edit-copy")
                 fallback: "edit-copy"
-                color: Kirigami.Theme.highlightColor
+                color: Kirigami.Theme.linkColor
             }
             QQC2.Label {
                 text: chip.text
                 font.weight: Font.DemiBold
-                color: Kirigami.Theme.highlightColor
+                color: Kirigami.Theme.linkColor
             }
         }
         background: Rectangle {
             radius: Kirigami.Units.cornerRadius
-            color: Qt.alpha(Kirigami.Theme.highlightColor, chip.down ? 0.26 : chip.hovered ? 0.2 : 0.14)
+            color: Qt.alpha(Kirigami.Theme.linkColor, chip.down ? 0.22 : chip.hovered ? 0.17 : 0.12)
             border.width: chip.visualFocus ? 1 : 0
             border.color: Kirigami.Theme.focusColor
         }
@@ -717,7 +717,7 @@ Item {
         implicitWidth: Math.max(implicitHeight, countLabel.implicitWidth + Kirigami.Units.smallSpacing * 2)
         implicitHeight: countLabel.implicitHeight + 2
         radius: height / 2
-        color: Kirigami.Theme.highlightColor
+        color: Kirigami.Theme.linkColor
         QQC2.Label {
             id: countLabel
             anchors.centerIn: parent
