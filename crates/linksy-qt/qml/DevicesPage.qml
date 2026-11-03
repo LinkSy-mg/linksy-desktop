@@ -135,6 +135,20 @@ Kirigami.ScrollablePage {
             Layout.fillWidth: true
             highlighted: info.id === app.selectedId
             onClicked: app.select(info.id)
+            // Rounded and softly tinted, inside the column's edges
+            leftInset: Kirigami.Units.smallSpacing * 2
+            rightInset: Kirigami.Units.smallSpacing * 2
+            topInset: 1
+            bottomInset: 1
+            leftPadding: Kirigami.Units.smallSpacing * 4
+            rightPadding: Kirigami.Units.smallSpacing * 4
+            background: Rectangle {
+                radius: Kirigami.Units.cornerRadius * 1.5
+                color: row.highlighted ? Qt.alpha(Kirigami.Theme.highlightColor, 0.22)
+                     : row.hovered ? Qt.alpha(Kirigami.Theme.textColor, 0.06) : "transparent"
+                border.width: row.visualFocus ? 1 : 0
+                border.color: Kirigami.Theme.focusColor
+            }
 
             contentItem: RowLayout {
                 spacing: Kirigami.Units.largeSpacing

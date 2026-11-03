@@ -368,60 +368,48 @@ Kirigami.Page {
                         Kirigami.Heading {
                             Layout.fillWidth: true
                             level: 1
+                            font.weight: Font.DemiBold
                             text: page.name
                             textFormat: Text.PlainText
                             wrapMode: Text.Wrap
                         }
+                        // How it's connected and how fast, its battery, that it's encrypted: plain words
                         Flow {
                             Layout.fillWidth: true
-                            spacing: Kirigami.Units.smallSpacing * 2
+                            spacing: Kirigami.Units.largeSpacing * 1.5
 
-                            Rectangle {
-                                id: linkChip
+                            RowLayout {
+                                id: linkInfo
                                 readonly property var d: page.link
                                 readonly property string look: !d || !d.connected ? "offline" : d.away ? "away" : d.usb ? "usb" : "on"
-                                readonly property color tint: look === "on" ? Kirigami.Theme.positiveTextColor
-                                                            : look === "away" ? Qt.rgba(0.133, 0.765, 0.902, 1)
-                                                            : look === "usb" ? Kirigami.Theme.highlightColor : Kirigami.Theme.textColor
-                                readonly property color ink: look === "offline" ? Qt.alpha(Kirigami.Theme.textColor, 0.7)
-                                                           : look === "away" ? Kirigami.ColorUtils.linearInterpolation(tint, Kirigami.Theme.textColor, 0.35) : tint
+                                readonly property string iconName: ({ on: page.handheld ? "network-wireless" : "network-wired", away: "network-wireless-hotspot",
+                                                                      usb: "drive-removable-media-usb", offline: "network-disconnect" })[look]
+                                readonly property color ink: look === "on" ? Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.positiveTextColor, Kirigami.Theme.textColor, 0.3)
+                                                           : look === "offline" ? Qt.alpha(Kirigami.Theme.textColor, 0.7) : Kirigami.Theme.linkColor
                                 visible: d !== null
-                                implicitWidth: linkRow.implicitWidth + Kirigami.Units.largeSpacing * 2
-                                implicitHeight: linkRow.implicitHeight + Kirigami.Units.smallSpacing * 1.5
-                                radius: height / 2
-                                color: Qt.alpha(tint, look === "offline" ? 0.08 : 0.15)
-                                RowLayout {
-                                    id: linkRow
-                                    anchors.centerIn: parent
-                                    spacing: Kirigami.Units.smallSpacing
-                                    Kirigami.Icon {
-                                        readonly property string name: ({ on: page.handheld ? "network-wireless" : "network-wired", away: "network-wireless-hotspot",
-                                                                          usb: "drive-removable-media-usb", offline: "network-disconnect" })[linkChip.look]
-                                        implicitWidth: Kirigami.Units.iconSizes.small * 0.875
-                                        implicitHeight: implicitWidth
-                                        source: app.sym(name)
-                                        fallback: name
-                                        color: linkChip.ink
-                                    }
-                                    QQC2.Label {
-                                        text: page.linkText(linkChip.d)
-                                        font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
-                                        font.weight: Font.Medium
-                                        color: linkChip.ink
-                                    }
+                                spacing: Kirigami.Units.smallSpacing
+                                Kirigami.Icon {
+                                    implicitWidth: Kirigami.Units.iconSizes.small
+                                    implicitHeight: implicitWidth
+                                    source: app.sym(linkInfo.iconName)
+                                    fallback: linkInfo.iconName
+                                    color: linkInfo.ink
+                                }
+                                QQC2.Label {
+                                    text: page.linkText(linkInfo.d)
+                                    color: linkInfo.ink
                                 }
                             }
 
-                            Rectangle {
+                            Item {
                                 id: batteryChip
                                 readonly property var battery: page.link && (page.link.connected || page.link.nearby) ? (page.link.battery ?? null) : null
                                 readonly property real level: Math.max(0, Math.min(1, (battery?.level ?? 0) / 100))
                                 readonly property bool charging: battery?.charging ?? false
                                 visible: battery !== null
-                                implicitWidth: batteryRow.implicitWidth + Kirigami.Units.largeSpacing * 2
-                                implicitHeight: linkChip.implicitHeight
-                                radius: height / 2
-                                color: Qt.alpha(Kirigami.Theme.textColor, 0.07)
+                                implicitWidth: batteryRow.implicitWidth
+                                implicitHeight: batteryRow.implicitHeight
+                                opacity: 0.75
                                 HoverHandler { id: batteryHover }
                                 QQC2.ToolTip.visible: batteryHover.hovered
                                 QQC2.ToolTip.text: batteryChip.charging ? app.t("Battery {level}%, charging", { level: batteryChip.battery?.level ?? 0 })
@@ -461,8 +449,6 @@ Kirigami.Page {
                                     }
                                     QQC2.Label {
                                         text: `${batteryChip.battery?.level ?? 0}%`
-                                        font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
-                                        font.weight: Font.Medium
                                     }
                                     // Charging: a bolt
                                     Shape {
@@ -485,22 +471,34 @@ Kirigami.Page {
                                     }
                                 }
                             }
-                        }
-                        RowLayout {
-                            visible: page.trusted
-                            spacing: Kirigami.Units.smallSpacing
-                            opacity: 0.7
-                            Kirigami.Icon {
-                                implicitWidth: Kirigami.Units.iconSizes.small * 0.75
-                                implicitHeight: implicitWidth
-                                source: app.sym("object-locked")
-                                fallback: "object-locked"
+
+                            RowLayout {
+                                visible: page.trusted
+                                spacing: Kirigami.Units.smallSpacing
+                                opacity: 0.75
+                                Kirigami.Icon {
+                                    implicitWidth: Kirigami.Units.iconSizes.small * 0.875
+                                    implicitHeight: implicitWidth
+                                    source: app.sym("object-locked")
+                                    fallback: "object-locked"
+                                }
+                                QQC2.Label {
+                                    text: app.t("Encrypted end to end")
+                                }
                             }
-                            QQC2.Label {
-                                text: app.t("Encrypted end to end")
-                                font: Kirigami.Theme.smallFont
-                            }
                         }
+                    }
+
+                    QQC2.Button {
+                        Layout.alignment: Qt.AlignVCenter
+                        visible: page.trusted
+                        highlighted: true
+                        icon.name: app.sym("document-send")
+                        text: app.t("Send Files")
+                        onClicked: filePicker.open()
+                        QQC2.ToolTip.visible: hovered
+                        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        QQC2.ToolTip.text: app.t("Click to choose, or drop them anywhere on this page")
                     }
 
                     // How long it can still be reached away from home
@@ -535,65 +533,68 @@ Kirigami.Page {
                     }
                 }
 
-                // The everyday actions
-                Flow {
+                // The everyday actions, one bar of tool buttons
+                Rectangle {
                     Layout.fillWidth: true
-                    spacing: Kirigami.Units.largeSpacing
                     visible: page.trusted
+                    implicitHeight: actionBar.implicitHeight + Kirigami.Units.smallSpacing * 2
+                    radius: Kirigami.Units.cornerRadius * 2
+                    color: Qt.alpha(Kirigami.Theme.textColor, 0.04)
 
-                    Tile {
-                        iconName: "document-send"
-                        title: app.t("Send Files")
-                        subtitle: app.t("Click to choose, or drop them anywhere on this page")
-                        onClicked: filePicker.open()
-                    }
-                    Tile {
-                        iconName: "video-display"
-                        title: app.t("View Screen")
-                        subtitle: app.t("Watch or take control")
-                        onClicked: app.viewScreen(page.info.id)
-                    }
-                    Tile {
-                        iconName: "edit-paste"
-                        title: app.t("Clipboard")
-                        subtitle: app.t("Send what you copied")
-                        onClicked: {
-                            const text = backend.clipboard();
-                            if (!text) return app.toast(app.t("There's no text on the clipboard"));
-                            app.request("clipboard", { to: page.info.id, text: text }, (ok, err) =>
-                                app.toast(ok ? app.t("Clipboard sent to {name}", { name: page.name }) : err));
+                    RowLayout {
+                        id: actionBar
+                        anchors.fill: parent
+                        anchors.margins: Kirigami.Units.smallSpacing
+                        spacing: Kirigami.Units.smallSpacing
+
+                        BarButton {
+                            iconName: "edit-paste"
+                            text: app.t("Clipboard")
+                            hint: app.t("Send what you copied")
+                            onClicked: {
+                                const text = backend.clipboard();
+                                if (!text) return app.toast(app.t("There's no text on the clipboard"));
+                                app.request("clipboard", { to: page.info.id, text: text }, (ok, err) =>
+                                    app.toast(ok ? app.t("Clipboard sent to {name}", { name: page.name }) : err));
+                            }
                         }
-                    }
-                    Tile {
-                        visible: page.canRing
-                        iconName: "audio-volume-high"
-                        tint: Kirigami.Theme.neutralTextColor
-                        title: app.t("Ring")
-                        subtitle: app.t("Loud, even on silent")
-                        onClicked: app.request("ring", { to: page.info.id, on: true }, (ok, err) =>
-                            app.toast(ok ? app.t("Ringing {name}…", { name: page.name }) : err))
-                    }
-                    Tile {
-                        visible: !page.canRing
-                        iconName: "preferences-desktop-notification-bell"
-                        tint: Kirigami.Theme.neutralTextColor
-                        title: app.t("Ping")
-                        subtitle: app.t("Show a notification")
-                        onClicked: app.request("notify", { to: page.info.id, title: "Ping", body: "" }, (ok, err) =>
-                            app.toast(ok ? app.t("Pinged {name}", { name: page.name }) : err))
-                    }
-                    Tile {
-                        visible: page.phone && page.info && app.can(page.info, "locate")
-                        iconName: "find-location"
-                        tint: Kirigami.Theme.neutralTextColor
-                        title: app.t("Locate")
-                        subtitle: app.t("Asked once, never tracked")
-                        onClicked: {
-                            app.toast(app.t("Asking {name} where it is…", { name: page.name }));
-                            app.request("locate", { device: page.info.id }, (ok, where) => {
-                                if (!ok) return app.toast(where);
-                                Qt.openUrlExternally(`https://www.openstreetmap.org/?mlat=${where.lat.toFixed(5)}&mlon=${where.lon.toFixed(5)}#map=17/${where.lat.toFixed(5)}/${where.lon.toFixed(5)}`);
-                            });
+                        BarButton {
+                            iconName: "video-display"
+                            text: app.t("View Screen")
+                            hint: app.t("Watch or take control")
+                            onClicked: app.viewScreen(page.info.id)
+                        }
+                        BarButton {
+                            visible: page.canRing
+                            iconName: "audio-volume-high"
+                            tint: Kirigami.Theme.neutralTextColor
+                            text: app.t("Ring")
+                            hint: app.t("Loud, even on silent")
+                            onClicked: app.request("ring", { to: page.info.id, on: true }, (ok, err) =>
+                                app.toast(ok ? app.t("Ringing {name}…", { name: page.name }) : err))
+                        }
+                        BarButton {
+                            visible: !page.canRing
+                            iconName: "preferences-desktop-notification-bell"
+                            tint: Kirigami.Theme.neutralTextColor
+                            text: app.t("Ping")
+                            hint: app.t("Show a notification")
+                            onClicked: app.request("notify", { to: page.info.id, title: "Ping", body: "" }, (ok, err) =>
+                                app.toast(ok ? app.t("Pinged {name}", { name: page.name }) : err))
+                        }
+                        BarButton {
+                            visible: page.phone && page.info && app.can(page.info, "locate")
+                            iconName: "find-location"
+                            tint: Kirigami.Theme.neutralTextColor
+                            text: app.t("Locate")
+                            hint: app.t("Asked once, never tracked")
+                            onClicked: {
+                                app.toast(app.t("Asking {name} where it is…", { name: page.name }));
+                                app.request("locate", { device: page.info.id }, (ok, where) => {
+                                    if (!ok) return app.toast(where);
+                                    Qt.openUrlExternally(`https://www.openstreetmap.org/?mlat=${where.lat.toFixed(5)}&mlon=${where.lon.toFixed(5)}#map=17/${where.lat.toFixed(5)}/${where.lon.toFixed(5)}`);
+                                });
+                            }
                         }
                     }
                 }
@@ -693,10 +694,12 @@ Kirigami.Page {
                 }
                 // Whatever the phone says it can do: the deck is this computer's side
                 Kirigami.Card {
+                    id: deckCard
                     visible: page.handheld
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     Layout.preferredWidth: Kirigami.Units.gridUnit * 14
+                    footer: CardActions { owner: deckCard }
                     contentItem: Item {
                         implicitWidth: deckHead.implicitWidth
                         implicitHeight: deckHead.implicitHeight
@@ -710,7 +713,7 @@ Kirigami.Page {
                     }
                     actions: Kirigami.Action {
                         text: app.t("Choose Actions…")
-                        icon.name: "configure"
+                        icon.name: app.sym("configure")
                         onTriggered: page.deckOpen = true
                     }
                 }
@@ -724,8 +727,7 @@ Kirigami.Page {
                 readonly property var running: app.terminal.running.filter(t => t.device === page.info?.id)
                 Layout.fillWidth: true
                 visible: page.phone
-                banner.title: app.t("Terminal")
-                banner.titleIcon: app.sym("utilities-terminal")
+                footer: CardActions { owner: terminalCard }
                 contentItem: Item {
                     implicitWidth: terminalColumn.implicitWidth
                     implicitHeight: terminalColumn.implicitHeight
@@ -733,12 +735,11 @@ Kirigami.Page {
                         id: terminalColumn
                         width: parent.width
                         spacing: Kirigami.Units.largeSpacing
-                        QQC2.Label {
+                        CardHead {
                             Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            opacity: 0.75
-                            textFormat: Text.PlainText
-                            text: terminalCard.locked ? app.t("Locked: 5 wrong codes in a row were typed on {name}. Unlock it if that was you.", { name: page.name })
+                            iconName: "utilities-terminal"
+                            title: app.t("Your computer's terminal on {name}", { name: page.name })
+                            description: terminalCard.locked ? app.t("Locked: 5 wrong codes in a row were typed on {name}. Unlock it if that was you.", { name: page.name })
                                 : app.terminal.code_set ? app.t("Let {name} open a shell on this computer after typing the terminal code. It runs as you.", { name: page.name })
                                 : app.t("Not set: no phone can open a terminal")
                         }
@@ -790,7 +791,7 @@ Kirigami.Page {
                     Kirigami.Action {
                         visible: terminalCard.locked
                         text: app.t("Unlock")
-                        icon.name: "object-unlocked"
+                        icon.name: app.sym("object-unlocked")
                         onTriggered: app.request("unlock_terminal", { target: page.info.id }, (ok, err) => {
                             if (!ok) app.toast(err);
                             app.request("terminal_status", {}, (ok2, s) => { if (ok2) app.terminal = s });
@@ -800,7 +801,7 @@ Kirigami.Page {
                         visible: !terminalCard.locked
                         enabled: app.terminal.code_set
                         text: terminalCard.allowed ? app.t("Turn Off") : app.t("Allow on {name}", { name: page.name })
-                        icon.name: terminalCard.allowed ? "media-playback-stop" : "dialog-ok"
+                        icon.name: app.sym(terminalCard.allowed ? "media-playback-stop" : "dialog-ok")
                         onTriggered: app.request("allow_terminal", { target: page.info.id, on: !terminalCard.allowed }, () =>
                             app.request("terminal_status", {}, (ok, s) => { if (ok) app.terminal = s }))
                     }
@@ -1180,51 +1181,35 @@ Kirigami.Page {
         }
     }
 
-    component Tile: QQC2.AbstractButton {
-        id: tile
+    // One of the everyday actions: its icon in its colour, its name, what it does on hover
+    component BarButton: QQC2.ToolButton {
         property string iconName
         property color tint: Kirigami.Theme.linkColor
-        property string title
-        property string subtitle
-        width: Kirigami.Units.gridUnit * 11
-        height: Kirigami.Units.gridUnit * 4
-        padding: Kirigami.Units.largeSpacing
-        background: Rectangle {
-            radius: Kirigami.Units.cornerRadius
-            color: tile.down ? Qt.darker(Kirigami.Theme.alternateBackgroundColor, 1.08)
-                 : tile.hovered ? Kirigami.Theme.alternateBackgroundColor
-                 : Kirigami.Theme.backgroundColor
-            border.color: tile.visualFocus ? Kirigami.Theme.focusColor : Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.15)
-            border.width: 1
+        property string hint
+        Layout.fillWidth: true
+        display: QQC2.AbstractButton.TextBesideIcon
+        icon.name: app.sym(iconName)
+        icon.color: tint
+        QQC2.ToolTip.visible: hovered && hint !== ""
+        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+        QQC2.ToolTip.text: hint
+    }
+
+    // A card's actions as a section of its own, under a line across the card
+    component CardActions: ColumnLayout {
+        id: cardActions
+        required property var owner
+        spacing: 0
+        Kirigami.Separator {
+            Layout.fillWidth: true
+            Layout.leftMargin: -cardActions.owner.leftPadding
+            Layout.rightMargin: -cardActions.owner.rightPadding
+            opacity: 0.6
         }
-        contentItem: RowLayout {
-            spacing: Kirigami.Units.largeSpacing
-            Kirigami.Icon {
-                source: app.sym(tile.iconName)
-                fallback: tile.iconName
-                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
-                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
-                color: tile.tint
-            }
-            ColumnLayout {
-                spacing: 0
-                Layout.fillWidth: true
-                QQC2.Label {
-                    text: tile.title
-                    font.bold: true
-                    Layout.fillWidth: true
-                    elide: Text.ElideRight
-                }
-                QQC2.Label {
-                    text: tile.subtitle
-                    opacity: 0.7
-                    font: Kirigami.Theme.smallFont
-                    wrapMode: Text.Wrap
-                    maximumLineCount: 2
-                    elide: Text.ElideRight
-                    Layout.fillWidth: true
-                }
-            }
+        Kirigami.ActionToolBar {
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.smallSpacing
+            actions: cardActions.owner.actions
         }
     }
 
@@ -1265,17 +1250,18 @@ Kirigami.Page {
                 }
             }
         }
+        footer: CardActions { owner: card }
         actions: [
             Kirigami.Action {
                 // A camera in use here: see what apps get, with the phone's controls
                 visible: card.running !== null && card.kind === "camera" && !card.running.sharing
                 text: app.t("Preview")
-                icon.name: "view-preview"
+                icon.name: app.sym("view-preview")
                 onTriggered: app.previewCamera(card.running.session, page.name)
             },
             Kirigami.Action {
                 text: card.running ? app.t("Stop") : card.button
-                icon.name: card.running ? "media-playback-stop" : "media-playback-start"
+                icon.name: app.sym(card.running ? "media-playback-stop" : "media-playback-start")
                 onTriggered: {
                     if (card.running) return app.request("end_session", { session: card.running.session });
                     app.request("start_session", { with: page.info.id, kind: card.kind }, (ok, err) => {
@@ -1293,51 +1279,23 @@ Kirigami.Page {
         ]
     }
 
-    // A Use As card's head: its title (and Live while it runs) beside its icon, then what it does
+    // A card's head: its icon in a round tint (and Live while it runs), its title, what it does
     component CardHead: ColumnLayout {
         id: head
         property string title
         property string iconName
         property string description
         property bool live: false
-        spacing: Kirigami.Units.largeSpacing
+        spacing: Kirigami.Units.smallSpacing
         RowLayout {
             Layout.fillWidth: true
+            Layout.bottomMargin: Kirigami.Units.smallSpacing
             spacing: Kirigami.Units.largeSpacing
-            ColumnLayout {
-                Layout.fillWidth: true
-                Layout.alignment: Qt.AlignTop
-                spacing: Kirigami.Units.smallSpacing
-                Kirigami.Heading {
-                    Layout.fillWidth: true
-                    level: 4
-                    font.bold: true
-                    wrapMode: Text.Wrap
-                    textFormat: Text.PlainText
-                    text: head.title
-                }
-                Rectangle {
-                    visible: head.live
-                    implicitWidth: liveLabel.implicitWidth + Kirigami.Units.largeSpacing * 2
-                    implicitHeight: liveLabel.implicitHeight + 4
-                    radius: height / 2
-                    color: Qt.alpha(Kirigami.Theme.positiveTextColor, 0.16)
-                    QQC2.Label {
-                        id: liveLabel
-                        anchors.centerIn: parent
-                        text: app.t("Live")
-                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                        font.bold: true
-                        color: Kirigami.Theme.positiveTextColor
-                    }
-                }
-            }
             Rectangle {
-                Layout.alignment: Qt.AlignTop
-                implicitWidth: Math.round(Kirigami.Units.gridUnit * 2.2)
+                implicitWidth: Math.round(Kirigami.Units.gridUnit * 2.4)
                 implicitHeight: implicitWidth
-                radius: Kirigami.Units.cornerRadius * 2
-                color: Qt.alpha(Kirigami.Theme.linkColor, 0.12)
+                radius: width / 2
+                color: Qt.alpha(Kirigami.Theme.linkColor, 0.14)
                 Kirigami.Icon {
                     anchors.centerIn: parent
                     width: Kirigami.Units.iconSizes.smallMedium
@@ -1347,13 +1305,37 @@ Kirigami.Page {
                     color: Kirigami.Theme.linkColor
                 }
             }
+            Item { Layout.fillWidth: true }
+            Rectangle {
+                Layout.alignment: Qt.AlignTop
+                visible: head.live
+                implicitWidth: liveLabel.implicitWidth + Kirigami.Units.largeSpacing * 2
+                implicitHeight: liveLabel.implicitHeight + 4
+                radius: height / 2
+                color: Qt.alpha(Kirigami.Theme.positiveTextColor, 0.16)
+                QQC2.Label {
+                    id: liveLabel
+                    anchors.centerIn: parent
+                    text: app.t("Live")
+                    font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.85
+                    font.weight: Font.DemiBold
+                    color: Kirigami.ColorUtils.linearInterpolation(Kirigami.Theme.positiveTextColor, Kirigami.Theme.textColor, 0.3)
+                }
+            }
+        }
+        Kirigami.Heading {
+            Layout.fillWidth: true
+            level: 4
+            font.weight: Font.DemiBold
+            wrapMode: Text.Wrap
+            textFormat: Text.PlainText
+            text: head.title
         }
         QQC2.Label {
             Layout.fillWidth: true
             text: head.description
             wrapMode: Text.Wrap
-            font: Kirigami.Theme.smallFont
-            opacity: 0.7
+            opacity: 0.75
         }
     }
 
