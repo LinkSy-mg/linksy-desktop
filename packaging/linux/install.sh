@@ -35,14 +35,17 @@ command -v update-desktop-database >/dev/null && update-desktop-database -q "$SH
 command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t -f "$SHARE/icons/hicolor" || true
 mkdir -p "$UNITS"
 sed "s|@BINDIR@|$BIN|" share/linksyd.service > "$UNITS/linksyd.service"
-# Desktops without systemd's graphical session start it from here instead
+# Desktops without systemd's graphical session start it from here instead. Turned off in
+# Preferences, an update leaves it off.
 AUTOSTART="${XDG_CONFIG_HOME:-$HOME/.config}/autostart"
+OFF="${XDG_CONFIG_HOME:-$HOME/.config}/linksy/autostart-off"
 mkdir -p "$AUTOSTART"
 sed "s|^Exec=linksyd|Exec=$BIN/linksyd|" share/linksyd-autostart.desktop > "$AUTOSTART/linksyd.desktop"
+if [ -e "$OFF" ]; then echo "Hidden=true" >> "$AUTOSTART/linksyd.desktop"; fi
 
 if [ "${1:-}" != "--no-service" ]; then
   if command -v systemctl >/dev/null && systemctl --user daemon-reload 2>/dev/null; then
-    systemctl --user enable --now linksyd.service
+    if [ -e "$OFF" ]; then systemctl --user start linksyd.service; else systemctl --user enable --now linksyd.service; fi
   else
     # No systemd: start it now; the autostart entry starts it at each login
     nohup "$BIN/linksyd" >/dev/null 2>&1 &
