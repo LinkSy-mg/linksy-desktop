@@ -120,7 +120,7 @@ impl Usb {
         let plugged = self.plugged.lock().unwrap();
         let versions = self.versions.lock().unwrap();
         let able: Vec<(&UsbPhone, &DeviceInfo)> = plugged.values().filter(|(_, p)| versions.get(&p.key).is_some_and(|v| *v >= 2)).map(|(d, p)| (p, d)).collect();
-        let on_cable = self.node.peer_address(phone).filter(|a| a.ip().is_loopback()).and_then(|a| self.cables.lock().unwrap().get(&a.port()).cloned());
+        let on_cable = self.node.peer_address(phone).and_then(cable_port).and_then(|p| self.cables.lock().unwrap().get(&p).cloned());
         let keys: Vec<(&str, &str)> = able.iter().map(|(p, _)| (p.key.as_str(), p.name.as_str())).collect();
         pick(&keys, on_cable.as_deref(), name, others).map(|i| (able[i].0.key.clone(), able[i].1.clone()))
     }
@@ -543,6 +543,12 @@ async fn carry(mut usb_rx: impl AsyncRead + Unpin, mut usb_tx: impl CableOut, ud
     from_phone
 }
 
+/// The bridge port a connection from `addr` comes through, if it comes over a cable. The
+/// node listens on [::], so loopback shows as ::ffff:127.0.0.1.
+fn cable_port(addr: SocketAddr) -> Option<u16> {
+    addr.ip().to_canonical().is_loopback().then_some(addr.port())
+}
+
 /// Which plugged-in phone (key, name) is the one asked for: the one its cable connection
 /// comes through, else the one named like it, else the only one plugged in, but only when no
 /// other Android device here could be that one. Guessing wrong would drive another phone.
@@ -572,6 +578,14 @@ mod tests {
         assert_eq!(pick(&two, None, "B", true), Some(1));
         assert_eq!(pick(&two, None, "C", false), None);
         assert_eq!(pick(&[], None, "A", false), None);
+    }
+
+    #[test]
+    fn a_cable_connection_is_known_however_its_address_is_written() {
+        assert_eq!(cable_port("[::ffff:127.0.0.1]:50372".parse().unwrap()), Some(50372));
+        assert_eq!(cable_port("127.0.0.1:50372".parse().unwrap()), Some(50372));
+        assert_eq!(cable_port("[::1]:7".parse().unwrap()), Some(7));
+        assert_eq!(cable_port("[::ffff:192.168.1.5]:47200".parse().unwrap()), None);
     }
 
     impl CableOut for tokio::io::WriteHalf<tokio::io::DuplexStream> {
