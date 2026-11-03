@@ -1469,7 +1469,7 @@ fn build_ui() -> (adw::BreakpointBin, Ui) {
     // The inspector
     let inspector = column(12);
     inspector.add_css_class("deck-inspector-box");
-    let inspector_scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).width_request(270).propagate_natural_height(true).child(&inspector).css_classes(["deck-inspector"]).build();
+    let inspector_scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).width_request(270).hexpand(false).propagate_natural_height(true).child(&inspector).css_classes(["deck-inspector"]).build();
 
     let work = gtk::Box::builder().css_classes(["deck-work"]).build();
     work.append(&stage);
