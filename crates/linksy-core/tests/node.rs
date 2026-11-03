@@ -902,6 +902,20 @@ async fn idle_connection_closes_and_next_send_reconnects() {
 }
 
 #[tokio::test]
+async fn a_pulled_cable_drops_its_connection_at_once() {
+    let (a, b) = paired().await;
+    let mut ra = a.node.subscribe();
+    let b_id = b.node.info().id;
+    let from = a.node.peer_address(&b_id).expect("connected");
+    assert!(!a.node.drop_link(std::net::SocketAddr::from((Ipv4Addr::LOCALHOST, 9))));
+    let started = std::time::Instant::now();
+    assert!(a.node.drop_link(from));
+    wait_for(&mut ra, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!(a.node.devices().iter().all(|d| !d.connected));
+}
+
+#[tokio::test]
 async fn busy_connection_stays_open_past_idle_time() {
     let tweak = |c: &mut Config| c.idle_after = Duration::from_millis(300);
     let a = dev_with("Alpha", tweak).await;

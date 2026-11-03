@@ -1490,6 +1490,19 @@ impl Node {
         self.inner.peers.lock().unwrap().get(id).map(|p| p.conn.remote_address())
     }
 
+    /// Close the connection coming from `addr` (a cable that was pulled out) now, rather
+    /// than when it times out, so the device can come back another way. Whether one did.
+    pub fn drop_link(&self, addr: SocketAddr) -> bool {
+        let peers = self.inner.peers.lock().unwrap();
+        let same = |a: SocketAddr| a.port() == addr.port() && a.ip().to_canonical() == addr.ip().to_canonical();
+        let mut dropped = false;
+        for p in peers.values().filter(|p| same(p.conn.remote_address())) {
+            p.conn.close(0u32.into(), b"link gone");
+            dropped = true;
+        }
+        dropped
+    }
+
     fn nearby_addrs(&self, id: &Fingerprint) -> Vec<SocketAddr> {
         self.inner.nearby.lock().unwrap().get(id).map(|(_, a)| a.clone()).unwrap_or_default()
     }
