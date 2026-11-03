@@ -25,15 +25,18 @@ impl Window {
             let terminals = tokio::time::timeout(optional, c.terminal_status()).await.ok().and_then(|r| r.ok());
             Ok((c.settings().await?, c.notification_prefs().await?, c.photo_prefs().await?, updates, terminals))
         });
+        // systemctl, meanwhile: off the UI thread
+        let autostart = gio::spawn_blocking(linksy_setup::autostart);
         glib::spawn_future_local(async move {
+            let autostart = autostart.await.ok().flatten();
             match call.await {
-                Ok((s, n, p, u, t)) => w.present_preferences(s, n, p, u, t),
+                Ok((s, n, p, u, t)) => w.present_preferences(s, n, p, u, t, autostart),
                 Err(e) => w.toast_error(&e, None),
             }
         });
     }
 
-    fn present_preferences(self: &Rc<Self>, settings: Settings, notifications: NotificationPrefs, photos: PhotoPrefs, updates: Option<UpdateInfo>, terminals: Option<linksy_ipc::TerminalStatus>) {
+    fn present_preferences(self: &Rc<Self>, settings: Settings, notifications: NotificationPrefs, photos: PhotoPrefs, updates: Option<UpdateInfo>, terminals: Option<linksy_ipc::TerminalStatus>, autostart: Option<bool>) {
         let dialog = adw::PreferencesDialog::builder().title(t!("Preferences")).search_enabled(false).build();
         let current = Rc::new(RefCell::new(settings.clone()));
         // Set while a widget is being reset after a failed save, so it doesn't save again.
@@ -92,7 +95,11 @@ impl Window {
         connection.add(&relay);
 
         let page = adw::PreferencesPage::new();
-        page.add(&self.language_group(&dialog));
+        let general = self.language_group(&dialog);
+        if let Some(on) = autostart {
+            general.add(&autostart_row(&dialog, on));
+        }
+        page.add(&general);
         page.add(&device);
         page.add(&receiving);
         page.add(&connection);
@@ -489,4 +496,36 @@ impl Window {
         });
         row
     }
+}
+
+/// "Start When You Log In": the background service at every login, or only once Linksy is
+/// opened. After a change it shows how things really are, worked or not.
+fn autostart_row(dialog: &adw::PreferencesDialog, on: bool) -> adw::SwitchRow {
+    let row = adw::SwitchRow::builder()
+        .title(t!("Start When You Log In"))
+        .subtitle(t!("Linksy runs in the background, so your devices can reach it with the window closed."))
+        .active(on)
+        .build();
+    let reverting = Rc::new(Cell::new(false));
+    let dialog = dialog.clone();
+    row.connect_active_notify(move |row| {
+        if reverting.get() {
+            return;
+        }
+        let want = row.is_active();
+        row.set_sensitive(false);
+        let job = gio::spawn_blocking(move || (linksy_setup::set_autostart(want), linksy_setup::autostart()));
+        let (row, dialog, reverting) = (row.clone(), dialog.clone(), reverting.clone());
+        glib::spawn_future_local(async move {
+            let (result, now) = job.await.unwrap_or((Ok(()), None));
+            if let Err(e) = result {
+                dialog.add_toast(adw::Toast::new(&glib::markup_escape_text(&e)));
+            }
+            reverting.set(true);
+            row.set_active(now.unwrap_or(!want));
+            reverting.set(false);
+            row.set_sensitive(true);
+        });
+    });
+    row
 }
