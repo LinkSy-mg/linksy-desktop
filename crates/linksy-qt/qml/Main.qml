@@ -150,6 +150,13 @@ Kirigami.ApplicationWindow {
         return text;
     }
 
+    // An icon's one-colour version, tinted by the theme like the GTK app's (Breeze draws some
+    // in full colour at larger sizes); the few Breeze has none of get the nearest one
+    function sym(name) {
+        const near = { "video-display": "monitor", "image-x-generic": "folder-pictures", "preferences-desktop-notification-bell": "notifications" };
+        return (near[name] ?? name) + "-symbolic";
+    }
+
     // "Linux laptop", "Android phone"
     function kindName(info) {
         const kind = t(info.kind);

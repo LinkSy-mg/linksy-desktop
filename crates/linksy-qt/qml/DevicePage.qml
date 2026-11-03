@@ -352,7 +352,8 @@ Kirigami.Page {
                                 anchors.centerIn: parent
                                 width: Kirigami.Units.iconSizes.small * 0.875
                                 height: width
-                                source: page.kindIcon(page.info?.kind ?? "")
+                                source: app.sym(page.kindIcon(page.info?.kind ?? ""))
+                                fallback: page.kindIcon(page.info?.kind ?? "")
                             }
                             HoverHandler { id: kindHover }
                             QQC2.ToolTip.visible: kindHover.hovered
@@ -394,16 +395,18 @@ Kirigami.Page {
                                     anchors.centerIn: parent
                                     spacing: Kirigami.Units.smallSpacing
                                     Kirigami.Icon {
+                                        readonly property string name: ({ on: page.handheld ? "network-wireless" : "network-wired", away: "network-wireless-hotspot",
+                                                                          usb: "drive-removable-media-usb", offline: "network-disconnect" })[linkChip.look]
                                         implicitWidth: Kirigami.Units.iconSizes.small * 0.875
                                         implicitHeight: implicitWidth
-                                        source: ({ on: page.handheld ? "network-wireless" : "network-wired", away: "network-wireless-hotspot",
-                                                   usb: "drive-removable-media-usb", offline: "network-disconnect" })[linkChip.look]
+                                        source: app.sym(name)
+                                        fallback: name
                                         color: linkChip.ink
                                     }
                                     QQC2.Label {
                                         text: page.linkText(linkChip.d)
-                                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                        font.bold: true
+                                        font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
+                                        font.weight: Font.Medium
                                         color: linkChip.ink
                                     }
                                 }
@@ -458,8 +461,8 @@ Kirigami.Page {
                                     }
                                     QQC2.Label {
                                         text: `${batteryChip.battery?.level ?? 0}%`
-                                        font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                        font.bold: true
+                                        font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
+                                        font.weight: Font.Medium
                                     }
                                     // Charging: a bolt
                                     Shape {
@@ -490,7 +493,8 @@ Kirigami.Page {
                             Kirigami.Icon {
                                 implicitWidth: Kirigami.Units.iconSizes.small * 0.75
                                 implicitHeight: implicitWidth
-                                source: "object-locked"
+                                source: app.sym("object-locked")
+                                fallback: "object-locked"
                             }
                             QQC2.Label {
                                 text: app.t("Encrypted end to end")
@@ -563,6 +567,7 @@ Kirigami.Page {
                     Tile {
                         visible: page.canRing
                         iconName: "audio-volume-high"
+                        tint: Kirigami.Theme.neutralTextColor
                         title: app.t("Ring")
                         subtitle: app.t("Loud, even on silent")
                         onClicked: app.request("ring", { to: page.info.id, on: true }, (ok, err) =>
@@ -571,6 +576,7 @@ Kirigami.Page {
                     Tile {
                         visible: !page.canRing
                         iconName: "preferences-desktop-notification-bell"
+                        tint: Kirigami.Theme.neutralTextColor
                         title: app.t("Ping")
                         subtitle: app.t("Show a notification")
                         onClicked: app.request("notify", { to: page.info.id, title: "Ping", body: "" }, (ok, err) =>
@@ -579,6 +585,7 @@ Kirigami.Page {
                     Tile {
                         visible: page.phone && page.info && app.can(page.info, "locate")
                         iconName: "find-location"
+                        tint: Kirigami.Theme.neutralTextColor
                         title: app.t("Locate")
                         subtitle: app.t("Asked once, never tracked")
                         onClicked: {
@@ -718,7 +725,7 @@ Kirigami.Page {
                 Layout.fillWidth: true
                 visible: page.phone
                 banner.title: app.t("Terminal")
-                banner.titleIcon: "utilities-terminal"
+                banner.titleIcon: app.sym("utilities-terminal")
                 contentItem: Item {
                     implicitWidth: terminalColumn.implicitWidth
                     implicitHeight: terminalColumn.implicitHeight
@@ -746,7 +753,8 @@ Kirigami.Page {
                                 Kirigami.Icon {
                                     implicitWidth: Kirigami.Units.iconSizes.smallMedium
                                     implicitHeight: implicitWidth
-                                    source: "utilities-terminal"
+                                    source: app.sym("utilities-terminal")
+                                    fallback: "utilities-terminal"
                                     color: shell.modelData.attached ? Kirigami.Theme.positiveTextColor : Kirigami.Theme.disabledTextColor
                                 }
                                 ColumnLayout {
@@ -1041,15 +1049,15 @@ Kirigami.Page {
                             Kirigami.Icon {
                                 implicitWidth: Kirigami.Units.iconSizes.small
                                 implicitHeight: Kirigami.Units.iconSizes.small
-                                source: page.tabIcon(tabButton.modelData)
-                                color: tabLabel.color
+                                source: app.sym(page.tabIcon(tabButton.modelData))
+                                fallback: page.tabIcon(tabButton.modelData)
+                                color: tabButton.current ? Kirigami.Theme.highlightColor : tabLabel.color
                             }
                             QQC2.Label {
                                 id: tabLabel
                                 text: tabButton.text
-                                font.weight: Font.DemiBold
-                                color: tabButton.current ? Kirigami.Theme.highlightColor
-                                     : tabButton.hovered ? Kirigami.Theme.textColor : Qt.alpha(Kirigami.Theme.textColor, 0.72)
+                                font.weight: tabButton.current ? Font.DemiBold : Font.Medium
+                                color: tabButton.current || tabButton.hovered ? Kirigami.Theme.textColor : Qt.alpha(Kirigami.Theme.textColor, 0.72)
                             }
                             // Unread conversations and other notifications
                             Rectangle {
@@ -1062,8 +1070,8 @@ Kirigami.Page {
                                     id: countLabel
                                     anchors.centerIn: parent
                                     text: String(inbox.count)
-                                    font.pointSize: Kirigami.Theme.smallFont.pointSize
-                                    font.bold: true
+                                    font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.8
+                                    font.weight: Font.DemiBold
                                     color: Kirigami.Theme.highlightedTextColor
                                 }
                             }
@@ -1139,7 +1147,8 @@ Kirigami.Page {
                 Layout.alignment: Qt.AlignTop
                 implicitWidth: Kirigami.Units.iconSizes.smallMedium
                 implicitHeight: implicitWidth
-                source: switchRow.iconName
+                source: app.sym(switchRow.iconName)
+                fallback: switchRow.iconName
             }
             ColumnLayout {
                 Layout.fillWidth: true
@@ -1174,6 +1183,7 @@ Kirigami.Page {
     component Tile: QQC2.AbstractButton {
         id: tile
         property string iconName
+        property color tint: Kirigami.Theme.highlightColor
         property string title
         property string subtitle
         width: Kirigami.Units.gridUnit * 11
@@ -1190,10 +1200,11 @@ Kirigami.Page {
         contentItem: RowLayout {
             spacing: Kirigami.Units.largeSpacing
             Kirigami.Icon {
-                source: tile.iconName
-                Layout.preferredWidth: Kirigami.Units.iconSizes.medium
-                Layout.preferredHeight: Kirigami.Units.iconSizes.medium
-                color: Kirigami.Theme.highlightColor
+                source: app.sym(tile.iconName)
+                fallback: tile.iconName
+                Layout.preferredWidth: Kirigami.Units.iconSizes.smallMedium
+                Layout.preferredHeight: Kirigami.Units.iconSizes.smallMedium
+                color: tile.tint
             }
             ColumnLayout {
                 spacing: 0
@@ -1331,7 +1342,8 @@ Kirigami.Page {
                     anchors.centerIn: parent
                     width: Kirigami.Units.iconSizes.smallMedium
                     height: width
-                    source: head.iconName
+                    source: app.sym(head.iconName)
+                    fallback: head.iconName
                     color: Kirigami.Theme.highlightColor
                 }
             }

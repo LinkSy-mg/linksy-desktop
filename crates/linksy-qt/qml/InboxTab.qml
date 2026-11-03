@@ -610,7 +610,8 @@ Item {
             anchors.centerIn: parent
             width: Kirigami.Units.iconSizes.smallMedium
             height: width
-            source: tile.alert?.icon ? "file://" + tile.alert.icon : "preferences-desktop-notification-bell"
+            source: tile.alert?.icon ? "file://" + tile.alert.icon : app.sym("preferences-desktop-notification-bell")
+            fallback: "preferences-desktop-notification-bell"
         }
     }
 
@@ -692,12 +693,13 @@ Item {
             Kirigami.Icon {
                 implicitWidth: Kirigami.Units.iconSizes.small
                 implicitHeight: Kirigami.Units.iconSizes.small
-                source: "edit-copy"
+                source: app.sym("edit-copy")
+                fallback: "edit-copy"
                 color: Kirigami.Theme.highlightColor
             }
             QQC2.Label {
                 text: chip.text
-                font.bold: true
+                font.weight: Font.DemiBold
                 color: Kirigami.Theme.highlightColor
             }
         }
@@ -720,8 +722,8 @@ Item {
             id: countLabel
             anchors.centerIn: parent
             text: String(pill.count)
-            font.pointSize: Kirigami.Theme.smallFont.pointSize
-            font.bold: true
+            font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.8
+            font.weight: Font.DemiBold
             color: Kirigami.Theme.highlightedTextColor
         }
     }
