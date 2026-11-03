@@ -305,12 +305,12 @@ ColumnLayout {
                             source: "go-next"
                             opacity: 0.6
                         }
+                        // No button text: KDE's style draws it under the label too
                         QQC2.ToolButton {
-                            id: crumbButton
-                            text: crumb.modelData.name
                             onClicked: tab.openFolder(crumb.modelData.path)
+                            Accessible.name: crumb.modelData.name
                             contentItem: QQC2.Label {
-                                text: crumbButton.text
+                                text: crumb.modelData.name
                                 textFormat: Text.PlainText
                                 font.weight: Font.DemiBold
                                 color: crumb.last ? Kirigami.Theme.textColor : Kirigami.Theme.highlightColor
