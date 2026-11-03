@@ -74,6 +74,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.12.2" date="2026-11-03">
+      <description>
+        <p>Starting at login can be turned off in Preferences, and the Qt app for KDE Plasma is redesigned in Plasma's own style: a calmer phone page with one bar of everyday actions, cards with their actions in a section of their own, and Breeze's one-colour icons, in light and Breeze Dark.</p>
+      </description>
+    </release>
     <release version="0.12.1" date="2026-11-03">
       <description>
         <p>A device's page in tabs, with a file manager for the phone's shared folder, an Inbox with the phone's other notifications and earlier messages, a Gallery of its photos and videos, and the Deck: the phone as buttons for this computer, with an editor in the GTK app to lay it out. The Inbox's new parts, the Gallery and the Deck need a coming version of Linksy for Android. Also fixed: with two phones, control goes only to the one on the cable you're viewing, and a pulled cable is noticed at once.</p>
