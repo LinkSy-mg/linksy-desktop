@@ -54,7 +54,7 @@ button.small { padding: 2px 12px; min-height: 26px; font-size: 0.9em; }
   padding: 3px 10px;
   border-radius: 99px;
   font-size: 0.85em;
-  font-weight: 700;
+  font-weight: 500;
   background-color: alpha(@success_color, 0.14);
   color: @success_color;
 }
@@ -65,7 +65,7 @@ button.small { padding: 2px 12px; min-height: 26px; font-size: 0.9em; }
   padding: 3px 10px;
   border-radius: 99px;
   font-size: 0.85em;
-  font-weight: 700;
+  font-weight: 500;
   background-color: alpha(currentColor, 0.07);
 }
 /* Tabs under the actions: a line under them all, the one showing underlined */
@@ -93,7 +93,7 @@ button.page-tab:checked { color: @accent_color; border-bottom-color: @accent_col
   background-color: @accent_bg_color;
   color: @accent_fg_color;
   font-size: 0.75em;
-  font-weight: 800;
+  font-weight: 600;
 }
 /* Inbox and Files tabs */
 list.inbox-list { background: none; }
