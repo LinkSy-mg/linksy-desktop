@@ -42,6 +42,9 @@ pub enum Request {
     OpenUrl { to: String, url: String },
     /// Make a device ring so it can be found (`on`), or stop it.
     Ring { to: String, on: bool },
+    /// Ask a phone to turn on `feature`: `notifications` (the Inbox) or `gallery`
+    /// (docs/protocol.md §4.21).
+    TurnOn { to: String, feature: String },
     /// A phone notification shown here (for the reply window).
     PhoneNotification { from: String, key: String },
     /// Reply to a phone notification shown here.
@@ -786,6 +789,10 @@ impl Client {
 
     pub async fn ring(&self, to: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::Ring { to: to.into(), on }).await
+    }
+
+    pub async fn turn_on(&self, to: impl Into<String>, feature: impl Into<String>) -> Result<(), ClientError> {
+        self.call(Request::TurnOn { to: to.into(), feature: feature.into() }).await
     }
 
     pub async fn phone_notification(&self, from: impl Into<String>, key: impl Into<String>) -> Result<(DeviceInfo, RemoteNotification), ClientError> {
