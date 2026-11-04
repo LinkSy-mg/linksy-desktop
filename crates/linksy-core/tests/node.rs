@@ -1551,6 +1551,21 @@ async fn terminals_are_judged_before_anyone_is_asked() {
 }
 
 #[tokio::test]
+async fn turn_on_reaches_the_phone_and_nonsense_does_not() {
+    let (a, b) = paired().await;
+    let idb = b.node.info().id;
+    let mut rb = b.node.subscribe();
+    a.node.ask_turn_on(&idb, &"x".repeat(65)).await.unwrap();
+    a.node.ask_turn_on(&idb, "gallery").await.unwrap();
+    let feature = wait_for(&mut rb, |e| match e {
+        Event::TurnOnRequest { feature, .. } => Some(feature.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(feature, "gallery");
+}
+
+#[tokio::test]
 async fn locate_asks_once_and_hears_back() {
     let (a, b) = paired().await;
     let (ida, idb) = (a.node.info().id, b.node.info().id);

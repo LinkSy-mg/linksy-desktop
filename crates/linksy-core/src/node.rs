@@ -268,6 +268,8 @@ pub enum Event {
     InboxHistoryPage { from: DeviceInfo, app: String, conversation: String, messages: Vec<ConversationMessage>, more: bool },
     /// A phone's photos changed (§4.18).
     GalleryChanged { from: DeviceInfo },
+    /// A computer asks this phone to turn on `feature` (§4.21).
+    TurnOnRequest { from: DeviceInfo, feature: String },
     /// A phone's deck (§4.19): it shows or stopped, an action to run; and what a computer
     /// offers it, with their state.
     DeckOpen { from: DeviceInfo },
@@ -961,6 +963,11 @@ impl Node {
     /// This phone's photos changed (§4.18).
     pub async fn gallery_changed(&self, to: &Fingerprint) -> Result<()> {
         self.send_message(to, &Message::GalleryChanged).await
+    }
+
+    /// Ask a phone to turn on `feature` (§4.21); it shows when the phone announces it.
+    pub async fn ask_turn_on(&self, to: &Fingerprint, feature: &str) -> Result<()> {
+        self.send_message(to, &Message::TurnOn { feature: feature.into() }).await
     }
 
     /// This phone's deck shows (`open`) or stopped (§4.19).
@@ -1979,6 +1986,8 @@ impl Node {
                                 }
                                 Ok(Message::InboxHistory { .. } | Message::InboxHistoryPage { .. }) => debug!("bad conversation history from {}", from.name),
                                 Ok(Message::GalleryChanged) => node.emit(Event::GalleryChanged { from }),
+                                Ok(Message::TurnOn { feature }) if feature.len() <= 64 => node.emit(Event::TurnOnRequest { from, feature }),
+                                Ok(Message::TurnOn { .. }) => debug!("bad turn_on from {}", from.name),
                                 Ok(Message::DeckOpen) => node.emit(Event::DeckOpen { from }),
                                 Ok(Message::DeckClose) => node.emit(Event::DeckClose { from }),
                                 Ok(Message::DeckRun { action, value }) if action.len() <= MAX_KEY && value.is_none_or(f64::is_finite) => {

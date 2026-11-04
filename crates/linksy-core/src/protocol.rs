@@ -433,6 +433,9 @@ pub enum Message {
     InboxHistoryPage { app: String, conversation: String, messages: Vec<ConversationMessage>, more: bool },
     /// The phone's photos changed: one added, deleted… (§4.18)
     GalleryChanged,
+    /// "Turn this on, please" (computer → phone, §4.21): `notifications` or `gallery`. The
+    /// phone asks its user; the answer is the `features` it announces.
+    TurnOn { feature: String },
     /// The phone's deck shows (the computer sends `deck_actions`, then `deck_state` as it
     /// changes), or stopped showing (§4.19).
     DeckOpen,
@@ -917,6 +920,13 @@ mod tests {
         assert_eq!(set, Message::VolumeSet { level: None, muted: Some(true) });
         assert_eq!(serde_json::to_string(&Message::VolumeSet { level: Some(0.5), muted: None }).unwrap(), r#"{"type":"volume_set","level":0.5}"#);
         assert_eq!(serde_json::from_str::<Message>(r#"{"type":"volume_watch","on":true}"#).unwrap(), Message::VolumeWatch { on: true });
+    }
+
+    #[test]
+    fn turn_on_reads_as_documented() {
+        let ask = Message::TurnOn { feature: "gallery".into() };
+        assert_eq!(serde_json::to_string(&ask).unwrap(), r#"{"type":"turn_on","feature":"gallery"}"#);
+        assert_eq!(serde_json::from_str::<Message>(r#"{"type":"turn_on","feature":"gallery"}"#).unwrap(), ask);
     }
 
     #[test]
