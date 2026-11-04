@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.12.4" date="2026-11-04">
+      <description>
+        <p>Fixes: clicking or swiping away a phone's notification no longer stops Linksy in the background, and the Gallery drops photos deleted on the phone right away.</p>
+      </description>
+    </release>
     <release version="0.12.3" date="2026-11-03">
       <description>
         <p>Lighter at rest: the window no longer keeps redrawing while it looks for devices or while a transfer waits to start, and a phone's page checks how fast it answers only while you're using the window.</p>
