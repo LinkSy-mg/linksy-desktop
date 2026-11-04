@@ -4,7 +4,7 @@
 //! double-clicking one saves it and opens it.
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -17,6 +17,8 @@ use super::Window;
 use crate::fmt;
 
 const PAGE: u32 = 120;
+/// The most a phone gives in one page.
+const MAX_PAGE: u32 = 500;
 
 type Fetch = RefCell<Option<Rc<dyn Fn(String)>>>;
 
@@ -52,6 +54,8 @@ struct GalleryState {
     loading: bool,
     /// Bumped when what's shown starts over, so late answers are dropped.
     generation: u64,
+    /// The phone's photos changed while another tab showed.
+    stale: bool,
 }
 
 impl GalleryView {
@@ -174,6 +178,17 @@ impl GalleryView {
         (0..set.size()).filter_map(|i| self.store.item(set.nth(i as u32)).and_downcast::<glib::BoxedAnyObject>()).map(|o| o.borrow::<GalleryItem>().id.clone()).collect()
     }
 
+    /// What the grid shows, in order: each item's time and id.
+    fn shown(&self) -> Vec<(u64, String)> {
+        (0..self.store.n_items())
+            .filter_map(|i| self.store.item(i).and_downcast::<glib::BoxedAnyObject>())
+            .map(|o| {
+                let i = o.borrow::<GalleryItem>();
+                (i.taken_ms, i.id.clone())
+            })
+            .collect()
+    }
+
     fn last_cursor(&self) -> Option<GalleryCursor> {
         let n = self.store.n_items();
         let last = self.store.item(n.checked_sub(1)?).and_downcast::<glib::BoxedAnyObject>()?;
@@ -201,6 +216,45 @@ fn show_thumb(cell: &gtk::Overlay, id: &str, path: PathBuf) {
             picture.set_paintable(Some(&gdk::MemoryTexture::new(width, height, format, &pixels, stride)));
         }
     });
+}
+
+#[derive(Debug, PartialEq)]
+enum Change {
+    Remove(usize),
+    Insert(usize, GalleryItem),
+}
+
+/// How to bring what's shown (newest first) in line with the newest page from the phone,
+/// changes applied in order. Shown items within the page's span but not in it were
+/// deleted; items older than the span stay, as does anything when the page holds all.
+fn reconcile(shown: &[(u64, String)], fresh: Vec<GalleryItem>, more: bool) -> Vec<Change> {
+    // Ties at the span's oldest millisecond are left alone: the phone's order within one
+    // isn't known here
+    let oldest = fresh.last().map(|i| i.taken_ms).filter(|_| more);
+    let ids: HashSet<&str> = fresh.iter().map(|i| i.id.as_str()).collect();
+    let mut changes = Vec::new();
+    let mut kept = Vec::with_capacity(shown.len());
+    for (i, (taken, id)) in shown.iter().enumerate().rev() {
+        if oldest.is_none_or(|o| *taken > o) && !ids.contains(id.as_str()) {
+            changes.push(Change::Remove(i));
+        } else {
+            kept.push(id.clone());
+        }
+    }
+    kept.reverse();
+    // The page's order is the phone's: each new one goes right after the last one shown
+    // before it in the page
+    let mut at = 0;
+    for item in fresh {
+        if let Some(i) = kept[at..].iter().position(|id| *id == item.id) {
+            at += i + 1;
+        } else {
+            kept.insert(at, item.id.clone());
+            changes.push(Change::Insert(at, item));
+            at += 1;
+        }
+    }
+    changes
 }
 
 /// "0:14", "12:03", "1:02:03".
@@ -268,9 +322,15 @@ impl Window {
         });
     }
 
-    /// The Gallery tab shows: the phone's albums and newest photos the first time.
+    /// The Gallery tab shows: the phone's albums and newest photos the first time, brought
+    /// up to date when they changed meanwhile.
     pub(super) fn gallery_shown(self: &Rc<Self>, phone: Fingerprint) {
         if self.gallery.state.borrow().phone == Some(phone) && self.gallery.store.n_items() > 0 {
+            let stale = std::mem::take(&mut self.gallery.state.borrow_mut().stale);
+            if stale {
+                self.gallery_albums(phone);
+                self.gallery_refresh(phone);
+            }
             return;
         }
         let generation = self.gallery.state.borrow().generation + 1;
@@ -282,11 +342,17 @@ impl Window {
         self.gallery_page(true);
     }
 
-    /// The phone's photos changed: newer ones in front, if its gallery is loaded.
+    /// The phone's photos changed (taken, deleted…): the grid follows, now or when the tab
+    /// shows again, if its gallery is loaded.
     pub(super) fn gallery_changed(self: &Rc<Self>, phone: &Fingerprint) {
-        if self.gallery.state.borrow().phone == Some(*phone) && self.page.tab() == super::page::Tab::Gallery {
+        if self.gallery.state.borrow().phone != Some(*phone) {
+            return;
+        }
+        if self.page.tab() == super::page::Tab::Gallery {
             self.gallery_albums(*phone);
-            self.gallery_newer(*phone);
+            self.gallery_refresh(*phone);
+        } else {
+            self.gallery.state.borrow_mut().stale = true;
         }
     }
 
@@ -354,7 +420,9 @@ impl Window {
             match result {
                 Ok(page) => {
                     g.state.borrow_mut().more = page.more;
-                    let objects: Vec<glib::BoxedAnyObject> = page.items.into_iter().map(glib::BoxedAnyObject::new).collect();
+                    // A refresh may have put some of these in already
+                    let shown: HashSet<String> = g.shown().into_iter().map(|(_, id)| id).collect();
+                    let objects: Vec<glib::BoxedAnyObject> = page.items.into_iter().filter(|i| !shown.contains(&i.id)).map(glib::BoxedAnyObject::new).collect();
                     g.store.splice(g.store.n_items(), 0, &objects);
                     if g.store.n_items() == 0 {
                         g.status(t!("No photos here yet."));
@@ -374,14 +442,16 @@ impl Window {
         });
     }
 
-    /// Photos taken since the newest shown, put in front.
-    fn gallery_newer(self: &Rc<Self>, phone: Fingerprint) {
+    /// The newest photos again, as many as shown: deleted ones out, new ones in, where
+    /// they go. The scroll position and the selection stay.
+    fn gallery_refresh(self: &Rc<Self>, phone: Fingerprint) {
         let Some(c) = self.client() else { return };
         let (album, generation) = {
             let state = self.gallery.state.borrow();
             (state.album.clone(), state.generation)
         };
-        let call = self.bridge.call(&c, move |c| async move { c.gallery_items(phone.to_string(), album, None, PAGE).await });
+        let limit = self.gallery.store.n_items().clamp(PAGE, MAX_PAGE);
+        let call = self.bridge.call(&c, move |c| async move { c.gallery_items(phone.to_string(), album, None, limit).await });
         let w = self.clone();
         glib::spawn_future_local(async move {
             let Ok(page) = call.await else { return };
@@ -389,13 +459,18 @@ impl Window {
             if g.state.borrow().generation != generation {
                 return;
             }
-            let newest = g.store.item(0).and_downcast::<glib::BoxedAnyObject>().map(|o| {
-                let i = o.borrow::<GalleryItem>();
-                (i.taken_ms, i.id.clone())
-            });
-            let newer: Vec<glib::BoxedAnyObject> = page.items.into_iter().filter(|i| newest.as_ref().is_none_or(|n| (i.taken_ms, &i.id) > (n.0, &n.1))).map(glib::BoxedAnyObject::new).collect();
-            if !newer.is_empty() {
-                g.store.splice(0, 0, &newer);
+            if !page.more {
+                g.state.borrow_mut().more = false;
+            }
+            for change in reconcile(&g.shown(), page.items, page.more) {
+                match change {
+                    Change::Remove(at) => g.store.remove(at as u32),
+                    Change::Insert(at, item) => g.store.insert(at as u32, &glib::BoxedAnyObject::new(item)),
+                }
+            }
+            if g.store.n_items() == 0 {
+                g.status(t!("No photos here yet."));
+            } else {
                 g.stack.set_visible_child_name("grid");
             }
         });
@@ -436,5 +511,89 @@ impl Window {
                 Err(e) => w.toast(&fmt::capitalize(&e)),
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn item(id: &str, taken_ms: u64) -> GalleryItem {
+        GalleryItem { id: id.into(), name: format!("{id}.jpg"), video: false, taken_ms, size: 1, duration_ms: None }
+    }
+
+    fn shown(items: &[(&str, u64)]) -> Vec<(u64, String)> {
+        items.iter().map(|(id, t)| (*t, id.to_string())).collect()
+    }
+
+    /// The list after the changes, to compare with what the phone has.
+    fn apply(shown: &[(u64, String)], changes: Vec<Change>) -> Vec<String> {
+        let mut ids: Vec<String> = shown.iter().map(|(_, id)| id.clone()).collect();
+        for c in changes {
+            match c {
+                Change::Remove(at) => {
+                    ids.remove(at);
+                }
+                Change::Insert(at, item) => ids.insert(at, item.id),
+            }
+        }
+        ids
+    }
+
+    #[test]
+    fn deleted_ones_go() {
+        let s = shown(&[("e", 50), ("d", 40), ("c", 30), ("b", 20), ("a", 10)]);
+        let changes = reconcile(&s, vec![item("e", 50), item("c", 30), item("a", 10)], false);
+        assert_eq!(changes, vec![Change::Remove(3), Change::Remove(1)]);
+        assert_eq!(apply(&s, changes), ["e", "c", "a"]);
+    }
+
+    #[test]
+    fn new_ones_come_in_where_they_go() {
+        let s = shown(&[("e", 50), ("c", 30), ("a", 10)]);
+        let fresh = vec![item("f", 60), item("e", 50), item("d", 40), item("c", 30), item("a", 10)];
+        assert_eq!(apply(&s, reconcile(&s, fresh, false)), ["f", "e", "d", "c", "a"]);
+    }
+
+    #[test]
+    fn older_than_the_page_stays() {
+        // Two pages shown, the newest asked again: the second page isn't touched
+        let s = shown(&[("e", 50), ("d", 40), ("c", 30), ("b", 20), ("a", 10)]);
+        let fresh = vec![item("e", 50), item("c", 30)];
+        assert_eq!(apply(&s, reconcile(&s, fresh, true)), ["e", "c", "b", "a"]);
+    }
+
+    #[test]
+    fn deletions_pull_older_ones_up() {
+        // Two deleted in front: the page reaches past what's shown, and those follow on
+        let s = shown(&[("e", 50), ("d", 40), ("c", 30)]);
+        let fresh = vec![item("e", 50), item("b", 20), item("a", 10)];
+        assert_eq!(apply(&s, reconcile(&s, fresh, true)), ["e", "b", "a"]);
+    }
+
+    #[test]
+    fn deleted_and_added_at_once() {
+        let s = shown(&[("e", 50), ("d", 40), ("c", 30)]);
+        let fresh = vec![item("g", 70), item("e", 50), item("c", 30)];
+        assert_eq!(apply(&s, reconcile(&s, fresh, false)), ["g", "e", "c"]);
+    }
+
+    #[test]
+    fn all_deleted() {
+        let s = shown(&[("b", 20), ("a", 10)]);
+        assert_eq!(apply(&s, reconcile(&s, vec![], false)), Vec::<String>::new());
+    }
+
+    #[test]
+    fn same_millisecond_at_the_edge_stays() {
+        let s = shown(&[("c", 30), ("b", 20), ("a", 20)]);
+        let fresh = vec![item("c", 30), item("b", 20)];
+        assert_eq!(apply(&s, reconcile(&s, fresh, true)), ["c", "b", "a"]);
+    }
+
+    #[test]
+    fn nothing_changed_nothing_to_do() {
+        let s = shown(&[("c", 30), ("b", 20)]);
+        assert!(reconcile(&s, vec![item("c", 30), item("b", 20)], true).is_empty());
     }
 }
