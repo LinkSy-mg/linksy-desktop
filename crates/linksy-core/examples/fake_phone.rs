@@ -44,7 +44,7 @@
 //! that long, as when the user turns the listener on.
 //! `--gallery DIR` shows the photos and videos under DIR as its gallery: a folder is an
 //! album, a file's modification time is when it was taken, a JPEG or PNG up to 256 KiB is
-//! its own thumbnail.
+//! its own thumbnail. Adding or removing a file there sends `gallery_changed`.
 //! `--deck ACTION[=VALUE]` opens the deck, prints the `deck_actions` and `deck_state` it
 //! gets, runs that action (a slider with VALUE), prints the state after, then closes it.
 //! `--deck-layout` announces `deck_layout`, so the deck also gets its layouts (printed as
@@ -465,9 +465,30 @@ async fn main() {
     if let Some(root) = gallery {
         let mut calls = node.incoming_gallery().expect("gallery requests");
         let serving = node.clone();
+        let watched = root.clone();
         tokio::spawn(async move {
             while let Some(call) = calls.recv().await {
                 show_gallery(call, &root, &serving).await;
+            }
+        });
+        // A file added or removed under DIR is told to the computers, as the phone does
+        let node = node.clone();
+        tokio::spawn(async move {
+            let ids = |root: &std::path::Path| gallery_items(root).into_iter().map(|(item, _, _)| item.id).collect::<Vec<_>>();
+            let mut last = ids(&watched);
+            loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                let now = ids(&watched);
+                if now == last {
+                    continue;
+                }
+                last = now;
+                for v in node.devices().into_iter().filter(|v| v.trusted && v.connected) {
+                    match node.gallery_changed(&v.device.id).await {
+                        Ok(()) => println!("gallery changed, told {}", v.device.name),
+                        Err(e) => println!("gallery changed: {e}"),
+                    }
+                }
             }
         });
     }
