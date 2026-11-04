@@ -796,7 +796,8 @@ controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifica
 phone), `direct_group` (hosts and joins Wi-Fi Direct groups by name and passphrase: phones,
 §4.17 "Phone to phone"), `inbox_history` (answers `inbox_history`, §4.5), `gallery` (shows
 its photos, §4.18), `deck` (a computer that runs a phone's deck, §4.19), `deck_layout` (a
-phone that draws the deck layouts a computer sends, §4.20).
+phone that draws the deck layouts a computer sends, §4.20), `turn_on` (a phone that asks its
+user when a computer asks it to turn something on, §4.21).
 Set `Config.features` in the core. To change them while running (`notifications` turned
 on or off), call `Node::set_features`: connected devices get a `features` message
 (at most 64 names of up to 64 bytes) and update at once, others see the new list at the
@@ -1665,6 +1666,28 @@ computer → phone {"type":"deck_state",…}         as in §4.19
   (`deck_layout.rs`, which also has the kinds, sizes, themes and `check`); the computer
   sends with `Node::deck_layout(to, &layouts)`, which refuses a phone without the feature.
 
+### 4.21 Turn on: a computer asks the phone (desktop, after 0.12.4)
+
+The computer shows a phone's Inbox and Gallery tabs even while they're off, saying what to
+turn on on the phone, with a link to linksy.diary.mg/help/inbox or /help/gallery. When the
+phone announces `turn_on` (§4.10), the tab also has an **Ask the Phone** button, which sends:
+
+```json
+{"type":"turn_on","feature":"notifications"}   // computer → phone: the Inbox
+{"type":"turn_on","feature":"gallery"}         // or the Gallery
+```
+
+- Core: `Event::TurnOnRequest { from, feature }` (JSON `turn_on_request`) on the phone; the
+  computer sends with `Node::ask_turn_on(to, feature)`. A `feature` over 64 bytes is dropped.
+- Phone: nothing is answered. Ask the user: a sheet when Linksy is open, a notification
+  otherwise, which opens it ("<computer> asks to show this phone's messages", or photos),
+  with Turn On running the same steps as the setting (Notification access with the
+  restricted-settings steps; Android's photo permission, Allow all). At most one prompt per
+  computer and feature a minute. Ignore unknown features; when it's already on, announce
+  the features again.
+- The answer is the phone's `features` (§4.10): once it announces `notifications` or
+  `gallery`, the computer's tab fills by itself.
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -2209,3 +2232,8 @@ robust against any encoder (GPU ones may slice too):
   with another Android phone paired, it no longer guesses that the one plugged in is the
   one being viewed. Phone to-do: on unplug, drop the cable connection and dial over Wi-Fi
   straight away (linksy-mobile#20).
+- **2026-11-04** — **Turn on** (§4.21), desktop after 0.12.4: the Inbox and Gallery tabs
+  show while off, with what to turn on and a help link; `turn_on` (computer → phone,
+  `notifications` or `gallery`), feature `turn_on`, core `ask_turn_on` and
+  `Event::TurnOnRequest`. Phone to-do: announce `turn_on` and ask the user, as in §4.21;
+  offer both in first-run setup, and turn the Inbox on once notification access is given.
