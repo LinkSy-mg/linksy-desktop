@@ -263,17 +263,25 @@ impl Mirror {
                         mirror.mute(&n.app, &n.app_name);
                         mirror.inner.shown.lock().unwrap().remove(&entry);
                     }
+                    // Spawned, not blocked on: this runs inside the notification library's own
+                    // runtime, and blocking there aborted the service
                     NotificationResponse::Action(a) if a.starts_with("act:") => {
-                        if let Err(e) = rt.block_on(node.notification_action(from, key, &a[4..])) {
-                            warn!("notification button failed: {e}");
-                        }
+                        let (node, from, key, action) = (node.clone(), *from, key.to_string(), a[4..].to_string());
+                        rt.spawn(async move {
+                            if let Err(e) = node.notification_action(&from, &key, &action).await {
+                                warn!("notification button failed: {e}");
+                            }
+                        });
                     }
                     // Clicked or swiped away: the user has seen it, so it's done on the phone too.
                     NotificationResponse::Default | NotificationResponse::Closed(CloseReason::Dismissed) => {
                         mirror.inner.shown.lock().unwrap().remove(&entry);
-                        if let Err(e) = rt.block_on(node.dismiss_notification(from, key)) {
-                            warn!("dismissing on the phone failed: {e}");
-                        }
+                        let (node, from, key) = (node.clone(), *from, key.to_string());
+                        rt.spawn(async move {
+                            if let Err(e) = node.dismiss_notification(&from, &key).await {
+                                warn!("dismissing on the phone failed: {e}");
+                            }
+                        });
                     }
                     _ => {
                         mirror.inner.shown.lock().unwrap().remove(&entry);
