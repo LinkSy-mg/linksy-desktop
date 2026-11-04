@@ -2,6 +2,17 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.12.4
+
+### Fixed
+- **Linksy stopped in the background:** clicking or swiping away a phone's notification
+  on the computer, or pressing one of its buttons, made the service quit, and the app
+  then said it wasn't running. It no longer does.
+- **The Gallery tab keeps up with deletions:** photos deleted on the phone left the
+  Gallery until Linksy restarted. They now go at once, new ones come in where they
+  belong, and what you scrolled to and selected stays. A change while another tab
+  shows is caught up when you come back. Both apps (#81).
+
 ## 0.12.3
 
 ### Improved
