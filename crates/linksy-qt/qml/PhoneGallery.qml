@@ -13,6 +13,8 @@ QtObject {
     property bool loading: false
     // Bumped when what's shown starts over, so late answers are dropped
     property int generation: 0
+    // The phone's photos changed while another tab showed
+    property bool stale: false
     // What shows instead of the grid ("Loading…", none yet, an error), "" for the grid
     property string status: ""
     property int selectedCount: 0
@@ -35,10 +37,19 @@ QtObject {
         return { itemId: i.id, name: i.name, video: i.video ?? false, taken_ms: i.taken_ms, duration_ms: i.duration_ms ?? -1, selected: false };
     }
 
-    // The Gallery tab shows: the phone's albums and newest photos the first time
+    // The Gallery tab shows: the phone's albums and newest photos the first time, brought
+    // up to date when they changed meanwhile
     function show(id) {
-        if (phone === id && items.count > 0) return;
+        if (phone === id && items.count > 0) {
+            if (stale) {
+                stale = false;
+                loadAlbums();
+                refresh();
+            }
+            return;
+        }
         phone = id;
+        stale = false;
         album = "";
         albums = [];
         thumbs = {};
@@ -83,27 +94,63 @@ QtObject {
 
     function landed(got) {
         more = got.more;
-        if (got.items.length) items.append(got.items.map(i => row(i)));
+        // A refresh may have put some of these in already
+        const shown = new Set();
+        for (let i = 0; i < items.count; i++) shown.add(items.get(i).itemId);
+        const fresh = got.items.filter(i => !shown.has(i.id));
+        if (fresh.length) items.append(fresh.map(i => row(i)));
         status = items.count ? "" : app.t("No photos here yet.");
         pageLanded();
     }
 
-    // The phone's photos changed: the ones taken since the newest shown, in front
-    function newer() {
+    // The phone's photos changed: the newest again, as many as shown (a phone gives 500 at
+    // most), and the grid brought in line; the scroll position and the selection stay
+    function refresh() {
         if (!phone) return;
         const at = generation;
-        app.request("gallery_items", { phone: phone, album: album || null, before: null, limit: 120 }, (ok, got) => {
-            if (ok && at === gallery.generation) gallery.putNewer(got.items);
+        const limit = Math.min(500, Math.max(120, items.count));
+        app.request("gallery_items", { phone: phone, album: album || null, before: null, limit: limit }, (ok, got) => {
+            if (ok && at === gallery.generation) gallery.reconcile(got.items, got.more);
         });
     }
 
-    function putNewer(list) {
-        const first = items.count ? items.get(0) : null;
-        const fresh = list.filter(i => !first || i.taken_ms > first.taken_ms || (i.taken_ms === first.taken_ms && i.id > first.itemId));
-        if (!fresh.length) return;
-        items.insert(0, fresh.map(i => row(i)));
-        if (anchor >= 0) anchor += fresh.length;
-        status = "";
+    // Shown ones within the page's span but not in it were deleted; older ones stay, as
+    // does anything when the page holds all. Ties at the span's oldest millisecond stay:
+    // the phone's order within one isn't known here.
+    function reconcile(list, pageMore) {
+        const oldest = pageMore && list.length ? list[list.length - 1].taken_ms : null;
+        const ids = new Set(list.map(i => i.id));
+        let changed = false;
+        for (let i = items.count - 1; i >= 0; i--) {
+            const shown = items.get(i);
+            if ((oldest === null || shown.taken_ms > oldest) && !ids.has(shown.itemId)) {
+                if (shown.selected) selectedCount--;
+                items.remove(i);
+                changed = true;
+            }
+        }
+        // The page's order is the phone's: each new one right after the last one shown
+        // before it in the page
+        let at = 0;
+        for (const i of list) {
+            let found = -1;
+            for (let j = at; j < items.count; j++) {
+                if (items.get(j).itemId === i.id) {
+                    found = j;
+                    break;
+                }
+            }
+            if (found >= 0) {
+                at = found + 1;
+                continue;
+            }
+            items.insert(at, row(i));
+            at++;
+            changed = true;
+        }
+        if (changed) anchor = -1;
+        if (!pageMore) more = false;
+        status = items.count ? "" : app.t("No photos here yet.");
     }
 
     // Where item `id`'s thumbnail is; "" until it's here, and asked for then

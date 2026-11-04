@@ -209,9 +209,13 @@ Kirigami.Page {
         function onAlertsChanged(phone) { if (phone === inbox.phone) inbox.load() }
         function onFsProgress(progress) { files.progress(progress) }
         function onGalleryChanged(phone) {
-            if (phone !== gallery.phone || page.tab !== "gallery") return;
+            if (phone !== gallery.phone) return;
+            if (page.tab !== "gallery") {
+                gallery.stale = true;
+                return;
+            }
             gallery.loadAlbums();
-            gallery.newer();
+            gallery.refresh();
         }
     }
 
