@@ -593,6 +593,7 @@ impl Window {
                 page::Action::AutoAccept(on) => w.auto_accept(id, on),
                 page::Action::AllowScreen(on) => w.allow_screen(id, on),
                 page::Action::Locate => w.locate(id),
+                page::Action::TurnOn(feature) => w.ask_turn_on(id, feature),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
                 page::Action::Webcam => w.use_camera(id),
@@ -935,6 +936,20 @@ impl Window {
                 w.toast_error(&e, Some(id));
             }
             w.refresh_devices();
+        });
+    }
+
+    /// Ask a phone to turn on its Inbox (`notifications`) or Gallery; its tab fills once it does.
+    fn ask_turn_on(self: &Rc<Self>, id: Fingerprint, feature: &'static str) {
+        let Some(c) = self.client() else { return };
+        let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
+        let w = self.clone();
+        let call = self.bridge.call(&c, move |c| async move { c.turn_on(id.to_string(), feature).await });
+        glib::spawn_future_local(async move {
+            match call.await {
+                Ok(()) => w.toast(&t!("Look at {name} to turn it on", name)),
+                Err(e) => w.toast(&t!("Couldn't ask {name}: {reason}", name, reason = fmt::capitalize(&e))),
+            }
         });
     }
 
@@ -1460,12 +1475,12 @@ impl Window {
             self.refresh_history();
             self.page.set_inbox_count(0);
             if let Some(d) = self.selected_device().filter(|d| d.trusted) {
-                if can(&d.device, "notifications") || can(&d.device, "sms") {
+                if inbox_on(&d.device) {
                     self.load_inbox(d.device.id);
                 }
                 match self.page.tab() {
                     page::Tab::Files => self.files_shown(d.device.id),
-                    page::Tab::Gallery => self.gallery_shown(d.device.id),
+                    page::Tab::Gallery if can(&d.device, "gallery") => self.gallery_shown(d.device.id),
                     _ => {}
                 }
             }
@@ -1549,9 +1564,11 @@ impl Window {
     /// A tab of the device's page shows: what's in it, fetched now.
     fn tab_shown(self: &Rc<Self>, id: Fingerprint, tab: page::Tab) {
         self.transfers_shown();
+        let on = |f: fn(&DeviceInfo) -> bool| self.device(&id).is_some_and(|d| f(&d.device));
         match tab {
-            page::Tab::Inbox => self.inbox_shown(id),
-            page::Tab::Gallery => self.gallery_shown(id),
+            page::Tab::Inbox if on(inbox_on) => self.inbox_shown(id),
+            page::Tab::Gallery if on(|d| can(d, "gallery")) => self.gallery_shown(id),
+            page::Tab::Inbox | page::Tab::Gallery => {}
             page::Tab::Files => self.files_shown(id),
             page::Tab::Transfers => self.render_transfers(),
             page::Tab::History => self.render_activity(),
@@ -2207,5 +2224,10 @@ pub(crate) fn can(d: &DeviceInfo, feature: &str) -> bool {
     if !d.features.is_empty() {
         return d.features.iter().any(|f| f == feature);
     }
-    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate"))
+    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate" | "turn_on"))
+}
+
+/// Whether a phone shares its messages, for its Inbox.
+pub(crate) fn inbox_on(d: &DeviceInfo) -> bool {
+    can(d, "notifications") || can(d, "sms")
 }

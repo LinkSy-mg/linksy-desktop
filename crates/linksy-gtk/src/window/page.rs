@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use linksy_ipc::linksy_core::{DeviceKind, DeviceView, Direction, Uuid};
+use linksy_ipc::linksy_core::{DeviceKind, DeviceView, Direction, Fingerprint, Uuid};
 use linksy_i18n::t;
 use linksy_ipc::{HistoryEntry, HistoryStatus, Shared, TerminalStatus};
 
@@ -52,6 +52,8 @@ pub enum Action {
     /// Let this device see and control the screen without asking.
     AllowScreen(bool),
     Locate,
+    /// Ask the phone to turn on `notifications` (the Inbox) or `gallery`.
+    TurnOn(&'static str),
     /// A tab shows, to fill.
     Tab(Tab),
     /// The timeline's filter changed.
@@ -164,6 +166,14 @@ pub struct DevicePage {
     /// The window's inbox and files views go here.
     pub inbox_slot: gtk::Box,
     pub gallery_slot: gtk::Box,
+    /// The Inbox and Gallery tabs: their view, or what to turn on on the phone ("off"), with
+    /// a button that asks it when it can be asked.
+    inbox_view: gtk::Stack,
+    gallery_view: gtk::Stack,
+    inbox_ask: gtk::Button,
+    gallery_ask: gtk::Button,
+    /// Whose Inbox and Gallery were on, to fill a tab when its phone turns it on.
+    turned_on: std::cell::Cell<Option<(Fingerprint, bool, bool)>>,
     pub files_slot: gtk::Box,
     pub transfers_slot: gtk::Box,
     /// The device's switches, as plain rows.
@@ -577,6 +587,40 @@ impl DevicePage {
         use_page.append(&terminals);
         let inbox_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let gallery_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+        let off = |slot: &gtk::Box, icon: &str, title: &str, how: &str, feature: &'static str, help: &str| {
+            let page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(12).halign(gtk::Align::Center).margin_top(36).margin_bottom(36).css_classes(["feature-off"]).build();
+            page.append(&gtk::Image::builder().icon_name(icon).pixel_size(64).css_classes(["dim-label"]).build());
+            page.append(&gtk::Label::builder().label(title).wrap(true).justify(gtk::Justification::Center).css_classes(["title-2"]).build());
+            page.append(&gtk::Label::builder().label(how).wrap(true).max_width_chars(48).justify(gtk::Justification::Center).css_classes(["dim-label"]).build());
+            let ask = gtk::Button::builder().label(t!("Ask the Phone")).halign(gtk::Align::Center).margin_top(12).css_classes(["pill", "suggested-action"]).build();
+            let e = emit.clone();
+            ask.connect_clicked(move |_| e(Action::TurnOn(feature)));
+            let how_to = gtk::Button::builder().label(t!("How to Turn It On")).halign(gtk::Align::Center).css_classes(["pill"]).build();
+            let (e, help) = (emit.clone(), help.to_string());
+            how_to.connect_clicked(move |_| e(Action::OpenLink(help.clone())));
+            page.append(&ask);
+            page.append(&how_to);
+            let view = gtk::Stack::builder().vhomogeneous(false).build();
+            view.add_named(slot, Some("on"));
+            view.add_named(&page, Some("off"));
+            (view, ask)
+        };
+        let (inbox_view, inbox_ask) = off(
+            &inbox_slot,
+            "mail-unread-symbolic",
+            t!("The Inbox Is Off"),
+            t!("Turn on “Show this phone's notifications” in Linksy on the phone, under Settings › With your computers."),
+            "notifications",
+            "https://linksy.diary.mg/help/inbox",
+        );
+        let (gallery_view, gallery_ask) = off(
+            &gallery_slot,
+            "image-x-generic-symbolic",
+            t!("The Gallery Is Off"),
+            t!("Turn on “Photos on your computers” in Linksy on the phone, under Settings › Files, and let it see all photos."),
+            "gallery",
+            "https://linksy.diary.mg/help/gallery",
+        );
         let files_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let transfers_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
         let forget_button = gtk::Button::builder().label(t!("Forget Device…")).halign(gtk::Align::Start).css_classes(["error"]).build();
@@ -587,8 +631,8 @@ impl DevicePage {
         settings_page.append(&forget_button);
         let tab_stack = gtk::Stack::builder().vhomogeneous(false).hhomogeneous(false).transition_type(gtk::StackTransitionType::Crossfade).transition_duration(120).build();
         tab_stack.add_named(&use_page, Some(Tab::Use.name()));
-        tab_stack.add_named(&inbox_slot, Some(Tab::Inbox.name()));
-        tab_stack.add_named(&gallery_slot, Some(Tab::Gallery.name()));
+        tab_stack.add_named(&inbox_view, Some(Tab::Inbox.name()));
+        tab_stack.add_named(&gallery_view, Some(Tab::Gallery.name()));
         tab_stack.add_named(&files_slot, Some(Tab::Files.name()));
         tab_stack.add_named(&transfers_slot, Some(Tab::Transfers.name()));
         tab_stack.add_named(&activity_box, Some(Tab::History.name()));
@@ -837,6 +881,11 @@ impl DevicePage {
             inbox_badge,
             inbox_slot,
             gallery_slot,
+            inbox_view,
+            gallery_view,
+            inbox_ask,
+            gallery_ask,
+            turned_on: std::cell::Cell::new(None),
             files_slot,
             transfers_slot,
             settings,
@@ -912,13 +961,29 @@ impl DevicePage {
     fn update_tabs(&self, d: &DeviceView) {
         let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
         let any_use = self.any_card() || self.terminal_box.is_visible() || self.terminals.is_visible();
+        // Shown while off too, saying how to turn them on
         let has = |t: Tab| match t {
             Tab::Use => any_use,
-            Tab::Inbox => d.device.kind == DeviceKind::Phone && (super::can(&d.device, "notifications") || super::can(&d.device, "sms")),
-            Tab::Gallery => phone && super::can(&d.device, "gallery"),
+            Tab::Inbox => d.device.kind == DeviceKind::Phone,
+            Tab::Gallery => phone,
             Tab::Files => phone && super::can(&d.device, "fs"),
             Tab::Transfers | Tab::History | Tab::Settings => true,
         };
+        let (inbox_on, gallery_on) = (super::inbox_on(&d.device), super::can(&d.device, "gallery"));
+        self.inbox_view.set_visible_child_name(if inbox_on { "on" } else { "off" });
+        self.gallery_view.set_visible_child_name(if gallery_on { "on" } else { "off" });
+        let askable = super::can(&d.device, "turn_on");
+        self.inbox_ask.set_visible(askable);
+        self.gallery_ask.set_visible(askable);
+        if let Some((id, inbox_was, gallery_was)) = self.turned_on.replace(Some((d.device.id, inbox_on, gallery_on)))
+            && id == d.device.id
+        {
+            let tab = self.tab.get();
+            let handler = self.handler.borrow().clone();
+            if let Some(f) = handler.filter(|_| (tab == Tab::Inbox && inbox_on && !inbox_was) || (tab == Tab::Gallery && gallery_on && !gallery_was)) {
+                f(Action::Tab(tab));
+            }
+        }
         for (t, b) in self.tab_buttons.iter().chain(&self.sticky_buttons) {
             b.set_visible(d.trusted && has(*t));
         }
