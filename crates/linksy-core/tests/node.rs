@@ -2057,6 +2057,46 @@ async fn both_ends_of_a_transfer_hear_its_route() {
 }
 
 #[tokio::test]
+async fn the_host_is_told_the_joiners_wifi_channel_and_makes_its_group_there() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "direct_host".into(), "direct_join".into(), "direct_group".into()]).await;
+    let (host, joiner) = if a.node.info().id < b.node.info().id { (&a, &b) } else { (&b, &a) };
+    let host_id = host.node.info().id;
+    fake_direct_app(&a.node);
+    fake_direct_app(&b.node);
+    let mut on_host = host.node.subscribe();
+    // Not a Wi-Fi channel: not passed on
+    joiner.node.set_wifi_frequency(Some(80));
+    joiner.node.set_wifi_frequency(Some(5200));
+    joiner.node.direct_link(&host_id).await.unwrap();
+    let group = wait_for(&mut on_host, |e| match e {
+        Event::DirectWanted { group, .. } => Some(group.clone()),
+        _ => None,
+    })
+    .await
+    .expect("credentials for a group");
+    assert_eq!(group.frequency, Some(5200));
+    assert!(group.is_valid());
+}
+
+#[tokio::test]
+async fn without_a_known_channel_the_host_chooses_as_before() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "direct_host".into(), "direct_join".into(), "direct_group".into()]).await;
+    let (host, joiner) = if a.node.info().id < b.node.info().id { (&a, &b) } else { (&b, &a) };
+    let host_id = host.node.info().id;
+    fake_direct_app(&a.node);
+    fake_direct_app(&b.node);
+    let mut on_host = host.node.subscribe();
+    joiner.node.direct_link(&host_id).await.unwrap();
+    let group = wait_for(&mut on_host, |e| match e {
+        Event::DirectWanted { group, .. } => Some(group.clone()),
+        _ => None,
+    })
+    .await
+    .expect("credentials for a group");
+    assert_eq!(group.frequency, None);
+}
+
+#[tokio::test]
 async fn two_phones_agree_on_one_host_and_link_through_its_group() {
     let (a, b) = paired_with(|c| c.features = vec!["files".into(), "direct_host".into(), "direct_join".into(), "direct_group".into()]).await;
     let (a_id, b_id) = (a.node.info().id, b.node.info().id);

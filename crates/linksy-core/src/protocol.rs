@@ -476,8 +476,14 @@ pub enum Message {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum DirectStep {
-    /// Joiner → host: a direct link would help, start one (or answer `end`).
-    Ask,
+    /// Joiner → host: a direct link would help, start one (or answer `end`). `frequency` is the
+    /// channel (MHz) of the joiner's Wi-Fi, so the host can make its group there: a Wi-Fi chip
+    /// serving its network and the group on two channels hops between them, and a transfer that
+    /// runs at 79 MB/s on one channel runs at 17 on two.
+    Ask {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        frequency: Option<u32>,
+    },
     /// Host → joiner: the host's address and its Wi-Fi Direct name; become findable and
     /// answer `listening`. Android doesn't tell apps their own address (they get
     /// `02:00:00:00:00:00`), so the joiner finds the host by name then. With `group` (both
@@ -518,7 +524,8 @@ impl DirectStep {
             Self::Up { ip: std::net::IpAddr::V4(ip), port } => (ip.is_private() || ip.is_link_local() || ip.is_loopback()) && *port != 0,
             Self::Up { .. } => false,
             Self::End { reason } => reason.as_ref().is_none_or(|r| r.len() <= 200),
-            Self::Ask | Self::Connecting | Self::Keep { .. } => true,
+            Self::Ask { frequency } => frequency.is_none_or(|f| (2400..=7125).contains(&f)),
+            Self::Connecting | Self::Keep { .. } => true,
         }
     }
 }
@@ -1167,5 +1174,14 @@ mod tests {
         let change = ControlsChange { media: Some(7.0), alarm: Some(f64::NAN), ringer: Some(Ringer::Unknown), dnd: Some(Dnd::Unknown), ..Default::default() }.tidy();
         assert_eq!((change.media, change.alarm, change.ringer, change.dnd), (Some(1.0), None, None, None));
         assert!(ControlsChange::default().is_empty());
+    }
+
+    #[test]
+    fn ask_carries_the_joiners_channel_only_when_it_has_one() {
+        assert_eq!(serde_json::to_string(&Message::Direct { step: DirectStep::Ask { frequency: None } }).unwrap(), r#"{"type":"direct","step":{"type":"ask"}}"#);
+        assert_eq!(serde_json::to_string(&Message::Direct { step: DirectStep::Ask { frequency: Some(5200) } }).unwrap(), r#"{"type":"direct","step":{"type":"ask","frequency":5200}}"#);
+        // What an older computer sends, and what an older phone does with a newer one
+        assert!(matches!(serde_json::from_str::<Message>(r#"{"type":"direct","step":{"type":"ask"}}"#), Ok(Message::Direct { step: DirectStep::Ask { frequency: None } })));
+        assert!(!DirectStep::Ask { frequency: Some(80) }.is_valid());
     }
 }

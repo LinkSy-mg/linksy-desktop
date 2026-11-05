@@ -629,6 +629,8 @@ struct Inner {
     volume_seq: Mutex<HashMap<Fingerprint, u64>>,
     /// The same for a phone's controls.
     controls_seq: Mutex<HashMap<Fingerprint, u64>>,
+    /// The channel (MHz) of this computer's Wi-Fi, told to a host asked for a direct link.
+    wifi_frequency: Mutex<Option<u32>>,
     /// Away from home, when on (docs/protocol.md §4.13).
     away: Mutex<Option<Arc<crate::away::Away>>>,
     /// Direct links up, for big transfers (docs/protocol.md §4.17).
@@ -693,6 +695,7 @@ impl Node {
                 media_seq: Mutex::default(),
                 volume_seq: Mutex::default(),
                 controls_seq: Mutex::default(),
+                wifi_frequency: Mutex::default(),
                 sessions: Mutex::new(Some(sessions)),
                 sessions_tx,
                 fs: Mutex::new(Some(fs)),
@@ -2785,6 +2788,15 @@ impl Node {
     }
 
     /// Credentials for a group the host makes, when both devices do groups (`direct_group`).
+    /// Tell the channel this computer's Wi-Fi is on (MHz), or that it isn't on one.
+    pub fn set_wifi_frequency(&self, frequency: Option<u32>) {
+        *self.inner.wifi_frequency.lock().unwrap() = frequency.filter(|f| (2400..=7125).contains(f));
+    }
+
+    fn wifi_frequency(&self) -> Option<u32> {
+        *self.inner.wifi_frequency.lock().unwrap()
+    }
+
     fn direct_group(&self, to: &Fingerprint) -> Option<DirectGroup> {
         let has = |features: &[String]| features.iter().any(|f| f == "direct_group");
         if has(&self.info().features) && self.peer_info(to).is_some_and(|p| has(&p.features)) {
@@ -2856,7 +2868,7 @@ impl Node {
             info!("setting up a direct link");
             if host {
                 self.emit(Event::DirectWanted { id: *to, group: self.direct_group(to) });
-            } else if let Err(e) = self.send_message(to, &Message::Direct { step: DirectStep::Ask }).await {
+            } else if let Err(e) = self.send_message(to, &Message::Direct { step: DirectStep::Ask { frequency: self.wifi_frequency() } }).await {
                 self.direct_drop(to, Some(e.to_string()));
             }
         }
@@ -2918,13 +2930,15 @@ impl Node {
         };
         match step {
             // Up already: nothing to set up
-            DirectStep::Ask if self.lane(&id).is_some() => {}
-            DirectStep::Ask if self.direct_role(&id) == Some(true) => {
+            DirectStep::Ask { .. } if self.lane(&id).is_some() => {}
+            DirectStep::Ask { frequency } if self.direct_role(&id) == Some(true) => {
                 if self.direct_begin(&id).1 {
-                    self.emit(Event::DirectWanted { id, group: self.direct_group(&id) });
+                    // The group on the joiner's channel, when it said which
+                    let group = self.direct_group(&id).map(|g| DirectGroup { frequency, ..g });
+                    self.emit(Event::DirectWanted { id, group });
                 }
             }
-            DirectStep::Ask => refuse("this device can't host a direct link"),
+            DirectStep::Ask { .. } => refuse("this device can't host a direct link"),
             DirectStep::Invite { .. } if self.direct_role(&id) != Some(false) => refuse("this device can't join a direct link"),
             DirectStep::End { reason } => {
                 self.direct_drop(&id, reason);
