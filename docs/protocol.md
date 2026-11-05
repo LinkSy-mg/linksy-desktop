@@ -84,7 +84,7 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | Copy to Computer (text from the phone's text menu) | Receives `clipboard` as before | Built, not published | to confirm against the phone's messages once they are published |
 | A USB button on the phone | Done (0.9) | Built, not published | `usb_plugged`, `usb_connect` (§4.11); mobile#11 |
 | Connection Doctor | Done on branch `phone-work` | Its half built, not published | the computer checks its firewall, a VPN, a phone on another network or not answering, and the cable; no new messages |
-| The phone's controls on the computer (volumes, ringer, Do Not Disturb, flashlight) | To do (Now) | To do | messages to agree on first |
+| The phone's controls on the computer (volumes, ringer, Do Not Disturb, flashlight) | Messages and core on branch `phone-work` (§4.24); the page and Do Not Disturb sync next | To do | `controls_watch`, `controls_state`, `controls_set`, `controls_refused`; feature `phone_controls` |
 | Bluetooth (presence and a link) | Planned | Planned | `ROADMAP.md`; not started |
 
 ## 3. How to build the phone app (recommendation)
@@ -1924,6 +1924,57 @@ ignores them.
   computer. `linksy snap <phone>` on the command line.
 - **Phone to-do:** announce `snap`; open the camera on `snap_request`; send the file, then the
   clipboard copy; `snap_refused` with a reason when it can't.
+
+### 4.24 The phone's controls on the computer (desktop, after 0.12.4)
+
+A computer sets a phone's volumes, ringer, Do Not Disturb and flashlight, and sees them change.
+Feature `phone_controls`, announced by the phone. Modelled on the computer's volume (§4.5):
+watch, state, set.
+
+```json
+{"type":"controls_watch","on":true}                       // computer → phone: send me controls_state while connected
+{"type":"controls_state","seq":1760945000123,"media":0.4,"ringtone":0.8,"alarm":1.0,
+ "ringer":"normal","dnd":"off","dnd_access":true,"flashlight":false}   // phone → computer
+{"type":"controls_set","media":0.5,"dnd":"priority","flashlight":true}   // computer → phone: only what is given
+{"type":"controls_refused","what":"dnd","reason":"Allow Do Not Disturb access to Linksy on the phone first"}
+```
+
+- **Levels** (`media`, `ringtone`, `alarm`) run from 0 to 1 of each stream's own range
+  (`AudioManager` `STREAM_MUSIC`, `STREAM_RING`, `STREAM_ALARM`): the phone rounds to its steps.
+  The computer keeps them within 0 to 1; a value that isn't a number is dropped.
+- **`ringer`**: `normal`, `vibrate` or `silent` (`AudioManager.setRingerMode`). Going to `silent`
+  on a phone in Do Not Disturb needs the access below.
+- **`dnd`**: `off`, `priority` (what the phone's own Do Not Disturb settings let through),
+  `alarms` (only alarms) or `silence` (nothing): Android's interruption filter. Changing it needs
+  **Do Not Disturb access** (`NotificationManager.isNotificationPolicyAccessGranted`), a special
+  access the user gives in Android's settings; `dnd_access` says whether Linksy has it, so the
+  computer can say so instead of showing a switch that does nothing. Without it, answer a
+  `dnd` change with `controls_refused`.
+- **`flashlight`**: `CameraManager.setTorchMode`; absent from `controls_state` when the phone has
+  none. It can't be turned on while the camera is in use (the webcam): `controls_refused`.
+- **`seq`** as for `media_state`: the computer keeps the newest and drops late ones. Send a
+  `controls_state` on connecting (to a computer that asked), and again whenever any of them
+  changes, by the phone's own buttons too, but at most about four times a second while a level is
+  moving. Values from a newer Linksy that this one doesn't know (`ringer`, `dnd`) are read as
+  `unknown` and never sent back.
+- **`controls_refused`** says which one (`what`: `media`, `ringtone`, `alarm`, `ringer`, `dnd`,
+  `flashlight`) and why, in a sentence to show as it is. A `controls_set` with several keys
+  may do some and refuse others; each refusal is its own message.
+- **From away:** these are **not** among the things always allowed away from home (§4.13): a
+  phone refuses `controls_set` from away with `controls_refused` and `reason` "away" unless
+  Allow Everything From Away is on for that computer. (Reading `controls_state` is fine: it only
+  goes to a computer that asked.) This is the safe default; widening it is the user's decision.
+- **Keep Do Not Disturb in Sync** (computer, GNOME and KDE): while on for a phone, the computer's
+  Do Not Disturb and the phone's `dnd` follow each other: `off` and the others map to the
+  computer's off and on, and the last change wins. Nothing on the phone's side beyond the above.
+- **Core API:** `node.watch_controls(id, on)`, `node.set_controls(id, ControlsChange)`,
+  `node.send_controls_state(id, &ControlsState)`, `node.refuse_controls(id, what, reason)`;
+  `Event::ControlsState`, `ControlsSet`, `ControlsWatch`, `ControlsRefused`.
+- **Phone to-do:** announce `phone_controls`; answer `controls_watch` with `controls_state` and
+  keep it going while watched; apply each `controls_set` key and refuse what it can't; ask the user
+  for Do Not Disturb access from a button where `dnd_access` is false (Settings, "Do Not Disturb
+  access"), since a sideloaded app can ask for it without a permission prompt of the
+  restricted kind.
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 
