@@ -12,6 +12,7 @@ pub mod gallery;
 pub mod identity;
 mod node;
 pub mod protocol;
+pub mod route;
 mod settings;
 mod tls;
 pub mod transfer;
@@ -26,6 +27,7 @@ pub use protocol::{
     MediaState, MouseButton, NotificationButton, PluggedPhone, RemoteNotification, SessionKind, SmsMessage, SmsThread, TerminalInfo, TerminalOpen, VolumeState,
 };
 pub use node::{TerminalCall, Verdict};
+pub use route::{DirectPlan, Route, SendPlan, Skip};
 pub use settings::{MAX_NAME, Settings};
 pub use trust::TrustedDevice;
 pub use uuid::Uuid;

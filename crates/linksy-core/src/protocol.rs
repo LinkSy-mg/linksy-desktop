@@ -483,6 +483,9 @@ pub enum DirectStep {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    /// Either way: a send is being prepared, so don't close the link for idleness for
+    /// `seconds` more (at most 180). Handled by the core; an older device ignores it.
+    Keep { seconds: u32 },
 }
 
 impl DirectStep {
@@ -497,7 +500,7 @@ impl DirectStep {
             Self::Up { ip: std::net::IpAddr::V4(ip), port } => (ip.is_private() || ip.is_link_local() || ip.is_loopback()) && *port != 0,
             Self::Up { .. } => false,
             Self::End { reason } => reason.as_ref().is_none_or(|r| r.len() <= 200),
-            Self::Ask | Self::Connecting => true,
+            Self::Ask | Self::Connecting | Self::Keep { .. } => true,
         }
     }
 }

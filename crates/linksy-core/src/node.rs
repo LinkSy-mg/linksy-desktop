@@ -35,6 +35,7 @@ use crate::protocol::{Battery, CallState, ConversationMessage, DeckAction, DeckS
     FileEntry, Handshake, Intent, Message, PAIRING_VERSION, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
+use crate::route::{DirectPlan, Rates, Route, SendPlan, Skip};
 use crate::transfer::{self, Progress};
 use crate::trust::{TrustStore, TrustedDevice};
 use crate::tls;
@@ -76,6 +77,10 @@ const INVITE_TTL: Duration = Duration::from_secs(300);
 const DIRECT_SETUP: Duration = Duration::from_secs(45);
 /// After a direct link with a device failed, transfers don't wait for another this long.
 const DIRECT_RETRY: Duration = Duration::from_secs(600);
+/// How long a direct link prepared for a send stays up unused, and the most a device may
+/// ask the other to keep one for (`keep`, docs/protocol.md §4.22).
+const WARM_KEEP: u32 = 90;
+const MAX_KEEP: u32 = 180;
 /// How often the away endpoint is checked against who could use it, and how long it stays
 /// up once no one could.
 const AWAY_CHECK: Duration = Duration::from_secs(60);
@@ -176,6 +181,19 @@ pub enum Event {
     /// `import`: photos a phone imports into this computer's pictures (no prompt).
     TransferStarted { transfer: Uuid, peer: DeviceInfo, direction: Direction, files: Vec<FileEntry>, total: u64, import: bool },
     TransferProgress { transfer: Uuid, bytes: u64, total: u64 },
+    /// The route a transfer goes over (docs/protocol.md §4.22), on both ends. Sent once when
+    /// the transfer starts; the sender sends one before that while it sets up a direct link
+    /// (`setting_up_direct`: the transfer waits, up to 45 s), then the settled one, with
+    /// `why_not_direct` when a link was tried and failed ("Wi-Fi is off") and it goes the
+    /// usual way.
+    TransferRoute {
+        transfer: Uuid,
+        route: Route,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        setting_up_direct: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        why_not_direct: Option<String>,
+    },
     TransferComplete { transfer: Uuid, saved: Vec<PathBuf> },
     TransferFailed { transfer: Uuid, reason: String },
     SettingsChanged { settings: Settings },
@@ -360,6 +378,9 @@ pub struct DeviceView {
     /// Connected away from home, over the internet (docs/protocol.md §4.13).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub away: bool,
+    /// A direct link (Wi-Fi Direct, §4.17) to it is up: big transfers go over it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub direct: bool,
     /// Everything is allowed from away for it (screens, files, camera…), not only the
     /// small things.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -422,6 +443,7 @@ struct Peer {
 struct Attempt {
     n: usize,
     outcome: watch::Sender<Option<bool>>,
+    since: Instant,
 }
 
 /// A direct link's connection to a device (docs/protocol.md §4.17), beside the usual one.
@@ -530,6 +552,8 @@ struct Inner {
     direct_attempts: AtomicUsize,
     /// When a direct link with a device last failed, and why.
     direct_failed: Mutex<HashMap<Fingerprint, (Instant, String)>>,
+    /// How fast each route to a device has been, and how long direct links took (§4.22).
+    rates: Mutex<HashMap<Fingerprint, Rates>>,
 }
 
 #[derive(Clone)]
@@ -597,6 +621,7 @@ impl Node {
                 direct: Mutex::default(),
                 direct_attempts: AtomicUsize::new(0),
                 direct_failed: Mutex::default(),
+                rates: Mutex::default(),
             }),
         };
 
@@ -700,6 +725,7 @@ impl Node {
         let peers = self.inner.peers.lock().unwrap();
         let nearby = self.inner.nearby.lock().unwrap();
         let batteries = self.inner.batteries.lock().unwrap();
+        let lanes: std::collections::HashSet<Fingerprint> = self.inner.lanes.lock().unwrap().iter().filter(|(_, l)| l.conn.close_reason().is_none()).map(|(id, _)| *id).collect();
         let mut out: Vec<DeviceView> = trust
             .list()
             .into_iter()
@@ -708,6 +734,7 @@ impl Node {
                 connected: peers.contains_key(&t.device.id),
                 usb: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Usb),
                 away: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Away),
+                direct: lanes.contains(&t.device.id),
                 away_all: t.away_all,
                 auto_accept: t.auto_accept,
                 allow_screen: t.allow_screen,
@@ -733,7 +760,7 @@ impl Node {
             .collect();
         for (id, (device, _)) in nearby.iter() {
             if !trust.contains(id) {
-                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false, latency_ms: None });
+                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, direct: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false, latency_ms: None });
             }
         }
         // Paired and reachable first, then devices to pair, then paired ones that are away.
@@ -1348,16 +1375,17 @@ impl Node {
             let result = async {
                 node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries.clone(), total, import });
                 // Big ones over a direct link, when the devices can set one up
-                let lane = node.direct_for(&to, total).await;
+                let (lane, why_not_direct) = node.direct_for(&to, total, Some(id)).await;
                 let _lane_busy = lane.as_ref().map(|(_, a)| a.hold());
                 let opened = match lane {
                     Some((lane, _)) => lane.open_bi().await.ok(),
                     None => None,
                 };
-                let (mut send, mut recv) = match opened {
-                    Some(streams) => streams,
-                    None => conn.open_bi().await?,
+                let (route, (mut send, mut recv)) = match opened {
+                    Some(streams) => (Route::Direct, streams),
+                    None => (node.link(&to).map_or(Route::Lan, Route::from), conn.open_bi().await?),
                 };
+                node.emit(Event::TransferRoute { transfer: id, route, setting_up_direct: false, why_not_direct });
                 write_msg(&mut send, &TransferMsg::Offer { id, files: entries, import, clipboard }).await?;
                 let offsets = match read_msg(&mut recv).await? {
                     TransferMsg::Accept { offsets } => offsets,
@@ -1368,9 +1396,14 @@ impl Node {
                 let mut report = move |bytes| {
                     let _ = events.send(Event::TransferProgress { transfer: id, bytes, total });
                 };
-                let start = offsets.iter().sum();
+                let start: u64 = offsets.iter().sum();
                 let mut progress = Progress::new(start, &mut report);
-                transfer::send_files(&mut send, &mut recv, &files, &offsets, &mut progress).await
+                let began = Instant::now();
+                let sent = transfer::send_files(&mut send, &mut recv, &files, &offsets, &mut progress).await;
+                if sent.is_ok() {
+                    node.learn_rate(&to, route, total.saturating_sub(start), began.elapsed());
+                }
+                sent
             }
             .await;
             node.inner.transfers.lock().unwrap().remove(&id);
@@ -2287,6 +2320,7 @@ impl Node {
         let node = self.clone();
         let from_clip = from.clone();
         let to_clipboard = clipboard_to.is_some();
+        let over_lane = lane.is_some();
         let task = tokio::spawn(async move {
             // The direct link it comes over stays up until it's done
             let _lane = lane;
@@ -2301,7 +2335,9 @@ impl Node {
                 write_msg(&mut send, &TransferMsg::Accept { offsets }).await?;
                 // A clipboard file isn't a download: it shows up as `ClipboardFile` only.
                 if !to_clipboard {
+                    let route = if over_lane { Route::Direct } else { node.link(&from.id).map_or(Route::Lan, Route::from) };
                     node.emit(Event::TransferStarted { transfer: id, peer: from, direction: Direction::Incoming, files, total, import });
+                    node.emit(Event::TransferRoute { transfer: id, route, setting_up_direct: false, why_not_direct: None });
                 }
                 let events = node.inner.events.clone();
                 let mut report = move |bytes| {
@@ -2462,19 +2498,49 @@ impl Node {
         self.info().features.iter().any(|f| f == mine) && self.peer_info(to).is_some_and(|p| p.features.iter().any(|f| f == theirs))
     }
 
+    /// What a direct link would do for a send of `total` bytes to `to` now, over `link`.
+    /// `head_start`: seconds of the setup that cost nothing (the user is still choosing).
+    fn direct_outlook(&self, to: &Fingerprint, link: Link, total: u64, head_start: f64) -> DirectPlan {
+        if self.lane(to).is_some() {
+            return DirectPlan::Up;
+        }
+        if link == Link::Usb {
+            return DirectPlan::Not { why: Skip::Cable };
+        }
+        if self.direct_role(to).is_none() {
+            return DirectPlan::Not { why: Skip::Unsupported };
+        }
+        if let Some((_, reason)) = self.inner.direct_failed.lock().unwrap().get(to).filter(|(at, _)| at.elapsed() < DIRECT_RETRY) {
+            return DirectPlan::Not { why: Skip::Failed { reason: reason.clone() } };
+        }
+        let rates = self.inner.rates.lock().unwrap().get(to).cloned().unwrap_or_default();
+        if rates.direct_pays(link, total, self.inner.config.direct_min, head_start) {
+            DirectPlan::Will
+        } else {
+            DirectPlan::Not { why: Skip::Small }
+        }
+    }
+
     /// The direct link a transfer of `total` bytes to `to` goes over: the one up, or a new
-    /// one when it's worth the wait.
-    async fn direct_for(&self, to: &Fingerprint, total: u64) -> Option<(quinn::Connection, Arc<Activity>)> {
-        if let Some(lane) = self.lane(to) {
-            return Some(lane);
+    /// one when it's worth the wait; and why there isn't one when it was tried and failed.
+    /// With a `transfer`, the wait is announced ([`Event::TransferRoute`]).
+    async fn direct_for(&self, to: &Fingerprint, total: u64, transfer: Option<Uuid>) -> (Option<(quinn::Connection, Arc<Activity>)>, Option<String>) {
+        let Some(link) = self.link(to) else { return (None, None) };
+        match self.direct_outlook(to, link, total, 0.0) {
+            DirectPlan::Up => (self.lane(to), None),
+            DirectPlan::Not { why: Skip::Failed { reason } } => (None, Some(reason)),
+            DirectPlan::Not { .. } => (None, None),
+            DirectPlan::Will => {
+                let Some(host) = self.direct_role(to) else { return (None, None) };
+                if let Some(transfer) = transfer {
+                    self.emit(Event::TransferRoute { transfer, route: link.into(), setting_up_direct: true, why_not_direct: None });
+                }
+                match self.direct_wait(to, host).await {
+                    Some(lane) => (Some(lane), None),
+                    None => (None, self.inner.direct_failed.lock().unwrap().get(to).map(|(_, why)| why.clone())),
+                }
+            }
         }
-        let host = self.direct_role(to)?;
-        if !worth_direct(self.link(to)?, total, self.inner.config.direct_min)
-            || self.inner.direct_failed.lock().unwrap().get(to).is_some_and(|(at, _)| at.elapsed() < DIRECT_RETRY)
-        {
-            return None;
-        }
-        self.direct_wait(to, host).await
     }
 
     /// Start a direct link with `to`, or join the attempt under way, and wait for it; the
@@ -2506,7 +2572,7 @@ impl Node {
         }
         let attempt = self.inner.direct_attempts.fetch_add(1, Ordering::SeqCst);
         let (outcome, rx) = watch::channel(None);
-        direct.insert(*to, Attempt { n: attempt, outcome });
+        direct.insert(*to, Attempt { n: attempt, outcome, since: Instant::now() });
         let (node, id) = (self.clone(), *to);
         tokio::spawn(async move {
             tokio::time::sleep(DIRECT_SETUP).await;
@@ -2561,6 +2627,7 @@ impl Node {
             DirectStep::End { reason } => {
                 self.direct_drop(&id, reason);
             }
+            DirectStep::Keep { seconds } => self.hold_lane(&id, seconds),
             step => {
                 if matches!(step, DirectStep::Invite { .. }) {
                     self.direct_begin(&id);
@@ -2584,6 +2651,7 @@ impl Node {
             old.conn.close(0u32.into(), b"replaced");
         }
         if let Some(a) = self.inner.direct.lock().unwrap().remove(&device.id) {
+            self.inner.rates.lock().unwrap().entry(device.id).or_default().learn_setup(a.since.elapsed().as_secs_f64());
             a.outcome.send_replace(Some(true));
         }
         self.inner.direct_failed.lock().unwrap().remove(&device.id);
@@ -2625,14 +2693,100 @@ impl Node {
     }
 }
 
-/// Whether sending `total` bytes over `link` is worth setting up a direct link first,
-/// which takes a few seconds; never instead of a cable.
-fn worth_direct(link: Link, total: u64, min: u64) -> bool {
-    match link {
-        Link::Usb => false,
-        Link::Lan => total >= min,
-        // Through the internet it's slow, so smaller ones gain too
-        Link::Away => total >= min / 8,
+/// Routes: which way bytes go, and getting a faster one ready (docs/protocol.md §4.22).
+impl Node {
+    /// How a connected device is reached now: a direct link when one is up, else the
+    /// connection's own route.
+    pub fn route(&self, id: &Fingerprint) -> Option<Route> {
+        let link = self.link(id)?;
+        Some(if self.lane(id).is_some() { Route::Direct } else { link.into() })
+    }
+
+    /// What sending `bytes` to `to` would do now, without doing it: the route, whether a
+    /// direct link is up or would be set up first, and a rough time. `None` when it isn't
+    /// connected (sending connects it, and the route is known then).
+    pub fn plan_send(&self, to: &Fingerprint, bytes: u64) -> Option<SendPlan> {
+        self.plan(to, bytes, 0.0, self.link(to)?)
+    }
+
+    /// [`Node::plan_send`] as if the connection went over `link`; for tests, which run on
+    /// loopback, where every link is a cable.
+    #[doc(hidden)]
+    pub fn plan_send_over(&self, to: &Fingerprint, bytes: u64, link: Link) -> SendPlan {
+        self.plan(to, bytes, 0.0, link).expect("a plan")
+    }
+
+    fn plan(&self, to: &Fingerprint, bytes: u64, head_start: f64, link: Link) -> Option<SendPlan> {
+        let direct = self.direct_outlook(to, link, bytes, head_start);
+        let rates = self.inner.rates.lock().unwrap().get(to).cloned().unwrap_or_default();
+        let seconds = match &direct {
+            DirectPlan::Up => rates.estimate(Route::Direct, bytes, false),
+            DirectPlan::Will => rates.estimate(Route::Direct, bytes, true),
+            DirectPlan::Not { .. } => rates.estimate(link.into(), bytes, false),
+        };
+        let route = if self.lane(to).is_some() { Route::Direct } else { link.into() };
+        Some(SendPlan { route, direct, seconds: Some(seconds) })
+    }
+
+    /// The user is choosing what to send, `bytes` of it so far: have the best route ready
+    /// by the time they tap Send. A direct link that will pay for itself starts to come up
+    /// now (half its setup counts as free, since choosing takes time), and one that's up
+    /// stays up for 90 s more; both devices keep it. Call again as the selection grows;
+    /// it does nothing twice. Returns the plan; `DirectLinked` / `DirectEnded` say how it
+    /// went. Nothing is sent.
+    pub async fn prepare_send(&self, to: &Fingerprint, bytes: u64) -> Option<SendPlan> {
+        Some(self.prepare(to, bytes, self.link(to)?))
+    }
+
+    /// [`Node::prepare_send`] as if the connection went over `link`; for tests.
+    #[doc(hidden)]
+    pub async fn prepare_send_over(&self, to: &Fingerprint, bytes: u64, link: Link) -> SendPlan {
+        self.prepare(to, bytes, link)
+    }
+
+    fn prepare(&self, to: &Fingerprint, bytes: u64, link: Link) -> SendPlan {
+        let head = self.inner.rates.lock().unwrap().get(to).cloned().unwrap_or_default().setup_secs() / 2.0;
+        let plan = self.plan(to, bytes, head, link).expect("a plan");
+        match plan.direct {
+            DirectPlan::Up => self.keep_direct(to, WARM_KEEP),
+            DirectPlan::Will => {
+                if let Some(host) = self.direct_role(to) {
+                    let (node, to) = (self.clone(), *to);
+                    tokio::spawn(async move {
+                        if node.direct_wait(&to, host).await.is_some() {
+                            node.keep_direct(&to, WARM_KEEP);
+                        }
+                    });
+                }
+            }
+            DirectPlan::Not { .. } => {}
+        }
+        plan
+    }
+
+    /// Hold the direct link with `to` open for `secs` more, here and there.
+    fn keep_direct(&self, to: &Fingerprint, secs: u32) {
+        self.hold_lane(to, secs);
+        let (node, to) = (self.clone(), *to);
+        tokio::spawn(async move {
+            let _ = node.send_message(&to, &Message::Direct { step: DirectStep::Keep { seconds: secs } }).await;
+        });
+    }
+
+    /// Don't close the direct link with `to` for idleness for `secs`.
+    fn hold_lane(&self, to: &Fingerprint, secs: u32) {
+        if let Some((_, activity)) = self.lane(to) {
+            let busy = activity.hold();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(secs.min(MAX_KEEP) as u64)).await;
+                drop(busy);
+            });
+        }
+    }
+
+    /// A transfer of `bytes` over `route` took `took`: what that route can do.
+    fn learn_rate(&self, to: &Fingerprint, route: Route, bytes: u64, took: Duration) {
+        self.inner.rates.lock().unwrap().entry(*to).or_default().learn(route, bytes, took.as_secs_f64());
     }
 }
 
@@ -2950,15 +3104,6 @@ fn bind_endpoint(identity: &Identity, addr: SocketAddr) -> Result<quinn::Endpoin
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn direct_links_only_when_worth_the_wait() {
-        let min = 256 << 20;
-        assert!(worth_direct(Link::Lan, min, min));
-        assert!(!worth_direct(Link::Lan, min - 1, min));
-        assert!(worth_direct(Link::Away, min / 8, min));
-        assert!(!worth_direct(Link::Usb, u64::MAX, min));
-    }
 
     #[tokio::test]
     async fn first_to_succeed_wins_without_waiting_for_the_other() {
