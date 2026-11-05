@@ -49,6 +49,8 @@
 //! gets, runs that action (a slider with VALUE), prints the state after, then closes it.
 //! `--deck-layout` announces `deck_layout`, so the deck also gets its layouts (printed as
 //! DECK_LAYOUT, in short); `--deck-wait SECONDS` keeps the deck open that long after the run.
+//! `--off FEATURE` starts without it (`notifications`, `gallery`), as with its switch off;
+//! `--turn-on` announces `turn_on` and says yes when a computer asks to turn one on.
 
 use std::time::Duration;
 
@@ -88,6 +90,7 @@ async fn main() {
     let mut accept_pairing = false;
     let mut deck: Option<(String, Option<f64>)> = None;
     let (mut deck_layout, mut deck_wait) = (false, 0u64);
+    let (mut off, mut turn_on) = (Vec::<String>::new(), false);
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -148,6 +151,8 @@ async fn main() {
             "--deck-wait" => deck_wait = value().parse().expect("--deck-wait SECONDS"),
             "--chats" => chats = true,
             "--notifications-later" => notifications_later = Some(value().parse().expect("--notifications-later SECONDS")),
+            "--off" => off.push(value()),
+            "--turn-on" => turn_on = true,
             other => panic!("unknown option {other}"),
         }
     }
@@ -172,6 +177,10 @@ async fn main() {
     if deck_layout {
         config.features.push("deck_layout".into());
     }
+    if turn_on {
+        config.features.push("turn_on".into());
+    }
+    config.features.retain(|f| !off.contains(f));
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
     let node = Node::start(config).await.expect("start");
     let mut events = node.subscribe();
@@ -667,6 +676,15 @@ async fn main() {
                     if let (Some(command), Some(p)) = (press.take(), state.players.first()) {
                         println!("pressing {command:?} on {}", p.app);
                         let _ = node.media_command(&from.id, &p.id, command).await;
+                    }
+                }
+                Ok(Event::TurnOnRequest { from, feature }) => {
+                    println!("TURN ON ASKED {feature} by {}", from.name);
+                    let mut features = node.info().features;
+                    if turn_on && ["notifications", "gallery"].contains(&feature.as_str()) && !features.contains(&feature) {
+                        features.push(feature.clone());
+                        node.set_features(features).await;
+                        println!("{feature} turned on");
                     }
                 }
                 Ok(Event::LocateRequest { from }) => {

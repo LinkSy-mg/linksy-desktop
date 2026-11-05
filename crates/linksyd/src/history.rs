@@ -132,10 +132,10 @@ impl History {
                 Err(RecvError::Closed) => break,
             };
             match event {
-                Event::TransferRequest { transfer, from, files, total } => {
+                Event::TransferRequest { transfer, from, files, total, .. } => {
                     offers.insert(transfer, (from, files, total));
                 }
-                Event::TransferStarted { transfer, peer, direction, files, total, import } => {
+                Event::TransferStarted { transfer, peer, direction, files, total, import, .. } => {
                     offers.remove(&transfer);
                     self.upsert(HistoryEntry {
                         id: transfer,

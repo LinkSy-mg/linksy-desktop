@@ -39,15 +39,18 @@ Kirigami.Page {
         if (!trusted || !info) return "";
         const shown = [];
         if (handheld || ["display", "camera", "microphone"].some(f => app.can(info, f))) shown.push("use");
-        if (phone && (app.can(info, "notifications") || app.can(info, "sms"))) shown.push("inbox");
-        if (handheld && app.can(info, "gallery")) shown.push("gallery");
+        // The Inbox and Gallery show while off too, saying how to turn them on
+        if (phone) shown.push("inbox");
+        if (handheld) shown.push("gallery");
         if (handheld && app.can(info, "fs")) shown.push("files");
         return shown.concat(["transfers", "history", "settings"]).join(" ");
     }
     readonly property var tabsShown: tabsKey ? tabsKey.split(" ") : []
-    readonly property string inboxPhone: tabsShown.includes("inbox") ? deviceId : ""
+    readonly property bool inboxOn: info !== null && (app.can(info, "notifications") || app.can(info, "sms"))
+    readonly property bool galleryOn: info !== null && app.can(info, "gallery")
+    readonly property string inboxPhone: inboxOn && tabsShown.includes("inbox") ? deviceId : ""
     readonly property string filesPhone: tabsShown.includes("files") ? deviceId : ""
-    readonly property string galleryPhone: tabsShown.includes("gallery") ? deviceId : ""
+    readonly property string galleryPhone: galleryOn && tabsShown.includes("gallery") ? deviceId : ""
     // Where the tabs are in the page, to pin them at its top once it scrolls past them
     readonly property real tabsTop: column.y + tabBar.y
 
@@ -97,7 +100,10 @@ Kirigami.Page {
         deckOpen = false;
         Qt.callLater(page.rebuild);
     }
-    onInboxPhoneChanged: inbox.reset(inboxPhone)
+    onInboxPhoneChanged: {
+        inbox.reset(inboxPhone);
+        if (tab === "inbox") inbox.load();
+    }
     onFilesPhoneChanged: if (tab === "files") Qt.callLater(page.showFiles)
     onGalleryPhoneChanged: if (tab === "gallery") Qt.callLater(page.showGallery)
     onTabsShownChanged: fixTab()
@@ -615,7 +621,7 @@ Kirigami.Page {
                     Layout.fillWidth: true
                     visible: page.trusted
                     sourceComponent: !page.trusted ? null
-                        : ({ use: useTab, inbox: inboxTab, gallery: galleryTab, files: filesTab, transfers: transfersTab, history: historyTab, settings: settingsTab })[page.tab] ?? null
+                        : ({ use: useTab, inbox: page.inboxOn ? inboxTab : featureOff, gallery: page.galleryOn ? galleryTab : featureOff, files: filesTab, transfers: transfersTab, history: historyTab, settings: settingsTab })[page.tab] ?? null
                 }
             }
         }
@@ -824,6 +830,44 @@ Kirigami.Page {
             app: page.app
             store: inbox
             narrow: page.narrow
+        }
+    }
+
+    // An Inbox or Gallery the phone hasn't turned on: where to, and Ask the Phone when it can be asked
+    Component {
+        id: featureOff
+        ColumnLayout {
+            id: off
+            readonly property bool gallery: page.tab === "gallery"
+            spacing: Kirigami.Units.largeSpacing
+
+            Kirigami.PlaceholderMessage {
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.gridUnit * 2
+                icon.name: page.tabIcon(page.tab)
+                text: off.gallery ? app.t("The Gallery Is Off") : app.t("The Inbox Is Off")
+                explanation: off.gallery
+                    ? app.t("Turn on “Photos on your computers” in Linksy on the phone, under Settings › Files, and let it see all photos.")
+                    : app.t("Turn on “Show this phone's notifications” in Linksy on the phone, under Settings › With your computers.")
+            }
+            QQC2.Button {
+                Layout.alignment: Qt.AlignHCenter
+                visible: page.info !== null && app.can(page.info, "turn_on")
+                highlighted: true
+                text: app.t("Ask the Phone")
+                icon.name: "smartphone"
+                onClicked: app.request("turn_on", { to: page.deviceId, feature: off.gallery ? "gallery" : "notifications" }, (ok, err) =>
+                    app.toast(ok ? app.t("Look at {name} to turn it on", { name: page.name })
+                                 : app.t("Couldn't ask {name}: {reason}", { name: page.name, reason: err.charAt(0).toUpperCase() + err.slice(1) })))
+            }
+            QQC2.Button {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.bottomMargin: Kirigami.Units.gridUnit * 2
+                flat: true
+                text: app.t("How to Turn It On")
+                icon.name: "help-contents"
+                onClicked: Qt.openUrlExternally(off.gallery ? "https://linksy.diary.mg/help/gallery" : "https://linksy.diary.mg/help/inbox")
+            }
         }
     }
 

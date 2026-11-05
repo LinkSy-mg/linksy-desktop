@@ -92,6 +92,9 @@ pub enum TransferMsg {
         /// taken without asking.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         clipboard: bool,
+        /// Apps among the files, each the APKs in a folder of its own (§4.22).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        apps: Vec<crate::apps::AppInfo>,
     },
     /// `offsets[i]` is how many bytes of file `i` the receiver already has.
     Accept { offsets: Vec<u64> },
@@ -433,6 +436,9 @@ pub enum Message {
     InboxHistoryPage { app: String, conversation: String, messages: Vec<ConversationMessage>, more: bool },
     /// The phone's photos changed: one added, deleted… (§4.18)
     GalleryChanged,
+    /// "Turn this on, please" (computer → phone, §4.21): `notifications` or `gallery`. The
+    /// phone asks its user; the answer is the `features` it announces.
+    TurnOn { feature: String },
     /// The phone's deck shows (the computer sends `deck_actions`, then `deck_state` as it
     /// changes), or stopped showing (§4.19).
     DeckOpen,
@@ -480,6 +486,9 @@ pub enum DirectStep {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
     },
+    /// Either way: a send is being prepared, so don't close the link for idleness for
+    /// `seconds` more (at most 180). Handled by the core; an older device ignores it.
+    Keep { seconds: u32 },
 }
 
 impl DirectStep {
@@ -494,7 +503,7 @@ impl DirectStep {
             Self::Up { ip: std::net::IpAddr::V4(ip), port } => (ip.is_private() || ip.is_link_local() || ip.is_loopback()) && *port != 0,
             Self::Up { .. } => false,
             Self::End { reason } => reason.as_ref().is_none_or(|r| r.len() <= 200),
-            Self::Ask | Self::Connecting => true,
+            Self::Ask | Self::Connecting | Self::Keep { .. } => true,
         }
     }
 }
@@ -917,6 +926,13 @@ mod tests {
         assert_eq!(set, Message::VolumeSet { level: None, muted: Some(true) });
         assert_eq!(serde_json::to_string(&Message::VolumeSet { level: Some(0.5), muted: None }).unwrap(), r#"{"type":"volume_set","level":0.5}"#);
         assert_eq!(serde_json::from_str::<Message>(r#"{"type":"volume_watch","on":true}"#).unwrap(), Message::VolumeWatch { on: true });
+    }
+
+    #[test]
+    fn turn_on_reads_as_documented() {
+        let ask = Message::TurnOn { feature: "gallery".into() };
+        assert_eq!(serde_json::to_string(&ask).unwrap(), r#"{"type":"turn_on","feature":"gallery"}"#);
+        assert_eq!(serde_json::from_str::<Message>(r#"{"type":"turn_on","feature":"gallery"}"#).unwrap(), ask);
     }
 
     #[test]

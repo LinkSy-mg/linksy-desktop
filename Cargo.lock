@@ -2578,6 +2578,7 @@ dependencies = [
  "hex",
  "if-addrs",
  "iroh",
+ "libc",
  "mdns-sd",
  "quinn",
  "rcgen",

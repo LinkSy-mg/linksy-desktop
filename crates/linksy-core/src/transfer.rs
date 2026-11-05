@@ -46,6 +46,23 @@ pub fn collect(paths: &[PathBuf]) -> io::Result<Vec<OutgoingFile>> {
     Ok(out)
 }
 
+/// Files under names of the sender's choosing: each `(path, name)` is sent as `name`, a
+/// relative path with `/` separators (an app's APKs, in a folder of their own). The path
+/// must be a file.
+pub fn collect_as(items: &[(PathBuf, String)]) -> io::Result<Vec<OutgoingFile>> {
+    let mut out = Vec::new();
+    for (path, name) in items {
+        if sanitize(name).is_none() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unsupported file name: {name}")));
+        }
+        if !std::fs::metadata(path)?.is_file() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{} is not a file", path.display())));
+        }
+        walk(path, name.clone(), &mut out, true)?;
+    }
+    Ok(out)
+}
+
 fn walk(path: &Path, rel: String, out: &mut Vec<OutgoingFile>, named: bool) -> io::Result<()> {
     let meta = if named { std::fs::metadata(path)? } else { std::fs::symlink_metadata(path)? };
     if meta.is_file() {
@@ -343,6 +360,20 @@ mod tests {
         for bad in ["", "/etc/passwd", "../x", "a/../../x", "./a", "C:\\x", "a\\b", "c:/x"] {
             assert_eq!(sanitize(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn files_can_be_sent_under_names_of_the_senders_choosing() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("base.apk");
+        std::fs::write(&real, b"apk").unwrap();
+        let got = collect_as(&[(real.clone(), "org.a.app-1/base.apk".into())]).unwrap();
+        assert_eq!(got[0].entry, FileEntry { path: "org.a.app-1/base.apk".into(), size: 3 });
+        assert_eq!(got[0].source, real);
+        // Never out of the folder, never a folder, never a file that isn't there
+        assert!(collect_as(&[(real.clone(), "../base.apk".into())]).is_err());
+        assert!(collect_as(&[(dir.path().to_path_buf(), "dir".into())]).is_err());
+        assert!(collect_as(&[(dir.path().join("none.apk"), "none.apk".into())]).is_err());
     }
 
     #[tokio::test]

@@ -23,6 +23,7 @@ use tokio::task::{AbortHandle, JoinSet};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::apps::{AppInfo, AppProbe, AppSend, DirectReady, MAX_APKS, MAX_PROBES, PreflightMsg, PreflightReply, ReceivedApp, is_apk, received_apps, valid_apps};
 use crate::deck_layout::DeckLayouts;
 use crate::discovery::{Announce, Discovery, DiscoveryEvent, DiscoveryKey};
 use crate::error::{Error, Result, invalid, protocol};
@@ -30,11 +31,13 @@ use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::fs::FsCall;
 use crate::gallery::GalleryCall;
 use crate::invite::{self, Invite};
+use crate::preflight::PreflightCall;
 use crate::settings::Settings;
 use crate::protocol::{Battery, CallState, ConversationMessage, DeckAction, DeckState, DirectGroup, DirectStep, PluggedPhone, FsRequest, GalleryRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState,
     FileEntry, Handshake, Intent, Message, PAIRING_VERSION, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
+use crate::route::{DirectPlan, Rates, Route, SendPlan, Skip};
 use crate::transfer::{self, Progress};
 use crate::trust::{TrustStore, TrustedDevice};
 use crate::tls;
@@ -76,6 +79,12 @@ const INVITE_TTL: Duration = Duration::from_secs(300);
 const DIRECT_SETUP: Duration = Duration::from_secs(45);
 /// After a direct link with a device failed, transfers don't wait for another this long.
 const DIRECT_RETRY: Duration = Duration::from_secs(600);
+/// How long a direct link prepared for a send stays up unused, and the most a device may
+/// ask the other to keep one for (`keep`, docs/protocol.md §4.22).
+const WARM_KEEP: u32 = 90;
+const MAX_KEEP: u32 = 180;
+/// How long a device's app has to add to a preflight answer.
+const PREFLIGHT_WAIT: Duration = Duration::from_millis(2500);
 /// How often the away endpoint is checked against who could use it, and how long it stays
 /// up once no one could.
 const AWAY_CHECK: Duration = Duration::from_secs(60);
@@ -120,6 +129,9 @@ pub struct Config {
     pub direct_min: u64,
     /// A direct link with nothing going on this long closes, so the phone stops hosting it.
     pub direct_idle: Duration,
+    /// Room to leave free where files are received: an offer that would use more is
+    /// declined at once, not started (§4.22).
+    pub keep_free: u64,
 }
 
 impl Config {
@@ -141,6 +153,7 @@ impl Config {
             relay: None,
             direct_min: 256 << 20,
             direct_idle: Duration::from_secs(20),
+            keep_free: 16 << 20,
         }
     }
 }
@@ -172,11 +185,44 @@ pub enum Event {
     Paired { device: DeviceInfo },
     PairingFailed { device: DeviceInfo, reason: String },
     /// Ask the user whether to accept these files.
-    TransferRequest { transfer: Uuid, from: DeviceInfo, files: Vec<FileEntry>, total: u64 },
+    TransferRequest {
+        transfer: Uuid,
+        from: DeviceInfo,
+        files: Vec<FileEntry>,
+        total: u64,
+        /// The apps among the files, when they say what they are (§4.22).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        apps: Vec<AppInfo>,
+    },
     /// `import`: photos a phone imports into this computer's pictures (no prompt).
-    TransferStarted { transfer: Uuid, peer: DeviceInfo, direction: Direction, files: Vec<FileEntry>, total: u64, import: bool },
+    TransferStarted {
+        transfer: Uuid,
+        peer: DeviceInfo,
+        direction: Direction,
+        files: Vec<FileEntry>,
+        total: u64,
+        import: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        apps: Vec<AppInfo>,
+    },
     TransferProgress { transfer: Uuid, bytes: u64, total: u64 },
+    /// The route a transfer goes over (docs/protocol.md §4.22), on both ends. Sent once when
+    /// the transfer starts; the sender sends one before that while it sets up a direct link
+    /// (`setting_up_direct`: the transfer waits, up to 45 s), then the settled one, with
+    /// `why_not_direct` when a link was tried and failed ("Wi-Fi is off") and it goes the
+    /// usual way.
+    TransferRoute {
+        transfer: Uuid,
+        route: Route,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        setting_up_direct: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        why_not_direct: Option<String>,
+    },
     TransferComplete { transfer: Uuid, saved: Vec<PathBuf> },
+    /// Apps arrived (after the `TransferComplete` of their transfer): each with the APKs it
+    /// came in, to install together. Android still asks the user (§4.22).
+    AppsReceived { transfer: Uuid, from: DeviceInfo, apps: Vec<ReceivedApp> },
     TransferFailed { transfer: Uuid, reason: String },
     SettingsChanged { settings: Settings },
     /// Ask the user whether `from` may start a media session (see their screen…).
@@ -268,6 +314,8 @@ pub enum Event {
     InboxHistoryPage { from: DeviceInfo, app: String, conversation: String, messages: Vec<ConversationMessage>, more: bool },
     /// A phone's photos changed (§4.18).
     GalleryChanged { from: DeviceInfo },
+    /// A computer asks this phone to turn on `feature` (§4.21).
+    TurnOnRequest { from: DeviceInfo, feature: String },
     /// A phone's deck (§4.19): it shows or stopped, an action to run; and what a computer
     /// offers it, with their state.
     DeckOpen { from: DeviceInfo },
@@ -358,6 +406,9 @@ pub struct DeviceView {
     /// Connected away from home, over the internet (docs/protocol.md §4.13).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub away: bool,
+    /// A direct link (Wi-Fi Direct, §4.17) to it is up: big transfers go over it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub direct: bool,
     /// Everything is allowed from away for it (screens, files, camera…), not only the
     /// small things.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -420,6 +471,7 @@ struct Peer {
 struct Attempt {
     n: usize,
     outcome: watch::Sender<Option<bool>>,
+    since: Instant,
 }
 
 /// A direct link's connection to a device (docs/protocol.md §4.17), beside the usual one.
@@ -468,7 +520,41 @@ impl Drop for Busy {
 /// where the answer goes for the ones that joined the first.
 struct Gathering {
     files: Vec<FileEntry>,
+    apps: Vec<AppInfo>,
     answer: watch::Sender<Option<bool>>,
+}
+
+/// What a send is made of: paths as they are, files under names of the sender's choosing,
+/// and the apps among them.
+#[derive(Default)]
+struct Items {
+    paths: Vec<PathBuf>,
+    named: Vec<(PathBuf, String)>,
+    apps: Vec<AppInfo>,
+}
+
+impl Items {
+    fn paths(paths: Vec<PathBuf>) -> Self {
+        Self { paths, ..Self::default() }
+    }
+}
+
+/// An APK's name in the offer: its own, with anything odd made safe, and different from
+/// the others of its app (`names`).
+fn apk_name(path: &std::path::Path, names: &mut std::collections::HashSet<String>) -> Option<String> {
+    let raw = path.file_name()?.to_str()?;
+    let clean: String = raw.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+') { c } else { '_' }).collect();
+    if !is_apk(&clean) {
+        return None;
+    }
+    let stem = &clean[..clean.len() - 4];
+    let mut name = clean.clone();
+    let mut n = 1;
+    while !names.insert(name.clone()) {
+        n += 1;
+        name = format!("{stem}_{n}.apk");
+    }
+    Some(name)
 }
 
 struct Inner {
@@ -499,6 +585,9 @@ struct Inner {
     /// Gallery requests, for whoever serves this device's photos (phones).
     gallery: Mutex<Option<mpsc::UnboundedReceiver<GalleryCall>>>,
     gallery_tx: mpsc::UnboundedSender<GalleryCall>,
+    /// Preflights from other devices, for the app to add what only it knows (§4.22).
+    preflight: Mutex<Option<mpsc::UnboundedReceiver<PreflightCall>>>,
+    preflight_tx: mpsc::UnboundedSender<PreflightCall>,
     /// Transfers this device asked for (photos from a gallery), taken without asking into
     /// their folder: by id, from whom, where, and since when.
     expected: Mutex<HashMap<Uuid, (Fingerprint, PathBuf, Instant)>>,
@@ -528,6 +617,8 @@ struct Inner {
     direct_attempts: AtomicUsize,
     /// When a direct link with a device last failed, and why.
     direct_failed: Mutex<HashMap<Fingerprint, (Instant, String)>>,
+    /// How fast each route to a device has been, and how long direct links took (§4.22).
+    rates: Mutex<HashMap<Fingerprint, Rates>>,
 }
 
 #[derive(Clone)]
@@ -556,6 +647,7 @@ impl Node {
         let (sessions_tx, sessions) = mpsc::unbounded_channel();
         let (fs_tx, fs) = mpsc::unbounded_channel();
         let (gallery_tx, gallery) = mpsc::unbounded_channel();
+        let (preflight_tx, preflight) = mpsc::unbounded_channel();
         let (terminals_tx, terminals) = mpsc::unbounded_channel();
         let node = Self {
             inner: Arc::new(Inner {
@@ -585,6 +677,8 @@ impl Node {
                 fs_tx,
                 gallery: Mutex::new(Some(gallery)),
                 gallery_tx,
+                preflight: Mutex::new(Some(preflight)),
+                preflight_tx,
                 expected: Mutex::default(),
                 terminals: Mutex::new(Some(terminals)),
                 terminals_tx,
@@ -595,6 +689,7 @@ impl Node {
                 direct: Mutex::default(),
                 direct_attempts: AtomicUsize::new(0),
                 direct_failed: Mutex::default(),
+                rates: Mutex::default(),
             }),
         };
 
@@ -698,6 +793,7 @@ impl Node {
         let peers = self.inner.peers.lock().unwrap();
         let nearby = self.inner.nearby.lock().unwrap();
         let batteries = self.inner.batteries.lock().unwrap();
+        let lanes: std::collections::HashSet<Fingerprint> = self.inner.lanes.lock().unwrap().iter().filter(|(_, l)| l.conn.close_reason().is_none()).map(|(id, _)| *id).collect();
         let mut out: Vec<DeviceView> = trust
             .list()
             .into_iter()
@@ -706,6 +802,7 @@ impl Node {
                 connected: peers.contains_key(&t.device.id),
                 usb: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Usb),
                 away: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Away),
+                direct: lanes.contains(&t.device.id),
                 away_all: t.away_all,
                 auto_accept: t.auto_accept,
                 allow_screen: t.allow_screen,
@@ -731,7 +828,7 @@ impl Node {
             .collect();
         for (id, (device, _)) in nearby.iter() {
             if !trust.contains(id) {
-                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false, latency_ms: None });
+                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, direct: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false, latency_ms: None });
             }
         }
         // Paired and reachable first, then devices to pair, then paired ones that are away.
@@ -963,6 +1060,11 @@ impl Node {
         self.send_message(to, &Message::GalleryChanged).await
     }
 
+    /// Ask a phone to turn on `feature` (§4.21); it shows when the phone announces it.
+    pub async fn ask_turn_on(&self, to: &Fingerprint, feature: &str) -> Result<()> {
+        self.send_message(to, &Message::TurnOn { feature: feature.into() }).await
+    }
+
     /// This phone's deck shows (`open`) or stopped (§4.19).
     pub async fn deck_open(&self, to: &Fingerprint, open: bool) -> Result<()> {
         self.send_message(to, if open { &Message::DeckOpen } else { &Message::DeckClose }).await
@@ -1129,7 +1231,7 @@ impl Node {
         if meta.len() > MAX_CLIPBOARD_FILE {
             return Err(invalid("too big for the clipboard (10 MB at most); send it as a file instead"));
         }
-        self.offer_with(to, vec![path], false, true, Uuid::new_v4()).await
+        self.offer_with(to, Items::paths(vec![path]), false, true, Uuid::new_v4()).await
     }
 
     /// Check in with a device that asked for heartbeats.
@@ -1286,6 +1388,46 @@ impl Node {
         Ok(conn.open_bi().await?)
     }
 
+    /// Preflights from other devices (§4.22), for the app to add what only it knows: whether
+    /// it can install apps, which of the apps asked about it has, whether a direct link would
+    /// work now. Taken once; until then the core answers on its own.
+    pub fn incoming_preflight(&self) -> Option<mpsc::UnboundedReceiver<PreflightCall>> {
+        self.inner.preflight.lock().unwrap().take()
+    }
+
+    async fn handle_preflight(self, from: DeviceInfo, mut send: quinn::SendStream, bytes: u64, files: u32, apps: Vec<AppProbe>) {
+        let apps: Vec<AppProbe> = apps.into_iter().filter(AppProbe::is_valid).take(MAX_PROBES).collect();
+        let (auto, dir) = {
+            let settings = self.inner.settings.lock().unwrap();
+            (settings.auto_accept || self.inner.trust.lock().unwrap().get(&from.id).is_some_and(|t| t.auto_accept), settings.download_dir.clone())
+        };
+        let can_link = self.info().features.iter().any(|f| f == "direct_host" || f == "direct_join");
+        let mut reply = PreflightReply {
+            free: crate::space::free(&dir).map(|f| f.saturating_sub(self.inner.config.keep_free)),
+            auto,
+            direct: if can_link { DirectReady::Ready } else { DirectReady::Unsupported },
+            can_install: None,
+            apps: Vec::new(),
+        };
+        let served = self.inner.preflight.lock().unwrap().is_none();
+        if served {
+            let (call, answer) = PreflightCall::new(from.clone(), bytes, files, apps.clone());
+            if self.inner.preflight_tx.send(call).is_ok()
+                && let Ok(Ok(a)) = tokio::time::timeout(PREFLIGHT_WAIT, answer).await
+            {
+                reply.free = a.free.or(reply.free);
+                reply.direct = a.direct.unwrap_or(reply.direct);
+                reply.can_install = a.can_install;
+                // Only what was asked about, once each
+                let asked: std::collections::HashSet<&str> = apps.iter().map(|p| p.package.as_str()).collect();
+                let mut seen = std::collections::HashSet::new();
+                reply.apps = a.apps.into_iter().filter(|s| asked.contains(s.package.as_str()) && seen.insert(s.package.clone())).collect();
+            }
+        }
+        let _ = write_msg(&mut send, &PreflightMsg::PreflightReply(reply)).await;
+        let _ = send.finish();
+    }
+
     pub fn incoming_sessions(&self) -> Option<mpsc::UnboundedReceiver<Session>> {
         self.inner.sessions.lock().unwrap().take()
     }
@@ -1314,22 +1456,60 @@ impl Node {
     }
 
     async fn offer(&self, to: &Fingerprint, paths: Vec<PathBuf>, import: bool) -> Result<Uuid> {
-        self.offer_with(to, paths, import, false, Uuid::new_v4()).await
+        self.offer_with(to, Items::paths(paths), import, false, Uuid::new_v4()).await
     }
 
     /// Send photos a computer asked for from this phone's gallery, as the transfer `id` it
     /// chose ([`GalleryRequest::Send`]).
     pub async fn send_gallery(&self, to: &Fingerprint, paths: Vec<PathBuf>, id: Uuid) -> Result<Uuid> {
-        self.offer_with(to, paths, true, false, id).await
+        self.offer_with(to, Items::paths(paths), true, false, id).await
     }
 
-    async fn offer_with(&self, to: &Fingerprint, paths: Vec<PathBuf>, import: bool, clipboard: bool, id: Uuid) -> Result<Uuid> {
+    /// Offer files, folders and apps in one go: `paths` as in [`Node::send_files`], and each
+    /// of `apps` as the folder of its APKs, which the other device is told about (§4.22).
+    /// The other device must announce `apps`; an app's folder is named `<package>-<version
+    /// code>`. Pass the whole selection in one call: one offer is one prompt, and the size
+    /// of all of it decides whether a direct link is set up.
+    pub async fn send_bundle(&self, to: &Fingerprint, paths: Vec<PathBuf>, apps: Vec<AppSend>) -> Result<Uuid> {
+        if !apps.is_empty() && !self.reach(to).await?.features.iter().any(|f| f == "apps") {
+            return Err(Error::Unsupported);
+        }
+        let mut items = Items::paths(paths);
+        let mut dirs = std::collections::HashSet::new();
+        for app in apps {
+            let mut info = app.info;
+            info.dir = format!("{}-{}", info.package, info.version_code);
+            if !info.is_valid() {
+                return Err(invalid(format!("{} isn't a valid app description", info.package)));
+            }
+            if !dirs.insert(info.dir.clone()) {
+                return Err(invalid(format!("{} twice in one send", info.package)));
+            }
+            if app.apks.is_empty() || app.apks.len() > MAX_APKS {
+                return Err(invalid(format!("{} has no APKs, or too many", info.package)));
+            }
+            let mut names = std::collections::HashSet::new();
+            for apk in app.apks {
+                let name = apk_name(&apk, &mut names).ok_or_else(|| invalid(format!("{} isn't an APK file", apk.display())))?;
+                items.named.push((apk, format!("{}/{name}", info.dir)));
+            }
+            items.apps.push(info);
+        }
+        self.offer_with(to, items, false, false, Uuid::new_v4()).await
+    }
+
+    async fn offer_with(&self, to: &Fingerprint, items: Items, import: bool, clipboard: bool, id: Uuid) -> Result<Uuid> {
         let (conn, activity) = self.ensure_connection(to).await?;
         let busy = activity.hold();
         let peer = self.peer_info(to).ok_or(Error::Unreachable)?;
-        let files = tokio::task::spawn_blocking(move || transfer::collect(&paths))
-            .await
-            .map_err(|e| protocol(e.to_string()))??;
+        let Items { paths, named, apps } = items;
+        let files = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<transfer::OutgoingFile>> {
+            let mut files = transfer::collect(&paths)?;
+            files.extend(transfer::collect_as(&named)?);
+            Ok(files)
+        })
+        .await
+        .map_err(|e| protocol(e.to_string()))??;
         if files.is_empty() {
             return Err(invalid("nothing to send"));
         }
@@ -1337,33 +1517,40 @@ impl Node {
         let to = *to;
         let task = tokio::spawn(async move {
             let entries: Vec<FileEntry> = files.iter().map(|f| f.entry.clone()).collect();
+            let entries_len = entries.len() as u32;
             let total = entries.iter().map(|f| f.size).sum();
             let result = async {
-                node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries.clone(), total, import });
+                node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries.clone(), total, import, apps: apps.clone() });
                 // Big ones over a direct link, when the devices can set one up
-                let lane = node.direct_for(&to, total).await;
+                let (lane, why_not_direct) = node.direct_for(&to, total, Some(id)).await;
                 let _lane_busy = lane.as_ref().map(|(_, a)| a.hold());
                 let opened = match lane {
                     Some((lane, _)) => lane.open_bi().await.ok(),
                     None => None,
                 };
-                let (mut send, mut recv) = match opened {
-                    Some(streams) => streams,
-                    None => conn.open_bi().await?,
+                let (route, (mut send, mut recv)) = match opened {
+                    Some(streams) => (Route::Direct, streams),
+                    None => (node.link(&to).map_or(Route::Lan, Route::from), conn.open_bi().await?),
                 };
-                write_msg(&mut send, &TransferMsg::Offer { id, files: entries, import, clipboard }).await?;
+                node.emit(Event::TransferRoute { transfer: id, route, setting_up_direct: false, why_not_direct });
+                write_msg(&mut send, &TransferMsg::Offer { id, files: entries, import, clipboard, apps }).await?;
                 let offsets = match read_msg(&mut recv).await? {
                     TransferMsg::Accept { offsets } => offsets,
-                    TransferMsg::Decline => return Err(Error::Declined),
+                    TransferMsg::Decline => return Err(node.why_declined(&to, total, entries_len).await),
                     other => return Err(protocol(format!("unexpected {other:?}"))),
                 };
                 let events = node.inner.events.clone();
                 let mut report = move |bytes| {
                     let _ = events.send(Event::TransferProgress { transfer: id, bytes, total });
                 };
-                let start = offsets.iter().sum();
+                let start: u64 = offsets.iter().sum();
                 let mut progress = Progress::new(start, &mut report);
-                transfer::send_files(&mut send, &mut recv, &files, &offsets, &mut progress).await
+                let began = Instant::now();
+                let sent = transfer::send_files(&mut send, &mut recv, &files, &offsets, &mut progress).await;
+                if sent.is_ok() {
+                    node.learn_rate(&to, route, total.saturating_sub(start), began.elapsed());
+                }
+                sent
             }
             .await;
             node.inner.transfers.lock().unwrap().remove(&id);
@@ -1527,16 +1714,17 @@ impl Node {
 
     /// Ask about an offer. Offers from the same device arriving within [`GATHER`] of the
     /// first join its prompt: one question, one answer for all of them.
-    async fn ask_offer(&self, from: &DeviceInfo, id: Uuid, files: &[FileEntry]) -> bool {
+    async fn ask_offer(&self, from: &DeviceInfo, id: Uuid, files: &[FileEntry], apps: &[AppInfo]) -> bool {
         let joined = {
             let mut gathering = self.inner.gathering.lock().unwrap();
             match gathering.get_mut(&from.id) {
                 Some(g) => {
                     g.files.extend_from_slice(files);
+                    g.apps.extend_from_slice(apps);
                     Some(g.answer.subscribe())
                 }
                 None => {
-                    gathering.insert(from.id, Gathering { files: files.to_vec(), answer: watch::channel(None).0 });
+                    gathering.insert(from.id, Gathering { files: files.to_vec(), apps: apps.to_vec(), answer: watch::channel(None).0 });
                     None
                 }
             }
@@ -1550,7 +1738,7 @@ impl Node {
         let Some(g) = self.inner.gathering.lock().unwrap().remove(&from.id) else { return false };
         let total = g.files.iter().map(|f| f.size).sum();
         let answer = self.expect_answer(id);
-        self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: g.files, total });
+        self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: g.files, total, apps: g.apps });
         let accepted = self.await_answer(id, answer, OFFER_TIMEOUT).await;
         let _ = g.answer.send(Some(accepted));
         accepted
@@ -1979,6 +2167,8 @@ impl Node {
                                 }
                                 Ok(Message::InboxHistory { .. } | Message::InboxHistoryPage { .. }) => debug!("bad conversation history from {}", from.name),
                                 Ok(Message::GalleryChanged) => node.emit(Event::GalleryChanged { from }),
+                                Ok(Message::TurnOn { feature }) if feature.len() <= 64 => node.emit(Event::TurnOnRequest { from, feature }),
+                                Ok(Message::TurnOn { .. }) => debug!("bad turn_on from {}", from.name),
                                 Ok(Message::DeckOpen) => node.emit(Event::DeckOpen { from }),
                                 Ok(Message::DeckClose) => node.emit(Event::DeckClose { from }),
                                 Ok(Message::DeckRun { action, value }) if action.len() <= MAX_KEY && value.is_none_or(f64::is_finite) => {
@@ -2081,8 +2271,12 @@ impl Node {
         };
         match first.get("type").and_then(|t| t.as_str()) {
             Some("offer") => match serde_json::from_value(first) {
-                Ok(TransferMsg::Offer { id, files, import, clipboard }) => self.handle_offer(from, send, recv, id, files, import, clipboard, lane).await,
+                Ok(TransferMsg::Offer { id, files, import, clipboard, apps }) => self.handle_offer(from, send, recv, id, files, import, clipboard, apps, lane).await,
                 _ => debug!("bad offer from {}", from.name),
+            },
+            Some("preflight") => match serde_json::from_value(first) {
+                Ok(PreflightMsg::Preflight { bytes, files, apps }) => self.handle_preflight(from, send, bytes, files, apps).await,
+                _ => debug!("bad preflight from {}", from.name),
             },
             Some("session_request") => match serde_json::from_value(first) {
                 Ok(SessionMsg::SessionRequest { id, kind, terminal, choose }) => self.handle_session(from, send, recv, id, kind, terminal, choose).await,
@@ -2216,8 +2410,10 @@ impl Node {
         files: Vec<FileEntry>,
         import: bool,
         clipboard: bool,
+        apps: Vec<AppInfo>,
         lane: Option<Busy>,
     ) {
+        let apps = valid_apps(apps, &files);
         let total: u64 = files.iter().map(|f| f.size).sum();
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
         // Clipboard files: one small file, into a folder of their own, kept until the next.
@@ -2267,7 +2463,7 @@ impl Node {
         let auto = import_to.is_some()
             || self.inner.settings.lock().unwrap().auto_accept
             || self.inner.trust.lock().unwrap().get(&from.id).is_some_and(|t| t.auto_accept);
-        let accepted = auto || self.ask_offer(&from, id, &files).await;
+        let accepted = auto || self.ask_offer(&from, id, &files, &apps).await;
         if !accepted {
             let _ = write_msg(&mut send, &TransferMsg::Decline).await;
             let _ = send.finish();
@@ -2277,7 +2473,10 @@ impl Node {
 
         let node = self.clone();
         let from_clip = from.clone();
+        let from_apps = from.clone();
         let to_clipboard = clipboard_to.is_some();
+        let over_lane = lane.is_some();
+        let (apps_started, apps_done, files_done) = (apps.clone(), apps, files.clone());
         let task = tokio::spawn(async move {
             // The direct link it comes over stays up until it's done
             let _lane = lane;
@@ -2289,10 +2488,21 @@ impl Node {
                 let plan = transfer::plan(&dir, &files).await?;
                 let offsets: Vec<u64> = plan.iter().map(|f| f.offset).collect();
                 let start = offsets.iter().sum();
+                // Better to say no now than to fill the disk and fail at the end
+                let need: u64 = total.saturating_sub(start);
+                if let Some(free) = crate::space::free(&dir)
+                    && need.saturating_add(node.inner.config.keep_free) > free
+                {
+                    let _ = write_msg(&mut send, &TransferMsg::Decline).await;
+                    let _ = send.finish();
+                    return Err(invalid(format!("not enough room: {need} bytes to receive, {free} free")));
+                }
                 write_msg(&mut send, &TransferMsg::Accept { offsets }).await?;
                 // A clipboard file isn't a download: it shows up as `ClipboardFile` only.
                 if !to_clipboard {
-                    node.emit(Event::TransferStarted { transfer: id, peer: from, direction: Direction::Incoming, files, total, import });
+                    let route = if over_lane { Route::Direct } else { node.link(&from.id).map_or(Route::Lan, Route::from) };
+                    node.emit(Event::TransferStarted { transfer: id, peer: from, direction: Direction::Incoming, files, total, import, apps: apps_started });
+                    node.emit(Event::TransferRoute { transfer: id, route, setting_up_direct: false, why_not_direct: None });
                 }
                 let events = node.inner.events.clone();
                 let mut report = move |bytes| {
@@ -2309,10 +2519,17 @@ impl Node {
             {
                 node.emit(Event::ClipboardFile { from: from_clip, path: path.clone() });
             }
+            let arrived = match &result {
+                Ok(saved) if !apps_done.is_empty() => Some(received_apps(&apps_done, &files_done, saved)),
+                _ => None,
+            };
             node.emit(match result {
                 Ok(saved) => Event::TransferComplete { transfer: id, saved },
                 Err(e) => Event::TransferFailed { transfer: id, reason: e.to_string() },
             });
+            if let Some(apps) = arrived {
+                node.emit(Event::AppsReceived { transfer: id, from: from_apps, apps });
+            }
         });
         self.inner.transfers.lock().unwrap().insert(id, task.abort_handle());
     }
@@ -2453,19 +2670,49 @@ impl Node {
         self.info().features.iter().any(|f| f == mine) && self.peer_info(to).is_some_and(|p| p.features.iter().any(|f| f == theirs))
     }
 
+    /// What a direct link would do for a send of `total` bytes to `to` now, over `link`.
+    /// `head_start`: seconds of the setup that cost nothing (the user is still choosing).
+    fn direct_outlook(&self, to: &Fingerprint, link: Link, total: u64, head_start: f64) -> DirectPlan {
+        if self.lane(to).is_some() {
+            return DirectPlan::Up;
+        }
+        if link == Link::Usb {
+            return DirectPlan::Not { why: Skip::Cable };
+        }
+        if self.direct_role(to).is_none() {
+            return DirectPlan::Not { why: Skip::Unsupported };
+        }
+        if let Some((_, reason)) = self.inner.direct_failed.lock().unwrap().get(to).filter(|(at, _)| at.elapsed() < DIRECT_RETRY) {
+            return DirectPlan::Not { why: Skip::Failed { reason: reason.clone() } };
+        }
+        let rates = self.inner.rates.lock().unwrap().get(to).cloned().unwrap_or_default();
+        if rates.direct_pays(link, total, self.inner.config.direct_min, head_start) {
+            DirectPlan::Will
+        } else {
+            DirectPlan::Not { why: Skip::Small }
+        }
+    }
+
     /// The direct link a transfer of `total` bytes to `to` goes over: the one up, or a new
-    /// one when it's worth the wait.
-    async fn direct_for(&self, to: &Fingerprint, total: u64) -> Option<(quinn::Connection, Arc<Activity>)> {
-        if let Some(lane) = self.lane(to) {
-            return Some(lane);
+    /// one when it's worth the wait; and why there isn't one when it was tried and failed.
+    /// With a `transfer`, the wait is announced ([`Event::TransferRoute`]).
+    async fn direct_for(&self, to: &Fingerprint, total: u64, transfer: Option<Uuid>) -> (Option<(quinn::Connection, Arc<Activity>)>, Option<String>) {
+        let Some(link) = self.link(to) else { return (None, None) };
+        match self.direct_outlook(to, link, total, 0.0) {
+            DirectPlan::Up => (self.lane(to), None),
+            DirectPlan::Not { why: Skip::Failed { reason } } => (None, Some(reason)),
+            DirectPlan::Not { .. } => (None, None),
+            DirectPlan::Will => {
+                let Some(host) = self.direct_role(to) else { return (None, None) };
+                if let Some(transfer) = transfer {
+                    self.emit(Event::TransferRoute { transfer, route: link.into(), setting_up_direct: true, why_not_direct: None });
+                }
+                match self.direct_wait(to, host).await {
+                    Some(lane) => (Some(lane), None),
+                    None => (None, self.inner.direct_failed.lock().unwrap().get(to).map(|(_, why)| why.clone())),
+                }
+            }
         }
-        let host = self.direct_role(to)?;
-        if !worth_direct(self.link(to)?, total, self.inner.config.direct_min)
-            || self.inner.direct_failed.lock().unwrap().get(to).is_some_and(|(at, _)| at.elapsed() < DIRECT_RETRY)
-        {
-            return None;
-        }
-        self.direct_wait(to, host).await
     }
 
     /// Start a direct link with `to`, or join the attempt under way, and wait for it; the
@@ -2497,7 +2744,7 @@ impl Node {
         }
         let attempt = self.inner.direct_attempts.fetch_add(1, Ordering::SeqCst);
         let (outcome, rx) = watch::channel(None);
-        direct.insert(*to, Attempt { n: attempt, outcome });
+        direct.insert(*to, Attempt { n: attempt, outcome, since: Instant::now() });
         let (node, id) = (self.clone(), *to);
         tokio::spawn(async move {
             tokio::time::sleep(DIRECT_SETUP).await;
@@ -2552,6 +2799,7 @@ impl Node {
             DirectStep::End { reason } => {
                 self.direct_drop(&id, reason);
             }
+            DirectStep::Keep { seconds } => self.hold_lane(&id, seconds),
             step => {
                 if matches!(step, DirectStep::Invite { .. }) {
                     self.direct_begin(&id);
@@ -2575,6 +2823,7 @@ impl Node {
             old.conn.close(0u32.into(), b"replaced");
         }
         if let Some(a) = self.inner.direct.lock().unwrap().remove(&device.id) {
+            self.inner.rates.lock().unwrap().entry(device.id).or_default().learn_setup(a.since.elapsed().as_secs_f64());
             a.outcome.send_replace(Some(true));
         }
         self.inner.direct_failed.lock().unwrap().remove(&device.id);
@@ -2616,14 +2865,112 @@ impl Node {
     }
 }
 
-/// Whether sending `total` bytes over `link` is worth setting up a direct link first,
-/// which takes a few seconds; never instead of a cable.
-fn worth_direct(link: Link, total: u64, min: u64) -> bool {
-    match link {
-        Link::Usb => false,
-        Link::Lan => total >= min,
-        // Through the internet it's slow, so smaller ones gain too
-        Link::Away => total >= min / 8,
+/// Routes: which way bytes go, and getting a faster one ready (docs/protocol.md §4.22).
+impl Node {
+    /// How a connected device is reached now: a direct link when one is up, else the
+    /// connection's own route.
+    pub fn route(&self, id: &Fingerprint) -> Option<Route> {
+        let link = self.link(id)?;
+        Some(if self.lane(id).is_some() { Route::Direct } else { link.into() })
+    }
+
+    /// What sending `bytes` to `to` would do now, without doing it: the route, whether a
+    /// direct link is up or would be set up first, and a rough time. `None` when it isn't
+    /// connected (sending connects it, and the route is known then).
+    pub fn plan_send(&self, to: &Fingerprint, bytes: u64) -> Option<SendPlan> {
+        self.plan(to, bytes, 0.0, self.link(to)?)
+    }
+
+    /// [`Node::plan_send`] as if the connection went over `link`; for tests, which run on
+    /// loopback, where every link is a cable.
+    #[doc(hidden)]
+    pub fn plan_send_over(&self, to: &Fingerprint, bytes: u64, link: Link) -> SendPlan {
+        self.plan(to, bytes, 0.0, link).expect("a plan")
+    }
+
+    fn plan(&self, to: &Fingerprint, bytes: u64, head_start: f64, link: Link) -> Option<SendPlan> {
+        let direct = self.direct_outlook(to, link, bytes, head_start);
+        let rates = self.inner.rates.lock().unwrap().get(to).cloned().unwrap_or_default();
+        let seconds = match &direct {
+            DirectPlan::Up => rates.estimate(Route::Direct, bytes, false),
+            DirectPlan::Will => rates.estimate(Route::Direct, bytes, true),
+            DirectPlan::Not { .. } => rates.estimate(link.into(), bytes, false),
+        };
+        let route = if self.lane(to).is_some() { Route::Direct } else { link.into() };
+        Some(SendPlan { route, direct, seconds: Some(seconds) })
+    }
+
+    /// The user is choosing what to send, `bytes` of it so far: have the best route ready
+    /// by the time they tap Send. A direct link that will pay for itself starts to come up
+    /// now (half its setup counts as free, since choosing takes time), and one that's up
+    /// stays up for 90 s more; both devices keep it. Call again as the selection grows;
+    /// it does nothing twice. Returns the plan; `DirectLinked` / `DirectEnded` say how it
+    /// went. Nothing is sent.
+    pub async fn prepare_send(&self, to: &Fingerprint, bytes: u64) -> Option<SendPlan> {
+        Some(self.prepare(to, bytes, self.link(to)?))
+    }
+
+    /// [`Node::prepare_send`] as if the connection went over `link`; for tests.
+    #[doc(hidden)]
+    pub async fn prepare_send_over(&self, to: &Fingerprint, bytes: u64, link: Link) -> SendPlan {
+        self.prepare(to, bytes, link)
+    }
+
+    fn prepare(&self, to: &Fingerprint, bytes: u64, link: Link) -> SendPlan {
+        let head = self.inner.rates.lock().unwrap().get(to).cloned().unwrap_or_default().setup_secs() / 2.0;
+        let plan = self.plan(to, bytes, head, link).expect("a plan");
+        match plan.direct {
+            DirectPlan::Up => self.keep_direct(to, WARM_KEEP),
+            DirectPlan::Will => {
+                if let Some(host) = self.direct_role(to) {
+                    let (node, to) = (self.clone(), *to);
+                    tokio::spawn(async move {
+                        if node.direct_wait(&to, host).await.is_some() {
+                            node.keep_direct(&to, WARM_KEEP);
+                        }
+                    });
+                }
+            }
+            DirectPlan::Not { .. } => {}
+        }
+        plan
+    }
+
+    /// Hold the direct link with `to` open for `secs` more, here and there.
+    fn keep_direct(&self, to: &Fingerprint, secs: u32) {
+        self.hold_lane(to, secs);
+        let (node, to) = (self.clone(), *to);
+        tokio::spawn(async move {
+            let _ = node.send_message(&to, &Message::Direct { step: DirectStep::Keep { seconds: secs } }).await;
+        });
+    }
+
+    /// Don't close the direct link with `to` for idleness for `secs`.
+    fn hold_lane(&self, to: &Fingerprint, secs: u32) {
+        if let Some((_, activity)) = self.lane(to) {
+            let busy = activity.hold();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(secs.min(MAX_KEEP) as u64)).await;
+                drop(busy);
+            });
+        }
+    }
+
+    /// What to tell the user when `to` declined `bytes` in `files` files: no room, if it
+    /// says so, else just that it was declined.
+    async fn why_declined(&self, to: &Fingerprint, bytes: u64, files: u32) -> Error {
+        match tokio::time::timeout(Duration::from_secs(3), self.preflight(to, bytes, files, Vec::new())).await {
+            Ok(Ok(reply)) if !reply.has_room_for(bytes) => {
+                let name = self.peer_info(to).map_or_else(|| "the other device".into(), |p| p.name);
+                invalid(format!("{name} doesn't have room for this: it needs {} and has {} free", crate::space::show(bytes), crate::space::show(reply.free.unwrap_or(0))))
+            }
+            _ => Error::Declined,
+        }
+    }
+
+    /// A transfer of `bytes` over `route` took `took`: what that route can do.
+    fn learn_rate(&self, to: &Fingerprint, route: Route, bytes: u64, took: Duration) {
+        self.inner.rates.lock().unwrap().entry(*to).or_default().learn(route, bytes, took.as_secs_f64());
     }
 }
 
@@ -2941,15 +3288,6 @@ fn bind_endpoint(identity: &Identity, addr: SocketAddr) -> Result<quinn::Endpoin
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn direct_links_only_when_worth_the_wait() {
-        let min = 256 << 20;
-        assert!(worth_direct(Link::Lan, min, min));
-        assert!(!worth_direct(Link::Lan, min - 1, min));
-        assert!(worth_direct(Link::Away, min / 8, min));
-        assert!(!worth_direct(Link::Usb, u64::MAX, min));
-    }
 
     #[tokio::test]
     async fn first_to_succeed_wins_without_waiting_for_the_other() {

@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use linksy_ipc::linksy_core::{DeviceInfo, DeviceKind, DeviceView, Direction, Event, FileEntry, Fingerprint, SessionKind, Uuid};
+use linksy_ipc::linksy_core::{DeviceInfo, DeviceKind, DeviceView, Direction, Event, FileEntry, Fingerprint, Route, SessionKind, Uuid};
 use linksy_ipc::{Client, HistoryEntry, Shared};
 use linksy_i18n::t;
 
@@ -43,6 +43,16 @@ struct Progress {
     total: u64,
     /// (time, bytes) samples for a smoothed speed estimate.
     samples: Vec<(Instant, u64)>,
+    /// Which way it goes, once known.
+    route: Option<RouteNote>,
+}
+
+/// What `Event::TransferRoute` said about a transfer.
+struct RouteNote {
+    route: Route,
+    setting_up: bool,
+    /// A direct link was tried and failed, for this reason.
+    why: Option<String>,
 }
 
 /// Widgets of a running transfer's row on the current page.
@@ -593,6 +603,7 @@ impl Window {
                 page::Action::AutoAccept(on) => w.auto_accept(id, on),
                 page::Action::AllowScreen(on) => w.allow_screen(id, on),
                 page::Action::Locate => w.locate(id),
+                page::Action::TurnOn(feature) => w.ask_turn_on(id, feature),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
                 page::Action::Webcam => w.use_camera(id),
@@ -938,6 +949,20 @@ impl Window {
         });
     }
 
+    /// Ask a phone to turn on its Inbox (`notifications`) or Gallery; its tab fills once it does.
+    fn ask_turn_on(self: &Rc<Self>, id: Fingerprint, feature: &'static str) {
+        let Some(c) = self.client() else { return };
+        let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
+        let w = self.clone();
+        let call = self.bridge.call(&c, move |c| async move { c.turn_on(id.to_string(), feature).await });
+        glib::spawn_future_local(async move {
+            match call.await {
+                Ok(()) => w.toast(&t!("Look at {name} to turn it on", name)),
+                Err(e) => w.toast(&t!("Couldn't ask {name}: {reason}", name, reason = fmt::capitalize(&e))),
+            }
+        });
+    }
+
     /// Ask a phone where it is, then show it, with a map link.
     fn locate(self: &Rc<Self>, id: Fingerprint) {
         let Some(c) = self.client() else { return };
@@ -1073,8 +1098,8 @@ impl Window {
                 }
                 self.render_page();
             }
-            Event::TransferRequest { transfer, from, files, total } => self.show_offer(transfer, &from, &files, total),
-            Event::TransferStarted { transfer, total, peer, direction, files, import } => {
+            Event::TransferRequest { transfer, from, files, total, .. } => self.show_offer(transfer, &from, &files, total),
+            Event::TransferStarted { transfer, total, peer, direction, files, import, .. } => {
                 // Accepted elsewhere (desktop notification, another window): drop the prompt.
                 self.close_offer_dialog(&transfer);
                 self.state.borrow_mut().progress.insert(transfer, Progress { total, ..Default::default() });
@@ -1090,6 +1115,17 @@ impl Window {
                 self.transfers_changed();
             }
             Event::TransferProgress { transfer, bytes, total } => self.update_progress(transfer, bytes, total),
+            Event::TransferRoute { transfer, route, setting_up_direct, why_not_direct } => {
+                let (bytes, total) = {
+                    let mut state = self.state.borrow_mut();
+                    let p = state.progress.entry(transfer).or_default();
+                    p.route = Some(RouteNote { route, setting_up: setting_up_direct, why: why_not_direct });
+                    (p.bytes, p.total)
+                };
+                self.update_progress(transfer, bytes, total);
+            }
+            // Apps are for phones to install
+            Event::AppsReceived { .. } => {}
             Event::TransferComplete { transfer, saved } => {
                 let open = {
                     let mut state = self.state.borrow_mut();
@@ -1170,6 +1206,7 @@ impl Window {
             Event::DeckOpen { .. } | Event::DeckClose { .. } | Event::DeckRun { .. } | Event::DeckActions { .. } | Event::DeckState { .. } | Event::DeckLayout { .. } => {}
             Event::InboxHistory { .. } | Event::InboxHistoryPage { .. } => {}
             Event::GalleryChanged { from } => self.gallery_changed(&from.id),
+            Event::TurnOnRequest { .. } => {}
             // Between the service and phones (USB cable, §4.11)
             Event::UsbPlugged { .. } | Event::UsbConnect { .. } => {}
             // Locate is answered through the service (it waits for the reply).
@@ -1459,12 +1496,12 @@ impl Window {
             self.refresh_history();
             self.page.set_inbox_count(0);
             if let Some(d) = self.selected_device().filter(|d| d.trusted) {
-                if can(&d.device, "notifications") || can(&d.device, "sms") {
+                if inbox_on(&d.device) {
                     self.load_inbox(d.device.id);
                 }
                 match self.page.tab() {
                     page::Tab::Files => self.files_shown(d.device.id),
-                    page::Tab::Gallery => self.gallery_shown(d.device.id),
+                    page::Tab::Gallery if can(&d.device, "gallery") => self.gallery_shown(d.device.id),
                     _ => {}
                 }
             }
@@ -1548,9 +1585,11 @@ impl Window {
     /// A tab of the device's page shows: what's in it, fetched now.
     fn tab_shown(self: &Rc<Self>, id: Fingerprint, tab: page::Tab) {
         self.transfers_shown();
+        let on = |f: fn(&DeviceInfo) -> bool| self.device(&id).is_some_and(|d| f(&d.device));
         match tab {
-            page::Tab::Inbox => self.inbox_shown(id),
-            page::Tab::Gallery => self.gallery_shown(id),
+            page::Tab::Inbox if on(inbox_on) => self.inbox_shown(id),
+            page::Tab::Gallery if on(|d| can(d, "gallery")) => self.gallery_shown(id),
+            page::Tab::Inbox | page::Tab::Gallery => {}
             page::Tab::Files => self.files_shown(id),
             page::Tab::Transfers => self.render_transfers(),
             page::Tab::History => self.render_activity(),
@@ -2093,14 +2132,37 @@ fn speed(p: &Progress) -> f64 {
     }
 }
 
+/// "Direct link", "Over the internet": the way a transfer goes.
+fn route_text(note: &RouteNote) -> String {
+    if note.setting_up {
+        return t!("Setting up a direct link…").to_string();
+    }
+    let way = match note.route {
+        Route::Usb => t!("USB cable"),
+        Route::Direct => t!("Direct link"),
+        Route::Lan => t!("Same network"),
+        Route::Away => t!("Over the internet"),
+    };
+    match &note.why {
+        Some(why) => format!("{way} · {}", t!("No direct link: {why}", why = why.as_str())),
+        None => way.to_string(),
+    }
+}
+
 fn progress_text(p: &Progress) -> String {
+    if let Some(note) = p.route.as_ref().filter(|n| n.setting_up) {
+        return route_text(note);
+    }
     let speed = speed(p);
     let mut text = t!("{done} of {total}", done = fmt::size(p.bytes), total = fmt::size(p.total));
     if speed > 0.0 && p.bytes < p.total {
         let left = Duration::from_secs_f64((p.total - p.bytes) as f64 / speed);
         text.push_str(&format!(" · {} · {}", t!("{size}/s", size = fmt::size(speed as u64)), fmt::remaining(left)));
     }
-    text
+    match &p.route {
+        Some(note) => format!("{} · {text}", route_text(note)),
+        None => text,
+    }
 }
 
 fn kind_icon(kind: DeviceKind) -> &'static str {
@@ -2206,5 +2268,39 @@ pub(crate) fn can(d: &DeviceInfo, feature: &str) -> bool {
     if !d.features.is_empty() {
         return d.features.iter().any(|f| f == feature);
     }
-    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate"))
+    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate" | "turn_on"))
+}
+
+/// Whether a phone shares its messages, for its Inbox.
+pub(crate) fn inbox_on(d: &DeviceInfo) -> bool {
+    can(d, "notifications") || can(d, "sms")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn moving(route: Option<RouteNote>) -> Progress {
+        Progress { bytes: 50, total: 100, route, ..Default::default() }
+    }
+
+    #[test]
+    fn the_way_a_transfer_goes_leads_its_progress() {
+        let direct = RouteNote { route: Route::Direct, setting_up: false, why: None };
+        assert!(progress_text(&moving(Some(direct))).starts_with("Direct link · "));
+        assert!(!progress_text(&moving(None)).contains("link"));
+    }
+
+    #[test]
+    fn waiting_for_a_direct_link_says_so() {
+        let waiting = RouteNote { route: Route::Lan, setting_up: true, why: None };
+        assert_eq!(progress_text(&moving(Some(waiting))), "Setting up a direct link…");
+    }
+
+    #[test]
+    fn a_link_that_failed_says_why() {
+        let failed = RouteNote { route: Route::Away, setting_up: false, why: Some("Wi-Fi is off".into()) };
+        let text = progress_text(&moving(Some(failed)));
+        assert!(text.starts_with("Over the internet · No direct link: Wi-Fi is off · "), "{text}");
+    }
 }
