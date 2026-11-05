@@ -523,7 +523,7 @@ async fn watch(c: &Client) -> Result<(), String> {
             }
             Event::Paired { device } => println!("✓ Paired with {}", device.name),
             Event::PairingFailed { device, reason } => println!("✗ Pairing with {} failed: {reason}", device.name),
-            Event::TransferRequest { transfer, from, files, total } => {
+            Event::TransferRequest { transfer, from, files, total, .. } => {
                 println!("{} wants to send {} ({}):", from.name, plural(files.len(), "item"), size(total));
                 for f in files.iter().take(5) {
                     println!("    {}", f.path);

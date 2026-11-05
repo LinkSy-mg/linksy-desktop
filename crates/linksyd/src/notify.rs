@@ -79,7 +79,7 @@ pub async fn run(node: Node) {
                 let body = t!("Check that {device} shows the code {code}.", device = device.name, code = spaced(&code));
                 prompt(node.clone(), request, Some(device.id), None, t!("Pair with {device}?", device = device.name), body, t!("Pair"));
             }
-            Event::TransferRequest { transfer, from, files, total } => {
+            Event::TransferRequest { transfer, from, files, total, .. } => {
                 let what = match files.as_slice() {
                     [one] => display_name(&one.path),
                     many => t!("{n} items", n = many.len()),
