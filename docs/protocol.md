@@ -35,7 +35,7 @@ Decisions already made with the owner:
 
 Desktop column: Linksy for Linux 0.12.4. Android column: the phone's `docs/android-app.md`
 (LinkSy-mg/linksy-mobile, phone 0.3.4, 2026-11-05). "Not possible" rows are hidden by the
-desktop for Android phones (see §4.10). Work on a branch of this repository that isn't in a
+desktop for Android phones (see §4.10). Work that is on main but not in a
 release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`.
 
 | Feature | Desktop (Linux) | Android | Notes |
@@ -77,9 +77,9 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | Terminal on the computer, from the phone | Done (0.7.0) | Done (0.2.0), hard to use (mobile#2) | session `terminal`, code set on the computer (§4.15) |
 | Direct link (Wi-Fi Direct) for big transfers | Done (0.9.9) | Done (0.2.8); between two phones 0.2.9 | phone hosts, computer joins with NetworkManager (§4.17); full speed only when both pick the same channel (`ROADMAP.md`) |
 | Choose Screen (see another monitor) | Done (0.9.11) | Done (0.2.12) | `choose` in `session_request` (§4.8) |
-| Turn on the Inbox or Gallery from the computer | On branch `turn-on` (not released) | Built, waits for the core that has it | `turn_on` (§4.21 on that branch) |
-| Phone to phone: the route, a check before sending, apps | On branch `phone-to-phone` (not released) | To do | §4.22 on that branch; the phone's prompt is written |
-| Position and seeking of the computer's players | On a branch (not released) | Nothing to do | the computer counts a browser's position itself and seeks exactly (§4.5) |
+| Turn on the Inbox or Gallery from the computer | On main (not released) | Built, waits for the core pin that has it | `turn_on` (§4.21) |
+| Phone to phone: the route, a check before sending, apps | On main (not released) | In progress | §4.22 |
+| Position and seeking of the computer's players | On main (not released) | Nothing to do | the computer counts a browser's position itself and seeks exactly (§4.5) |
 | Bluetooth (presence and a link) | Planned | Planned | `ROADMAP.md`; not started |
 
 ## 3. How to build the phone app (recommendation)

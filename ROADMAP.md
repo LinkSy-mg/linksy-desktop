@@ -24,11 +24,11 @@ and the Inbox · the phone's Gallery · the Deck, with layouts made on the compu
 discovery · Update Now and problem logs. The desktop alone: controlling a phone over the cable
 (0.11.0).
 
-**Built, not in a release yet** (branches of this repository):
-- Turn the Inbox or Gallery on from the computer: the phone side is built and waits for the
-  core that has the message.
+**On main, not in a release yet:**
+- Turn the Inbox or Gallery on from the computer: the phone side is built and needs the core
+  pin that has the message.
 - Phone to phone: the route a transfer takes, a check before sending, and sending apps. The
-  computer side is done; the phone side is to do.
+  computer side is done; the phone side is in progress.
 - Day headings in the Gallery ("Today", "Yesterday", "Nov 2").
 - The phone's seek bar on the computer's browser music (the computer now counts a browser's
   position itself and seeks exactly).
