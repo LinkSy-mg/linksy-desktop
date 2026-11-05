@@ -220,6 +220,11 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             node.ring(&id, on).await.map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
+        Request::Snap { to } => {
+            let id = resolve(node, &to)?;
+            node.request_snap(&id).await.map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
         Request::TurnOn { to, feature } => {
             let id = resolve(node, &to)?;
             node.ask_turn_on(&id, &feature).await.map_err(|e| e.to_string())?;

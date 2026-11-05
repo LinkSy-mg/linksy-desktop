@@ -42,6 +42,8 @@ pub enum Request {
     OpenUrl { to: String, url: String },
     /// Make a device ring so it can be found (`on`), or stop it.
     Ring { to: String, on: bool },
+    /// Ask a phone to open its camera and send what it takes (§4.23).
+    Snap { to: String },
     /// Ask a phone to turn on `feature`: `notifications` (the Inbox) or `gallery`
     /// (docs/protocol.md §4.21).
     TurnOn { to: String, feature: String },
@@ -789,6 +791,10 @@ impl Client {
 
     pub async fn ring(&self, to: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::Ring { to: to.into(), on }).await
+    }
+
+    pub async fn snap(&self, to: impl Into<String>) -> Result<(), ClientError> {
+        self.call(Request::Snap { to: to.into() }).await
     }
 
     pub async fn turn_on(&self, to: impl Into<String>, feature: impl Into<String>) -> Result<(), ClientError> {

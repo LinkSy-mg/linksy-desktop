@@ -27,6 +27,7 @@ Usage:
   linksy open <device> <url>         open a web link in its browser
   linksy ring <device> [--stop]      make it ring so you can find it
   linksy locate <phone>              ask a phone where it is (it can say no)
+  linksy snap <phone>                ask a phone to open its camera and send the picture
   linksy terminal                    terminals for phones: code set, allowed, running
   linksy terminal code               set the code a phone types to open a terminal here
   linksy terminal allow|deny <phone> let a phone open terminals here, or stop it
@@ -278,6 +279,10 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             println!("Ringing {to}. Stop it with: linksy ring {to} --stop");
         }
         ("ring", [to, stop]) if stop == "--stop" => c.ring(to.clone(), false).await.map_err(err)?,
+        ("snap", [phone]) => {
+            c.snap(phone.clone()).await.map_err(err)?;
+            println!("Open the camera on {phone}: the picture arrives in Downloads/Linksy and on the clipboard.");
+        }
         ("locate", [phone]) => {
             println!("Asking {phone} where it is…");
             let l = c.locate(phone.clone()).await.map_err(err)?;
