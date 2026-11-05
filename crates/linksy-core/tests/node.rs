@@ -320,6 +320,37 @@ async fn a_phone_can_say_why_it_cannot_snap() {
 }
 
 #[tokio::test]
+async fn a_phones_controls_are_watched_changed_and_refused() {
+    use linksy_core::{ControlsChange, ControlsState, Dnd, Ringer};
+    let (computer, phone) = paired().await;
+    let (cid, pid) = (computer.node.info().id, phone.node.info().id);
+    let (mut rc, mut rp) = (computer.node.subscribe(), phone.node.subscribe());
+    let state = |seq| ControlsState { seq, media: 0.5, ringtone: 0.8, alarm: 1.0, ringer: Ringer::Normal, dnd: Dnd::Off, dnd_access: true, flashlight: Some(false) };
+
+    computer.node.watch_controls(&pid, true).await.unwrap();
+    wait_for(&mut rp, |e| matches!(e, Event::ControlsWatch { on: true, .. }).then_some(())).await;
+
+    // Sent out of order: the older one is dropped
+    phone.node.send_controls_state(&cid, &state(2)).await.unwrap();
+    phone.node.send_controls_state(&cid, &state(1)).await.unwrap();
+    phone.node.send_controls_state(&cid, &state(3)).await.unwrap();
+    let first = wait_for(&mut rc, |e| match e { Event::ControlsState { state, .. } => Some(state.seq), _ => None }).await;
+    let second = wait_for(&mut rc, |e| match e { Event::ControlsState { state, .. } => Some(state.seq), _ => None }).await;
+    assert_eq!((first, second), (2, 3));
+
+    // A level out of range is brought within it, and nothing at all is not sent
+    computer.node.set_controls(&pid, ControlsChange { media: Some(2.0), dnd: Some(Dnd::Priority), flashlight: Some(true), ..Default::default() }).await.unwrap();
+    let change = wait_for(&mut rp, |e| match e { Event::ControlsSet { change, .. } => Some(*change), _ => None }).await;
+    assert_eq!((change.media, change.dnd, change.flashlight, change.ringer), (Some(1.0), Some(Dnd::Priority), Some(true), None));
+    assert!(computer.node.set_controls(&pid, ControlsChange::default()).await.is_err());
+
+    // The phone says why it didn't do one
+    phone.node.refuse_controls(&cid, "dnd", "Allow Do Not Disturb access to Linksy on the phone first").await.unwrap();
+    let (what, reason) = wait_for(&mut rc, |e| match e { Event::ControlsRefused { what, reason, .. } => Some((what.clone(), reason.clone())), _ => None }).await;
+    assert_eq!((what.as_str(), reason.as_str()), ("dnd", "Allow Do Not Disturb access to Linksy on the phone first"));
+}
+
+#[tokio::test]
 async fn sends_files_and_folders_intact() {
     let (a, b) = paired().await;
     let src = a.dir.path().join("out");

@@ -367,6 +367,16 @@ pub enum Message {
     },
     /// Start (or stop) sending `volume_state` to the sender while connected.
     VolumeWatch { on: bool },
+    /// A phone's controls (its volumes, ringer, Do Not Disturb and flashlight), sent when they
+    /// change to a device that asked with `controls_watch` (docs/protocol.md §4.24).
+    ControlsState(ControlsState),
+    /// Change some of the receiver's controls (a phone's): only the ones given.
+    ControlsSet(ControlsChange),
+    /// Start (or stop) sending `controls_state` to the sender while connected.
+    ControlsWatch { on: bool },
+    /// The receiver didn't change one control (`media`, `ringtone`, `alarm`, `ringer`, `dnd` or
+    /// `flashlight`), and says why in words to show as they are.
+    ControlsRefused { what: String, reason: String },
     /// The sender (a phone) has a call coming in, going on, or none any more.
     CallState {
         state: CallState,
@@ -686,6 +696,87 @@ pub struct VolumeState {
     pub seq: u64,
     pub level: f64,
     pub muted: bool,
+}
+
+/// How a phone makes sound for calls and notifications.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Ringer {
+    #[default]
+    Normal,
+    Vibrate,
+    Silent,
+    /// A value a newer Linksy knows.
+    #[serde(other)]
+    Unknown,
+}
+
+/// A phone's Do Not Disturb: what still gets through.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Dnd {
+    /// Everything does.
+    #[default]
+    Off,
+    /// What the phone's own Do Not Disturb settings let through.
+    Priority,
+    /// Only alarms.
+    Alarms,
+    /// Nothing.
+    Silence,
+    /// A value a newer Linksy knows.
+    #[serde(other)]
+    Unknown,
+}
+
+/// A phone's controls. Levels run from 0 to 1 of each stream's range. `seq` as in
+/// [`MediaState`]: a later one replaces an earlier one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ControlsState {
+    pub seq: u64,
+    pub media: f64,
+    pub ringtone: f64,
+    pub alarm: f64,
+    pub ringer: Ringer,
+    pub dnd: Dnd,
+    /// Android lets Linksy change Do Not Disturb (the user gave it Do Not Disturb access).
+    #[serde(default)]
+    pub dnd_access: bool,
+    /// The flashlight is on; absent when the phone has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flashlight: Option<bool>,
+}
+
+/// What to change in a phone's controls: only what is given.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ControlsChange {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ringtone: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alarm: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ringer: Option<Ringer>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dnd: Option<Dnd>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flashlight: Option<bool>,
+}
+
+impl ControlsChange {
+    /// The same with every level kept within 0 to 1 and anything that isn't a number dropped.
+    pub fn tidy(mut self) -> Self {
+        let level = |l: Option<f64>| l.filter(|l| l.is_finite()).map(|l| l.clamp(0.0, 1.0));
+        (self.media, self.ringtone, self.alarm) = (level(self.media), level(self.ringtone), level(self.alarm));
+        self.ringer = self.ringer.filter(|r| *r != Ringer::Unknown);
+        self.dnd = self.dnd.filter(|d| *d != Dnd::Unknown);
+        self
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1046,5 +1137,35 @@ mod tests {
         let refused = serde_json::to_string(&Message::SnapRefused { reason: "Linksy needs the camera permission".into() }).unwrap();
         assert_eq!(refused, r#"{"type":"snap_refused","reason":"Linksy needs the camera permission"}"#);
         assert!(matches!(serde_json::from_str::<Message>(&refused), Ok(Message::SnapRefused { .. })));
+    }
+
+    #[test]
+    fn phone_controls_messages_have_the_names_the_phone_is_told() {
+        let set = Message::ControlsSet(ControlsChange { media: Some(0.5), ringer: Some(Ringer::Vibrate), dnd: Some(Dnd::Priority), flashlight: Some(true), ..Default::default() });
+        assert_eq!(serde_json::to_string(&set).unwrap(), r#"{"type":"controls_set","media":0.5,"ringer":"vibrate","dnd":"priority","flashlight":true}"#);
+        assert_eq!(serde_json::to_string(&Message::ControlsWatch { on: true }).unwrap(), r#"{"type":"controls_watch","on":true}"#);
+        let state = Message::ControlsState(ControlsState { seq: 7, media: 0.4, ringtone: 0.8, alarm: 1.0, ringer: Ringer::Normal, dnd: Dnd::Off, dnd_access: true, flashlight: Some(false) });
+        assert_eq!(
+            serde_json::to_string(&state).unwrap(),
+            r#"{"type":"controls_state","seq":7,"media":0.4,"ringtone":0.8,"alarm":1.0,"ringer":"normal","dnd":"off","dnd_access":true,"flashlight":false}"#
+        );
+        assert_eq!(serde_json::from_str::<Message>(&serde_json::to_string(&state).unwrap()).unwrap(), state);
+        let refused = serde_json::to_string(&Message::ControlsRefused { what: "dnd".into(), reason: "Allow Do Not Disturb access to Linksy on the phone first".into() }).unwrap();
+        assert_eq!(refused, r#"{"type":"controls_refused","what":"dnd","reason":"Allow Do Not Disturb access to Linksy on the phone first"}"#);
+    }
+
+    #[test]
+    fn a_phone_without_a_flashlight_or_access_and_values_from_a_newer_linksy() {
+        let older = r#"{"type":"controls_state","seq":1,"media":0.1,"ringtone":0.2,"alarm":0.3,"ringer":"silent","dnd":"alarms"}"#;
+        let Message::ControlsState(s) = serde_json::from_str(older).unwrap() else { panic!() };
+        assert_eq!((s.flashlight, s.dnd_access, s.ringer, s.dnd), (None, false, Ringer::Silent, Dnd::Alarms));
+        // A value this version doesn't know is read as Unknown, not as a broken message
+        let newer = older.replace(r#""ringer":"silent""#, r#""ringer":"loud""#).replace(r#""dnd":"alarms""#, r#""dnd":"gaming""#);
+        let Message::ControlsState(s) = serde_json::from_str(&newer).unwrap() else { panic!() };
+        assert_eq!((s.ringer, s.dnd), (Ringer::Unknown, Dnd::Unknown));
+        // And such a value is never passed on as a change
+        let change = ControlsChange { media: Some(7.0), alarm: Some(f64::NAN), ringer: Some(Ringer::Unknown), dnd: Some(Dnd::Unknown), ..Default::default() }.tidy();
+        assert_eq!((change.media, change.alarm, change.ringer, change.dnd), (Some(1.0), None, None, None));
+        assert!(ControlsChange::default().is_empty());
     }
 }

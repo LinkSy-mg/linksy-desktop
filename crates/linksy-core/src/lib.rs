@@ -26,9 +26,10 @@ pub use error::{Error, Result};
 pub use identity::{DeviceInfo, DeviceKind, Fingerprint};
 pub use node::{Config, DeviceView, Direction, Event, MAX_CLIPBOARD, Node, Session, folder_name, over_usb, Link, link_of};
 pub use protocol::{
-    Battery, CallState, ControlMsg, ConversationMessage, DeckAction, DeckKind, DeckState, DirectGroup, DirectStep, FileEntry, FsEntry, FsReply, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryReply, GalleryRequest, MediaCommand, MediaPlayer,
+    Battery, CallState, ControlMsg, ControlsChange, ControlsState, ConversationMessage, DeckAction, DeckKind, DeckState, DirectGroup, DirectStep, FileEntry, FsEntry, FsReply, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryReply, GalleryRequest, MediaCommand, MediaPlayer,
     MediaState, MouseButton, NotificationButton, PluggedPhone, RemoteNotification, SessionKind, SmsMessage, SmsThread, TerminalInfo, TerminalOpen, VolumeState,
 };
+pub use protocol::{Dnd, Ringer};
 pub use node::{TerminalCall, Verdict};
 pub use apps::{AppHave, AppInfo, AppProbe, AppSend, AppState, DirectReady, PreflightMsg, PreflightReply, ReceivedApp};
 pub use preflight::{PreflightAnswer, PreflightCall};

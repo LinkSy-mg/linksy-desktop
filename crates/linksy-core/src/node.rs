@@ -33,7 +33,7 @@ use crate::gallery::GalleryCall;
 use crate::invite::{self, Invite};
 use crate::preflight::PreflightCall;
 use crate::settings::Settings;
-use crate::protocol::{Battery, CallState, ConversationMessage, DeckAction, DeckState, DirectGroup, DirectStep, PluggedPhone, FsRequest, GalleryRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState,
+use crate::protocol::{Battery, CallState, ControlsChange, ControlsState, ConversationMessage, DeckAction, DeckState, DirectGroup, DirectStep, PluggedPhone, FsRequest, GalleryRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState,
     FileEntry, Handshake, Intent, Message, PAIRING_VERSION, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -268,6 +268,15 @@ pub enum Event {
     VolumeSet { from: DeviceInfo, level: Option<f64>, muted: Option<bool> },
     /// A device wants this one's `volume_state` while connected (`on`), or no longer.
     VolumeWatch { from: DeviceInfo, on: bool },
+    /// A phone's controls, newest (older ones are dropped here).
+    ControlsState { from: DeviceInfo, state: ControlsState },
+    /// A device asks to change some of this phone's controls (answer with `refuse_controls` for
+    /// one that can't be).
+    ControlsSet { from: DeviceInfo, change: ControlsChange },
+    /// A device wants this one's `controls_state` while connected (`on`), or no longer.
+    ControlsWatch { from: DeviceInfo, on: bool },
+    /// A phone didn't change one of its controls, and says why.
+    ControlsRefused { from: DeviceInfo, what: String, reason: String },
     /// A phone's call: ringing, answered, or over.
     CallState { from: DeviceInfo, state: CallState, contact: Option<String> },
     /// A device checked in ("still here").
@@ -618,6 +627,8 @@ struct Inner {
     media_seq: Mutex<HashMap<Fingerprint, u64>>,
     /// The same for volume.
     volume_seq: Mutex<HashMap<Fingerprint, u64>>,
+    /// The same for a phone's controls.
+    controls_seq: Mutex<HashMap<Fingerprint, u64>>,
     /// Away from home, when on (docs/protocol.md §4.13).
     away: Mutex<Option<Arc<crate::away::Away>>>,
     /// Direct links up, for big transfers (docs/protocol.md §4.17).
@@ -681,6 +692,7 @@ impl Node {
                 batteries: Mutex::default(),
                 media_seq: Mutex::default(),
                 volume_seq: Mutex::default(),
+                controls_seq: Mutex::default(),
                 sessions: Mutex::new(Some(sessions)),
                 sessions_tx,
                 fs: Mutex::new(Some(fs)),
@@ -1181,6 +1193,34 @@ impl Node {
     /// Ask a device for its volume while connected (`on`), or stop.
     pub async fn watch_volume(&self, to: &Fingerprint, on: bool) -> Result<()> {
         self.send_message(to, &Message::VolumeWatch { on }).await
+    }
+
+    /// Send this phone's controls (bump `seq` each time).
+    pub async fn send_controls_state(&self, to: &Fingerprint, state: &ControlsState) -> Result<()> {
+        if ![state.media, state.ringtone, state.alarm].iter().all(|l| l.is_finite()) {
+            return Err(invalid("a volume isn't a number"));
+        }
+        self.send_message(to, &Message::ControlsState(*state)).await
+    }
+
+    /// Change some of a phone's controls: only the ones given (levels kept within 0 to 1).
+    pub async fn set_controls(&self, to: &Fingerprint, change: ControlsChange) -> Result<()> {
+        let change = change.tidy();
+        if change.is_empty() {
+            return Err(invalid("nothing to change"));
+        }
+        self.send_message(to, &Message::ControlsSet(change)).await
+    }
+
+    /// Ask a phone for its controls while connected (`on`), or stop.
+    pub async fn watch_controls(&self, to: &Fingerprint, on: bool) -> Result<()> {
+        self.send_message(to, &Message::ControlsWatch { on }).await
+    }
+
+    /// Answer `Event::ControlsSet` for one control that wasn't changed (`media`, `ringtone`,
+    /// `alarm`, `ringer`, `dnd`, `flashlight`), with why.
+    pub async fn refuse_controls(&self, to: &Fingerprint, what: &str, reason: &str) -> Result<()> {
+        self.send_message(to, &Message::ControlsRefused { what: what.into(), reason: reason.into() }).await
     }
 
     /// Tell a device about a call on this one (phones), so it can pause its media.
@@ -2175,6 +2215,31 @@ impl Node {
                                     }
                                 }
                                 Ok(Message::VolumeWatch { on }) => node.emit(Event::VolumeWatch { from, on }),
+                                Ok(Message::ControlsState(state)) if [state.media, state.ringtone, state.alarm].iter().all(|l| l.is_finite()) => {
+                                    let newer = {
+                                        let mut seqs = node.inner.controls_seq.lock().unwrap();
+                                        let last = seqs.entry(from.id).or_insert(0);
+                                        let newer = state.seq > *last;
+                                        if newer {
+                                            *last = state.seq;
+                                        }
+                                        newer
+                                    };
+                                    if newer {
+                                        node.emit(Event::ControlsState { from, state });
+                                    }
+                                }
+                                Ok(Message::ControlsState(_)) => debug!("bad controls from {}", from.name),
+                                Ok(Message::ControlsSet(change)) => {
+                                    let change = change.tidy();
+                                    if !change.is_empty() {
+                                        node.emit(Event::ControlsSet { from, change });
+                                    }
+                                }
+                                Ok(Message::ControlsWatch { on }) => node.emit(Event::ControlsWatch { from, on }),
+                                Ok(Message::ControlsRefused { what, reason }) => {
+                                    node.emit(Event::ControlsRefused { from, what: what.chars().take(40).collect(), reason: reason.chars().take(200).collect() })
+                                }
                                 Ok(Message::CallState { state, contact }) => node.emit(Event::CallState { from, state, contact }),
                                 Ok(Message::Heartbeat) => node.emit(Event::Heartbeat { from }),
                                 Ok(Message::ClipboardWatch { on }) => node.emit(Event::ClipboardWatch { from, on }),

@@ -1229,6 +1229,8 @@ impl Window {
             Event::UsbPlugged { .. } | Event::UsbConnect { .. } => {}
             // Locate is answered through the service (it waits for the reply).
             Event::SnapRequest { .. } => {}
+            // A phone's controls (§4.24): the service watches them for the page
+            Event::ControlsState { .. } | Event::ControlsSet { .. } | Event::ControlsWatch { .. } | Event::ControlsRefused { .. } => {}
             Event::SnapRefused { from, reason } => self.toast(&t!("{name} can't take a picture: {reason}", name = from.name, reason = fmt::capitalize(&reason))),
             Event::LocateRequest { .. } | Event::Location { .. } | Event::LocationRefused { .. } | Event::TerminalListRequest { .. } | Event::Terminals { .. } => {}
             // Answers go to whoever asked (the service waits for them); requests are a phone's.
