@@ -487,6 +487,19 @@ fn stop_portal_autostart() {
     );
 }
 
+/// For the Connection Doctor: a finding when the firewall would keep devices out of Linksy.
+pub fn firewall_finding() -> Option<linksy_ipc::Finding> {
+    if firewall_need()? == Need::Ready {
+        return None;
+    }
+    Some(linksy_ipc::Finding {
+        id: "firewall".into(),
+        title: t!("The firewall may be keeping devices out").into(),
+        detail: t!("Linksy's port and device discovery aren't open in this computer's firewall. Finish Setup opens them (it asks for your password).").into(),
+        action: Some(linksy_ipc::FindingAction::FinishSetup),
+    })
+}
+
 /// What this computer has and lacks, right now, for the `ui` window.
 pub fn check(ui: Ui) -> Vec<Item> {
     let fam = family();
