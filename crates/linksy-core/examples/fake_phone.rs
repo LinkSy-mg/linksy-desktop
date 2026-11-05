@@ -51,6 +51,8 @@
 //! DECK_LAYOUT, in short); `--deck-wait SECONDS` keeps the deck open that long after the run.
 //! `--off FEATURE` starts without it (`notifications`, `gallery`), as with its switch off;
 //! `--turn-on` announces `turn_on` and says yes when a computer asks to turn one on.
+//! `--snap PICTURE` announces `snap` and, when a computer asks, sends that picture as a file
+//! and then to its clipboard; `--snap-refuse WHY` says no with that reason instead.
 
 use std::time::Duration;
 
@@ -91,6 +93,7 @@ async fn main() {
     let mut deck: Option<(String, Option<f64>)> = None;
     let (mut deck_layout, mut deck_wait) = (false, 0u64);
     let (mut off, mut turn_on) = (Vec::<String>::new(), false);
+    let (mut snap, mut snap_refuse) = (None::<std::path::PathBuf>, None::<String>);
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -153,6 +156,8 @@ async fn main() {
             "--notifications-later" => notifications_later = Some(value().parse().expect("--notifications-later SECONDS")),
             "--off" => off.push(value()),
             "--turn-on" => turn_on = true,
+            "--snap" => snap = Some(value().into()),
+            "--snap-refuse" => snap_refuse = Some(value()),
             other => panic!("unknown option {other}"),
         }
     }
@@ -179,6 +184,9 @@ async fn main() {
     }
     if turn_on {
         config.features.push("turn_on".into());
+    }
+    if snap.is_some() || snap_refuse.is_some() {
+        config.features.push("snap".into());
     }
     config.features.retain(|f| !off.contains(f));
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
@@ -685,6 +693,17 @@ async fn main() {
                         features.push(feature.clone());
                         node.set_features(features).await;
                         println!("{feature} turned on");
+                    }
+                }
+                Ok(Event::SnapRequest { from }) => {
+                    println!("SNAP ASKED by {}", from.name);
+                    if let Some(why) = &snap_refuse {
+                        let _ = node.refuse_snap(&from.id, why).await;
+                    } else if let Some(picture) = &snap {
+                        let sent = node.send_files(&from.id, vec![picture.clone()]).await;
+                        println!("snap sent: {:?}", sent.map_err(|e| e.to_string()));
+                        let on_clipboard = node.send_clipboard_file(&from.id, picture.clone()).await;
+                        println!("snap on the clipboard: {:?}", on_clipboard.map_err(|e| e.to_string()));
                     }
                 }
                 Ok(Event::LocateRequest { from }) => {
