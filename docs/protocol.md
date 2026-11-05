@@ -80,7 +80,7 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | Turn on the Inbox or Gallery from the computer | On main (not released) | Built, waits for the core pin that has it | `turn_on` (§4.21) |
 | Phone to phone: the route, a check before sending, apps | On main (not released) | In progress | §4.22 |
 | Position and seeking of the computer's players | On main (not released) | Nothing to do | the computer counts a browser's position itself and seeks exactly (§4.5) |
-| Snap: take a photo on the phone, it lands on the computer | To do (Now) | Built, not published | an ordinary file transfer, then `clipboard_file` where the computer announces it; the computer's "Snap from Phone" needs a new message |
+| Snap: take a photo on the phone, it lands on the computer | Done on branch `phone-work` (§4.23) | Built, not published | an ordinary file transfer, then `clipboard_file` where the computer announces it; "Snap from Phone" sends `snap_request` |
 | Copy to Computer (text from the phone's text menu) | Receives `clipboard` as before | Built, not published | to confirm against the phone's messages once they are published |
 | A USB button on the phone | Done (0.9) | Built, not published | `usb_plugged`, `usb_connect` (§4.11); mobile#11 |
 | Connection Doctor | To do (Now) | Its half built, not published | the computer checks its firewall, a VPN, devices kept apart and the cable |
