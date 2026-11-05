@@ -54,6 +54,14 @@ Finish Setup gives the line for its config. Linksy Camera comes back at boot thr
 `modules-load.d` instead of a systemd service (0.9.13), and Restart Now uses `loginctl`.
 Lock When Away needs `elogind`.
 
+Nothing there restarts the service after a crash, so `linksyd` does it itself when systemd
+isn't supervising it (no `INVOCATION_ID`; the Flatpak, an autostart entry, the app starting
+it): it runs as the child of a small copy of itself that starts it again after 3 s, for a
+crash or a kill but not for a stop that was asked for (Quit, a TERM), and gives up after 5 in
+a minute, as `linksyd.service` does. The copy costs under 1 MB. `LINKSY_NO_SUPERVISOR=1`
+runs the service without it. One lock beside the IPC socket keeps it to one service per user,
+however many autostart entries start it.
+
 ## Plan
 
 Each gap gets a fallback Linksy handles itself, rather than a package the user has to find.

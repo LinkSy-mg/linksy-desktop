@@ -106,7 +106,7 @@ impl Node {
             FsReply::FsOk => Ok(FsAnswer::Ok),
             FsReply::FsInfo { name } => Ok(FsAnswer::Info { name }),
             FsReply::FsError { message, not_found: true } => Err(Error::NotFound(message)),
-            FsReply::FsError { message, .. } => Err(Error::Invalid(message)),
+            FsReply::FsError { message, .. } => Err(crate::error::refusal(message)),
         }
     }
 }

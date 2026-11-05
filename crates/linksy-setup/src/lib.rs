@@ -459,6 +459,11 @@ fn flatpak_autostart() -> PathBuf {
     linksy_host::config_dir().join("autostart/mg.diary.linksy.Linksy.service.desktop")
 }
 
+/// Whether the Flatpak starts the service from the entry of its own (Finish Setup writes it).
+pub fn own_autostart() -> bool {
+    linksy_host::exists(&flatpak_autostart())
+}
+
 /// The one the Background portal writes when the window asks it to start the service.
 fn portal_autostart() -> PathBuf {
     linksy_host::config_dir().join("autostart/mg.diary.linksy.Linksy.desktop")
@@ -823,7 +828,11 @@ pub fn enable_autostart() -> Result<(), Failure> {
             "[Desktop Entry]\nType=Application\nName=Linksy service\nComment=Keeps Linksy ready for your devices\nExec={}\nIcon=mg.diary.linksy.Linksy\nNoDisplay=true\nTerminal=false\nX-GNOME-Autostart-enabled=true\n",
             linksy_host::launcher("linksyd")
         );
-        return linksy_host::write(&flatpak_autostart(), entry.as_bytes()).map_err(|_| Failure::Message(t!("Couldn't turn on starting with your computer.").into()));
+        linksy_host::write(&flatpak_autostart(), entry.as_bytes()).map_err(|_| Failure::Message(t!("Couldn't turn on starting with your computer.").into()))?;
+        // One entry starts the service: the Background portal's, written when the window starts
+        // it, would start a second one at every login
+        stop_portal_autostart();
+        return Ok(());
     }
     let ok = std::process::Command::new("systemctl").args(["--user", "enable", "--now", "linksyd.service"]).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success());
     if ok { Ok(()) } else { Err(Failure::Message(t!("Couldn't turn on starting with your computer.").into())) }

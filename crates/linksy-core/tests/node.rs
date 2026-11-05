@@ -194,6 +194,46 @@ async fn unpaired_device_cannot_connect() {
     assert!(matches!(err, Error::NotPaired), "{err}");
 }
 
+fn loopback(node: &Node) -> std::net::SocketAddr {
+    let mut addr = node.local_addr().unwrap();
+    if addr.ip().is_unspecified() {
+        addr.set_ip(std::net::Ipv6Addr::LOCALHOST.into());
+    }
+    addr
+}
+
+#[tokio::test]
+async fn an_address_reconnects_a_paired_device_without_pairing_again() {
+    let (a, b) = paired().await;
+    let mut rb = b.node.subscribe();
+    let got = a.node.connect_or_pair(loopback(&b.node)).await.unwrap();
+    assert_eq!(got.name, "Beta");
+    // No second pairing was asked for on the other side
+    let asked = tokio::time::timeout(Duration::from_millis(600), async {
+        loop {
+            if let Ok(Event::PairingRequest { .. }) = rb.recv().await {
+                return;
+            }
+        }
+    })
+    .await;
+    assert!(asked.is_err(), "a paired device was asked to pair again");
+    assert_eq!(a.node.trusted().len(), 1);
+}
+
+#[tokio::test]
+async fn an_address_of_a_device_not_paired_yet_pairs_with_it() {
+    let a = dev("Alpha").await;
+    let b = dev("Beta").await;
+    auto_answer(&a.node, true);
+    auto_answer(&b.node, true);
+    let mut rb = b.node.subscribe();
+    let got = a.node.connect_or_pair(loopback(&b.node)).await.unwrap();
+    assert_eq!(got.name, "Beta");
+    wait_for(&mut rb, |e| matches!(e, Event::Connected { .. }).then_some(())).await;
+    assert_eq!((a.node.trusted().len(), b.node.trusted().len()), (1, 1));
+}
+
 #[tokio::test]
 async fn sends_files_and_folders_intact() {
     let (a, b) = paired().await;

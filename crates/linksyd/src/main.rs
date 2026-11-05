@@ -24,6 +24,7 @@ mod pictures;
 mod rest;
 mod update;
 mod sessions;
+mod supervise;
 #[cfg(target_os = "linux")]
 mod terminal;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
@@ -38,6 +39,7 @@ mod direct;
 mod media;
 #[cfg(target_os = "linux")]
 mod notify;
+mod single;
 mod system;
 #[cfg(target_os = "linux")]
 mod tray;
@@ -149,6 +151,10 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn main() -> ExitCode {
+    // Where nothing else restarts the service, this process only watches it (see supervise.rs)
+    if let Some(code) = supervise::run() {
+        return code;
+    }
     // Two malloc arenas, not one per thread: set before any thread starts (desktop#26)
     // SAFETY: no other thread is running yet
     #[cfg(target_env = "gnu")]
@@ -187,7 +193,15 @@ async fn run() -> ExitCode {
         }
     };
 
-    // One service per user: if the socket answers, another linksyd is running.
+    // One service per user. The lock decides, held until this ends: two started together both
+    // find no socket yet. A socket that answers is an older linksyd, which took no lock.
+    let _single = match single::take(&args.socket) {
+        Ok(lock) => lock,
+        Err(single::Taken) => {
+            eprintln!("linksyd is already running");
+            return ExitCode::SUCCESS;
+        }
+    };
     if tokio::net::UnixStream::connect(&args.socket).await.is_ok() {
         eprintln!("linksyd is already running");
         return ExitCode::SUCCESS;
@@ -312,7 +326,9 @@ async fn run() -> ExitCode {
     if let Some(t) = terminal::TERMINALS.get() {
         t.end_all();
     }
-    node.shutdown().await;
+    // Never lingers: a service that lost the relay's one place for its id (a second copy) used
+    // to hang here and stay in the tray
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(5), node.shutdown()).await;
     let _ = std::fs::remove_file(&socket);
     if let Some(exe) = updated {
         use std::os::unix::process::CommandExt;

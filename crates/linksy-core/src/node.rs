@@ -881,6 +881,15 @@ impl Node {
         self.dial(addr, Intent::Pair).await
     }
 
+    /// Reach the device at an address someone typed in: reconnect when it is already paired
+    /// (a phone on another subnet of the same home, which discovery never crosses), else pair.
+    pub async fn connect_or_pair(&self, addr: SocketAddr) -> Result<DeviceInfo> {
+        match self.connect(addr).await {
+            Err(Error::NotPaired) => self.pair(addr).await,
+            other => other,
+        }
+    }
+
     /// Pair with a device found by discovery.
     pub async fn pair_device(&self, id: Fingerprint) -> Result<DeviceInfo> {
         let addrs = self.nearby_addrs(&id);

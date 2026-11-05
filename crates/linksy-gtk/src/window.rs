@@ -794,7 +794,8 @@ impl Window {
         }
         let options = glib::VariantDict::new(None);
         options.insert("reason", t!("Linksy stays ready for your devices when its window is closed."));
-        options.insert("autostart", !linksy_setup::autostart_off());
+        // The portal's entry only when the service has none of its own: two would start two
+        options.insert("autostart", !linksy_setup::autostart_off() && !linksy_setup::own_autostart());
         options.insert("commandline", vec!["linksyd"]);
         if let Some(bus) = self.window.application().and_then(|app| app.dbus_connection()) {
             bus.call(
