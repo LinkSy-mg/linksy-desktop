@@ -290,7 +290,7 @@ impl GalleryView {
             selected.retain(|id| ids.contains(id.as_str()));
             selected.len() != before
         };
-        let new = rows(&items, self.columns.get(), |ms| section_label(ms));
+        let new = rows(&items, self.columns.get(), section_label);
         let (keep, removed) = {
             let old = self.laid.borrow();
             (old.iter().zip(&new).take_while(|(a, b)| a == b).count(), old.len())
