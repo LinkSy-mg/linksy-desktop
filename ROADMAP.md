@@ -6,6 +6,65 @@ both sides can work in parallel. Protocol details go into `docs/protocol.md` §4
 
 Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 
+## Where things are
+
+Linksy for Linux **0.12.4** and Linksy for Android **0.3.4** (2026-11-05). The two have their
+own version numbers. The numbers 0.9 to 1.0 in the plan below name **themes of work**, not
+releases: features shipped as they were ready, so the Gallery, Deck and Inbox arrived in
+desktop 0.12.x while 0.12's own theme, "Fast on any link", is still mostly ahead. Which side
+has which feature is in `docs/protocol.md` §2.
+
+**Shipped on both sides:** files, folders and the clipboard · Open on PC · battery and Find ·
+the computer's music and volume on the phone · pause on calls · Lock when away · photo
+auto-import · the phone in the Files sidebar · touchpad, keyboard and slides · the phone's
+screen, webcam, microphone and second display · the phone watching and controlling the
+computer, and Choose Screen · the terminal · Away from home (your own relay, a 7-day lease) ·
+Locate · Wi-Fi Direct for big files · the phone's notifications with Reply, the Messages page
+and the Inbox · the phone's Gallery · the Deck, with layouts made on the computer · private
+discovery · Update Now and problem logs. The desktop alone: controlling a phone over the cable
+(0.11.0).
+
+**Built, not in a release yet** (branches of this repository):
+- Turn the Inbox or Gallery on from the computer: the phone side is built and waits for the
+  core that has the message.
+- Phone to phone: the route a transfer takes, a check before sending, and sending apps. The
+  computer side is done; the phone side is to do.
+- Day headings in the Gallery ("Today", "Yesterday", "Nov 2").
+- The phone's seek bar on the computer's browser music (the computer now counts a browser's
+  position itself and seeks exactly).
+
+**Open on the phone, with the computer side ready:**
+- A "Connect by USB Cable" button on the phone (mobile#11).
+- USB on every phone (a Samsung A05 connects since 0.3.3 but lags, releases#8).
+- Away from home switched off completely.
+- Customizing the Deck on the phone (mobile#21), a usable terminal (mobile#2), less idle
+  memory (mobile#3).
+- The phone's own music on the computer: it needed notification access, which the app has had
+  since 0.3.2, so it is possible now and not built.
+
+**Next, in order** (the 0.12 theme):
+1. Lower latency on every connection (desktop#27).
+2. 60 fps screens (mobile#5).
+3. Wi-Fi Direct at full speed on any router.
+4. A link when no network is shared (desktop#13).
+5. Connection Doctor, one button for "why can't I see my phone?". Pieces exist: Finish Setup
+   on the computer, "Keep Linksy alive" on the phone.
+6. Bluetooth: knowing the phone is near, and a link without Wi-Fi (desktop#4).
+
+**Later, or maybe:** calls on the computer (desktop#7, "maybe") · the phone's volumes, Do Not
+Disturb and flashlight from the computer · controlling the phone's screen without a cable
+(desktop#8) · automatic clipboard sync where it is missing (desktop#9) · the phone's sound
+with its screen · videos that open where you left off · the computer's notifications on the
+phone · onboarding (desktop#16) and the feature freeze for 1.0 (desktop#10).
+
+**Not possible or not planned:** texting from the computer through SMS permissions (an app
+outside the Play Store can't hold them; texts come as the phone's notifications) · automatic
+clipboard sync on GNOME (GNOME doesn't let apps watch the clipboard; manual Send Clipboard
+stays) · the caller's name · browsing the phone's whole storage · Windows and macOS ·
+unlocking the computer from the phone.
+
+## The plan by theme
+
 | Release | Theme | Features |
 |---|---|---|
 | 0.2 | Everyday basics | Open on PC (desktop done in 0.2.0) · Battery & Ring (desktop done in 0.2.1) · Notifications with reply (desktop done in 0.2.2) |
@@ -16,17 +75,17 @@ Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 | 0.7 | Your computer in your pocket | Terminal from the phone, locked by a code set on the computer (desktop done in 0.7.0; `docs/protocol.md` §4.15) · Set Up Everything (0.7.0) |
 | 0.8 | Easier to set up | One-password Finish Setup · Connect by USB Cable guide · Microphone level and Listen · Ten languages (desktop done in 0.8.0) |
 | 0.9 | Works on every desktop | Hyprland, Sway, niri, X11 desktops and distributions without systemd ([desktop support](docs/desktop-support.md)) · Older releases (Ubuntu 24.04) and a list of every dependency · The cable when you ask for it · Upgrades in one click (`linksy upgrade`, Update Now) · Problem logs (`logs.txt`) · Private discovery · One Accept for a batch (desktop done in 0.9.0; screen control on Hyprland and Sway moves to 0.10) |
-| **0.10** | **Lighter and smoother** | Lighter at rest (desktop done in 0.11.3) · Transfers in a corner panel (desktop done) · Choose which monitor to view (desktop done) · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
-| **0.11** | **Never miss a notification** | The phone's notifications on the computer, with reply, which brings texts from every messaging app (desktop: Messages page and copied codes in 0.11.4) · Snap to computer (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
-| **0.12** | **Fast on any link** | Lower latency on every connection · 60 fps screens · Wi-Fi Direct at full speed on any router · Transfers with no shared network · Bluetooth: connect, and know when the phone is near · Connection Doctor |
-| **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone next) · The phone's photos on the computer (desktop: Gallery in 0.12.1) |
-| **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (desktop done in 0.11.3; your own relay in Android 0.2.3) |
+| 0.10 | Lighter and smoother | Lighter at rest (desktop done in 0.11.3) · Transfers in a corner panel (desktop done) · Choose which monitor to view (desktop done) · Screens on X11 without a portal (desktop done) · Screen control on Hyprland and Sway (desktop done) · A Qt 6 app for KDE Plasma (desktop done early, in 0.8.4) |
+| 0.11 | Never miss a notification | The phone's notifications on the computer, with reply, which brings texts from every messaging app (Android 0.3.2; desktop: Messages page and copied codes in 0.11.4) · Snap to computer (desktop 0.11 shipped Linksy Cable and phone control by cable early, from 0.13 and 0.16) |
+| **0.12** | **Fast on any link** | Lower latency on every connection (not started) · 60 fps screens (not started) · Wi-Fi Direct at full speed on any router (not started; direct links themselves shipped in 0.9.9) · Transfers with no shared network (not started) · Bluetooth: connect, and know when the phone is near (not started) · Connection Doctor (not started) |
+| **0.13** | **The cable, for real** | USB that works on every phone, end to end (desktop done in 0.11.0; the phone connects on a Samsung A05 since 0.3.3, not every phone yet) · The phone's photos on the computer (done: the Gallery, desktop 0.12.1, Android 0.3.3) |
+| **0.14** | **Your relay, or none** | Away from home becomes optional: off, removed, or your own relay (desktop done in 0.11.3; your own relay in desktop 0.8.4 and Android 0.2.3; the phone's switch to turn it off completely remains) |
 | **0.15** | **Calls** *(maybe)* | Answer, decline and hang up from the computer; talk through it over Bluetooth · The phone's controls on the computer |
-| **0.16** | **Optional extras** | Control the phone's screen from the computer · Automatic clipboard sync · The phone's sound with its screen · Deck (desktop: actions and the GTK editor in 0.12.1) · Videos open where you left off · The computer's notifications on the phone |
+| **0.16** | **Optional extras** | Control the phone's screen from the computer (by cable: desktop done in 0.11.0; without a cable: not started) · Automatic clipboard sync (computer to phone done except on GNOME; phone to computer limited) · The phone's sound with its screen (not started) · Deck (done: desktop 0.12.1, Android 0.3.3) · Videos open where you left off (not started) · The computer's notifications on the phone (not started) |
 | **1.0** | **Feature freeze** | No new features: fixes, performance, polish, stores · Onboarding |
 
-After 0.16, Linksy is feature complete: everything after that is fixing. Bold releases are
-next; the rest have shipped.
+After 0.16, Linksy is feature complete: everything after that is fixing. Themes in bold still
+have work ahead; the others have shipped.
 
 Not planned: automatic clipboard sync on GNOME (GNOME doesn't let apps watch the clipboard;
 it needs a Shell extension, and manual Send Clipboard stays). Windows and macOS.
