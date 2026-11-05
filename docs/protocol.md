@@ -1381,7 +1381,7 @@ A link with no transfer for **20 s** (`Config.direct_idle`) closes on both sides
 handle `up` before `connecting` too):
 
 ```json
-{"type":"direct","step":{"type":"ask"}}                                     // joiner → host: "set one up"
+{"type":"direct","step":{"type":"ask","frequency":5200}}                   // joiner → host: "set one up" (frequency: its Wi-Fi's channel, MHz, when it is on one)
 {"type":"direct","step":{"type":"invite","address":"02:00:00:00:00:00","name":"realme 15 Pro 5G"}} // host → joiner: its Wi-Fi Direct address and name
 {"type":"direct","step":{"type":"listening","address":"d8:80:83:cb:0d:33"}} // joiner → host: findable at this address
 {"type":"direct","step":{"type":"connecting"}}                              // host → joiner: connecting to you now
@@ -1458,6 +1458,16 @@ Steps (no `listening`, no `connecting`):
    `requestGroupInfo` for its `frequency`, then
    `direct_send(id, Invite { address, name: Some(deviceName), group: Some(g with frequency) })`,
    and right after, `direct_send(id, Up { ip: groupOwnerAddress (192.168.49.1), port: node.local_addr().port })`.
+   **Same channel (desktop, after 0.12.4):** a computer's `ask` carries `frequency`, the channel its
+   Wi-Fi is on (from `iw dev … link`, kept up to date on every network change). The host's core
+   puts it in `DirectWanted`'s group as `g.frequency = Some(f)`. When `g.frequency` is `Some(f)`,
+   **create the group on it** with `.setGroupOperatingFrequency(f)` instead of the band (only one
+   of the two may be set on a Builder), and if `createGroup` fails with it (a channel the phone
+   may not host on, such as a DFS channel in some regions) create it again with the band as above.
+   A computer's Wi-Fi chip that serves its network on one channel and the group on another hops
+   between them, which is what made a transfer run at 17 MB/s instead of 79. `ask` from an older
+   computer has no `frequency`, and an older phone ignores it. Whether this holds the speed on a
+   different channel is **not measured yet**.
 3. **Joiner**, on `Event::Direct { step: Invite { group: Some(g), .. } }`:
    `connect(channel, WifiP2pConfig.Builder().setNetworkName(g.ssid).setPassphrase(g.passphrase)
    (.setGroupOperatingFrequency(f) when g.frequency is Some(f)).build(), listener)`. Only one of

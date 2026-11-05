@@ -98,7 +98,8 @@ One button finds which, says it in a sentence, and fixes what it can.
 A direct link ran at about 79 MB/s when the phone picked the channel the computer's Wi-Fi
 was on, and about 17 MB/s when it picked another (5220 MHz against 5240): the computer's
 one Wi-Fi chip keeps hopping between the two.
-- **Desktop:** say which channel its Wi-Fi is on when it asks for a link.
+- **Desktop (done on branch `phone-work`, not measured):** says which channel its Wi-Fi is on when it
+  asks for a link (`ask` carries `frequency`, §4.17).
 - **Phone:** create the group on that channel (`setGroupOperatingFrequency`) and let the
   computer join it, instead of choosing during negotiation. First check that
   NetworkManager can join a group that already exists.
