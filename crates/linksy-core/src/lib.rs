@@ -1,6 +1,7 @@
 //! Linksy core: device identity, discovery, pairing and file transfer over QUIC.
 //! UI-independent; the daemon and every native front end build on [`Node`].
 
+pub mod apps;
 pub mod away;
 pub mod cable;
 pub mod deck_layout;
@@ -11,9 +12,11 @@ pub mod fs;
 pub mod gallery;
 pub mod identity;
 mod node;
+pub mod preflight;
 pub mod protocol;
 pub mod route;
 mod settings;
+pub mod space;
 mod tls;
 pub mod transfer;
 pub mod trust;
@@ -27,6 +30,8 @@ pub use protocol::{
     MediaState, MouseButton, NotificationButton, PluggedPhone, RemoteNotification, SessionKind, SmsMessage, SmsThread, TerminalInfo, TerminalOpen, VolumeState,
 };
 pub use node::{TerminalCall, Verdict};
+pub use apps::{AppHave, AppInfo, AppProbe, AppSend, AppState, DirectReady, PreflightMsg, PreflightReply, ReceivedApp};
+pub use preflight::{PreflightAnswer, PreflightCall};
 pub use route::{DirectPlan, Route, SendPlan, Skip};
 pub use settings::{MAX_NAME, Settings};
 pub use trust::TrustedDevice;

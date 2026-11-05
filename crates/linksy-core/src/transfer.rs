@@ -46,6 +46,23 @@ pub fn collect(paths: &[PathBuf]) -> io::Result<Vec<OutgoingFile>> {
     Ok(out)
 }
 
+/// Files under names of the sender's choosing: each `(path, name)` is sent as `name`, a
+/// relative path with `/` separators (an app's APKs, in a folder of their own). The path
+/// must be a file.
+pub fn collect_as(items: &[(PathBuf, String)]) -> io::Result<Vec<OutgoingFile>> {
+    let mut out = Vec::new();
+    for (path, name) in items {
+        if sanitize(name).is_none() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("unsupported file name: {name}")));
+        }
+        if !std::fs::metadata(path)?.is_file() {
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, format!("{} is not a file", path.display())));
+        }
+        walk(path, name.clone(), &mut out, true)?;
+    }
+    Ok(out)
+}
+
 fn walk(path: &Path, rel: String, out: &mut Vec<OutgoingFile>, named: bool) -> io::Result<()> {
     let meta = if named { std::fs::metadata(path)? } else { std::fs::symlink_metadata(path)? };
     if meta.is_file() {

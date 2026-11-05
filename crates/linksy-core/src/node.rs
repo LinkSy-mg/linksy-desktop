@@ -23,6 +23,7 @@ use tokio::task::{AbortHandle, JoinSet};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::apps::{AppInfo, AppProbe, AppSend, DirectReady, MAX_APKS, MAX_PROBES, PreflightMsg, PreflightReply, ReceivedApp, is_apk, received_apps, valid_apps};
 use crate::deck_layout::DeckLayouts;
 use crate::discovery::{Announce, Discovery, DiscoveryEvent, DiscoveryKey};
 use crate::error::{Error, Result, invalid, protocol};
@@ -30,6 +31,7 @@ use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
 use crate::fs::FsCall;
 use crate::gallery::GalleryCall;
 use crate::invite::{self, Invite};
+use crate::preflight::PreflightCall;
 use crate::settings::Settings;
 use crate::protocol::{Battery, CallState, ConversationMessage, DeckAction, DeckState, DirectGroup, DirectStep, PluggedPhone, FsRequest, GalleryRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState,
     FileEntry, Handshake, Intent, Message, PAIRING_VERSION, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
@@ -81,6 +83,8 @@ const DIRECT_RETRY: Duration = Duration::from_secs(600);
 /// ask the other to keep one for (`keep`, docs/protocol.md §4.22).
 const WARM_KEEP: u32 = 90;
 const MAX_KEEP: u32 = 180;
+/// How long a device's app has to add to a preflight answer.
+const PREFLIGHT_WAIT: Duration = Duration::from_millis(2500);
 /// How often the away endpoint is checked against who could use it, and how long it stays
 /// up once no one could.
 const AWAY_CHECK: Duration = Duration::from_secs(60);
@@ -125,6 +129,9 @@ pub struct Config {
     pub direct_min: u64,
     /// A direct link with nothing going on this long closes, so the phone stops hosting it.
     pub direct_idle: Duration,
+    /// Room to leave free where files are received: an offer that would use more is
+    /// declined at once, not started (§4.22).
+    pub keep_free: u64,
 }
 
 impl Config {
@@ -146,6 +153,7 @@ impl Config {
             relay: None,
             direct_min: 256 << 20,
             direct_idle: Duration::from_secs(20),
+            keep_free: 16 << 20,
         }
     }
 }
@@ -177,9 +185,26 @@ pub enum Event {
     Paired { device: DeviceInfo },
     PairingFailed { device: DeviceInfo, reason: String },
     /// Ask the user whether to accept these files.
-    TransferRequest { transfer: Uuid, from: DeviceInfo, files: Vec<FileEntry>, total: u64 },
+    TransferRequest {
+        transfer: Uuid,
+        from: DeviceInfo,
+        files: Vec<FileEntry>,
+        total: u64,
+        /// The apps among the files, when they say what they are (§4.22).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        apps: Vec<AppInfo>,
+    },
     /// `import`: photos a phone imports into this computer's pictures (no prompt).
-    TransferStarted { transfer: Uuid, peer: DeviceInfo, direction: Direction, files: Vec<FileEntry>, total: u64, import: bool },
+    TransferStarted {
+        transfer: Uuid,
+        peer: DeviceInfo,
+        direction: Direction,
+        files: Vec<FileEntry>,
+        total: u64,
+        import: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        apps: Vec<AppInfo>,
+    },
     TransferProgress { transfer: Uuid, bytes: u64, total: u64 },
     /// The route a transfer goes over (docs/protocol.md §4.22), on both ends. Sent once when
     /// the transfer starts; the sender sends one before that while it sets up a direct link
@@ -195,6 +220,9 @@ pub enum Event {
         why_not_direct: Option<String>,
     },
     TransferComplete { transfer: Uuid, saved: Vec<PathBuf> },
+    /// Apps arrived (after the `TransferComplete` of their transfer): each with the APKs it
+    /// came in, to install together. Android still asks the user (§4.22).
+    AppsReceived { transfer: Uuid, from: DeviceInfo, apps: Vec<ReceivedApp> },
     TransferFailed { transfer: Uuid, reason: String },
     SettingsChanged { settings: Settings },
     /// Ask the user whether `from` may start a media session (see their screen…).
@@ -492,7 +520,41 @@ impl Drop for Busy {
 /// where the answer goes for the ones that joined the first.
 struct Gathering {
     files: Vec<FileEntry>,
+    apps: Vec<AppInfo>,
     answer: watch::Sender<Option<bool>>,
+}
+
+/// What a send is made of: paths as they are, files under names of the sender's choosing,
+/// and the apps among them.
+#[derive(Default)]
+struct Items {
+    paths: Vec<PathBuf>,
+    named: Vec<(PathBuf, String)>,
+    apps: Vec<AppInfo>,
+}
+
+impl Items {
+    fn paths(paths: Vec<PathBuf>) -> Self {
+        Self { paths, ..Self::default() }
+    }
+}
+
+/// An APK's name in the offer: its own, with anything odd made safe, and different from
+/// the others of its app (`names`).
+fn apk_name(path: &std::path::Path, names: &mut std::collections::HashSet<String>) -> Option<String> {
+    let raw = path.file_name()?.to_str()?;
+    let clean: String = raw.chars().map(|c| if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+') { c } else { '_' }).collect();
+    if !is_apk(&clean) {
+        return None;
+    }
+    let stem = &clean[..clean.len() - 4];
+    let mut name = clean.clone();
+    let mut n = 1;
+    while !names.insert(name.clone()) {
+        n += 1;
+        name = format!("{stem}_{n}.apk");
+    }
+    Some(name)
 }
 
 struct Inner {
@@ -523,6 +585,9 @@ struct Inner {
     /// Gallery requests, for whoever serves this device's photos (phones).
     gallery: Mutex<Option<mpsc::UnboundedReceiver<GalleryCall>>>,
     gallery_tx: mpsc::UnboundedSender<GalleryCall>,
+    /// Preflights from other devices, for the app to add what only it knows (§4.22).
+    preflight: Mutex<Option<mpsc::UnboundedReceiver<PreflightCall>>>,
+    preflight_tx: mpsc::UnboundedSender<PreflightCall>,
     /// Transfers this device asked for (photos from a gallery), taken without asking into
     /// their folder: by id, from whom, where, and since when.
     expected: Mutex<HashMap<Uuid, (Fingerprint, PathBuf, Instant)>>,
@@ -582,6 +647,7 @@ impl Node {
         let (sessions_tx, sessions) = mpsc::unbounded_channel();
         let (fs_tx, fs) = mpsc::unbounded_channel();
         let (gallery_tx, gallery) = mpsc::unbounded_channel();
+        let (preflight_tx, preflight) = mpsc::unbounded_channel();
         let (terminals_tx, terminals) = mpsc::unbounded_channel();
         let node = Self {
             inner: Arc::new(Inner {
@@ -611,6 +677,8 @@ impl Node {
                 fs_tx,
                 gallery: Mutex::new(Some(gallery)),
                 gallery_tx,
+                preflight: Mutex::new(Some(preflight)),
+                preflight_tx,
                 expected: Mutex::default(),
                 terminals: Mutex::new(Some(terminals)),
                 terminals_tx,
@@ -1163,7 +1231,7 @@ impl Node {
         if meta.len() > MAX_CLIPBOARD_FILE {
             return Err(invalid("too big for the clipboard (10 MB at most); send it as a file instead"));
         }
-        self.offer_with(to, vec![path], false, true, Uuid::new_v4()).await
+        self.offer_with(to, Items::paths(vec![path]), false, true, Uuid::new_v4()).await
     }
 
     /// Check in with a device that asked for heartbeats.
@@ -1320,6 +1388,46 @@ impl Node {
         Ok(conn.open_bi().await?)
     }
 
+    /// Preflights from other devices (§4.22), for the app to add what only it knows: whether
+    /// it can install apps, which of the apps asked about it has, whether a direct link would
+    /// work now. Taken once; until then the core answers on its own.
+    pub fn incoming_preflight(&self) -> Option<mpsc::UnboundedReceiver<PreflightCall>> {
+        self.inner.preflight.lock().unwrap().take()
+    }
+
+    async fn handle_preflight(self, from: DeviceInfo, mut send: quinn::SendStream, bytes: u64, files: u32, apps: Vec<AppProbe>) {
+        let apps: Vec<AppProbe> = apps.into_iter().filter(AppProbe::is_valid).take(MAX_PROBES).collect();
+        let (auto, dir) = {
+            let settings = self.inner.settings.lock().unwrap();
+            (settings.auto_accept || self.inner.trust.lock().unwrap().get(&from.id).is_some_and(|t| t.auto_accept), settings.download_dir.clone())
+        };
+        let can_link = self.info().features.iter().any(|f| f == "direct_host" || f == "direct_join");
+        let mut reply = PreflightReply {
+            free: crate::space::free(&dir),
+            auto,
+            direct: if can_link { DirectReady::Ready } else { DirectReady::Unsupported },
+            can_install: None,
+            apps: Vec::new(),
+        };
+        let served = self.inner.preflight.lock().unwrap().is_none();
+        if served {
+            let (call, answer) = PreflightCall::new(from.clone(), bytes, files, apps.clone());
+            if self.inner.preflight_tx.send(call).is_ok()
+                && let Ok(Ok(a)) = tokio::time::timeout(PREFLIGHT_WAIT, answer).await
+            {
+                reply.free = a.free.or(reply.free);
+                reply.direct = a.direct.unwrap_or(reply.direct);
+                reply.can_install = a.can_install;
+                // Only what was asked about, once each
+                let asked: std::collections::HashSet<&str> = apps.iter().map(|p| p.package.as_str()).collect();
+                let mut seen = std::collections::HashSet::new();
+                reply.apps = a.apps.into_iter().filter(|s| asked.contains(s.package.as_str()) && seen.insert(s.package.clone())).collect();
+            }
+        }
+        let _ = write_msg(&mut send, &PreflightMsg::PreflightReply(reply)).await;
+        let _ = send.finish();
+    }
+
     pub fn incoming_sessions(&self) -> Option<mpsc::UnboundedReceiver<Session>> {
         self.inner.sessions.lock().unwrap().take()
     }
@@ -1348,22 +1456,60 @@ impl Node {
     }
 
     async fn offer(&self, to: &Fingerprint, paths: Vec<PathBuf>, import: bool) -> Result<Uuid> {
-        self.offer_with(to, paths, import, false, Uuid::new_v4()).await
+        self.offer_with(to, Items::paths(paths), import, false, Uuid::new_v4()).await
     }
 
     /// Send photos a computer asked for from this phone's gallery, as the transfer `id` it
     /// chose ([`GalleryRequest::Send`]).
     pub async fn send_gallery(&self, to: &Fingerprint, paths: Vec<PathBuf>, id: Uuid) -> Result<Uuid> {
-        self.offer_with(to, paths, true, false, id).await
+        self.offer_with(to, Items::paths(paths), true, false, id).await
     }
 
-    async fn offer_with(&self, to: &Fingerprint, paths: Vec<PathBuf>, import: bool, clipboard: bool, id: Uuid) -> Result<Uuid> {
+    /// Offer files, folders and apps in one go: `paths` as in [`Node::send_files`], and each
+    /// of `apps` as the folder of its APKs, which the other device is told about (§4.22).
+    /// The other device must announce `apps`; an app's folder is named `<package>-<version
+    /// code>`. Pass the whole selection in one call: one offer is one prompt, and the size
+    /// of all of it decides whether a direct link is set up.
+    pub async fn send_bundle(&self, to: &Fingerprint, paths: Vec<PathBuf>, apps: Vec<AppSend>) -> Result<Uuid> {
+        if !apps.is_empty() && !self.reach(to).await?.features.iter().any(|f| f == "apps") {
+            return Err(Error::Unsupported);
+        }
+        let mut items = Items::paths(paths);
+        let mut dirs = std::collections::HashSet::new();
+        for app in apps {
+            let mut info = app.info;
+            info.dir = format!("{}-{}", info.package, info.version_code);
+            if !info.is_valid() {
+                return Err(invalid(format!("{} isn't a valid app description", info.package)));
+            }
+            if !dirs.insert(info.dir.clone()) {
+                return Err(invalid(format!("{} twice in one send", info.package)));
+            }
+            if app.apks.is_empty() || app.apks.len() > MAX_APKS {
+                return Err(invalid(format!("{} has no APKs, or too many", info.package)));
+            }
+            let mut names = std::collections::HashSet::new();
+            for apk in app.apks {
+                let name = apk_name(&apk, &mut names).ok_or_else(|| invalid(format!("{} isn't an APK file", apk.display())))?;
+                items.named.push((apk, format!("{}/{name}", info.dir)));
+            }
+            items.apps.push(info);
+        }
+        self.offer_with(to, items, false, false, Uuid::new_v4()).await
+    }
+
+    async fn offer_with(&self, to: &Fingerprint, items: Items, import: bool, clipboard: bool, id: Uuid) -> Result<Uuid> {
         let (conn, activity) = self.ensure_connection(to).await?;
         let busy = activity.hold();
         let peer = self.peer_info(to).ok_or(Error::Unreachable)?;
-        let files = tokio::task::spawn_blocking(move || transfer::collect(&paths))
-            .await
-            .map_err(|e| protocol(e.to_string()))??;
+        let Items { paths, named, apps } = items;
+        let files = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<transfer::OutgoingFile>> {
+            let mut files = transfer::collect(&paths)?;
+            files.extend(transfer::collect_as(&named)?);
+            Ok(files)
+        })
+        .await
+        .map_err(|e| protocol(e.to_string()))??;
         if files.is_empty() {
             return Err(invalid("nothing to send"));
         }
@@ -1373,7 +1519,7 @@ impl Node {
             let entries: Vec<FileEntry> = files.iter().map(|f| f.entry.clone()).collect();
             let total = entries.iter().map(|f| f.size).sum();
             let result = async {
-                node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries.clone(), total, import });
+                node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries.clone(), total, import, apps: apps.clone() });
                 // Big ones over a direct link, when the devices can set one up
                 let (lane, why_not_direct) = node.direct_for(&to, total, Some(id)).await;
                 let _lane_busy = lane.as_ref().map(|(_, a)| a.hold());
@@ -1386,7 +1532,7 @@ impl Node {
                     None => (node.link(&to).map_or(Route::Lan, Route::from), conn.open_bi().await?),
                 };
                 node.emit(Event::TransferRoute { transfer: id, route, setting_up_direct: false, why_not_direct });
-                write_msg(&mut send, &TransferMsg::Offer { id, files: entries, import, clipboard }).await?;
+                write_msg(&mut send, &TransferMsg::Offer { id, files: entries, import, clipboard, apps }).await?;
                 let offsets = match read_msg(&mut recv).await? {
                     TransferMsg::Accept { offsets } => offsets,
                     TransferMsg::Decline => return Err(Error::Declined),
@@ -1567,16 +1713,17 @@ impl Node {
 
     /// Ask about an offer. Offers from the same device arriving within [`GATHER`] of the
     /// first join its prompt: one question, one answer for all of them.
-    async fn ask_offer(&self, from: &DeviceInfo, id: Uuid, files: &[FileEntry]) -> bool {
+    async fn ask_offer(&self, from: &DeviceInfo, id: Uuid, files: &[FileEntry], apps: &[AppInfo]) -> bool {
         let joined = {
             let mut gathering = self.inner.gathering.lock().unwrap();
             match gathering.get_mut(&from.id) {
                 Some(g) => {
                     g.files.extend_from_slice(files);
+                    g.apps.extend_from_slice(apps);
                     Some(g.answer.subscribe())
                 }
                 None => {
-                    gathering.insert(from.id, Gathering { files: files.to_vec(), answer: watch::channel(None).0 });
+                    gathering.insert(from.id, Gathering { files: files.to_vec(), apps: apps.to_vec(), answer: watch::channel(None).0 });
                     None
                 }
             }
@@ -1590,7 +1737,7 @@ impl Node {
         let Some(g) = self.inner.gathering.lock().unwrap().remove(&from.id) else { return false };
         let total = g.files.iter().map(|f| f.size).sum();
         let answer = self.expect_answer(id);
-        self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: g.files, total });
+        self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: g.files, total, apps: g.apps });
         let accepted = self.await_answer(id, answer, OFFER_TIMEOUT).await;
         let _ = g.answer.send(Some(accepted));
         accepted
@@ -2123,8 +2270,12 @@ impl Node {
         };
         match first.get("type").and_then(|t| t.as_str()) {
             Some("offer") => match serde_json::from_value(first) {
-                Ok(TransferMsg::Offer { id, files, import, clipboard }) => self.handle_offer(from, send, recv, id, files, import, clipboard, lane).await,
+                Ok(TransferMsg::Offer { id, files, import, clipboard, apps }) => self.handle_offer(from, send, recv, id, files, import, clipboard, apps, lane).await,
                 _ => debug!("bad offer from {}", from.name),
+            },
+            Some("preflight") => match serde_json::from_value(first) {
+                Ok(PreflightMsg::Preflight { bytes, files, apps }) => self.handle_preflight(from, send, bytes, files, apps).await,
+                _ => debug!("bad preflight from {}", from.name),
             },
             Some("session_request") => match serde_json::from_value(first) {
                 Ok(SessionMsg::SessionRequest { id, kind, terminal, choose }) => self.handle_session(from, send, recv, id, kind, terminal, choose).await,
@@ -2258,8 +2409,10 @@ impl Node {
         files: Vec<FileEntry>,
         import: bool,
         clipboard: bool,
+        apps: Vec<AppInfo>,
         lane: Option<Busy>,
     ) {
+        let apps = valid_apps(apps, &files);
         let total: u64 = files.iter().map(|f| f.size).sum();
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
         // Clipboard files: one small file, into a folder of their own, kept until the next.
@@ -2309,7 +2462,7 @@ impl Node {
         let auto = import_to.is_some()
             || self.inner.settings.lock().unwrap().auto_accept
             || self.inner.trust.lock().unwrap().get(&from.id).is_some_and(|t| t.auto_accept);
-        let accepted = auto || self.ask_offer(&from, id, &files).await;
+        let accepted = auto || self.ask_offer(&from, id, &files, &apps).await;
         if !accepted {
             let _ = write_msg(&mut send, &TransferMsg::Decline).await;
             let _ = send.finish();
@@ -2319,8 +2472,10 @@ impl Node {
 
         let node = self.clone();
         let from_clip = from.clone();
+        let from_apps = from.clone();
         let to_clipboard = clipboard_to.is_some();
         let over_lane = lane.is_some();
+        let (apps_started, apps_done, files_done) = (apps.clone(), apps, files.clone());
         let task = tokio::spawn(async move {
             // The direct link it comes over stays up until it's done
             let _lane = lane;
@@ -2332,11 +2487,20 @@ impl Node {
                 let plan = transfer::plan(&dir, &files).await?;
                 let offsets: Vec<u64> = plan.iter().map(|f| f.offset).collect();
                 let start = offsets.iter().sum();
+                // Better to say no now than to fill the disk and fail at the end
+                let need: u64 = total.saturating_sub(start);
+                if let Some(free) = crate::space::free(&dir)
+                    && need.saturating_add(node.inner.config.keep_free) > free
+                {
+                    let _ = write_msg(&mut send, &TransferMsg::Decline).await;
+                    let _ = send.finish();
+                    return Err(invalid(format!("not enough room: {need} bytes to receive, {free} free")));
+                }
                 write_msg(&mut send, &TransferMsg::Accept { offsets }).await?;
                 // A clipboard file isn't a download: it shows up as `ClipboardFile` only.
                 if !to_clipboard {
                     let route = if over_lane { Route::Direct } else { node.link(&from.id).map_or(Route::Lan, Route::from) };
-                    node.emit(Event::TransferStarted { transfer: id, peer: from, direction: Direction::Incoming, files, total, import });
+                    node.emit(Event::TransferStarted { transfer: id, peer: from, direction: Direction::Incoming, files, total, import, apps: apps_started });
                     node.emit(Event::TransferRoute { transfer: id, route, setting_up_direct: false, why_not_direct: None });
                 }
                 let events = node.inner.events.clone();
@@ -2354,10 +2518,17 @@ impl Node {
             {
                 node.emit(Event::ClipboardFile { from: from_clip, path: path.clone() });
             }
+            let arrived = match &result {
+                Ok(saved) if !apps_done.is_empty() => Some(received_apps(&apps_done, &files_done, saved)),
+                _ => None,
+            };
             node.emit(match result {
                 Ok(saved) => Event::TransferComplete { transfer: id, saved },
                 Err(e) => Event::TransferFailed { transfer: id, reason: e.to_string() },
             });
+            if let Some(apps) = arrived {
+                node.emit(Event::AppsReceived { transfer: id, from: from_apps, apps });
+            }
         });
         self.inner.transfers.lock().unwrap().insert(id, task.abort_handle());
     }

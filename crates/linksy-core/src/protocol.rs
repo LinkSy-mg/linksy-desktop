@@ -92,6 +92,9 @@ pub enum TransferMsg {
         /// taken without asking.
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         clipboard: bool,
+        /// Apps among the files, each the APKs in a folder of its own (§4.22).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        apps: Vec<crate::apps::AppInfo>,
     },
     /// `offsets[i]` is how many bytes of file `i` the receiver already has.
     Accept { offsets: Vec<u64> },
