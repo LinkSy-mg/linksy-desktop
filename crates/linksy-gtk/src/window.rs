@@ -5,6 +5,7 @@
 mod camera;
 mod corner;
 mod deck;
+mod doctor;
 mod files;
 mod gallery;
 mod island;
@@ -370,7 +371,7 @@ impl Window {
                 island::Pick::Transfers => w.open_transfers(),
                 island::Pick::Send(id) => w.choose_files_for(id),
                 island::Pick::AddDevice => w.show_invite(),
-                island::Pick::PairAddress => w.ask_pair_address(),
+                island::Pick::PairAddress => w.ask_pair_address(""),
                 island::Pick::UsbCable => w.show_usb_cable(),
             }
         });
@@ -503,7 +504,7 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 14] = [
+        let actions: [(&str, Run); 15] = [
             ("choose-files", |w| w.choose_files()),
             ("transfers", |w| w.open_transfers()),
             ("toggle-sidebar", |w| w.split.set_show_sidebar(!w.split.shows_sidebar())),
@@ -519,7 +520,8 @@ impl Window {
             ("upgrade", |w| w.show_upgrade()),
             ("usb-cable", |w| w.show_usb_cable()),
             ("add-device", |w| w.show_invite()),
-            ("pair-address", |w| w.ask_pair_address()),
+            ("pair-address", |w| w.ask_pair_address("")),
+            ("doctor", |w| w.show_doctor()),
             ("preview-camera", |w| {
                 let on = w.state.borrow().camera;
                 match on.and_then(|(_, id)| w.device(&id)) {
@@ -1895,7 +1897,7 @@ impl Window {
     }
 
     /// For networks that block discovery: pair with a device by its IP address.
-    fn ask_pair_address(self: &Rc<Self>) {
+    fn ask_pair_address(self: &Rc<Self>, address: &str) {
         let dialog = adw::AlertDialog::new(Some(t!("Pair by Address")), Some(t!("If a device doesn't show up, enter the address shown in its Linksy Preferences.")));
         let entry = gtk::Entry::builder().placeholder_text("192.168.1.20").activates_default(true).input_purpose(gtk::InputPurpose::Url).build();
         dialog.set_extra_child(Some(&entry));
@@ -1906,6 +1908,7 @@ impl Window {
         dialog.set_response_enabled("pair", false);
         let d = dialog.clone();
         entry.connect_changed(move |e| d.set_response_enabled("pair", fmt::peer_address(&e.text()).is_some()));
+        entry.set_text(address);
         let (w, e) = (self.clone(), entry.clone());
         dialog.connect_response(Some("pair"), move |_, _| {
             let Some(addr) = fmt::peer_address(&e.text()) else { return };
@@ -2082,6 +2085,7 @@ fn main_menu() -> gtk::MenuButton {
     section.append(Some(t!("Add Device…")), Some("win.add-device"));
     section.append(Some(t!("Pair by Address…")), Some("win.pair-address"));
     section.append(Some(t!("Connect by USB Cable…")), Some("win.usb-cable"));
+    section.append(Some(t!("Why Can't I See My Phone?")), Some("win.doctor"));
     section.append(Some(t!("Open Received Files")), Some("app.open-downloads"));
     menu.append_section(None, &section);
     let section = gio::Menu::new();
