@@ -1,5 +1,6 @@
-// A phone's Gallery tab: its photos and videos in a grid, newest first, the next page as it
-// scrolls. Only the squares in view are built, and each asks for its own thumbnail.
+// A phone's Gallery tab: its photos and videos in a grid under a heading for each day,
+// newest first, the next page as it scrolls. Only the rows in view are built, and each
+// square asks for its own thumbnail.
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
@@ -26,7 +27,7 @@ ColumnLayout {
 
     // Short pages leave nothing to scroll: the next one now
     function fill() {
-        if (grid.contentHeight < grid.height + 400) store.page(false);
+        if (list.contentHeight < list.height + 400) store.page(false);
     }
 
     function click(index, modifiers) {
@@ -74,17 +75,43 @@ ColumnLayout {
         Layout.fillWidth: true
         Layout.preferredHeight: Kirigami.Units.gridUnit * 33
         visible: tab.store.status === ""
-        GridView {
-            id: grid
+        ListView {
+            id: list
             readonly property int columns: Math.max(3, Math.min(12, Math.floor(width / (Kirigami.Units.gridUnit * 7.5))))
+            readonly property int square: Math.floor(width / columns)
             // Decoded no bigger than shown, nor than the service's thumbnails
-            readonly property int decoded: Math.min(256, Math.ceil(cellWidth * Screen.devicePixelRatio))
+            readonly property int decoded: Math.min(256, Math.ceil(square * Screen.devicePixelRatio))
             clip: true
-            cellWidth: Math.floor(width / columns)
-            cellHeight: cellWidth
-            model: tab.store.items
+            model: tab.store.rows
+            onColumnsChanged: tab.store.setColumns(columns)
+            Component.onCompleted: tab.store.setColumns(columns)
             onContentYChanged: if (contentY - originY + height > contentHeight - 400) tab.store.page(false)
-            delegate: Cell {}
+            delegate: Item {
+                id: line
+                required property string kind
+                required property string label
+                required property int start
+                required property int size
+                width: ListView.view.width
+                height: kind === "day" ? heading.implicitHeight + Kirigami.Units.gridUnit : list.square
+                QQC2.Label {
+                    id: heading
+                    visible: line.kind === "day"
+                    anchors.left: parent.left
+                    anchors.bottom: parent.bottom
+                    anchors.leftMargin: Kirigami.Units.smallSpacing
+                    anchors.bottomMargin: Kirigami.Units.smallSpacing
+                    text: line.label
+                    font.weight: Font.DemiBold
+                }
+                Row {
+                    visible: line.kind === "photos"
+                    Repeater {
+                        model: line.kind === "photos" ? line.size : 0
+                        Cell { first: line.start }
+                    }
+                }
+            }
         }
     }
 
@@ -129,16 +156,20 @@ ColumnLayout {
     // One photo or video: its thumbnail once it's here, its length for a video
     component Cell: Item {
         id: cell
+        // Its place in its row, and the row's first among the items
         required property int index
-        required property string itemId
-        required property string name
-        required property bool video
-        required property real taken_ms
-        required property real duration_ms
-        required property bool selected
+        required property int first
+        readonly property int at: first + index
+        readonly property var photo: tab.store.items.get(at)
+        readonly property string itemId: photo.itemId
+        readonly property string name: photo.name
+        readonly property bool video: photo.video
+        readonly property real taken_ms: photo.taken_ms
+        readonly property real duration_ms: photo.duration_ms
+        readonly property bool selected: tab.store.selectionRev >= 0 && !!tab.store.chosen[itemId]
         property string path: tab.store.thumb(itemId)
-        implicitWidth: grid.cellWidth
-        implicitHeight: grid.cellHeight
+        implicitWidth: list.square
+        implicitHeight: list.square
 
         Connections {
             target: tab.store
@@ -160,8 +191,8 @@ ColumnLayout {
                 Image {
                     anchors.fill: parent
                     source: cell.path ? "file://" + cell.path.split("/").map(encodeURIComponent).join("/") : ""
-                    sourceSize.width: grid.decoded
-                    sourceSize.height: grid.decoded
+                    sourceSize.width: list.decoded
+                    sourceSize.height: list.decoded
                     fillMode: Image.PreserveAspectCrop
                     asynchronous: true
                 }
@@ -190,7 +221,7 @@ ColumnLayout {
             id: pointer
             anchors.fill: parent
             hoverEnabled: true
-            onClicked: mouse => tab.click(cell.index, mouse.modifiers)
+            onClicked: mouse => tab.click(cell.at, mouse.modifiers)
             onDoubleClicked: tab.store.save([cell.itemId], true)
             onContainsMouseChanged: {
                 if (containsMouse) {

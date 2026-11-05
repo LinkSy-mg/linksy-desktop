@@ -1507,6 +1507,12 @@ fn local(at_ms: u64) -> Option<glib::DateTime> {
 
 /// "Today", "Yesterday", "Monday 13 October".
 pub(super) fn day_label(at_ms: u64) -> String {
+    day_heading(at_ms, |_| "%A %e %B")
+}
+
+/// "Today", "Yesterday", then the date as `far` formats it, given whether it falls in
+/// this year.
+pub(super) fn day_heading(at_ms: u64, far: impl Fn(bool) -> &'static str) -> String {
     let (Some(then), Ok(now)) = (local(at_ms), glib::DateTime::now_local()) else { return String::new() };
     let key = |d: &glib::DateTime| (d.year(), d.day_of_year());
     if key(&then) == key(&now) {
@@ -1514,7 +1520,7 @@ pub(super) fn day_label(at_ms: u64) -> String {
     } else if now.add_days(-1).is_ok_and(|y| key(&y) == key(&then)) {
         t!("Yesterday").into()
     } else {
-        then.format("%A %e %B").map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default()
+        then.format(far(then.year() == now.year())).map(|s| s.split_whitespace().collect::<Vec<_>>().join(" ")).unwrap_or_default()
     }
 }
 

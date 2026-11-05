@@ -1,7 +1,7 @@
-//! A phone's Gallery tab (docs/protocol.md §4.18): its photos and videos, newest first, a
-//! page at a time as the grid scrolls; each thumbnail is fetched when its square comes into
-//! view and decoded off the main thread. Selected ones are saved into the photos folder;
-//! double-clicking one saves it and opens it.
+//! A phone's Gallery tab (docs/protocol.md §4.18): its photos and videos, newest first and
+//! under a heading for each day, a page at a time as the grid scrolls; each thumbnail is
+//! fetched when its square comes into view and decoded off the main thread. Selected ones
+//! are saved into the photos folder; double-clicking one saves it and opens it.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -19,6 +19,8 @@ use crate::fmt;
 const PAGE: u32 = 120;
 /// The most a phone gives in one page.
 const MAX_PAGE: u32 = 500;
+/// The most squares in a row.
+const MAX_COLUMNS: usize = 12;
 
 type Fetch = RefCell<Option<Rc<dyn Fn(String)>>>;
 
@@ -27,9 +29,19 @@ pub struct GalleryView {
     albums: gtk::DropDown,
     album_names: gtk::StringList,
     count: gtk::Label,
+    /// Every photo shown, newest first.
     store: gio::ListStore,
-    selection: gtk::MultiSelection,
-    grid: gtk::GridView,
+    /// What the list shows: the same photos cut into rows under their day's heading.
+    rows: gio::ListStore,
+    laid: RefCell<Vec<Row>>,
+    list: gtk::ListView,
+    /// Squares in a row, from the width.
+    columns: Cell<usize>,
+    /// How tall a square is, from the width.
+    square: Cell<i32>,
+    selected: RefCell<HashSet<String>>,
+    /// Where a range starts (Shift-click).
+    anchor: RefCell<Option<String>>,
     scroller: gtk::ScrolledWindow,
     stack: gtk::Stack,
     status: gtk::Label,
@@ -41,6 +53,7 @@ pub struct GalleryView {
     /// Thumbnails already on disk, by item id, for the phone shown.
     thumbs: RefCell<HashMap<String, PathBuf>>,
     fetch: Fetch,
+    open: Fetch,
     /// Filling the album list, not the user choosing.
     syncing: Cell<bool>,
 }
@@ -68,10 +81,10 @@ impl GalleryView {
         top.append(&count);
 
         let store = gio::ListStore::new::<glib::BoxedAnyObject>();
-        let selection = gtk::MultiSelection::new(Some(store.clone()));
+        let rows = gio::ListStore::new::<glib::BoxedAnyObject>();
         let factory = gtk::SignalListItemFactory::new();
-        let grid = gtk::GridView::builder().model(&selection).factory(&factory).min_columns(3).max_columns(12).enable_rubberband(true).css_classes(["gallery-grid"]).build();
-        let scroller = gtk::ScrolledWindow::builder().child(&grid).hscrollbar_policy(gtk::PolicyType::Never).height_request(600).css_classes(["inner-scroll", "gallery-box"]).build();
+        let list = gtk::ListView::builder().model(&gtk::NoSelection::new(Some(rows.clone()))).factory(&factory).css_classes(["gallery-grid"]).build();
+        let scroller = gtk::ScrolledWindow::builder().child(&list).hscrollbar_policy(gtk::PolicyType::Never).height_request(600).css_classes(["inner-scroll", "gallery-box"]).build();
         let status = gtk::Label::builder().wrap(true).justify(gtk::Justification::Center).css_classes(["dim-label"]).margin_top(40).margin_bottom(40).build();
         let stack = gtk::Stack::builder().vhomogeneous(false).build();
         stack.add_named(&scroller, Some("grid"));
@@ -95,8 +108,13 @@ impl GalleryView {
             album_names,
             count,
             store,
-            selection,
-            grid,
+            rows,
+            laid: RefCell::default(),
+            list,
+            columns: Cell::new(4),
+            square: Cell::new(132),
+            selected: RefCell::default(),
+            anchor: RefCell::default(),
             scroller,
             stack,
             status,
@@ -107,51 +125,253 @@ impl GalleryView {
             state: RefCell::default(),
             thumbs: RefCell::default(),
             fetch: RefCell::default(),
+            open: RefCell::default(),
             syncing: Cell::new(false),
         });
         view.cells(&factory);
+        view.wire();
         view
     }
 
     fn cells(self: &Rc<Self>, factory: &gtk::SignalListItemFactory) {
-        factory.connect_setup(|_, item| {
+        let view = Rc::downgrade(self);
+        factory.connect_setup(move |_, item| {
             let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-            let picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).can_shrink(true).width_request(132).height_request(132).build();
-            let duration = gtk::Label::builder().halign(gtk::Align::End).valign(gtk::Align::End).visible(false).css_classes(["video-badge", "numeric"]).build();
-            let cell = gtk::Overlay::builder().child(&picture).overflow(gtk::Overflow::Hidden).css_classes(["gallery-cell"]).build();
-            cell.add_overlay(&duration);
-            item.set_child(Some(&cell));
+            item.set_activatable(false);
+            item.set_selectable(false);
+            let day = gtk::Label::builder().xalign(0.0).margin_top(14).margin_bottom(4).margin_start(6).css_classes(["heading"]).build();
+            let line = gtk::Box::builder().homogeneous(true).build();
+            for _ in 0..MAX_COLUMNS {
+                line.append(&Self::slot(&view));
+            }
+            let row = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
+            row.append(&day);
+            row.append(&line);
+            item.set_child(Some(&row));
         });
         let view = Rc::downgrade(self);
         factory.connect_bind(move |_, item| {
             let Some(view) = view.upgrade() else { return };
             let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-            let (Some(obj), Some(cell)) = (item.item().and_downcast::<glib::BoxedAnyObject>(), item.child().and_downcast::<gtk::Overlay>()) else { return };
-            let g = obj.borrow::<GalleryItem>();
-            let picture = cell.child().and_downcast::<gtk::Picture>().expect("picture");
-            let duration = cell.last_child().and_downcast::<gtk::Label>().expect("duration");
-            picture.set_paintable(gdk::Paintable::NONE);
-            cell.set_widget_name(&g.id);
-            cell.set_tooltip_text(Some(&format!("{}\n{}", g.name, super::page::day_label(g.taken_ms))));
-            duration.set_visible(g.video);
-            duration.set_label(&g.duration_ms.map(clock).unwrap_or_default());
-            let known = view.thumbs.borrow().get(&g.id).cloned();
-            match known {
-                Some(path) => show_thumb(&cell, &g.id, path),
-                None => {
-                    let fetch = view.fetch.borrow().clone();
-                    if let Some(fetch) = fetch {
-                        fetch(g.id.clone());
+            let (Some(obj), Some(row)) = (item.item().and_downcast::<glib::BoxedAnyObject>(), item.child().and_downcast::<gtk::Box>()) else { return };
+            let (Some(day), Some(line)) = (row.first_child().and_downcast::<gtk::Label>(), row.last_child().and_downcast::<gtk::Box>()) else { return };
+            match &*obj.borrow::<Row>() {
+                Row::Day(label) => {
+                    day.set_label(label);
+                    day.set_visible(true);
+                    line.set_visible(false);
+                }
+                Row::Photos(photos) => {
+                    day.set_visible(false);
+                    line.set_visible(true);
+                    let columns = view.columns.get();
+                    let mut next = line.first_child();
+                    for i in 0..MAX_COLUMNS {
+                        let Some(slot) = next.and_downcast::<gtk::Box>() else { break };
+                        next = slot.next_sibling();
+                        slot.set_visible(i < columns);
+                        let Some(cell) = slot.first_child().and_downcast::<gtk::Overlay>() else { continue };
+                        match photos.get(i) {
+                            Some(g) => {
+                                cell.set_visible(true);
+                                view.bind_photo(&slot, &cell, g);
+                            }
+                            None => {
+                                cell.set_visible(false);
+                                cell.set_widget_name("");
+                            }
+                        }
                     }
                 }
             }
         });
         factory.connect_unbind(|_, item| {
             let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
-            if let Some(cell) = item.child() {
-                cell.set_widget_name("");
+            let Some(line) = item.child().and_then(|row| row.last_child()) else { return };
+            let mut next = line.first_child();
+            while let Some(slot) = next {
+                next = slot.next_sibling();
+                if let Some(cell) = slot.first_child() {
+                    cell.set_widget_name("");
+                }
             }
         });
+    }
+
+    /// One square of a row: the photo, a ring when selected; clicks pick it.
+    fn slot(view: &std::rc::Weak<Self>) -> gtk::Box {
+        let picture = gtk::Picture::builder().content_fit(gtk::ContentFit::Cover).can_shrink(true).build();
+        let duration = gtk::Label::builder().halign(gtk::Align::End).valign(gtk::Align::End).visible(false).css_classes(["video-badge", "numeric"]).build();
+        let cell = gtk::Overlay::builder().child(&picture).overflow(gtk::Overflow::Hidden).css_classes(["gallery-cell"]).build();
+        cell.add_overlay(&duration);
+        let slot = gtk::Box::builder().hexpand(true).css_classes(["gallery-slot"]).build();
+        slot.append(&cell);
+        let click = gtk::GestureClick::builder().button(gdk::BUTTON_PRIMARY).build();
+        let view = view.clone();
+        click.connect_pressed(move |gesture, presses, _, _| {
+            let Some(view) = view.upgrade() else { return };
+            let Some(id) = gesture.widget().and_then(|s| s.first_child()).map(|c| c.widget_name().to_string()) else { return };
+            view.press(&id, presses, gesture.current_event_state());
+        });
+        slot.add_controller(click);
+        slot
+    }
+
+    fn bind_photo(self: &Rc<Self>, slot: &gtk::Box, cell: &gtk::Overlay, g: &GalleryItem) {
+        let (Some(picture), Some(duration)) = (cell.child().and_downcast::<gtk::Picture>(), cell.last_child().and_downcast::<gtk::Label>()) else { return };
+        picture.set_paintable(gdk::Paintable::NONE);
+        picture.set_height_request(self.square.get());
+        cell.set_widget_name(&g.id);
+        cell.set_tooltip_text(Some(&format!("{}\n{}", g.name, super::page::day_label(g.taken_ms))));
+        duration.set_visible(g.video);
+        duration.set_label(&g.duration_ms.map(clock).unwrap_or_default());
+        if self.selected.borrow().contains(&g.id) {
+            slot.add_css_class("selected");
+        } else {
+            slot.remove_css_class("selected");
+        }
+        let known = self.thumbs.borrow().get(&g.id).cloned();
+        match known {
+            Some(path) => show_thumb(cell, &g.id, path),
+            None => {
+                let fetch = self.fetch.borrow().clone();
+                if let Some(fetch) = fetch {
+                    fetch(g.id.clone());
+                }
+            }
+        }
+    }
+
+    /// The list follows the photos, and the squares follow the width.
+    fn wire(self: &Rc<Self>) {
+        let view = Rc::downgrade(self);
+        self.store.connect_items_changed(move |_, _, _, _| {
+            if let Some(view) = view.upgrade() {
+                view.relayout();
+            }
+        });
+        let view = Rc::downgrade(self);
+        self.list.add_tick_callback(move |list, _| {
+            if let Some(view) = view.upgrade() {
+                view.fit(list.width());
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    /// As many squares as the width has room for.
+    fn fit(&self, width: i32) {
+        if width <= 0 {
+            return;
+        }
+        let columns = (width / 140).clamp(3, MAX_COLUMNS as i32) as usize;
+        let square = width / columns as i32 - 6;
+        if square != self.square.get() {
+            self.square.set(square);
+            for (_, cell) in self.squares() {
+                if let Some(picture) = cell.child() {
+                    picture.set_height_request(square);
+                }
+            }
+        }
+        if columns != self.columns.get() {
+            self.columns.set(columns);
+            self.relayout();
+        }
+    }
+
+    /// Cut the photos into rows again, touching only the rows from the first that changed.
+    fn relayout(&self) {
+        let items = self.items();
+        let ids: HashSet<&str> = items.iter().map(|i| i.id.as_str()).collect();
+        let pruned = {
+            let mut selected = self.selected.borrow_mut();
+            let before = selected.len();
+            selected.retain(|id| ids.contains(id.as_str()));
+            selected.len() != before
+        };
+        let new = rows(&items, self.columns.get(), section_label);
+        let (keep, removed) = {
+            let old = self.laid.borrow();
+            (old.iter().zip(&new).take_while(|(a, b)| a == b).count(), old.len())
+        };
+        let added: Vec<glib::BoxedAnyObject> = new[keep..].iter().cloned().map(glib::BoxedAnyObject::new).collect();
+        self.rows.splice(keep as u32, (removed - keep) as u32, &added);
+        *self.laid.borrow_mut() = new;
+        if pruned {
+            self.sync_selection();
+        }
+    }
+
+    /// A click on photo `id`: Ctrl adds or drops it, Shift takes the range from the last
+    /// one picked, plain picks only it; a second click opens it.
+    fn press(&self, id: &str, presses: i32, state: gdk::ModifierType) {
+        if presses >= 2 {
+            let open = self.open.borrow().clone();
+            if let Some(open) = open {
+                open(id.to_string());
+            }
+            return;
+        }
+        let shown = self.shown();
+        let at = |id: &str| shown.iter().position(|(_, i)| i == id);
+        {
+            let mut selected = self.selected.borrow_mut();
+            let mut anchor = self.anchor.borrow_mut();
+            if state.contains(gdk::ModifierType::CONTROL_MASK) {
+                if !selected.remove(id) {
+                    selected.insert(id.to_string());
+                }
+                *anchor = Some(id.to_string());
+            } else if state.contains(gdk::ModifierType::SHIFT_MASK)
+                && let (Some(from), Some(to)) = (anchor.as_deref().and_then(at), at(id))
+            {
+                selected.clear();
+                selected.extend(shown[from.min(to)..=from.max(to)].iter().map(|(_, i)| i.clone()));
+            } else {
+                selected.clear();
+                selected.insert(id.to_string());
+                *anchor = Some(id.to_string());
+            }
+        }
+        self.sync_selection();
+    }
+
+    /// The rings and the bar show what's selected.
+    fn sync_selection(&self) {
+        let selected = self.selected.borrow();
+        for (slot, cell) in self.squares() {
+            if selected.contains(cell.widget_name().as_str()) {
+                slot.add_css_class("selected");
+            } else {
+                slot.remove_css_class("selected");
+            }
+        }
+        self.bar.set_visible(!selected.is_empty());
+        self.bar_label.set_label(&t!("{what} selected", what = fmt::plural(selected.len(), "item")));
+    }
+
+    fn deselect(&self) {
+        self.selected.borrow_mut().clear();
+        self.sync_selection();
+    }
+
+    /// Every square built now, with its photo's cell.
+    fn squares(&self) -> Vec<(gtk::Box, gtk::Overlay)> {
+        let mut found = Vec::new();
+        let mut child = self.list.first_child();
+        while let Some(c) = child {
+            child = c.next_sibling();
+            let Some(line) = c.first_child().and_then(|row| row.last_child()) else { continue };
+            let mut next = line.first_child();
+            while let Some(slot) = next {
+                next = slot.next_sibling();
+                if let (Some(slot), Some(cell)) = (slot.clone().downcast::<gtk::Box>().ok(), slot.first_child().and_downcast::<gtk::Overlay>()) {
+                    found.push((slot, cell));
+                }
+            }
+        }
+        found
     }
 
     fn status(&self, text: &str) {
@@ -161,21 +381,16 @@ impl GalleryView {
 
     /// The cell showing item `id`, if one does.
     fn cell_of(&self, id: &str) -> Option<gtk::Overlay> {
-        let mut child = self.grid.first_child();
-        while let Some(c) = child {
-            if let Some(cell) = c.first_child().and_downcast::<gtk::Overlay>()
-                && cell.widget_name() == id
-            {
-                return Some(cell);
-            }
-            child = c.next_sibling();
-        }
-        None
+        self.squares().into_iter().map(|(_, cell)| cell).find(|cell| cell.widget_name() == id)
     }
 
     fn selected_ids(&self) -> Vec<String> {
-        let set = self.selection.selection();
-        (0..set.size()).filter_map(|i| self.store.item(set.nth(i as u32)).and_downcast::<glib::BoxedAnyObject>()).map(|o| o.borrow::<GalleryItem>().id.clone()).collect()
+        let selected = self.selected.borrow();
+        self.shown().into_iter().map(|(_, id)| id).filter(|id| selected.contains(id)).collect()
+    }
+
+    fn items(&self) -> Vec<GalleryItem> {
+        (0..self.store.n_items()).filter_map(|i| self.store.item(i).and_downcast::<glib::BoxedAnyObject>()).map(|o| o.borrow::<GalleryItem>().clone()).collect()
     }
 
     /// What the grid shows, in order: each item's time and id.
@@ -216,6 +431,37 @@ fn show_thumb(cell: &gtk::Overlay, id: &str, path: PathBuf) {
             picture.set_paintable(Some(&gdk::MemoryTexture::new(width, height, format, &pixels, stride)));
         }
     });
+}
+
+/// A row of the list: a day's heading, or up to a row's worth of that day's photos.
+#[derive(Clone, Debug, PartialEq)]
+enum Row {
+    Day(String),
+    Photos(Vec<GalleryItem>),
+}
+
+/// Photos (newest first) cut into rows of `columns` under a heading for each day, as
+/// `label` names the day of a time.
+fn rows(items: &[GalleryItem], columns: usize, label: impl Fn(u64) -> String) -> Vec<Row> {
+    let mut out = Vec::new();
+    let mut day: Option<String> = None;
+    for item in items {
+        let name = label(item.taken_ms);
+        if day.as_ref() != Some(&name) {
+            out.push(Row::Day(name.clone()));
+            day = Some(name);
+        }
+        match out.last_mut() {
+            Some(Row::Photos(row)) if row.len() < columns => row.push(item.clone()),
+            _ => out.push(Row::Photos(vec![item.clone()])),
+        }
+    }
+    out
+}
+
+/// "Today", "Yesterday", "Nov 2"; with the year for earlier years, so days never merge.
+fn section_label(at_ms: u64) -> String {
+    super::page::day_heading(at_ms, |this_year| if this_year { "%b %e" } else { "%b %e, %Y" })
 }
 
 #[derive(Debug, PartialEq)]
@@ -291,35 +537,25 @@ impl Window {
             }
         });
         let w = Rc::downgrade(self);
-        g.selection.connect_selection_changed(move |_, _, _| {
-            if let Some(w) = w.upgrade() {
-                let n = w.gallery.selection.selection().size() as usize;
-                w.gallery.bar.set_visible(n > 0);
-                w.gallery.bar_label.set_label(&t!("{what} selected", what = fmt::plural(n, "item")));
-            }
-        });
-        let w = Rc::downgrade(self);
         g.save.connect_clicked(move |_| {
             if let Some(w) = w.upgrade() {
                 let ids = w.gallery.selected_ids();
                 w.gallery_save(ids, false);
-                w.gallery.selection.unselect_all();
+                w.gallery.deselect();
             }
         });
         let w = Rc::downgrade(self);
         g.clear.connect_clicked(move |_| {
             if let Some(w) = w.upgrade() {
-                w.gallery.selection.unselect_all();
+                w.gallery.deselect();
             }
         });
         let w = Rc::downgrade(self);
-        g.grid.connect_activate(move |_, position| {
-            let Some(w) = w.upgrade() else { return };
-            if let Some(obj) = w.gallery.store.item(position).and_downcast::<glib::BoxedAnyObject>() {
-                let id = obj.borrow::<GalleryItem>().id.clone();
+        *g.open.borrow_mut() = Some(Rc::new(move |id| {
+            if let Some(w) = w.upgrade() {
                 w.gallery_save(vec![id], true);
             }
-        });
+        }));
     }
 
     /// The Gallery tab shows: the phone's albums and newest photos the first time, brought
@@ -400,7 +636,7 @@ impl Window {
         };
         if fresh {
             g.store.remove_all();
-            g.selection.unselect_all();
+            g.deselect();
             g.status(t!("Loading…"));
         }
         let (album, generation) = {
@@ -538,6 +774,46 @@ mod tests {
             }
         }
         ids
+    }
+
+    /// The day of a time as tests name it: a time is `day * 100 + n`.
+    fn day_of(ms: u64) -> String {
+        format!("day {}", ms / 100)
+    }
+
+    fn ids(row: &Row) -> Vec<&str> {
+        match row {
+            Row::Photos(p) => p.iter().map(|i| i.id.as_str()).collect(),
+            Row::Day(d) => vec![d.as_str()],
+        }
+    }
+
+    #[test]
+    fn each_day_gets_a_heading_and_rows_fill_up() {
+        let items = [item("a", 305), item("b", 304), item("c", 303), item("d", 202), item("e", 101)];
+        let laid = rows(&items, 2, day_of);
+        let flat: Vec<Vec<&str>> = laid.iter().map(ids).collect();
+        assert_eq!(flat, vec![vec!["day 3"], vec!["a", "b"], vec!["c"], vec!["day 2"], vec!["d"], vec!["day 1"], vec!["e"]]);
+    }
+
+    #[test]
+    fn a_new_day_never_shares_a_row() {
+        let items = [item("a", 201), item("b", 101)];
+        assert_eq!(rows(&items, 4, day_of).len(), 4);
+    }
+
+    #[test]
+    fn no_photos_no_rows() {
+        assert!(rows(&[], 4, day_of).is_empty());
+    }
+
+    #[test]
+    fn narrower_rows_split_a_day_further() {
+        let items: Vec<GalleryItem> = (0..7).map(|n| item(&format!("p{n}"), 350 - n)).collect();
+        let wide = rows(&items, 7, day_of);
+        let narrow = rows(&items, 3, day_of);
+        assert_eq!(wide.len(), 2);
+        assert_eq!(narrow.len(), 4);
     }
 
     #[test]

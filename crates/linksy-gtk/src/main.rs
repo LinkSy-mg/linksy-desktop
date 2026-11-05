@@ -112,9 +112,10 @@ button.code-chip {
 }
 button.crumb { padding: 2px 6px; min-height: 28px; font-weight: 600; color: @accent_color; }
 button.crumb.current { color: @window_fg_color; }
-gridview.gallery-grid { background: none; }
-gridview.gallery-grid > child { padding: 3px; border-radius: 12px; background: none; }
-gridview.gallery-grid > child:selected { background-color: alpha(@accent_bg_color, 0.22); box-shadow: inset 0 0 0 3px @accent_bg_color; }
+listview.gallery-grid { background: none; }
+listview.gallery-grid > row { padding: 0; background: none; }
+.gallery-slot { padding: 3px; border-radius: 12px; }
+.gallery-slot.selected { background-color: alpha(@accent_bg_color, 0.22); box-shadow: inset 0 0 0 3px @accent_bg_color; }
 .gallery-cell { border-radius: 10px; }
 .gallery-cell picture { background-color: alpha(currentColor, 0.06); }
 .video-badge { margin: 6px; padding: 1px 6px; border-radius: 6px; background-color: alpha(black, 0.62); color: white; font-size: 0.8em; font-weight: 700; }

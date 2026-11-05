@@ -1,5 +1,6 @@
 // A phone's photos and videos, kept by its page for the Gallery tab (docs/protocol.md §4.18):
-// newest first, a page at a time; each thumbnail asked for once, by the square showing it
+// newest first and under a heading for each day, a page at a time; each thumbnail asked
+// for once, by the square showing it
 import QtQuick
 
 QtObject {
@@ -18,9 +19,17 @@ QtObject {
     // What shows instead of the grid ("Loading…", none yet, an error), "" for the grid
     property string status: ""
     property int selectedCount: 0
+    // The selected items' ids, and a counter that changes with it for squares to follow
+    property var chosen: ({})
+    property int selectionRev: 0
     // Where a range starts (Shift-click)
     property int anchor: -1
     property ListModel items: ListModel {}
+    // What the list shows: the same items cut into rows of `columns` under a heading for
+    // each day, as {kind: "day", label} or {kind: "photos", start, size}
+    property ListModel rows: ListModel {}
+    property var laid: []
+    property int columns: 4
     // Thumbnails on disk by item id, and the ones asked for
     property var thumbs: ({})
     property var asked: ({})
@@ -34,7 +43,38 @@ QtObject {
     }
 
     function row(i) {
-        return { itemId: i.id, name: i.name, video: i.video ?? false, taken_ms: i.taken_ms, duration_ms: i.duration_ms ?? -1, selected: false };
+        return { itemId: i.id, name: i.name, video: i.video ?? false, taken_ms: i.taken_ms, duration_ms: i.duration_ms ?? -1 };
+    }
+
+    // Cut the items into rows again, touching only the rows from the first that changed
+    function layout() {
+        const next = [];
+        let day = null, open = null;
+        for (let i = 0; i < items.count; i++) {
+            const label = app.sectionLabel(items.get(i).taken_ms);
+            if (label !== day) {
+                next.push({ kind: "day", label: label, start: 0, size: 0, key: "d" + label });
+                day = label;
+                open = null;
+            }
+            if (open === null || open.size >= columns) {
+                open = { kind: "photos", label: "", start: i, size: 0, key: "p" + i };
+                next.push(open);
+            }
+            open.size++;
+            open.key += "," + items.get(i).itemId;
+        }
+        let keep = 0;
+        while (keep < laid.length && keep < next.length && laid[keep].key === next[keep].key) keep++;
+        if (keep < rows.count) rows.remove(keep, rows.count - keep);
+        for (let i = keep; i < next.length; i++) rows.append(next[i]);
+        laid = next;
+    }
+
+    function setColumns(n) {
+        if (n === columns) return;
+        columns = n;
+        layout();
     }
 
     // The Gallery tab shows: the phone's albums and newest photos the first time, brought
@@ -72,8 +112,8 @@ QtObject {
         if (fresh) {
             generation++;
             items.clear();
-            selectedCount = 0;
-            anchor = -1;
+            layout();
+            clearSelection();
             more = false;
             status = app.t("Loading…");
         } else {
@@ -98,7 +138,10 @@ QtObject {
         const shown = new Set();
         for (let i = 0; i < items.count; i++) shown.add(items.get(i).itemId);
         const fresh = got.items.filter(i => !shown.has(i.id));
-        if (fresh.length) items.append(fresh.map(i => row(i)));
+        if (fresh.length) {
+            items.append(fresh.map(i => row(i)));
+            layout();
+        }
         status = items.count ? "" : app.t("No photos here yet.");
         pageLanded();
     }
@@ -124,7 +167,11 @@ QtObject {
         for (let i = items.count - 1; i >= 0; i--) {
             const shown = items.get(i);
             if ((oldest === null || shown.taken_ms > oldest) && !ids.has(shown.itemId)) {
-                if (shown.selected) selectedCount--;
+                if (chosen[shown.itemId]) {
+                    delete chosen[shown.itemId];
+                    selectedCount--;
+                    selectionRev++;
+                }
                 items.remove(i);
                 changed = true;
             }
@@ -148,7 +195,10 @@ QtObject {
             at++;
             changed = true;
         }
-        if (changed) anchor = -1;
+        if (changed) {
+            anchor = -1;
+            layout();
+        }
         if (!pageMore) more = false;
         status = items.count ? "" : app.t("No photos here yet.");
     }
@@ -177,9 +227,15 @@ QtObject {
     }
 
     function toggle(index) {
-        const on = !items.get(index).selected;
-        items.setProperty(index, "selected", on);
-        selectedCount += on ? 1 : -1;
+        const id = items.get(index).itemId;
+        if (chosen[id]) {
+            delete chosen[id];
+            selectedCount--;
+        } else {
+            chosen[id] = true;
+            selectedCount++;
+        }
+        selectionRev++;
         anchor = index;
     }
 
@@ -191,26 +247,25 @@ QtObject {
     function selectRange(index) {
         if (anchor < 0) return toggle(index);
         for (let i = Math.min(anchor, index); i <= Math.max(anchor, index); i++) {
-            if (items.get(i).selected) continue;
-            items.setProperty(i, "selected", true);
+            const id = items.get(i).itemId;
+            if (chosen[id]) continue;
+            chosen[id] = true;
             selectedCount++;
         }
+        selectionRev++;
     }
 
     function clearSelection() {
-        for (let i = 0; i < items.count && selectedCount > 0; i++) {
-            if (!items.get(i).selected) continue;
-            items.setProperty(i, "selected", false);
-            selectedCount--;
-        }
+        chosen = ({});
         selectedCount = 0;
+        selectionRev++;
         anchor = -1;
     }
 
     function selectedIds() {
         const ids = [];
         for (let i = 0; i < items.count; i++) {
-            if (items.get(i).selected) ids.push(items.get(i).itemId);
+            if (chosen[items.get(i).itemId]) ids.push(items.get(i).itemId);
         }
         return ids;
     }
