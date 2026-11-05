@@ -157,6 +157,13 @@ Kirigami.ScrollablePage {
             url: page.setup?.byHand ?? ""
             text: app.t("What Linksy Needs")
         }
+
+        QQC2.Button {
+            Layout.alignment: Qt.AlignHCenter
+            flat: true
+            text: app.t("Why Can't I See My Phone?")
+            onClicked: { app.pageStack.layers.pop(); app.openDoctor(); }
+        }
     }
 
     // Secure Boot holds the new camera driver until it's approved at the next restart

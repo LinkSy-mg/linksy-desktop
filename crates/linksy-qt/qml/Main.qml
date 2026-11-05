@@ -245,8 +245,13 @@ Kirigami.ApplicationWindow {
         pageStack.pushDialogLayer(Qt.resolvedUrl("SetupPage.qml"), { app: root });
     }
 
-    function openInvite() {
+    function openInvite(address) {
+        inviteDialog.addressText = address ?? "";
         inviteDialog.open();
+    }
+
+    function openDoctor() {
+        pageStack.pushDialogLayer(Qt.resolvedUrl("DoctorPage.qml"), { app: root });
     }
 
     // Bring the window forward for a question the service asks

@@ -8,6 +8,7 @@ Kirigami.Dialog {
     id: dialog
     required property var app
     property string link: ""
+    property alias addressText: address.text
     title: app.t("Add a Device")
     padding: Kirigami.Units.largeSpacing * 2
     preferredWidth: Kirigami.Units.gridUnit * 24
