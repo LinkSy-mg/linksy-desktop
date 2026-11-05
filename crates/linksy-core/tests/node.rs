@@ -234,6 +234,91 @@ async fn an_address_of_a_device_not_paired_yet_pairs_with_it() {
     assert_eq!((a.node.trusted().len(), b.node.trusted().len()), (1, 1));
 }
 
+/// Whether `to` was asked before the transfer `id` completed there.
+async fn was_asked(rx: &mut broadcast::Receiver<Event>, id: uuid::Uuid) -> bool {
+    let mut asked = false;
+    wait_for(rx, |e| {
+        match e {
+            Event::TransferRequest { .. } => asked = true,
+            Event::TransferComplete { transfer, .. } if *transfer == id => return Some(()),
+            Event::TransferFailed { reason, .. } => panic!("transfer failed: {reason}"),
+            _ => {}
+        }
+        None
+    })
+    .await;
+    asked
+}
+
+#[tokio::test]
+async fn a_snap_that_was_asked_for_is_taken_without_asking() {
+    let (computer, phone) = paired_with(|c| c.features = vec!["snap".into()]).await;
+    let mut rc = computer.node.subscribe();
+    let mut rp = phone.node.subscribe();
+    let picture = phone.dir.path().join("snap.jpg");
+    std::fs::write(&picture, b"not really a jpeg").unwrap();
+
+    computer.node.request_snap(&phone.node.info().id).await.unwrap();
+    wait_for(&mut rp, |e| matches!(e, Event::SnapRequest { .. }).then_some(())).await;
+
+    let id = phone.node.send_files(&computer.node.info().id, vec![picture.clone()]).await.unwrap();
+    assert!(!was_asked(&mut rc, id).await, "the snap was asked about");
+    assert!(computer.downloads().join("snap.jpg").exists());
+
+    // One request, one picture: the next image asks as usual
+    let id = phone.node.send_files(&computer.node.info().id, vec![picture]).await.unwrap();
+    assert!(was_asked(&mut rc, id).await, "a second picture was taken without asking");
+}
+
+#[tokio::test]
+async fn a_picture_nobody_asked_for_still_asks() {
+    let (computer, phone) = paired_with(|c| c.features = vec!["snap".into()]).await;
+    let mut rc = computer.node.subscribe();
+    let picture = phone.dir.path().join("photo.jpg");
+    std::fs::write(&picture, b"x").unwrap();
+    let id = phone.node.send_files(&computer.node.info().id, vec![picture]).await.unwrap();
+    assert!(was_asked(&mut rc, id).await);
+}
+
+#[tokio::test]
+async fn only_an_image_or_a_pdf_counts_as_the_snap() {
+    let (computer, phone) = paired_with(|c| c.features = vec!["snap".into()]).await;
+    let mut rc = computer.node.subscribe();
+    computer.node.request_snap(&phone.node.info().id).await.unwrap();
+    let other = phone.dir.path().join("notes.txt");
+    std::fs::write(&other, b"x").unwrap();
+    let id = phone.node.send_files(&computer.node.info().id, vec![other]).await.unwrap();
+    assert!(was_asked(&mut rc, id).await);
+}
+
+#[tokio::test]
+async fn a_phone_that_cannot_snap_is_not_asked() {
+    let (computer, phone) = paired().await;
+    let err = computer.node.request_snap(&phone.node.info().id).await.unwrap_err();
+    assert!(matches!(err, Error::Unsupported), "{err}");
+}
+
+#[tokio::test]
+async fn a_phone_can_say_why_it_cannot_snap() {
+    let (computer, phone) = paired_with(|c| c.features = vec!["snap".into()]).await;
+    let mut rc = computer.node.subscribe();
+    let mut rp = phone.node.subscribe();
+    computer.node.request_snap(&phone.node.info().id).await.unwrap();
+    wait_for(&mut rp, |e| matches!(e, Event::SnapRequest { .. }).then_some(())).await;
+    phone.node.refuse_snap(&computer.node.info().id, "Linksy needs the camera permission").await.unwrap();
+    let reason = wait_for(&mut rc, |e| match e {
+        Event::SnapRefused { reason, .. } => Some(reason.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(reason, "Linksy needs the camera permission");
+    // Refused: a picture sent anyway is not expected any more
+    let picture = phone.dir.path().join("late.jpg");
+    std::fs::write(&picture, b"x").unwrap();
+    let id = phone.node.send_files(&computer.node.info().id, vec![picture]).await.unwrap();
+    assert!(was_asked(&mut rc, id).await);
+}
+
 #[tokio::test]
 async fn sends_files_and_folders_intact() {
     let (a, b) = paired().await;

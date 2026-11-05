@@ -406,6 +406,11 @@ pub enum Message {
     },
     /// The sender won't or can't say where it is (turned off, no permission, no fix).
     LocationRefused { reason: String },
+    /// "Open your camera and send what you take" (computer → phone, docs/protocol.md §4.23).
+    /// The picture comes as an ordinary transfer, which the computer takes without asking.
+    SnapRequest,
+    /// The phone can't or won't (turned off, no camera permission, the camera is in use).
+    SnapRefused { reason: String },
     /// Texting from the computer. Requests (computer → phone):
     SmsListThreads { limit: u32 },
     SmsListMessages {

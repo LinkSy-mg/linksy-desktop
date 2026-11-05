@@ -53,6 +53,9 @@ pub const MAX_CLIPBOARD: usize = 256 * 1024;
 const MAX_SMS: u32 = 100;
 /// Largest file one device may put on another's clipboard.
 const MAX_CLIPBOARD_FILE: u64 = 10 << 20;
+/// How long a picture asked for with `request_snap` is taken without asking, and its largest size.
+const SNAP_WAIT: Duration = Duration::from_secs(120);
+const MAX_SNAP: u64 = 40 << 20;
 /// Longest link accepted for "Open on PC".
 const MAX_URL: usize = 8 * 1024;
 /// Mirrored notifications: longest key, and largest icon (base64 of a 64 KiB PNG).
@@ -281,6 +284,11 @@ pub enum Event {
     Location { from: DeviceInfo, lat: f64, lon: f64, accuracy_m: Option<f64>, at_ms: u64 },
     /// A device wouldn't or couldn't say where it is.
     LocationRefused { from: DeviceInfo, reason: String },
+    /// A computer asks this phone to open its camera and send what it takes (answer with
+    /// `refuse_snap` if it can't; else the picture goes out as an ordinary transfer).
+    SnapRequest { from: DeviceInfo },
+    /// A phone couldn't open its camera for a snap.
+    SnapRefused { from: DeviceInfo, reason: String },
     /// A device asks which terminals run here for it (answer with `send_terminals`).
     TerminalListRequest { from: DeviceInfo },
     /// The terminals running on a device for this one.
@@ -591,6 +599,8 @@ struct Inner {
     /// Transfers this device asked for (photos from a gallery), taken without asking into
     /// their folder: by id, from whom, where, and since when.
     expected: Mutex<HashMap<Uuid, (Fingerprint, PathBuf, Instant)>>,
+    /// Phones asked for a snap, and until when their picture is taken without asking.
+    snap_wait: Mutex<HashMap<Fingerprint, Instant>>,
     /// Terminal requests, for whoever runs terminals (the daemon on a computer).
     terminals: Mutex<Option<mpsc::UnboundedReceiver<TerminalCall>>>,
     terminals_tx: mpsc::UnboundedSender<TerminalCall>,
@@ -680,6 +690,7 @@ impl Node {
                 preflight: Mutex::new(Some(preflight)),
                 preflight_tx,
                 expected: Mutex::default(),
+                snap_wait: Mutex::default(),
                 terminals: Mutex::new(Some(terminals)),
                 terminals_tx,
                 unsupported: Mutex::new(Default::default()),
@@ -1186,6 +1197,38 @@ impl Node {
     /// Answer `Event::LocateRequest` with no: turned off, no permission, no fix.
     pub async fn refuse_location(&self, to: &Fingerprint, reason: &str) -> Result<()> {
         self.send_message(to, &Message::LocationRefused { reason: reason.into() }).await
+    }
+
+    /// Ask a phone to open its camera and send what it takes (docs/protocol.md §4.23). Only
+    /// for a phone that announces `snap` ([`Error::Unsupported`] otherwise). For the next two
+    /// minutes one picture or page from it is taken without asking; the phone says
+    /// `Event::SnapRefused` when it can't.
+    pub async fn request_snap(&self, to: &Fingerprint) -> Result<()> {
+        if !self.peer_info(to).is_some_and(|p| p.features.iter().any(|f| f == "snap")) {
+            return Err(Error::Unsupported);
+        }
+        self.send_message(to, &Message::SnapRequest).await?;
+        self.inner.snap_wait.lock().unwrap().insert(*to, Instant::now());
+        Ok(())
+    }
+
+    /// Answer `Event::SnapRequest` with no: turned off, no camera permission, camera in use.
+    pub async fn refuse_snap(&self, to: &Fingerprint, reason: &str) -> Result<()> {
+        self.send_message(to, &Message::SnapRefused { reason: reason.into() }).await
+    }
+
+    /// Whether this offer is the picture a phone was asked for (`request_snap`): one image or
+    /// PDF of a sensible size, within two minutes of the request. Uses the request up.
+    fn is_asked_snap(&self, from: &Fingerprint, files: &[FileEntry]) -> bool {
+        let [file] = files else { return false };
+        let name = file.path.to_ascii_lowercase();
+        let kind = ["jpg", "jpeg", "png", "webp", "heic", "heif", "pdf"].iter().any(|e| name.ends_with(&format!(".{e}")));
+        if !kind || file.size > MAX_SNAP {
+            return false;
+        }
+        let mut wait = self.inner.snap_wait.lock().unwrap();
+        wait.retain(|_, at| at.elapsed() < SNAP_WAIT);
+        wait.remove(from).is_some()
     }
 
     /// Ask a computer which terminals run there for this device (`Event::Terminals`).
@@ -2142,6 +2185,11 @@ impl Node {
                                 Ok(Message::LocationRefused { reason }) => {
                                     node.emit(Event::LocationRefused { from, reason: reason.chars().take(200).collect() })
                                 }
+                                Ok(Message::SnapRequest) => node.emit(Event::SnapRequest { from }),
+                                Ok(Message::SnapRefused { reason }) => {
+                                    node.inner.snap_wait.lock().unwrap().remove(&from.id);
+                                    node.emit(Event::SnapRefused { from, reason: reason.chars().take(200).collect() })
+                                }
                                 Ok(Message::Picture { image }) => {
                                     if image.len() <= MAX_PICTURE {
                                         node.emit(Event::Picture { from, image });
@@ -2469,7 +2517,10 @@ impl Node {
         } else {
             None
         };
+        // The picture of a snap this computer asked for is taken at once; anything else asks
+        let snapped = import_to.is_none() && !import && self.is_asked_snap(&from.id, &files);
         let auto = import_to.is_some()
+            || snapped
             || self.inner.settings.lock().unwrap().auto_accept
             || self.inner.trust.lock().unwrap().get(&from.id).is_some_and(|t| t.auto_accept);
         let accepted = auto || self.ask_offer(&from, id, &files, &apps).await;
