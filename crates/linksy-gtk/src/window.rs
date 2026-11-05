@@ -2275,3 +2275,32 @@ pub(crate) fn can(d: &DeviceInfo, feature: &str) -> bool {
 pub(crate) fn inbox_on(d: &DeviceInfo) -> bool {
     can(d, "notifications") || can(d, "sms")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn moving(route: Option<RouteNote>) -> Progress {
+        Progress { bytes: 50, total: 100, route, ..Default::default() }
+    }
+
+    #[test]
+    fn the_way_a_transfer_goes_leads_its_progress() {
+        let direct = RouteNote { route: Route::Direct, setting_up: false, why: None };
+        assert!(progress_text(&moving(Some(direct))).starts_with("Direct link · "));
+        assert!(!progress_text(&moving(None)).contains("link"));
+    }
+
+    #[test]
+    fn waiting_for_a_direct_link_says_so() {
+        let waiting = RouteNote { route: Route::Lan, setting_up: true, why: None };
+        assert_eq!(progress_text(&moving(Some(waiting))), "Setting up a direct link…");
+    }
+
+    #[test]
+    fn a_link_that_failed_says_why() {
+        let failed = RouteNote { route: Route::Away, setting_up: false, why: Some("Wi-Fi is off".into()) };
+        let text = progress_text(&moving(Some(failed)));
+        assert!(text.starts_with("Over the internet · No direct link: Wi-Fi is off · "), "{text}");
+    }
+}
