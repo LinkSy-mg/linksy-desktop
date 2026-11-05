@@ -411,6 +411,14 @@ and close the other with reason `duplicate`.
     computer's player (its media notification / page), `{on: false}` when it stops. The
     computer then sends `media_state` on every change while the connection lives, and
     acts on `media_command` for its players.
+  - **Position and seeking (desktop after 0.12.4).** `position_ms` is where the player was
+    when the state was taken: carry on from it while `playing`. Browsers often report no
+    position of their own (it sits at 0 while they play), so the computer counts it itself
+    for those, from the start of a track and from each seek, and it is right again after
+    any seek (a phone that opens a page in the middle of a track can see the count start
+    from 0 until then). `length_ms` is missing when the player doesn't know it (some
+    browser tracks): there is no timeline then. `seek` takes an **absolute** `position_ms`
+    and the computer goes exactly there; a new `media_state` follows.
 
   **Volume (desktop 0.9.8).** The computer's system volume: its default sound output's
   `level` (0 = silent, 1 = 100 %) and `muted`. Only computers that announce the `volume`
