@@ -167,7 +167,7 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
                 node.pair_with_invite(&target).await
             } else {
                 match target.parse::<SocketAddr>() {
-                    Ok(addr) => node.pair(addr).await,
+                    Ok(addr) => node.connect_or_pair(addr).await,
                     Err(_) => node.pair_device(resolve(node, &target)?).await,
                 }
             }
