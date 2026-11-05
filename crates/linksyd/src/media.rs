@@ -16,7 +16,7 @@ use futures_util::StreamExt;
 use linksy_core::{CallState, DeviceInfo, Event, Fingerprint, MediaCommand, MediaPlayer, MediaState, Node};
 use tokio::sync::{broadcast::error::RecvError, mpsc};
 use tracing::{debug, warn};
-use zbus::zvariant::{ObjectPath, OwnedValue, Value};
+use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, proxy::CacheProperties};
 
 const MPRIS: &str = "org.mpris.MediaPlayer2.";
@@ -255,16 +255,34 @@ impl Local {
             MediaCommand::PlayPause => proxy.call_method("PlayPause", &()).await.map(|_| ()),
             MediaCommand::Next => proxy.call_method("Next", &()).await.map(|_| ()),
             MediaCommand::Previous => proxy.call_method("Previous", &()).await.map(|_| ()),
-            MediaCommand::Seek { position_ms } => {
-                // Relative, so it works without the track id SetPosition wants.
-                let now: i64 = proxy.get_property("Position").await.unwrap_or(0);
-                proxy.call_method("Seek", &(position_ms as i64 * 1000 - now)).await.map(|_| ())
-            }
+            MediaCommand::Seek { position_ms } => seek(&name, &proxy, position_ms).await,
         };
         if let Err(e) = result {
             debug!("{player}: {e}");
         }
     }
+}
+
+/// Go to a place in the track. Exactly there (`SetPosition`) when the player gives the
+/// track's id; else by the difference from where it says it is.
+async fn seek(name: &str, proxy: &zbus::Proxy<'_>, ms: u64) -> zbus::Result<()> {
+    let target = ms as i64 * 1000;
+    let meta: HashMap<String, OwnedValue> = proxy.get_property("Metadata").await.unwrap_or_default();
+    if let Some(track) = meta.get("mpris:trackid").and_then(track_path) {
+        match proxy.call_method("SetPosition", &(track, target)).await {
+            Ok(_) => return Ok(()),
+            Err(e) => debug!("{name}: SetPosition: {e}"),
+        }
+    }
+    let now: i64 = proxy.get_property("Position").await.unwrap_or(0);
+    proxy.call_method("Seek", &(target - now)).await.map(|_| ())
+}
+
+/// A track's id, which `SetPosition` wants: an object path (some players send a string),
+/// and not the one that means there is no track.
+fn track_path(value: &OwnedValue) -> Option<OwnedObjectPath> {
+    let path = OwnedObjectPath::try_from(value.clone()).ok().or_else(|| OwnedObjectPath::try_from(String::try_from(value.clone()).ok()?).ok())?;
+    (path.as_str() != "/org/mpris/MediaPlayer2/TrackList/NoTrack").then_some(path)
 }
 
 impl Local {
