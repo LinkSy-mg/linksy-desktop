@@ -139,6 +139,15 @@ Kirigami.ApplicationWindow {
         return d.toLocaleDateString(Qt.locale(), "dddd d MMMM");
     }
 
+    // "Today", "Yesterday", "Nov 2", with the year for earlier years, as the Gallery's headings
+    function sectionLabel(ms) {
+        const d = new Date(ms), day = new Date();
+        if (d.toDateString() === day.toDateString()) return t("Today");
+        day.setDate(day.getDate() - 1);
+        if (d.toDateString() === day.toDateString()) return t("Yesterday");
+        return d.toLocaleDateString(Qt.locale(), d.getFullYear() === new Date().getFullYear() ? "MMM d" : "MMM d, yyyy");
+    }
+
     // How a device is reachable, as the GTK app's sidebar says it, with its battery
     function statusLine(d) {
         let text;
