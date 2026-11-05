@@ -24,6 +24,7 @@ mod pictures;
 mod rest;
 mod update;
 mod sessions;
+mod supervise;
 #[cfg(target_os = "linux")]
 mod terminal;
 // Accept/Decline buttons need the freedesktop notification spec; other platforms get
@@ -150,6 +151,10 @@ fn parse_args() -> Result<Args, String> {
 }
 
 fn main() -> ExitCode {
+    // Where nothing else restarts the service, this process only watches it (see supervise.rs)
+    if let Some(code) = supervise::run() {
+        return code;
+    }
     // Two malloc arenas, not one per thread: set before any thread starts (desktop#26)
     // SAFETY: no other thread is running yet
     #[cfg(target_env = "gnu")]
