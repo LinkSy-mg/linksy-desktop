@@ -44,6 +44,8 @@ pub enum Request {
     Ring { to: String, on: bool },
     /// Ask a phone to open its camera and send what it takes (§4.23).
     Snap { to: String },
+    /// "Why can't I see my phone?": what the service can find wrong, with what to do.
+    Doctor,
     /// Ask a phone to turn on `feature`: `notifications` (the Inbox) or `gallery`
     /// (docs/protocol.md §4.21).
     TurnOn { to: String, feature: String },
@@ -393,6 +395,29 @@ pub enum UsbState {
     /// In accessory mode: the cable carries Linksy once the phone app opens it.
     Accessory,
     Failed,
+}
+
+/// One thing the Connection Doctor found.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Finding {
+    /// `firewall`, `vpn`, `other_network`, `silent`, `asleep`, `never_seen`, `cable_off`,
+    /// `cable_failed` or `fine`.
+    pub id: String,
+    pub title: String,
+    pub detail: String,
+    /// What Linksy can do about it, as a button.
+    pub action: Option<FindingAction>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "do", rename_all = "snake_case")]
+pub enum FindingAction {
+    /// Open Finish Setup (it opens the firewall).
+    FinishSetup,
+    /// Ask for an address to connect by, starting from this one.
+    ConnectByAddress { address: String },
+    /// Switch the cable on for this phone (`UsbConnect`'s key).
+    UsbConnect { phone: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -791,6 +816,10 @@ impl Client {
 
     pub async fn ring(&self, to: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::Ring { to: to.into(), on }).await
+    }
+
+    pub async fn doctor(&self) -> Result<Vec<Finding>, ClientError> {
+        self.call(Request::Doctor).await
     }
 
     pub async fn snap(&self, to: impl Into<String>) -> Result<(), ClientError> {

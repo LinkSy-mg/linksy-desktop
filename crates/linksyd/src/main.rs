@@ -8,6 +8,7 @@ mod codes;
 mod controls;
 #[cfg(target_os = "linux")]
 mod deck;
+mod doctor;
 mod gallery;
 mod history;
 mod inbox;

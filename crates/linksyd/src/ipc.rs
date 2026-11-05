@@ -220,6 +220,7 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             node.ring(&id, on).await.map_err(|e| e.to_string())?;
             Ok(Value::Null)
         }
+        Request::Doctor => json(serde_json::to_value(crate::doctor::run(node, usb_status().phones).await)),
         Request::Snap { to } => {
             let id = resolve(node, &to)?;
             node.request_snap(&id).await.map_err(|e| e.to_string())?;
