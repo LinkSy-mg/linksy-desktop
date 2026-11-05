@@ -41,7 +41,7 @@ pub enum Error {
     Unsupported,
     /// Asked from away (over the internet), where the other device only allows it if
     /// its user said so for this device.
-    #[error("the other device allows this only on the same network")]
+    #[error("the other device allows this only on the same network. To use it from away, open Linksy on that device and turn on Allow Everything From Away for this one")]
     NotFromAway,
     /// A terminal turned down, with why (`off`, `code`, `locked`).
     #[error("terminal refused: {reason}")]
@@ -60,4 +60,28 @@ pub(crate) fn protocol(msg: impl Into<String>) -> Error {
 
 pub(crate) fn invalid(msg: impl Into<String>) -> Error {
     Error::Invalid(msg.into())
+}
+
+/// What a device said when it turned a request down: its words, except that a refusal because
+/// the asker is away from home is the error for that, which says what to do about it.
+pub(crate) fn refusal(message: String) -> Error {
+    if message.contains("only on the same network") { Error::NotFromAway } else { Error::Invalid(message) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_refusal_for_being_away_says_what_to_do() {
+        let e = refusal("this device shows its photos only on the same network".into());
+        assert!(matches!(e, Error::NotFromAway));
+        assert!(e.to_string().contains("Allow Everything From Away"));
+        assert!(matches!(refusal("this device shares its files only on the same network".into()), Error::NotFromAway));
+    }
+
+    #[test]
+    fn any_other_refusal_is_kept_as_it_was_said() {
+        assert!(matches!(refusal("this device doesn't share its photos".into()), Error::Invalid(m) if m == "this device doesn't share its photos"));
+    }
 }

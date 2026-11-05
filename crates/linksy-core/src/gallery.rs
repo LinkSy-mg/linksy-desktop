@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use crate::error::{Error, Result, invalid, protocol};
+use crate::error::{Result, invalid, protocol};
 use crate::identity::{DeviceInfo, Fingerprint};
 use crate::node::Node;
 use crate::protocol::{GalleryAlbum, GalleryItem, GalleryReply, GalleryRequest, read_msg, write_msg};
@@ -90,7 +90,7 @@ impl Node {
             }
             GalleryReply::GalleryData { .. } => Err(protocol("thumbnail too large")),
             GalleryReply::GalleryOk => Ok(GalleryAnswer::Ok),
-            GalleryReply::GalleryError { message } => Err(Error::Invalid(message)),
+            GalleryReply::GalleryError { message } => Err(crate::error::refusal(message)),
         }
     }
 
