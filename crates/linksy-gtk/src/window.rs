@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use adw::prelude::*;
 use gtk::{gdk, gio, glib};
-use linksy_ipc::linksy_core::{DeviceInfo, DeviceKind, DeviceView, Direction, Event, FileEntry, Fingerprint, SessionKind, Uuid};
+use linksy_ipc::linksy_core::{DeviceInfo, DeviceKind, DeviceView, Direction, Event, FileEntry, Fingerprint, Route, SessionKind, Uuid};
 use linksy_ipc::{Client, HistoryEntry, Shared};
 use linksy_i18n::t;
 
@@ -43,6 +43,16 @@ struct Progress {
     total: u64,
     /// (time, bytes) samples for a smoothed speed estimate.
     samples: Vec<(Instant, u64)>,
+    /// Which way it goes, once known.
+    route: Option<RouteNote>,
+}
+
+/// What `Event::TransferRoute` said about a transfer.
+struct RouteNote {
+    route: Route,
+    setting_up: bool,
+    /// A direct link was tried and failed, for this reason.
+    why: Option<String>,
 }
 
 /// Widgets of a running transfer's row on the current page.
@@ -1088,8 +1098,8 @@ impl Window {
                 }
                 self.render_page();
             }
-            Event::TransferRequest { transfer, from, files, total } => self.show_offer(transfer, &from, &files, total),
-            Event::TransferStarted { transfer, total, peer, direction, files, import } => {
+            Event::TransferRequest { transfer, from, files, total, .. } => self.show_offer(transfer, &from, &files, total),
+            Event::TransferStarted { transfer, total, peer, direction, files, import, .. } => {
                 // Accepted elsewhere (desktop notification, another window): drop the prompt.
                 self.close_offer_dialog(&transfer);
                 self.state.borrow_mut().progress.insert(transfer, Progress { total, ..Default::default() });
@@ -1105,6 +1115,17 @@ impl Window {
                 self.transfers_changed();
             }
             Event::TransferProgress { transfer, bytes, total } => self.update_progress(transfer, bytes, total),
+            Event::TransferRoute { transfer, route, setting_up_direct, why_not_direct } => {
+                let (bytes, total) = {
+                    let mut state = self.state.borrow_mut();
+                    let p = state.progress.entry(transfer).or_default();
+                    p.route = Some(RouteNote { route, setting_up: setting_up_direct, why: why_not_direct });
+                    (p.bytes, p.total)
+                };
+                self.update_progress(transfer, bytes, total);
+            }
+            // Apps are for phones to install
+            Event::AppsReceived { .. } => {}
             Event::TransferComplete { transfer, saved } => {
                 let open = {
                     let mut state = self.state.borrow_mut();
@@ -2111,14 +2132,37 @@ fn speed(p: &Progress) -> f64 {
     }
 }
 
+/// "Direct link", "Over the internet": the way a transfer goes.
+fn route_text(note: &RouteNote) -> String {
+    if note.setting_up {
+        return t!("Setting up a direct link…").to_string();
+    }
+    let way = match note.route {
+        Route::Usb => t!("USB cable"),
+        Route::Direct => t!("Direct link"),
+        Route::Lan => t!("Same network"),
+        Route::Away => t!("Over the internet"),
+    };
+    match &note.why {
+        Some(why) => format!("{way} · {}", t!("No direct link: {why}", why = why.as_str())),
+        None => way.to_string(),
+    }
+}
+
 fn progress_text(p: &Progress) -> String {
+    if let Some(note) = p.route.as_ref().filter(|n| n.setting_up) {
+        return route_text(note);
+    }
     let speed = speed(p);
     let mut text = t!("{done} of {total}", done = fmt::size(p.bytes), total = fmt::size(p.total));
     if speed > 0.0 && p.bytes < p.total {
         let left = Duration::from_secs_f64((p.total - p.bytes) as f64 / speed);
         text.push_str(&format!(" · {} · {}", t!("{size}/s", size = fmt::size(speed as u64)), fmt::remaining(left)));
     }
-    text
+    match &p.route {
+        Some(note) => format!("{} · {text}", route_text(note)),
+        None => text,
+    }
 }
 
 fn kind_icon(kind: DeviceKind) -> &'static str {
