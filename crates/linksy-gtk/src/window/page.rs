@@ -52,6 +52,8 @@ pub enum Action {
     /// Let this device see and control the screen without asking.
     AllowScreen(bool),
     Locate,
+    /// Ask a phone to open its camera and send the picture.
+    Snap,
     /// Ask the phone to turn on `notifications` (the Inbox) or `gallery`.
     TurnOn(&'static str),
     /// A tab shows, to fill.
@@ -132,6 +134,7 @@ pub struct DevicePage {
     send_tile: gtk::Button,
     ring_tile: gtk::Widget,
     locate_tile: gtk::Widget,
+    snap_tile: gtk::Widget,
     ping_tile: gtk::Widget,
     /// "Use the phone as": a card per feature, two by two.
     use_as: gtk::Box,
@@ -356,6 +359,7 @@ impl DevicePage {
         tile("video-display-symbolic", t!("View Screen"), t!("Watch or take control"), false, || Action::ViewScreen);
         let ring_tile = tile("audio-volume-high-symbolic", t!("Ring"), t!("Loud, even on silent"), true, || Action::Ring);
         let locate_tile = tile("find-location-symbolic", t!("Locate"), t!("Asked once, never tracked"), true, || Action::Locate);
+        let snap_tile = tile("camera-photo-symbolic", t!("Snap from Phone"), t!("Take a picture, get it here"), false, || Action::Snap);
         let ping_tile = tile("preferences-system-notifications-symbolic", t!("Ping"), t!("Show a notification"), false, || Action::Ping);
         // Not expanding: their insides push text to the bottom, not the page.
         let actions = gtk::Box::builder().spacing(10).homogeneous(true).vexpand(false).build();
@@ -852,6 +856,7 @@ impl DevicePage {
             send_tile,
             ring_tile,
             locate_tile,
+            snap_tile,
             ping_tile,
             use_as,
             use_as_title,
@@ -1177,6 +1182,7 @@ impl DevicePage {
         self.actions.set_visible(d.trusted);
         self.ring_tile.set_visible(ring);
         self.locate_tile.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "locate"));
+        self.snap_tile.set_visible(d.trusted && super::can(&d.device, "snap"));
         self.ping_tile.set_visible(!ring);
 
         self.display_card.set_visible(super::can(&d.device, "display"));

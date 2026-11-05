@@ -591,6 +591,15 @@ Kirigami.Page {
                                 app.toast(ok ? app.t("Pinged {name}", { name: page.name }) : err))
                         }
                         BarButton {
+                            visible: page.trusted && page.info && app.can(page.info, "snap")
+                            iconName: "camera-photo"
+                            tint: Kirigami.Theme.neutralTextColor
+                            text: app.t("Snap from Phone")
+                            hint: app.t("Take a picture, get it here")
+                            onClicked: app.request("snap", { to: page.info.id }, (ok, err) =>
+                                app.toast(ok ? app.t("Take the picture on {name}, it arrives here", { name: page.name }) : app.t("Couldn't ask {name}: {reason}", { name: page.name, reason: err.charAt(0).toUpperCase() + err.slice(1) })))
+                        }
+                        BarButton {
                             visible: page.phone && page.info && app.can(page.info, "locate")
                             iconName: "find-location"
                             tint: Kirigami.Theme.neutralTextColor

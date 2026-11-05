@@ -603,6 +603,7 @@ impl Window {
                 page::Action::AutoAccept(on) => w.auto_accept(id, on),
                 page::Action::AllowScreen(on) => w.allow_screen(id, on),
                 page::Action::Locate => w.locate(id),
+                page::Action::Snap => w.snap(id),
                 page::Action::TurnOn(feature) => w.ask_turn_on(id, feature),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
@@ -964,6 +965,20 @@ impl Window {
         });
     }
 
+    /// Ask a phone to open its camera; the picture arrives as a file and goes on the clipboard.
+    fn snap(self: &Rc<Self>, id: Fingerprint) {
+        let Some(c) = self.client() else { return };
+        let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
+        let call = self.bridge.call(&c, move |c| async move { c.snap(id.to_string()).await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            match call.await {
+                Ok(()) => w.toast(&t!("Take the picture on {name}, it arrives here", name)),
+                Err(e) => w.toast(&t!("Couldn't ask {name}: {reason}", name, reason = fmt::capitalize(&e))),
+            }
+        });
+    }
+
     /// Ask a phone where it is, then show it, with a map link.
     fn locate(self: &Rc<Self>, id: Fingerprint) {
         let Some(c) = self.client() else { return };
@@ -1211,6 +1226,8 @@ impl Window {
             // Between the service and phones (USB cable, §4.11)
             Event::UsbPlugged { .. } | Event::UsbConnect { .. } => {}
             // Locate is answered through the service (it waits for the reply).
+            Event::SnapRequest { .. } => {}
+            Event::SnapRefused { from, reason } => self.toast(&t!("{name} can't take a picture: {reason}", name = from.name, reason = fmt::capitalize(&reason))),
             Event::LocateRequest { .. } | Event::Location { .. } | Event::LocationRefused { .. } | Event::TerminalListRequest { .. } | Event::Terminals { .. } => {}
             // Answers go to whoever asked (the service waits for them); requests are a phone's.
             Event::SmsMessage { .. }
@@ -2269,7 +2286,7 @@ pub(crate) fn can(d: &DeviceInfo, feature: &str) -> bool {
     if !d.features.is_empty() {
         return d.features.iter().any(|f| f == feature);
     }
-    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate" | "turn_on"))
+    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate" | "turn_on" | "snap"))
 }
 
 /// Whether a phone shares its messages, for its Inbox.

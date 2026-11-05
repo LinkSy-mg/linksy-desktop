@@ -275,7 +275,7 @@ Kirigami.ApplicationWindow {
     // What a device can do for others; older versions don't say, so assume as the GTK app does
     function can(info, feature) {
         if (info.features && info.features.length) return info.features.includes(feature);
-        return !(info.os === "android" && ["sms", "notifications", "media_state", "control", "clipboard_file", "clipboard_watch", "microphone", "locate", "turn_on"].includes(feature));
+        return !(info.os === "android" && ["sms", "notifications", "media_state", "control", "clipboard_file", "clipboard_watch", "microphone", "locate", "turn_on", "snap"].includes(feature));
     }
 
     function refreshAll() {
@@ -469,6 +469,9 @@ Kirigami.ApplicationWindow {
             break;
         case "ring":
             if (ev.on) toast(t("{name} is looking for this computer", { name: ev.from.name }));
+            break;
+        case "snap_refused":
+            toast(t("{name} can't take a picture: {reason}", { name: ev.from.name, reason: ev.reason.charAt(0).toUpperCase() + ev.reason.slice(1) }));
             break;
         }
     }
