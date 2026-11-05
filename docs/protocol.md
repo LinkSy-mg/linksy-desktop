@@ -57,7 +57,7 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | Phone as webcam | Done | Done | `camera`; desktop: V4L2 "Linksy Camera" with v4l2loopback |
 | Phone as second display | Done | Done | `display`; at the phone's shape since desktop 0.5.5 |
 | Phone watches / controls the computer | Done | Done | phone requests `screen` / `control` |
-| Controlling the phone from the computer | Done | Not possible | AccessibilityService is blocked for sideloaded apps |
+| Controlling the phone from the computer | Done, over the cable (0.11.0) | Nothing to do over the cable; not planned without it | over the cable the computer plugs a virtual touchscreen into the phone (§4.11); without it the phone would need an AccessibilityService, which is blocked for sideloaded apps |
 | Texting from the computer | Done | Not possible | SMS permissions are blocked for sideloaded apps |
 | Phone notifications on the computer, reply | Done | Done (0.3.2) | a notification listener, on once the user allows Notification access (Android 13 and later: Allow restricted settings first); texts come this way, not through SMS permissions |
 | Messages page, codes copied | Done (0.11.4) | Done (0.3.2) | from message notifications; `conversation`, `sender`… (§4.5) |
@@ -80,6 +80,11 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | Turn on the Inbox or Gallery from the computer | On main (not released) | Built, waits for the core pin that has it | `turn_on` (§4.21) |
 | Phone to phone: the route, a check before sending, apps | On main (not released) | In progress | §4.22 |
 | Position and seeking of the computer's players | On main (not released) | Nothing to do | the computer counts a browser's position itself and seeks exactly (§4.5) |
+| Snap: take a photo on the phone, it lands on the computer | To do (Now) | Built, not published | an ordinary file transfer, then `clipboard_file` where the computer announces it; the computer's "Snap from Phone" needs a new message |
+| Copy to Computer (text from the phone's text menu) | Receives `clipboard` as before | Built, not published | to confirm against the phone's messages once they are published |
+| A USB button on the phone | Done (0.9) | Built, not published | `usb_plugged`, `usb_connect` (§4.11); mobile#11 |
+| Connection Doctor | To do (Now) | Its half built, not published | the computer checks its firewall, a VPN, devices kept apart and the cable |
+| The phone's controls on the computer (volumes, ringer, Do Not Disturb, flashlight) | To do (Now) | To do | messages to agree on first |
 | Bluetooth (presence and a link) | Planned | Planned | `ROADMAP.md`; not started |
 
 ## 3. How to build the phone app (recommendation)
