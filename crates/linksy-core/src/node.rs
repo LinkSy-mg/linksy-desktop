@@ -882,6 +882,11 @@ impl Node {
         self.inner.pending.lock().unwrap().contains_key(&request)
     }
 
+    /// The address a paired device was last reached at, if it ever was.
+    pub fn last_address(&self, id: &Fingerprint) -> Option<SocketAddr> {
+        self.inner.trust.lock().unwrap().get(id).and_then(|t| t.last_addr)
+    }
+
     /// Reconnect to an already paired device at a known address.
     pub async fn connect(&self, addr: SocketAddr) -> Result<DeviceInfo> {
         self.dial(addr, Intent::Connect).await
