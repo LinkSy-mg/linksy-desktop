@@ -9,7 +9,7 @@
 //! Nothing runs on D-Bus while no device is watching and no phone is playing.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine;
 use futures_util::StreamExt;
@@ -18,6 +18,9 @@ use tokio::sync::{broadcast::error::RecvError, mpsc};
 use tracing::{debug, warn};
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, proxy::CacheProperties};
+
+mod clock;
+use clock::{Clock, Track};
 
 const MPRIS: &str = "org.mpris.MediaPlayer2.";
 const PATH: &str = "/org/mpris/MediaPlayer2";
@@ -150,6 +153,12 @@ struct Local {
     /// Cover art as sent, by file and when it last changed: players send their state
     /// again and again with the same picture.
     art: std::sync::Mutex<HashMap<String, (std::time::SystemTime, Option<String>)>>,
+    /// Where each player is by our own count, for those whose Position can't be believed
+    /// (by player name)
+    clocks: std::sync::Mutex<HashMap<String, Clock>>,
+    /// Where players said they went (`Seeked`) and when, by their unique bus name, until the
+    /// next look
+    seeks: std::sync::Arc<std::sync::Mutex<HashMap<String, (u64, Instant)>>>,
 }
 
 impl Local {
@@ -165,15 +174,20 @@ impl Local {
             .build();
         let mut owners = zbus::MessageStream::for_match_rule(owners, &bus, None).await?;
         let (tx, changed) = mpsc::channel(8);
+        let seeks: std::sync::Arc<std::sync::Mutex<HashMap<String, (u64, Instant)>>> = Default::default();
+        let heard = seeks.clone();
         let listen = tokio::spawn(async move {
             loop {
                 let next = tokio::select! { m = props.next() => m, m = owners.next() => m };
+                if let Some(Ok(message)) = &next {
+                    note_seek(&heard, message);
+                }
                 if next.is_none() || tx.try_send(()).is_err() && tx.is_closed() {
                     break;
                 }
             }
         });
-        Ok(Self { bus, changed, _listen: listen, art: Default::default() })
+        Ok(Self { bus, changed, _listen: listen, art: Default::default(), clocks: Default::default(), seeks })
     }
 
     async fn names(&self) -> Vec<String> {
@@ -193,12 +207,14 @@ impl Local {
 
     async fn snapshot(&mut self) -> MediaState {
         let mut players = Vec::new();
-        for name in self.names().await {
-            match self.player(&name).await {
+        let names = self.names().await;
+        for name in &names {
+            match self.player(name).await {
                 Ok(p) => players.push(p),
                 Err(e) => debug!("{name}: {e}"),
             }
         }
+        self.clocks.lock().unwrap().retain(|name, _| names.contains(name));
         let seq = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
         MediaState { seq, players }
     }
@@ -213,6 +229,9 @@ impl Local {
         let artist = meta.get("xesam:artist").and_then(|v| Vec::<String>::try_from(v.clone()).ok()).map(|a| a.join(", ")).unwrap_or_default();
         let length = meta.get("mpris:length").and_then(|v| i64::try_from(v.clone()).ok().or_else(|| u64::try_from(v.clone()).ok().map(|u| u as i64)));
         let position: Option<i64> = player.get_property("Position").await.ok();
+        let playing = status == "Playing";
+        let length_ms = length.filter(|l| *l > 0).map(|l| l as u64 / 1000);
+        let position_ms = self.position(name, Track { title: text("xesam:title"), length_ms }, playing, position.filter(|p| *p >= 0).map(|p| p as u64 / 1000)).await;
         let flag = |v: zbus::Result<bool>| v.unwrap_or(false);
         Ok(MediaPlayer {
             id: name[MPRIS.len()..].to_string(),
@@ -220,9 +239,9 @@ impl Local {
             title: text("xesam:title"),
             artist,
             album: text("xesam:album"),
-            playing: status == "Playing",
-            position_ms: position.filter(|p| *p >= 0).map(|p| p as u64 / 1000),
-            length_ms: length.filter(|l| *l > 0).map(|l| l as u64 / 1000),
+            playing,
+            position_ms,
+            length_ms,
             can_next: flag(player.get_property("CanGoNext").await),
             can_previous: flag(player.get_property("CanGoPrevious").await),
             can_seek: flag(player.get_property("CanSeek").await),
@@ -255,7 +274,7 @@ impl Local {
             MediaCommand::PlayPause => proxy.call_method("PlayPause", &()).await.map(|_| ()),
             MediaCommand::Next => proxy.call_method("Next", &()).await.map(|_| ()),
             MediaCommand::Previous => proxy.call_method("Previous", &()).await.map(|_| ()),
-            MediaCommand::Seek { position_ms } => seek(&name, &proxy, position_ms).await,
+            MediaCommand::Seek { position_ms } => self.seek(&name, &proxy, position_ms).await,
         };
         if let Err(e) = result {
             debug!("{player}: {e}");
@@ -263,29 +282,47 @@ impl Local {
     }
 }
 
-/// Go to a place in the track. Exactly there (`SetPosition`) when the player gives the
-/// track's id; else by the difference from where it says it is.
-async fn seek(name: &str, proxy: &zbus::Proxy<'_>, ms: u64) -> zbus::Result<()> {
-    let target = ms as i64 * 1000;
-    let meta: HashMap<String, OwnedValue> = proxy.get_property("Metadata").await.unwrap_or_default();
-    if let Some(track) = meta.get("mpris:trackid").and_then(track_path) {
-        match proxy.call_method("SetPosition", &(track, target)).await {
-            Ok(_) => return Ok(()),
-            Err(e) => debug!("{name}: SetPosition: {e}"),
-        }
-    }
-    let now: i64 = proxy.get_property("Position").await.unwrap_or(0);
-    proxy.call_method("Seek", &(target - now)).await.map(|_| ())
-}
-
-/// A track's id, which `SetPosition` wants: an object path (some players send a string),
-/// and not the one that means there is no track.
-fn track_path(value: &OwnedValue) -> Option<OwnedObjectPath> {
-    let path = OwnedObjectPath::try_from(value.clone()).ok().or_else(|| OwnedObjectPath::try_from(String::try_from(value.clone()).ok()?).ok())?;
-    (path.as_str() != "/org/mpris/MediaPlayer2/TrackList/NoTrack").then_some(path)
-}
-
 impl Local {
+    /// Where the player is: what it says, unless that has stayed at 0 while it plays.
+    async fn position(&self, name: &str, track: Track, playing: bool, raw_ms: Option<u64>) -> Option<u64> {
+        let seeked = if self.seeks.lock().unwrap().is_empty() {
+            None
+        } else {
+            let owner = async {
+                let dbus = zbus::fdo::DBusProxy::new(&self.bus).await.ok()?;
+                dbus.get_name_owner(zbus::names::BusName::try_from(name).ok()?).await.ok().map(|o| o.to_string())
+            };
+            let owner = owner.await;
+            owner.and_then(|o| self.seeks.lock().unwrap().remove(&o))
+        };
+        let now = Instant::now();
+        let mut clocks = self.clocks.lock().unwrap();
+        clocks.entry(name.to_string()).or_insert_with(|| Clock::new(track.clone(), playing, now)).look(track, playing, raw_ms, seeked, now)
+    }
+
+    /// Go to a place in the track. Exactly there (`SetPosition`) when the player gives the
+    /// track's id; else by the difference from where it is, which is only as right as that is.
+    async fn seek(&self, name: &str, proxy: &zbus::Proxy<'_>, ms: u64) -> zbus::Result<()> {
+        let target = ms as i64 * 1000;
+        let meta: HashMap<String, OwnedValue> = proxy.get_property("Metadata").await.unwrap_or_default();
+        let mut done = false;
+        if let Some(track) = meta.get("mpris:trackid").and_then(track_path) {
+            match proxy.call_method("SetPosition", &(track, target)).await {
+                Ok(_) => done = true,
+                Err(e) => debug!("{name}: SetPosition: {e}"),
+            }
+        }
+        if !done {
+            let raw: i64 = proxy.get_property("Position").await.unwrap_or(0);
+            let counted = self.clocks.lock().unwrap().get(name).filter(|c| c.stuck()).map(|c| c.at(Instant::now()) as i64 * 1000);
+            proxy.call_method("Seek", &(target - counted.unwrap_or(raw))).await?;
+        }
+        if let Some(clock) = self.clocks.lock().unwrap().get_mut(name) {
+            clock.seeked(ms, Instant::now());
+        }
+        Ok(())
+    }
+
     /// Cover art from a local file, small enough to pass along.
     fn art(&self, url: &str) -> Option<String> {
         let path = percent_decode(url.strip_prefix("file://")?);
@@ -304,6 +341,28 @@ impl Local {
         known.insert(path, (modified, art.clone()));
         art
     }
+}
+
+/// A player said it moved (`Seeked`, in microseconds): where, by who.
+fn note_seek(heard: &std::sync::Mutex<HashMap<String, (u64, Instant)>>, message: &zbus::Message) {
+    let header = message.header();
+    if header.member().is_none_or(|m| m.as_str() != "Seeked") {
+        return;
+    }
+    let Some(sender) = header.sender() else { return };
+    let Ok(us) = message.body().deserialize::<i64>() else { return };
+    let mut heard = heard.lock().unwrap();
+    if heard.len() > 16 {
+        heard.clear();
+    }
+    heard.insert(sender.to_string(), (us.max(0) as u64 / 1000, Instant::now()));
+}
+
+/// A track's id, which `SetPosition` wants: an object path (some players send a string),
+/// and not the one that means there is no track.
+fn track_path(value: &OwnedValue) -> Option<OwnedObjectPath> {
+    let path = OwnedObjectPath::try_from(value.clone()).ok().or_else(|| OwnedObjectPath::try_from(String::try_from(value.clone()).ok()?).ok())?;
+    (path.as_str() != "/org/mpris/MediaPlayer2/TrackList/NoTrack").then_some(path)
 }
 
 /// The picture as it is when it's small enough, else scaled down and saved as JPEG (a
@@ -568,6 +627,7 @@ fn owned(v: Value<'_>) -> OwnedValue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
 
     #[test]
     fn makes_a_big_cover_small() {
