@@ -40,7 +40,44 @@ pub async fn available() -> bool {
     }
 }
 
+/// The channel of this computer's Wi-Fi in MHz, from `iw`: told to a phone asked to host a direct
+/// link, so its group is made on the same channel and the card doesn't hop between two.
+pub async fn wifi_frequency() -> Option<u32> {
+    async fn iw(args: &[&str]) -> Option<String> {
+        let out = tokio::process::Command::from(linksy_host::command("iw", &[])).args(args).stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().await.ok()?;
+        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+    for interface in managed_interfaces(&iw(&["dev"]).await?) {
+        if let Some(f) = iw(&["dev", &interface, "link"]).await.and_then(|l| parse_frequency(&l)) {
+            return Some(f);
+        }
+    }
+    None
+}
+
+/// The Wi-Fi interfaces in what `iw dev` prints (not the Wi-Fi Direct device).
+fn managed_interfaces(dev: &str) -> Vec<String> {
+    let mut current = None;
+    let mut out = Vec::new();
+    for line in dev.lines().map(str::trim) {
+        if let Some(name) = line.strip_prefix("Interface ") {
+            current = Some(name.trim().to_string());
+        } else if line == "type managed" {
+            out.extend(current.take());
+        }
+    }
+    out
+}
+
+/// The channel in what `iw dev <interface> link` prints ("freq: 5200.0"), if it is connected.
+fn parse_frequency(link: &str) -> Option<u32> {
+    let value = link.lines().find_map(|l| l.trim().strip_prefix("freq:"))?;
+    let mhz = value.trim().parse::<f64>().ok()?.round() as u32;
+    (2400..=7125).contains(&mhz).then_some(mhz)
+}
+
 pub async fn run(node: Node) {
+    node.set_wifi_frequency(wifi_frequency().await);
     let mut events = node.subscribe();
     // Each link being joined or up, and where its next steps go.
     let mut links: HashMap<Fingerprint, mpsc::UnboundedSender<DirectStep>> = HashMap::new();
@@ -258,6 +295,17 @@ fn p2p_address(iw: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_wifi_channel_is_read_from_what_iw_prints() {
+        let dev = "phy#0\n\tUnnamed/non-netdev interface\n\t\twdev 0x5\n\t\ttype P2P-device\n\tInterface wlp3s0\n\t\tifindex 3\n\t\ttype managed\n";
+        assert_eq!(super::managed_interfaces(dev), ["wlp3s0"]);
+        let link = "Connected to d8:42:f7:4e:00:00 (on wlp3s0)\n\tSSID: home\n\tfreq: 5200.0\n\tRX: 1 bytes\n";
+        assert_eq!(super::parse_frequency(link), Some(5200));
+        assert_eq!(super::parse_frequency("freq: 2437"), Some(2437));
+        assert_eq!(super::parse_frequency("Not connected."), None);
+        assert_eq!(super::parse_frequency("freq: 12.0"), None);
+    }
+
     use super::*;
 
     #[test]
