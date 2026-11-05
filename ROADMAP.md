@@ -49,10 +49,11 @@ On main and not in a release yet:
 Built on the phone, not published (from the phone's side; the desktop has not seen its messages yet):
 - **Snap to Computer** and **Copy to Computer**, the phone's half of the **Connection Doctor**, and a **USB button** (`usb_plugged`, `usb_connect`, which the computer already answers).
 
-Being built on the computer, in this order:
-1. Snap from Phone, and checking that a snap lands where it should.
-2. The Connection Doctor.
-3. The phone's controls (volumes, ringer, Do Not Disturb, flashlight).
+Built on the computer, on branch `phone-work` (not on main yet):
+1. Snap from Phone: the picture lands in Downloads/Linksy and on the clipboard, with a notification to open it (§4.23).
+2. The Connection Doctor: "Why Can't I See My Phone?" in the device list and Finish Setup.
+
+Being built next: the phone's controls (volumes, ringer, Do Not Disturb, flashlight).
 
 
 ## Now, in detail

@@ -83,7 +83,7 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | Snap: take a photo on the phone, it lands on the computer | Done on branch `phone-work` (§4.23) | Built, not published | an ordinary file transfer, then `clipboard_file` where the computer announces it; "Snap from Phone" sends `snap_request` |
 | Copy to Computer (text from the phone's text menu) | Receives `clipboard` as before | Built, not published | to confirm against the phone's messages once they are published |
 | A USB button on the phone | Done (0.9) | Built, not published | `usb_plugged`, `usb_connect` (§4.11); mobile#11 |
-| Connection Doctor | To do (Now) | Its half built, not published | the computer checks its firewall, a VPN, devices kept apart and the cable |
+| Connection Doctor | Done on branch `phone-work` | Its half built, not published | the computer checks its firewall, a VPN, a phone on another network or not answering, and the cable; no new messages |
 | The phone's controls on the computer (volumes, ringer, Do Not Disturb, flashlight) | To do (Now) | To do | messages to agree on first |
 | Bluetooth (presence and a link) | Planned | Planned | `ROADMAP.md`; not started |
 
