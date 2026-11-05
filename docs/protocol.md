@@ -1890,6 +1890,41 @@ probed apps); a picker for the phone's own photos, files and apps that calls `pr
 as it fills and sends once with `send_bundle`; install what `AppsReceived` lists in one
 session; show `TransferRoute`. The pairing and the 7-day away lease are unchanged (§4.13).
 
+### 4.23 Snap from Phone (desktop, after 0.12.4)
+
+A computer asks a phone to open its camera and send what the user takes. Additive: a phone
+that doesn't announce `snap` is never asked, and a computer that doesn't know the messages
+ignores them.
+
+```json
+{"type":"snap_request"}                                                  // computer → phone
+{"type":"snap_refused","reason":"Linksy needs the camera permission"}    // phone → computer
+```
+
+- **Feature `snap`:** the phone announces it while it can open its camera for a computer
+  (permission given, the switch on). The computer shows **Snap from Phone** on the phone's page
+  only then, and `node.request_snap(id)` is `Error::Unsupported` otherwise.
+- **The phone** opens its camera on `snap_request` (with the screen on; when Linksy is in the
+  background Android won't start an activity, so a notification "Take a picture for
+  *computer*" that opens it is the way). If it can't, it answers `snap_refused` with a
+  sentence to show as it is; the computer shows "*phone* can't take a picture: …". If the user
+  closes the camera without a picture, nothing is sent.
+- **The picture** is an ordinary offer (§4.5): **one file**, `.jpg`, `.jpeg`, `.png`, `.webp`,
+  `.heic`, `.heif` or `.pdf` (a straightened page), at most 40 MiB. For two minutes after its
+  `snap_request`, and once per request, the computer takes it **without asking** into
+  Downloads/Linksy, with the notification "Received *name*" (Open, Show in Folder). Any other
+  offer, a second picture, or one after the two minutes asks as usual, and so does a phone's own
+  "Snap to Computer" with no `snap_request` before it, unless Always Accept is on for that phone.
+- **The clipboard:** when the computer announces `clipboard_file`, send the same picture a second
+  time with `"clipboard":true` (§4.5; at most 10 MiB, so a scaled copy if it is bigger). The
+  computer puts it on its clipboard as an image and says "Image ready to paste". Send the file
+  first, then the clipboard copy: the first is what the notification opens.
+- **Core API:** `node.request_snap(id)`, `node.refuse_snap(id, reason)`;
+  `Event::SnapRequest { from }` on the phone, `Event::SnapRefused { from, reason }` on the
+  computer. `linksy snap <phone>` on the command line.
+- **Phone to-do:** announce `snap`; open the camera on `snap_request`; send the file, then the
+  clipboard copy; `snap_refused` with a reason when it can't.
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text

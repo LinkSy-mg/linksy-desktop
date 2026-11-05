@@ -1039,4 +1039,12 @@ mod tests {
         // A kind it doesn't know fails the whole list, so the computer adds none
         assert!(serde_json::from_str::<Message>(&json.replace(r#""kind":"button""#, r#""kind":"dial""#)).is_err());
     }
+
+    #[test]
+    fn snap_messages_have_the_names_the_phone_is_told() {
+        assert_eq!(serde_json::to_string(&Message::SnapRequest).unwrap(), r#"{"type":"snap_request"}"#);
+        let refused = serde_json::to_string(&Message::SnapRefused { reason: "Linksy needs the camera permission".into() }).unwrap();
+        assert_eq!(refused, r#"{"type":"snap_refused","reason":"Linksy needs the camera permission"}"#);
+        assert!(matches!(serde_json::from_str::<Message>(&refused), Ok(Message::SnapRefused { .. })));
+    }
 }
