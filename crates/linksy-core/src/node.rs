@@ -1403,7 +1403,7 @@ impl Node {
         };
         let can_link = self.info().features.iter().any(|f| f == "direct_host" || f == "direct_join");
         let mut reply = PreflightReply {
-            free: crate::space::free(&dir),
+            free: crate::space::free(&dir).map(|f| f.saturating_sub(self.inner.config.keep_free)),
             auto,
             direct: if can_link { DirectReady::Ready } else { DirectReady::Unsupported },
             can_install: None,
@@ -1517,6 +1517,7 @@ impl Node {
         let to = *to;
         let task = tokio::spawn(async move {
             let entries: Vec<FileEntry> = files.iter().map(|f| f.entry.clone()).collect();
+            let entries_len = entries.len() as u32;
             let total = entries.iter().map(|f| f.size).sum();
             let result = async {
                 node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries.clone(), total, import, apps: apps.clone() });
@@ -1535,7 +1536,7 @@ impl Node {
                 write_msg(&mut send, &TransferMsg::Offer { id, files: entries, import, clipboard, apps }).await?;
                 let offsets = match read_msg(&mut recv).await? {
                     TransferMsg::Accept { offsets } => offsets,
-                    TransferMsg::Decline => return Err(Error::Declined),
+                    TransferMsg::Decline => return Err(node.why_declined(&to, total, entries_len).await),
                     other => return Err(protocol(format!("unexpected {other:?}"))),
                 };
                 let events = node.inner.events.clone();
@@ -2952,6 +2953,18 @@ impl Node {
                 tokio::time::sleep(Duration::from_secs(secs.min(MAX_KEEP) as u64)).await;
                 drop(busy);
             });
+        }
+    }
+
+    /// What to tell the user when `to` declined `bytes` in `files` files: no room, if it
+    /// says so, else just that it was declined.
+    async fn why_declined(&self, to: &Fingerprint, bytes: u64, files: u32) -> Error {
+        match tokio::time::timeout(Duration::from_secs(3), self.preflight(to, bytes, files, Vec::new())).await {
+            Ok(Ok(reply)) if !reply.has_room_for(bytes) => {
+                let name = self.peer_info(to).map_or_else(|| "the other device".into(), |p| p.name);
+                invalid(format!("{name} doesn't have room for this: it needs {} and has {} free", crate::space::show(bytes), crate::space::show(reply.free.unwrap_or(0))))
+            }
+            _ => Error::Declined,
         }
     }
 

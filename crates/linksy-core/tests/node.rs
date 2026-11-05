@@ -2163,3 +2163,24 @@ async fn an_offer_that_would_fill_the_disk_is_declined_at_once() {
     wait_for(&mut on_a, |e| matches!(e, Event::TransferFailed { transfer, .. } if *transfer == id).then_some(())).await;
     assert!(!b.downloads().join("small.bin").exists());
 }
+
+#[tokio::test]
+async fn a_device_without_room_says_so_when_it_declines() {
+    let (a, b) = paired_with(|c| {
+        c.features = vec!["files".into(), "preflight".into()];
+        c.keep_free = u64::MAX / 2;
+    })
+    .await;
+    let mut on_a = a.node.subscribe();
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("small.bin");
+    std::fs::write(&file, vec![1u8; 4096]).unwrap();
+    let id = a.node.send_files(&b.node.info().id, vec![file]).await.unwrap();
+    let reason = wait_for(&mut on_a, |e| match e {
+        Event::TransferFailed { transfer, reason } if *transfer == id => Some(reason.clone()),
+        _ => None,
+    })
+    .await;
+    assert!(reason.contains("Beta doesn't have room for this"), "{reason}");
+    assert!(reason.contains("4.1 KB"), "{reason}");
+}

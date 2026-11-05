@@ -362,6 +362,20 @@ mod tests {
         }
     }
 
+    #[test]
+    fn files_can_be_sent_under_names_of_the_senders_choosing() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("base.apk");
+        std::fs::write(&real, b"apk").unwrap();
+        let got = collect_as(&[(real.clone(), "org.a.app-1/base.apk".into())]).unwrap();
+        assert_eq!(got[0].entry, FileEntry { path: "org.a.app-1/base.apk".into(), size: 3 });
+        assert_eq!(got[0].source, real);
+        // Never out of the folder, never a folder, never a file that isn't there
+        assert!(collect_as(&[(real.clone(), "../base.apk".into())]).is_err());
+        assert!(collect_as(&[(dir.path().to_path_buf(), "dir".into())]).is_err());
+        assert!(collect_as(&[(dir.path().join("none.apk"), "none.apk".into())]).is_err());
+    }
+
     #[tokio::test]
     async fn plan_picks_unique_name_and_resume_offset() {
         let dir = tempfile::tempdir().unwrap();

@@ -12,6 +12,21 @@ pub fn free(path: &Path) -> Option<u64> {
     free_at(at)
 }
 
+/// "812 MB", "2.1 GB": for a message, in the decimal units phones show.
+pub fn show(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["bytes", "KB", "MB", "GB", "TB"];
+    let (mut value, mut unit) = (bytes as f64, 0);
+    while value >= 1000.0 && unit < UNITS.len() - 1 {
+        value /= 1000.0;
+        unit += 1;
+    }
+    match unit {
+        0 => format!("{bytes} bytes"),
+        _ if value < 10.0 => format!("{value:.1} {}", UNITS[unit]),
+        _ => format!("{value:.0} {}", UNITS[unit]),
+    }
+}
+
 #[cfg(unix)]
 fn free_at(path: &Path) -> Option<u64> {
     use std::os::unix::ffi::OsStrExt;
@@ -23,6 +38,8 @@ fn free_at(path: &Path) -> Option<u64> {
     }
     // SAFETY: statvfs succeeded, so it is filled in
     let stat = unsafe { stat.assume_init() };
+    // 32-bit targets (armeabi-v7a) have these as u32
+    #[allow(clippy::unnecessary_cast)]
     Some((stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64))
 }
 
@@ -34,6 +51,15 @@ fn free_at(_: &Path) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sizes_read_as_phones_show_them() {
+        assert_eq!(show(0), "0 bytes");
+        assert_eq!(show(999), "999 bytes");
+        assert_eq!(show(1_500), "1.5 KB");
+        assert_eq!(show(812_000_000), "812 MB");
+        assert_eq!(show(2_100_000_000), "2.1 GB");
+    }
 
     #[cfg(unix)]
     #[test]
