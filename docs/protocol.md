@@ -33,8 +33,10 @@ Decisions already made with the owner:
 
 ## 2. Feature status
 
-Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, phone 0.1.16, 2026-10-21).
-"Not possible" rows are hidden by the desktop for Android phones (see §4.10).
+Desktop column: Linksy for Linux 0.12.4. Android column: the phone's `docs/android-app.md`
+(LinkSy-mg/linksy-mobile, phone 0.3.4, 2026-11-05). "Not possible" rows are hidden by the
+desktop for Android phones (see §4.10). Work on a branch of this repository that isn't in a
+release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`.
 
 | Feature | Desktop (Linux) | Android | Notes |
 |---|---|---|---|
@@ -44,8 +46,8 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Open on PC (`open_url`) | Done | Done, both ways | §4.5 |
 | Battery, Ring / Find | Done | Done | §4.5 |
 | The computer's music on the phone | Done | Done | `media_watch`, `media_state`, `media_command` |
-| The computer's volume on the phone | Done (0.9.8) | To do | `volume_watch`, `volume_state`, `volume_set` (§4.5) |
-| The phone's music on the computer | Done | Not possible | needs notification-listener access |
+| The computer's volume on the phone | Done (0.9.8) | Done (0.2.6) | `volume_watch`, `volume_state`, `volume_set` (§4.5) |
+| The phone's music on the computer | Done | To do | `MediaSessionManager` needs the notification listener, which the app has had since 0.3.2: possible, not built |
 | Pause the computer's media during calls | Done | Done | `call_state`; never a `contact` |
 | Lock when away | Done | Done | `heartbeat`; foreground service |
 | Photo auto-import | Done | Done | one folder the user picks, `YYYY-MM` folders |
@@ -57,24 +59,28 @@ Android column from the phone's `docs/android-app.md` (LinkSy-mg/linksy-mobile, 
 | Phone watches / controls the computer | Done | Done | phone requests `screen` / `control` |
 | Controlling the phone from the computer | Done | Not possible | AccessibilityService is blocked for sideloaded apps |
 | Texting from the computer | Done | Not possible | SMS permissions are blocked for sideloaded apps |
-| Phone notifications on the computer, reply | Done | Not possible | notification-listener access is blocked |
-| Messages page, codes copied | Done (0.11.4) | To do (optional fields) | from message notifications; `conversation`, `sender`… (§4.5) |
-| Inbox: other notifications, earlier messages, replies after the notification | Done (0.12.1) | To do | `messages`, `reply_kept`, `inbox_history` (§4.5) |
-| Gallery: the phone's photos page by page | Done (0.12.1) | To do | `gallery` stream, thumbnails, `send` (§4.18) |
-| Deck: the phone as buttons for the computer | Done (0.12.1) | To do | `deck_open`, `deck_actions`, `deck_run` (§4.19) |
-| Deck layouts made on the computer | Done (0.12.1) | To do | `deck_layout`, feature `deck_layout` (§4.20) |
+| Phone notifications on the computer, reply | Done | Done (0.3.2) | a notification listener, on once the user allows Notification access (Android 13 and later: Allow restricted settings first); texts come this way, not through SMS permissions |
+| Messages page, codes copied | Done (0.11.4) | Done (0.3.2) | from message notifications; `conversation`, `sender`… (§4.5) |
+| Inbox: other notifications, earlier messages, replies after the notification | Done (0.12.1) | Done (0.3.3) | `messages`, `reply_kept`, `inbox_history` (§4.5) |
+| Gallery: the phone's photos page by page | Done (0.12.1) | Done (0.3.3) | `gallery` stream, thumbnails, `send` (§4.18) |
+| Deck: the phone as buttons for the computer | Done (0.12.1) | Done (0.3.3) | `deck_open`, `deck_actions`, `deck_run` (§4.19) |
+| Deck layouts made on the computer | Done (0.12.1) | Done (0.3.3) | `deck_layout`, feature `deck_layout` (§4.20) |
 | Images/files on the clipboard | Done | Done | offer with `"clipboard":true` (§4.5) |
 | Automatic clipboard sync, computer → phone | Done (not on GNOME) | Done (phone asks) | `clipboard_watch` (§4.5) |
 | Phone as microphone | Done | Done | session `microphone`, raw PCM (§4.8) |
-| USB cable (no Wi-Fi, lower latency) | Done | Built, untested on hardware | Android Open Accessory + UDP bridge (§4.11) |
+| USB cable (no Wi-Fi, lower latency) | Done (cable v2, 0.11.0) | Works on some phones, not yet every one | Android Open Accessory + UDP bridge (§4.11); a Samsung A05 connects since phone 0.3.3 but lags (releases#8); the plan to make it work everywhere is in `ROADMAP.md` |
 | Camera controls from the computer | Done | Done | §4.8; docs/android-app.md §2.8 |
 | Device pictures | Done | Done | §4.5; docs/android-app.md §2.7 |
 | Away from home (over the internet) | Done | Done | iroh, Linksy's relay, 7-day lease (§4.13) |
 | Locate the phone | Done | Done (while the app is open) | `locate` / `location` (§4.14) |
 | 1080p webcam | Done | Done | `size` in `camera_control`, `size_options` (§4.8) |
-| Terminal on the computer, from the phone | Done (0.7.0) | To do | session `terminal`, code set on the computer (§4.15) |
-| Direct link (Wi-Fi Direct) for big transfers | Done (0.9.9), untested with a phone | To do | phone hosts, computer joins with NetworkManager (§4.17) |
-| Bluetooth LE presence | Not planned | Not planned | |
+| Terminal on the computer, from the phone | Done (0.7.0) | Done (0.2.0), hard to use (mobile#2) | session `terminal`, code set on the computer (§4.15) |
+| Direct link (Wi-Fi Direct) for big transfers | Done (0.9.9) | Done (0.2.8); between two phones 0.2.9 | phone hosts, computer joins with NetworkManager (§4.17); full speed only when both pick the same channel (`ROADMAP.md`) |
+| Choose Screen (see another monitor) | Done (0.9.11) | Done (0.2.12) | `choose` in `session_request` (§4.8) |
+| Turn on the Inbox or Gallery from the computer | On branch `turn-on` (not released) | Built, waits for the core that has it | `turn_on` (§4.21 on that branch) |
+| Phone to phone: the route, a check before sending, apps | On branch `phone-to-phone` (not released) | To do | §4.22 on that branch; the phone's prompt is written |
+| Position and seeking of the computer's players | On a branch (not released) | Nothing to do | the computer counts a browser's position itself and seeks exactly (§4.5) |
+| Bluetooth (presence and a link) | Planned | Planned | `ROADMAP.md`; not started |
 
 ## 3. How to build the phone app (recommendation)
 
