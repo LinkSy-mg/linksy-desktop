@@ -172,14 +172,22 @@ Kirigami.ApplicationWindow {
         return n === 1 ? t("1 hour left") : t("{n} hours left", { n: n });
     }
 
-    // "1.2 MB of 3.8 MB · 4.1 MB/s · 2 seconds left"
+    // "Direct link", "Over the internet": the way a transfer goes
+    function routeText(r) {
+        if (r.setting_up) return t("Setting up a direct link…");
+        const way = { usb: t("USB cable"), direct: t("Direct link"), lan: t("Same network"), away: t("Over the internet") }[r.route] ?? "";
+        return r.why ? `${way} · ${t("No direct link: {why}", { why: r.why })}` : way;
+    }
+
+    // "Direct link · 1.2 MB of 3.8 MB · 4.1 MB/s · 2 seconds left"
     function progressText(p) {
+        if (p.route?.setting_up) return routeText(p.route);
         let text = t("{done} of {total}", { done: size(p.bytes), total: size(p.total) });
         const [first, last] = [p.samples[0], p.samples[p.samples.length - 1]];
         const speed = first && last && last[0] > first[0] ? (last[1] - first[1]) / ((last[0] - first[0]) / 1000) : 0;
         if (speed > 0 && p.bytes < p.total)
             text += ` · ${t("{size}/s", { size: size(speed) })} · ${remaining((p.total - p.bytes) / speed)}`;
-        return text;
+        return p.route && routeText(p.route) ? `${routeText(p.route)} · ${text}` : text;
     }
 
     // Show any second display another computer started here, or screen the tray asked to
@@ -395,6 +403,13 @@ Kirigami.ApplicationWindow {
         case "transfer_progress":
             setProgress(ev.transfer, ev.bytes, ev.total);
             break;
+        case "transfer_route": {
+            const p = Object.assign({}, progress);
+            const was = p[ev.transfer] ?? { bytes: 0, total: 0, samples: [] };
+            p[ev.transfer] = Object.assign({}, was, { route: { route: ev.route, setting_up: ev.setting_up_direct === true, why: ev.why_not_direct ?? "" } });
+            progress = p;
+            break;
+        }
         case "transfer_complete": case "transfer_failed":
             if (offerDialog.transfer === ev.transfer) offerDialog.close();
             setProgress(ev.transfer, -1, 0);
@@ -512,7 +527,7 @@ Kirigami.ApplicationWindow {
         else {
             const now = Date.now();
             const samples = (p[id]?.samples ?? []).concat([[now, bytes]]).filter(s => now - s[0] < 3000);
-            p[id] = { bytes: bytes, total: total, samples: samples };
+            p[id] = { bytes: bytes, total: total, samples: samples, route: p[id]?.route };
         }
         progress = p;
     }
