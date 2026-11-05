@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use linksy_core::gallery::GalleryAnswer;
 use linksy_core::{
-    Battery, CallState, Config, ControlMsg, ConversationMessage, DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckTheme, DeckTile, DirectGroup, DirectPlan, DirectStep, Error, Event, FsEntry, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryRequest, MediaCommand, MediaPlayer, MediaState, Node,
+    AppHave, AppInfo, AppProbe, AppSend, AppState, DirectReady, PreflightAnswer, Battery, CallState, Config, ControlMsg, ConversationMessage, DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckTheme, DeckTile, DirectGroup, DirectPlan, DirectStep, Error, Event, FsEntry, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryRequest, MediaCommand, MediaPlayer, MediaState, Node,
     NotificationButton, RemoteNotification, Route, SessionKind, SmsThread, Skip, VolumeState, Link,
 };
 use tokio::io::AsyncReadExt;
@@ -1970,4 +1970,196 @@ async fn group_credentials_go_only_to_a_device_that_joins_groups() {
     let creds = DirectGroup::random().unwrap();
     let step = DirectStep::Invite { address: "02:00:00:00:00:00".into(), name: None, group: Some(creds) };
     assert!(phone.node.direct_send(&pc_id, step).await.is_err());
+}
+
+// ---- Phone to phone (docs/protocol.md §4.22) ----
+
+fn app_info(package: &str, version_code: u64) -> AppInfo {
+    AppInfo { package: package.into(), label: "Notes".into(), version_code, version_name: Some("2.1".into()), signer: Some("cd".repeat(32)), dir: String::new(), icon: None }
+}
+
+fn apks(dir: &Path, names: &[&str]) -> Vec<PathBuf> {
+    names
+        .iter()
+        .map(|n| {
+            let path = dir.join(n);
+            std::fs::write(&path, format!("apk {n}").repeat(1000)).unwrap();
+            path
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_preflight_tells_the_room_and_whether_it_asks() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "preflight".into(), "direct_host".into()]).await;
+    let reply = a.node.preflight(&b.node.info().id, 3 << 20, 2, vec![]).await.unwrap();
+    assert!(reply.free.is_some_and(|f| f > 0));
+    assert!(!reply.auto);
+    assert_eq!(reply.direct, DirectReady::Ready);
+    assert_eq!(reply.can_install, None);
+    assert!(reply.apps.is_empty());
+    assert!(reply.has_room_for(1 << 20));
+    assert!(!reply.has_room_for(u64::MAX));
+    // Files from this device in without asking, once the user said so
+    b.node.set_auto_accept(&a.node.info().id, true).unwrap();
+    assert!(a.node.preflight(&b.node.info().id, 1, 1, vec![]).await.unwrap().auto);
+}
+
+#[tokio::test]
+async fn a_device_that_does_not_preflight_is_not_asked() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into()]).await;
+    assert!(matches!(a.node.preflight(&b.node.info().id, 1, 1, vec![]).await, Err(Error::Unsupported)));
+}
+
+#[tokio::test]
+async fn the_app_adds_what_only_it_knows_to_a_preflight() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "preflight".into(), "apps".into()]).await;
+    let mut calls = b.node.incoming_preflight().expect("preflights");
+    tokio::spawn(async move {
+        while let Some(call) = calls.recv().await {
+            let mut apps = vec![
+                AppState { package: "org.notes.app".into(), have: AppHave::Older, version_code: Some(3) },
+                // Not asked about, and asked about twice: neither goes out
+                AppState { package: "org.secret.app".into(), have: AppHave::Same, version_code: Some(1) },
+                AppState { package: "org.notes.app".into(), have: AppHave::Same, version_code: Some(9) },
+            ];
+            apps.push(AppState { package: "org.maps.app".into(), have: AppHave::Missing, version_code: None });
+            call.answer(PreflightAnswer { free: Some(5_000), direct: Some(DirectReady::WifiOff), can_install: Some(false), apps });
+        }
+    });
+    let probes = vec![
+        AppProbe { package: "org.notes.app".into(), version_code: 7, signer: None },
+        AppProbe { package: "org.maps.app".into(), version_code: 2, signer: None },
+        AppProbe { package: "../../bad".into(), version_code: 1, signer: None },
+    ];
+    let reply = a.node.preflight(&b.node.info().id, 4_000, 1, probes).await.unwrap();
+    assert_eq!(reply.free, Some(5_000));
+    assert_eq!(reply.direct, DirectReady::WifiOff);
+    assert_eq!(reply.can_install, Some(false));
+    let states: Vec<(&str, AppHave)> = reply.apps.iter().map(|s| (s.package.as_str(), s.have)).collect();
+    assert_eq!(states, vec![("org.notes.app", AppHave::Older), ("org.maps.app", AppHave::Missing)]);
+    assert!(reply.has_room_for(4_000));
+    assert!(!reply.has_room_for(5_001));
+}
+
+#[tokio::test]
+async fn an_app_that_never_answers_does_not_hold_a_preflight_up() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "preflight".into()]).await;
+    let _calls = b.node.incoming_preflight().expect("preflights");
+    let began = std::time::Instant::now();
+    let reply = a.node.preflight(&b.node.info().id, 1, 1, vec![]).await.unwrap();
+    assert!(reply.free.is_some());
+    assert!(began.elapsed() < Duration::from_secs(5));
+}
+
+#[tokio::test]
+async fn apps_travel_as_folders_and_arrive_described() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "apps".into()]).await;
+    let (a_id, b_id) = (a.node.info().id, b.node.info().id);
+    let mut on_a = a.node.subscribe();
+    let mut on_b = b.node.subscribe();
+    let src = tempfile::tempdir().unwrap();
+    let notes = apks(src.path(), &["base.apk", "split_config.arm64_v8a.apk", "split_config.xxhdpi.apk"]);
+    let maps_dir = src.path().join("maps");
+    std::fs::create_dir(&maps_dir).unwrap();
+    let maps = apks(&maps_dir, &["base.apk"]);
+    let photo = src.path().join("photo.jpg");
+    std::fs::write(&photo, b"jpeg").unwrap();
+
+    let id = a
+        .node
+        .send_bundle(&b_id, vec![photo], vec![AppSend { info: app_info("org.notes.app", 7), apks: notes.clone() }, AppSend { info: app_info("org.maps.app", 12), apks: maps }])
+        .await
+        .unwrap();
+    let asked = wait_for(&mut on_b, |e| match e {
+        Event::TransferRequest { transfer, apps, files, .. } if *transfer == id => Some((apps.clone(), files.len())),
+        _ => None,
+    })
+    .await;
+    assert_eq!(asked.1, 5);
+    let dirs: Vec<&str> = asked.0.iter().map(|a| a.dir.as_str()).collect();
+    assert_eq!(dirs, vec!["org.notes.app-7", "org.maps.app-12"]);
+    assert_eq!(asked.0[0].label, "Notes");
+
+    let arrived = wait_for(&mut on_b, |e| match e {
+        Event::AppsReceived { transfer, apps, from } if *transfer == id => {
+            assert_eq!(from.id, a_id);
+            Some(apps.clone())
+        }
+        _ => None,
+    })
+    .await;
+    assert_eq!(arrived.len(), 2);
+    let got: Vec<String> = arrived[0].apks.iter().map(|p| p.file_name().unwrap().to_str().unwrap().to_string()).collect();
+    assert_eq!(got, vec!["base.apk", "split_config.arm64_v8a.apk", "split_config.xxhdpi.apk"]);
+    for (sent, received) in notes.iter().zip(&arrived[0].apks) {
+        assert_eq!(std::fs::read(sent).unwrap(), std::fs::read(received).unwrap());
+        assert_eq!(received.parent().unwrap(), b.downloads().join("org.notes.app-7"));
+    }
+    assert_eq!(arrived[1].apks.len(), 1);
+    assert_eq!(std::fs::read(b.downloads().join("photo.jpg")).unwrap(), b"jpeg");
+    wait_for(&mut on_a, |e| matches!(e, Event::TransferComplete { transfer, .. } if *transfer == id).then_some(())).await;
+}
+
+#[tokio::test]
+async fn the_same_app_again_never_mixes_with_the_one_before() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "apps".into()]).await;
+    let b_id = b.node.info().id;
+    let mut on_b = b.node.subscribe();
+    let src = tempfile::tempdir().unwrap();
+    let first = apks(src.path(), &["base.apk", "split_old.apk"]);
+    let id = a.node.send_bundle(&b_id, vec![], vec![AppSend { info: app_info("org.notes.app", 7), apks: first }]).await.unwrap();
+    wait_for(&mut on_b, |e| matches!(e, Event::AppsReceived { transfer, .. } if *transfer == id).then_some(())).await;
+    // The second send has other splits: only its own files are listed, the old ones stay where they are
+    let second_dir = tempfile::tempdir().unwrap();
+    let second = apks(second_dir.path(), &["base.apk", "split_new.apk"]);
+    let id = a.node.send_bundle(&b_id, vec![], vec![AppSend { info: app_info("org.notes.app", 7), apks: second }]).await.unwrap();
+    let arrived = wait_for(&mut on_b, |e| match e {
+        Event::AppsReceived { transfer, apps, .. } if *transfer == id => Some(apps.clone()),
+        _ => None,
+    })
+    .await;
+    let names: Vec<String> = arrived[0].apks.iter().map(|p| p.file_name().unwrap().to_str().unwrap().to_string()).collect();
+    assert_eq!(names, vec!["base (1).apk", "split_new.apk"]);
+}
+
+#[tokio::test]
+async fn apps_go_only_to_devices_that_take_them_and_only_as_apks() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into()]).await;
+    let src = tempfile::tempdir().unwrap();
+    let files = apks(src.path(), &["base.apk"]);
+    let sent = a.node.send_bundle(&b.node.info().id, vec![], vec![AppSend { info: app_info("org.notes.app", 7), apks: files }]).await;
+    assert!(matches!(sent, Err(Error::Unsupported)));
+
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "apps".into()]).await;
+    let not_apk = src.path().join("run.sh");
+    std::fs::write(&not_apk, b"#!/bin/sh").unwrap();
+    for bad in [
+        AppSend { info: app_info("org.notes.app", 7), apks: vec![not_apk] },
+        AppSend { info: app_info("org.notes.app", 7), apks: vec![] },
+        AppSend { info: app_info("not a package", 7), apks: apks(src.path(), &["x.apk"]) },
+    ] {
+        assert!(matches!(a.node.send_bundle(&b.node.info().id, vec![], vec![bad]).await, Err(Error::Invalid(_))));
+    }
+    let twice = vec![AppSend { info: app_info("org.notes.app", 7), apks: apks(src.path(), &["a.apk"]) }, AppSend { info: app_info("org.notes.app", 7), apks: apks(src.path(), &["b.apk"]) }];
+    assert!(matches!(a.node.send_bundle(&b.node.info().id, vec![], twice).await, Err(Error::Invalid(_))));
+}
+
+#[tokio::test]
+async fn an_offer_that_would_fill_the_disk_is_declined_at_once() {
+    let (a, b) = paired_with(|c| c.keep_free = u64::MAX / 2).await;
+    let mut on_a = a.node.subscribe();
+    let mut on_b = b.node.subscribe();
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("small.bin");
+    std::fs::write(&file, vec![1u8; 4096]).unwrap();
+    let id = a.node.send_files(&b.node.info().id, vec![file]).await.unwrap();
+    let reason = wait_for(&mut on_b, |e| match e {
+        Event::TransferFailed { transfer, reason } if *transfer == id => Some(reason.clone()),
+        _ => None,
+    })
+    .await;
+    assert!(reason.contains("not enough room"), "{reason}");
+    wait_for(&mut on_a, |e| matches!(e, Event::TransferFailed { transfer, .. } if *transfer == id).then_some(())).await;
+    assert!(!b.downloads().join("small.bin").exists());
 }
