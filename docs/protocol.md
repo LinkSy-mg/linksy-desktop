@@ -464,6 +464,7 @@ and close the other with reason `duplicate`.
      an image goes on as an image (pastes into chats and editors), anything else as a
      file (pastes into the file manager). Taken without asking; more than one file or
      a bigger one is declined. The receiver shows no download for it.
+     Add `"apps":[…]` to say that folders of the offer are apps (§4.22).
      Paths are relative, `/`-separated. Folders are sent as their files, with the folder
      name as the first component.
   2. Receiver asks the user (or auto-accepts), then answers
@@ -797,7 +798,8 @@ phone), `direct_group` (hosts and joins Wi-Fi Direct groups by name and passphra
 §4.17 "Phone to phone"), `inbox_history` (answers `inbox_history`, §4.5), `gallery` (shows
 its photos, §4.18), `deck` (a computer that runs a phone's deck, §4.19), `deck_layout` (a
 phone that draws the deck layouts a computer sends, §4.20), `turn_on` (a phone that asks its
-user when a computer asks it to turn something on, §4.21).
+user when a computer asks it to turn something on, §4.21), `preflight` (answers the check
+before a send, §4.22; computers announce it too), `apps` (sends and installs apps, §4.22).
 Set `Config.features` in the core. To change them while running (`notifications` turned
 on or off), call `Node::set_features`: connected devices get a `features` message
 (at most 64 names of up to 64 bytes) and update at once, others see the new list at the
@@ -1348,7 +1350,9 @@ the link, and carries the transfers over a **second QUIC connection** on it (`he
 
 **When.** The sender's core sets a link up before sending files of **256 MiB or more**
 (`Config.direct_min`), or an eighth of that when the devices are connected away from home
-(§4.13: they may still be side by side), never over a USB cable. It waits at most
+(§4.13: they may still be side by side), never over a USB cable. Once it has seen how fast
+the routes to a device are, it works out instead whether a link gets the bytes there
+sooner, and can prepare one while the user chooses (§4.22). It waits at most
 **45 s** (the first real one took 25 s), then sends over the usual connection. A link that failed isn't tried again with
 that device for 10 minutes. `node.direct_link(id)` sets one up on demand (for testing).
 A link with no transfer for **20 s** (`Config.direct_idle`) closes on both sides:
@@ -1688,6 +1692,185 @@ phone announces `turn_on` (§4.10), the tab also has an **Ask the Phone** button
 - The answer is the phone's `features` (§4.10): once it announces `notifications` or
   `gallery`, the computer's tab fills by itself.
 
+### 4.22 Phone to phone: the way it goes, a check before sending, and apps (desktop, after 0.12.4)
+
+Everything here is additive: older devices ignore what they don't know, and nothing changes
+between a computer and a phone that doesn't use it. Two phones are the case it is made for,
+but a computer takes part where it makes sense (a computer announces `preflight`).
+
+**1. The way a transfer goes.** Both ends of a transfer hear which route it takes:
+
+```json
+Event::TransferRoute { transfer, route, setting_up_direct?, why_not_direct? }
+```
+
+`route` is `usb` (a cable), `direct` (a Wi-Fi Direct link, §4.17), `lan` (the same network)
+or `away` (the internet, §4.13), worst to best `away < lan < direct < usb`.
+- The receiver gets one, right after `TransferStarted`.
+- The sender gets one with `setting_up_direct: true` while the transfer waits for a direct
+  link to come up (up to 45 s: show "Setting up a direct link…", not a bar stuck at 0), and
+  then the settled one. `why_not_direct` is set when a link was tried and failed ("Wi-Fi is
+  off", "it took too long") and the transfer went the usual way: show it, once.
+- `node.route(id)` is the route a connected device has now; `DeviceView.direct` is true while
+  a direct link is up. The transfer's `route` is what to show next to its speed.
+
+**2. When a direct link pays.** A direct link takes seconds to come up (10 s is the usual,
+25 s was the first one measured) and then moves bytes 3 to 4 times faster than the network
+and 20 times faster than the relay. The core sets one up before a send when that gets the
+bytes there sooner:
+- With nothing known yet about a device, as before: `Config.direct_min` (256 MiB) on the
+  network, an eighth of it when away.
+- After that, from what it has seen: each route's speed to that device (an average of its
+  transfers of 8 MiB or more, newest counting 40%) and how long direct links took. Unmeasured
+  numbers are the usual ones: network 20 MB/s, internet 3 MB/s, direct 75 MB/s, setup 10 s.
+  A direct link is set up when `bytes / now > setup + bytes / direct`. A fast network
+  therefore needs a bigger send before it's worth it, a slow one a smaller.
+- Never over a cable, never between devices that can't make one (§4.17), and not for 10
+  minutes after a failed attempt.
+
+`node.plan_send(id, bytes) -> SendPlan` says what a send would do now, without sending:
+
+```json
+{"route":"lan","direct":{"state":"will"},"seconds":42}
+// direct: {"state":"up"} | {"state":"will"} | {"state":"not","why":{"kind":"cable"|"small"|"unsupported"|"failed","reason":"…"}}
+```
+
+`seconds` is a guess from the same numbers (say "about"). Use it in the picker: "Sending
+2.1 GB · direct link · about 40 s".
+
+**3. Getting the best route ready while the user chooses.** Choosing takes longer than a
+setup. `node.prepare_send(id, bytes)` (call it when the selection changes, at most every
+half second, with what's selected so far) starts a direct link if it will pay (half of the
+setup counts as free, since the user is still choosing), asks the other device to keep it,
+and holds it open for 90 more seconds. It does nothing twice and sends nothing; it returns
+the plan, and `DirectLinked` / `DirectEnded` say how it went. So the Send button is
+already a direct link for anything big. The core tells the other device with one more direct step:
+
+```json
+{"type":"direct","step":{"type":"keep","seconds":90}}   // don't close the link for idleness for this long (at most 180)
+```
+
+A device that doesn't know `keep` ignores it, and its side closes the link when idle (20 s)
+as before. The apps do their Wi-Fi part exactly as in §4.17, whoever asks.
+Send the whole selection in **one** `send_bundle` / `send_files` call: one offer is one
+prompt on the other phone, and its total size is what decides. Offers from one device within
+a second of the first are asked about together, so a queue of several is one prompt too.
+
+**4. Preflight: one question before sending (feature `preflight`).** The sender opens a
+bidirectional stream and sends, as its first message,
+
+```json
+{"type":"preflight","bytes":2147483648,"files":3,
+ "apps":[{"package":"org.mozilla.firefox","version_code":2015987654,"signer":"<64 hex>"}]}
+```
+
+(`apps`: at most 256, what it is about to send, each valid: an Android application id,
+`signer` optional.) The answer, on the same stream:
+
+```json
+{"type":"preflight_reply","free":1400000000,"auto":false,"direct":"ready","can_install":true,
+ "apps":[{"package":"org.mozilla.firefox","have":"older","version_code":2015900000}]}
+```
+
+- `free`: bytes the device will take, when it knows (what is free where files are received,
+  minus `Config.keep_free`, 16 MiB). `has_room_for(bytes)` compares. A phone that copies
+  what it receives to another place (the core receives into its own folder, the app then
+  publishes to Downloads) must report what it can take **at once**: when both copies exist
+  together, half of what is free.
+- `auto`: files from the sender are accepted without asking (otherwise its user is asked,
+  and the sender should say "[Pixel] will ask first").
+- `direct`: `ready`, `wifi_off`, `no_permission`, `unsupported`: whether it could set up a
+  direct link now. The core says `ready` when the device announces `direct_host` or
+  `direct_join`, `unsupported` when not; only the app knows Wi-Fi and permissions, so a
+  phone answers `wifi_off` / `no_permission` itself ("Turn on Wi-Fi on [Pixel] for the fast
+  link").
+- `can_install`: whether it can install apps now (Linksy may install unknown apps), for
+  devices that take apps.
+- `apps`: for each probe it understood, how its own copy compares with the one to be
+  sent: `none` (not installed), `same`, `older` (it has an older one: sending is an update),
+  `newer`, `other_signer` (installed from another developer: Android won't update it, and
+  removing it loses its data: don't offer it). Unknown values from a newer Linksy are
+  `unknown`; treat them as "don't know".
+
+The core answers on its own with `free`, `auto` and `direct`; the app takes the rest from
+`node.incoming_preflight()` (`PreflightCall { from, bytes, files, apps }`, answer with
+`call.answer(PreflightAnswer { free?, direct?, can_install?, apps })` within about two
+seconds, or the core answers without). A sender calls `node.preflight(id, bytes, files,
+probes)`: `Error::Unsupported` for a device without the feature (just send), a timeout after
+6 s. Call it when the user taps Send (or when the picker opens, for the app marks), not for
+every change of the selection.
+
+**5. Room.** A receiver now declines at once an offer that would fill its disk (what is
+left to receive plus `keep_free` more than what's free), instead of failing at the end. The
+sender, after a decline, asks `preflight` and, if there isn't room, ends the transfer with
+"[Pixel] doesn't have room for this: it needs 2.1 GB and has 400 MB free" (`TransferFailed`
+`reason`), otherwise plain "declined".
+
+**6. Apps (feature `apps`).** A phone that announces `apps` sends its installed apps and
+installs the ones it receives. An app is the APK files it is made of (a base and, for most
+apps from Play, splits for the screen, language and processor) in a folder of its own inside
+an ordinary offer, so it has the same resume, hashing, progress and prompt as any file. The
+offer says which folder is which app:
+
+```json
+{"type":"offer","id":"…","files":[
+   {"path":"org.mozilla.firefox-2015987654/base.apk","size":93211045},
+   {"path":"org.mozilla.firefox-2015987654/split_config.arm64_v8a.apk","size":2100000},
+   {"path":"photo.jpg","size":812345}],
+ "apps":[{"package":"org.mozilla.firefox","label":"Firefox","version_code":2015987654,
+          "version_name":"129.0.2","signer":"<64 hex>","dir":"org.mozilla.firefox-2015987654",
+          "icon":"<base64 PNG, ≤ 16 KiB>"}]}
+```
+
+- `dir` is one path component holding only `.apk` files (1 to 64); `signer` is the SHA-256 of
+  the signing certificate (64 hex); `icon` is optional; at most 100 apps. An app that
+  doesn't check out (a bad package name or folder, a file there that isn't an APK, two apps
+  on one folder) is dropped from `apps`: its files still arrive, as files.
+- The sender: `node.send_bundle(id, paths, [AppSend { info, apks }])` (the core names the
+  folder `<package>-<version_code>`, names the files after the APKs, makes odd characters
+  `_`, and refuses a device without `apps`). The APKs are read in place
+  (`ApplicationInfo.sourceDir` and `splitSourceDirs`: readable by other apps), nothing is
+  copied or zipped. Skip system apps and apps the other phone has at `same`, `newer` or
+  `other_signer`.
+- The receiver gets `Event::TransferRequest { …, apps }` and `Event::TransferStarted { …,
+  apps }`: ask "Install Firefox 129.0.2 (update) from Pixel?", not "base.apk". When the
+  transfer is complete, `Event::AppsReceived { transfer, from, apps: [{ info, apks }] }`
+  lists, per app, exactly the files of this transfer (never what an earlier transfer of the
+  same app left in its folder), saved. Install them **together, in one
+  `PackageInstaller` session** (`MODE_FULL_INSTALL`, each file written with
+  `session.openWrite(name, 0, size)`, then `commit`); Android shows its own confirmation.
+  Never install without it.
+- The hints are only a description. Check what arrived with
+  `PackageManager.getPackageArchiveInfo(base, GET_SIGNING_CERTIFICATES)`: its package name,
+  version and signing certificate must be what `apps` says; if not, don't install and say so.
+  An app from another signer than the installed one can't update it: say so, don't
+  uninstall for the user. Delete the saved APKs after the install, or when the transfer is
+  declined or fails.
+- Android needs "Install unknown apps" allowed for Linksy (`canRequestPackageInstalls()`;
+  `ACTION_MANAGE_UNKNOWN_APP_SOURCES` for the user to allow it). Say so before the first
+  app is sent ("[Pixel] needs to allow installs from Linksy": `can_install` in the
+  preflight), not when it arrives. Play Protect may warn about an app installed this way.
+  Linksy for Android is installed from outside the Play Store, which is why none of this
+  needs a Google account.
+- What doesn't move: an app's data and logins. Apps that check a licence with Google or a
+  developer's account may refuse to run.
+
+**7. Limits.** One offer holds at most about 5000 files (its first message is 1 MiB); a
+picker with more sends several offers (they're asked about together). Photos and folders
+are ordinary files; `send_bundle` takes the same paths as `send_files`.
+
+**Core API:** `node.route(id)`, `node.plan_send(id, bytes)`, `node.prepare_send(id, bytes)`,
+`node.preflight(id, bytes, files, probes)`, `node.incoming_preflight()`,
+`node.send_bundle(id, paths, apps)`; `Event::TransferRoute`, `Event::AppsReceived`,
+`apps` on `TransferRequest` and `TransferStarted`; `DeviceView.direct`; `Config.keep_free`;
+features `preflight` and `apps`.
+
+**Phone to-do** (linksy-mobile): announce `preflight` and `apps`; answer
+`incoming_preflight` (room that counts the staging copy, `direct`, `can_install`, the
+probed apps); a picker for the phone's own photos, files and apps that calls `prepare_send`
+as it fills and sends once with `send_bundle`; install what `AppsReceived` lists in one
+session; show `TransferRoute`. The pairing and the 7-day away lease are unchanged (§4.13).
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -1715,6 +1898,9 @@ node.watch_volume(id, on)  node.set_volume(id, Some(0.4), None)   // Event::Volu
 node.send_volume_state(id, &VolumeState{ seq, level, muted })     // Event::VolumeWatch / VolumeSet
 node.direct_send(id, DirectStep::Invite { address } | Listening | Connecting | Up { ip, port })   // §4.17
 node.direct_dial(id, addr)  node.direct_end(id, reason)  node.direct_link(id)
+node.route(id) -> Route   node.plan_send(id, bytes) -> SendPlan   node.prepare_send(id, bytes)   // §4.22
+node.preflight(id, bytes, files, probes) -> PreflightReply   node.incoming_preflight()   // §4.22
+node.send_bundle(id, paths, [AppSend { info, apks }]) -> transfer_id   // files and apps, §4.22
 // Event::DirectWanted { id, group } (host: start; group: Some(credentials) phone to phone) / Direct { from, step } / DirectLinked { id } / DirectEnded { id, reason }
 node.send_call_state(id, CallState::Ringing | Active | Idle, contact)
 node.heartbeat(id)                          // Event::HeartbeatWatch { from, on, every_s } says when
@@ -1733,9 +1919,11 @@ node.request_session(id, kind) -> Session   node.incoming_sessions()    // scree
 Events (JSON-serializable, same shapes as the desktop IPC):
 `device_found`, `device_lost`, `device_updated`, `connected`, `disconnected`,
 `pairing_request {request, device, code, incoming, older?}`, `paired`, `pairing_failed`,
-`transfer_request {transfer, from, files, total}`, `transfer_started`,
+`transfer_request {transfer, from, files, total, apps?}`, `transfer_started`,
 `transfer_progress {transfer, bytes, total}`, `transfer_complete {transfer, saved}`,
-`transfer_failed {transfer, reason}`, `settings_changed`, `notification`, `clipboard`.
+`transfer_failed {transfer, reason}`, `transfer_route {transfer, route, setting_up_direct?,
+why_not_direct?}` (§4.22), `apps_received {transfer, from, apps}` (§4.22), `settings_changed`,
+`notification`, `clipboard`.
 
 Every consent question (pairing, incoming files) is an event with an id; the UI answers
 with `respond(id, accept)`. Whichever front end answers first wins (desktop: the window
@@ -2237,3 +2425,13 @@ robust against any encoder (GPU ones may slice too):
   `notifications` or `gallery`), feature `turn_on`, core `ask_turn_on` and
   `Event::TurnOnRequest`. Phone to-do: announce `turn_on` and ask the user, as in §4.21;
   offer both in first-run setup, and turn the Inbox on once notification access is given.
+- **2026-11-05** — **Phone to phone** (§4.22), desktop after 0.12.4: every transfer tells both
+  ends its route (`transfer_route`: cable, direct link, same network, internet), also while a
+  direct link is being set up; the core learns how fast each route to a device is and sets
+  up a direct link when that gets the bytes there sooner, `plan_send` says what a send would
+  do and `prepare_send` brings a link up while the user is still choosing (a new direct
+  step, `keep`); `preflight` asks a device for its room, whether it asks first, whether a
+  direct link would work and which apps it has before anything is sent; apps travel as
+  folders of APKs in an offer, with `apps` describing them, `send_bundle` to send and
+  `apps_received` to install; offers that would fill the disk are declined at once with the
+  room said. Features `preflight` (computers too) and `apps`. Phone to-do: §4.22.
