@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use linksy_core::gallery::GalleryAnswer;
 use linksy_core::{
-    Battery, CallState, Config, ControlMsg, ConversationMessage, DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckTheme, DeckTile, DirectGroup, DirectStep, Error, Event, FsEntry, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryRequest, MediaCommand, MediaPlayer, MediaState, Node,
-    NotificationButton, RemoteNotification, SessionKind, SmsThread, VolumeState,
+    Battery, CallState, Config, ControlMsg, ConversationMessage, DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckTheme, DeckTile, DirectGroup, DirectPlan, DirectStep, Error, Event, FsEntry, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryRequest, MediaCommand, MediaPlayer, MediaState, Node,
+    NotificationButton, RemoteNotification, Route, SessionKind, SmsThread, Skip, VolumeState, Link,
 };
 use tokio::io::AsyncReadExt;
 use tempfile::TempDir;
@@ -1762,6 +1762,142 @@ async fn direct_link_stays_up_while_a_transfer_runs_then_closes_when_idle() {
     // Idle afterwards: closed on both
     wait_for(&mut on_a, |e| matches!(e, Event::DirectEnded { .. }).then_some(())).await;
     wait_for(&mut on_b, |e| matches!(e, Event::DirectEnded { .. }).then_some(())).await;
+}
+
+/// Phones: the one with the smaller id hosts, so each test names its nodes by role.
+fn phones(c: &mut Config) {
+    c.features = vec!["files".into(), "direct_host".into(), "direct_join".into(), "direct_group".into()];
+}
+
+#[tokio::test]
+async fn a_send_plan_says_what_would_happen() {
+    let (a, b) = paired_with(phones).await;
+    let b_id = b.node.info().id;
+    // On loopback the connection is a cable, and nothing beats a cable
+    let plan = a.node.plan_send(&b_id, 5 << 30).unwrap();
+    assert_eq!(plan.route, Route::Usb);
+    assert_eq!(plan.direct, DirectPlan::Not { why: Skip::Cable });
+
+    let small = a.node.plan_send_over(&b_id, 3 << 20, Link::Lan);
+    assert_eq!(small.route, Route::Lan);
+    assert_eq!(small.direct, DirectPlan::Not { why: Skip::Small });
+    let big = a.node.plan_send_over(&b_id, 1 << 30, Link::Lan);
+    assert_eq!(big.direct, DirectPlan::Will);
+    // A set-up takes time the estimate counts, and the relay is slower than the network
+    assert!(big.seconds.unwrap() > 10);
+    assert!(a.node.plan_send_over(&b_id, 40 << 20, Link::Away).direct == DirectPlan::Will);
+    assert!(a.node.plan_send_over(&b_id, 10 << 20, Link::Away).direct != DirectPlan::Will);
+}
+
+#[tokio::test]
+async fn a_send_plan_knows_when_two_devices_cannot_link() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into()]).await;
+    let plan = a.node.plan_send_over(&b.node.info().id, 5 << 30, Link::Lan);
+    assert_eq!(plan.direct, DirectPlan::Not { why: Skip::Unsupported });
+}
+
+#[tokio::test]
+async fn a_failed_link_is_remembered_in_the_plan() {
+    let (a, b) = paired_with(phones).await;
+    let b_id = b.node.info().id;
+    // Neither app answers: the host's `DirectWanted` goes nowhere, so end it by hand
+    let mut on_a = a.node.subscribe();
+    let sender = a.node.clone();
+    let asked = tokio::spawn(async move { sender.prepare_send_over(&b_id, 2 << 30, Link::Lan).await });
+    assert_eq!(asked.await.unwrap().direct, DirectPlan::Will);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    a.node.direct_end(&b_id, Some("Wi-Fi is off".into())).await;
+    wait_for(&mut on_a, |e| matches!(e, Event::DirectEnded { .. }).then_some(())).await;
+    let plan = a.node.plan_send_over(&b_id, 2 << 30, Link::Lan);
+    assert_eq!(plan.direct, DirectPlan::Not { why: Skip::Failed { reason: "Wi-Fi is off".into() } });
+}
+
+#[tokio::test]
+async fn preparing_a_send_brings_the_link_up_and_keeps_it_while_the_user_chooses() {
+    let (a, b) = paired_with(|c| {
+        phones(c);
+        c.direct_idle = Duration::from_millis(300);
+    })
+    .await;
+    let (a_id, b_id) = (a.node.info().id, b.node.info().id);
+    fake_direct_app(&a.node);
+    fake_direct_app(&b.node);
+    let mut on_a = a.node.subscribe();
+    let mut on_b = b.node.subscribe();
+
+    let plan = a.node.prepare_send_over(&b_id, 1 << 30, Link::Lan).await;
+    assert_eq!(plan.direct, DirectPlan::Will);
+    wait_for(&mut on_a, |e| matches!(e, Event::DirectLinked { id } if *id == b_id).then_some(())).await;
+    wait_for(&mut on_b, |e| matches!(e, Event::DirectLinked { id } if *id == a_id).then_some(())).await;
+    assert_eq!(a.node.route(&b_id), Some(Route::Direct));
+    assert!(a.node.devices().iter().any(|d| d.device.id == b_id && d.direct));
+
+    // Idle for several times the idle limit, on both sides: still up, because it's kept
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(a.node.route(&b_id), Some(Route::Direct));
+    assert_eq!(b.node.route(&a_id), Some(Route::Direct));
+    assert_eq!(a.node.plan_send_over(&b_id, 1 << 20, Link::Lan).direct, DirectPlan::Up);
+
+    // Asked again, it does nothing twice
+    assert_eq!(a.node.prepare_send_over(&b_id, 1 << 30, Link::Lan).await.direct, DirectPlan::Up);
+}
+
+#[tokio::test]
+async fn a_link_nobody_prepared_closes_when_idle_as_before() {
+    let (a, b) = paired_with(|c| {
+        phones(c);
+        c.direct_idle = Duration::from_millis(300);
+    })
+    .await;
+    let b_id = b.node.info().id;
+    fake_direct_app(&a.node);
+    fake_direct_app(&b.node);
+    let mut on_a = a.node.subscribe();
+    a.node.direct_link(&b_id).await.unwrap();
+    wait_for(&mut on_a, |e| matches!(e, Event::DirectEnded { .. }).then_some(())).await;
+    assert_eq!(a.node.route(&b_id), Some(Route::Usb));
+}
+
+#[tokio::test]
+async fn both_ends_of_a_transfer_hear_its_route() {
+    let (a, b) = paired_with(phones).await;
+    let (a_id, b_id) = (a.node.info().id, b.node.info().id);
+    fake_direct_app(&a.node);
+    fake_direct_app(&b.node);
+    let mut on_a = a.node.subscribe();
+    let mut on_b = b.node.subscribe();
+    let src = tempfile::tempdir().unwrap();
+    let file = src.path().join("one.bin");
+    std::fs::write(&file, vec![1u8; 1 << 20]).unwrap();
+
+    // The ordinary connection first (a cable here)
+    let id = a.node.send_files(&b_id, vec![file.clone()]).await.unwrap();
+    let route = wait_for(&mut on_a, |e| match e {
+        Event::TransferRoute { transfer, route, .. } if *transfer == id => Some(*route),
+        _ => None,
+    })
+    .await;
+    assert_eq!(route, Route::Usb);
+    let heard = wait_for(&mut on_b, |e| match e {
+        Event::TransferRoute { transfer, route, .. } if *transfer == id => Some(*route),
+        _ => None,
+    })
+    .await;
+    assert_eq!(heard, Route::Usb);
+    wait_for(&mut on_a, |e| matches!(e, Event::TransferComplete { transfer, .. } if *transfer == id).then_some(())).await;
+
+    // Then over a direct link
+    a.node.direct_link(&b_id).await.unwrap();
+    wait_for(&mut on_b, |e| matches!(e, Event::DirectLinked { id } if *id == a_id).then_some(())).await;
+    let id = a.node.send_files(&b_id, vec![file]).await.unwrap();
+    for rx in [&mut on_a, &mut on_b] {
+        let route = wait_for(rx, |e| match e {
+            Event::TransferRoute { transfer, route, setting_up_direct: false, why_not_direct: None } if *transfer == id => Some(*route),
+            _ => None,
+        })
+        .await;
+        assert_eq!(route, Route::Direct);
+    }
 }
 
 #[tokio::test]
