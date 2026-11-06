@@ -13,6 +13,8 @@ use tracing::{debug, warn};
 static DIR: OnceLock<PathBuf> = OnceLock::new();
 /// What a picture may weigh (the protocol's limit).
 const MAX: usize = 128 * 1024;
+/// The biggest file looked at when finding this computer's own picture.
+const MAX_FILE: usize = 8 * 1024 * 1024;
 
 /// The picture `id` sent, if it sent one.
 pub fn path(id: &Fingerprint) -> Option<PathBuf> {
@@ -55,15 +57,68 @@ pub async fn run(node: Node, data_dir: PathBuf) {
     }
 }
 
-/// The user's account picture (GNOME's Users settings, else ~/.face), in base64, when it's a
-/// small enough JPEG or PNG.
+/// The user's account picture (GNOME's Users settings, else ~/.face), in base64, as a JPEG or
+/// PNG that fits what a picture may weigh. Read on the computer itself: the Flatpak's
+/// sandbox doesn't have those folders.
 fn own_picture() -> Option<String> {
     let user = std::env::var("USER").ok();
     let candidates = user.map(|u| PathBuf::from("/var/lib/AccountsService/icons").join(u)).into_iter().chain(std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".face")));
-    let bytes = candidates.filter_map(|p| std::fs::read(p).ok()).find(|b| b.len() <= MAX && is_image(b))?;
+    let bytes = candidates.filter_map(|p| linksy_host::read_bytes(&p, MAX_FILE)).filter(|b| is_image(b)).find_map(fit)?;
     Some(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+/// The picture as it is when it's light enough, else scaled down and saved as JPEG: account
+/// pictures are often photos of a few hundred kilobytes.
+fn fit(bytes: Vec<u8>) -> Option<Vec<u8>> {
+    if bytes.len() <= MAX {
+        return Some(bytes);
+    }
+    let picture = image::load_from_memory(&bytes).ok()?;
+    for side in [512, 384, 256, 128] {
+        let mut out = Vec::new();
+        let rgb = picture.thumbnail(side, side).to_rgb8();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&rgb).ok()?;
+        if out.len() <= MAX {
+            return Some(out);
+        }
+    }
+    None
 }
 
 fn is_image(b: &[u8]) -> bool {
     b.starts_with(b"\x89PNG\r\n\x1a\n") || b.starts_with(&[0xff, 0xd8, 0xff])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn big_png() -> Vec<u8> {
+        let img = image::RgbImage::from_fn(700, 700, |x, y| image::Rgb([((x * 7) ^ (y * 13)) as u8, (x * 3 + y * 5) as u8, ((x * y) % 251) as u8]));
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    }
+
+    #[test]
+    fn a_light_picture_is_kept_as_it_is() {
+        let small = b"\x89PNG\r\n\x1a\nnot really a picture".to_vec();
+        assert_eq!(fit(small.clone()), Some(small));
+    }
+
+    #[test]
+    fn a_heavy_picture_is_scaled_down_to_fit() {
+        let png = big_png();
+        assert!(png.len() > MAX, "the test picture is {} bytes, it must be heavier than {MAX}", png.len());
+        let fitted = fit(png).expect("scaled down");
+        assert!(fitted.len() <= MAX);
+        assert!(is_image(&fitted));
+    }
+
+    #[test]
+    fn something_that_is_no_picture_is_left_out() {
+        let mut junk = vec![0xff, 0xd8, 0xff];
+        junk.resize(MAX + 10, 1);
+        assert_eq!(fit(junk), None);
+    }
 }
