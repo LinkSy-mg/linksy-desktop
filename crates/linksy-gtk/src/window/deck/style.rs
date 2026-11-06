@@ -13,7 +13,6 @@ const CSS: &str = r#"
 .deck-chip.dirty { color: alpha(currentColor, 0.6); }
 .deck-library { border-right: 1px solid alpha(currentColor, 0.12); }
 .deck-inspector { border-left: 1px solid alpha(currentColor, 0.12); }
-.deck-work.narrow .deck-inspector { border-left: none; border-top: 1px solid alpha(currentColor, 0.12); }
 .deck-library, .deck-inspector-box { padding: 14px; }
 .deck-group { font-size: 0.75em; font-weight: 700; letter-spacing: 0.06em; opacity: 0.6; margin: 10px 8px 2px; }
 .deck-items { background: none; }
