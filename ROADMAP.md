@@ -125,7 +125,12 @@ touchpad and the webcam feel immediate.
   back within 50 ms, and switching networks reconnects in under 2 seconds.
 
 ### 60 fps screens — M
-Today screens run at up to 30 fps (the webcam already does 60).
+The computer's screen on a phone now encodes at up to 60 fps (30 before), falling back to 30 by
+itself when its encoder can't keep up; the phone's own screen at 60 needs the settings in
+`docs/protocol.md` §4.8, and decoding at 60 on the phone is its half. Measured here: a GPU
+encoder keeps 60 fps at 1080p; x264 on the CPU keeps 60 at 1080p and 53 at 1440p; a 144 Hz
+screen is cut to 60. The first phone-side measurements are not in yet.
+Before: screens ran at up to 30 fps (the webcam already did 60).
 - **Both ways:** the computer's screen on the phone, controlling it, Sidecar, and the
   phone's screen on the computer, at 60 fps where both ends can encode and decode it.
 - **Phone:** 60 fps decoding and display, and 60 fps capture of its own screen; asks the

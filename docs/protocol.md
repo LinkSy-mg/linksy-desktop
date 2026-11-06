@@ -602,9 +602,15 @@ After `session_accept`:
 - **Sharer → viewer:** raw **H.264 Annex-B byte stream** (no framing): start codes,
   SPS/PPS repeated before every keyframe (`config-interval=-1`), access-unit aligned.
   **Profile: Constrained Baseline** (every decoder handles it, including OpenH264 and
-  phone hardware). Desktop sends ~8 Mbit/s, keyframe at least every 2 s (60 frames),
-  up to 30 fps, at the screen's resolution. While the screen is still, the
-  last frame comes again every 100 ms, so the newest change never waits in an encoder.
+  phone hardware). Desktop sends 8 to 16 Mbit/s, a keyframe at least every 60 frames (2 s at
+  30 fps, 1 s at 60), **up to 60 fps** (since desktop, after 0.12.4; 30 before), at the screen's
+  resolution. The computer encodes at 60 when its screen moves that fast (a 144 Hz screen is cut
+  to 60) and its encoder keeps up, and falls back to 30 by itself when it doesn't (a GPU encoder
+  keeps 60 at 4K here; x264 on the CPU keeps 60 at 1080p). The rate is not negotiated and not
+  announced: a decoder just sees frames come at 30 or 60 a second, so decode and show each as
+  it arrives, and ask the display for its highest refresh rate while a screen shows. While the
+  screen is still, the last frame comes again every 100 ms, so the newest change never waits in an
+  encoder.
 - **Viewer → sharer:** framed JSON control messages (u32 BE length + JSON). A sharer must
   keep reading this half and ignore unknown types. In `screen` sessions the viewer sends
   nothing; in **`control`** sessions (same media, plus input; the prompt says "wants to
@@ -655,6 +661,25 @@ On Android:
   (`session.send`). Events: `session_request {request, from, kind}`,
   `session_started {session, peer, kind, sharing}`, `session_ended {session}`.
 
+
+**The phone's own screen at 60 fps (what the phone must change).** The phone encodes with
+`MediaCodec` from a `MediaProjection` `VirtualDisplay` whose `Surface` is the encoder's input.
+The virtual display makes a frame whenever the screen changes, up to the display's refresh rate
+(90 or 120 on many phones), so the encoder is what to set:
+
+- `KEY_FRAME_RATE` 60 and `KEY_MAX_FPS_TO_ENCODER` 60 (API 29+; frames above 60 a second are
+  dropped before the encoder, not encoded), `KEY_OPERATING_RATE` 60 (API 23+) so the encoder
+  reserves the speed, and `KEY_PRIORITY` 0 (real time) and `KEY_LATENCY` 1 (API 30+).
+- `KEY_BITRATE_MODE` CBR at 12 to 16 Mbit/s (8 is too little at 60 for a scrolling page);
+  `KEY_I_FRAME_INTERVAL` 1 (a keyframe a second), no B-frames, Constrained Baseline, SPS/PPS
+  before every keyframe, as now.
+- `KEY_REPEAT_PREVIOUS_FRAME_AFTER` 100000 (µs) so a still screen sends its last frame ten times a
+  second and the computer's newest change never waits in the encoder.
+- Keep the capture at the screen's size: a `VirtualDisplay` of 1080 × 2400 at 60 is within every
+  phone's hardware encoder; if `MediaCodecInfo.VideoCapabilities.areSizeAndRateSupported(w, h, 60)`
+  is false, use 30 (`KEY_FRAME_RATE` 30, `KEY_MAX_FPS_TO_ENCODER` 30). Nothing is announced: the
+  computer sees the frames at whatever rate they come.
+- The computer decodes either; its viewer shows frames as they arrive.
 
 **The phone's sound with its screen (desktop, after 0.12.4; not tried on a phone).** A computer
 that shows a phone's screen (`screen` or `control`, including the cable) asks the phone for its
