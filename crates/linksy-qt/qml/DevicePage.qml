@@ -38,7 +38,7 @@ Kirigami.Page {
     readonly property string tabsKey: {
         if (!trusted || !info) return "";
         const shown = [];
-        if (handheld || ["display", "camera", "microphone"].some(f => app.can(info, f))) shown.push("use");
+        if (handheld || ["display", "camera", "microphone", "phone_controls"].some(f => app.can(info, f))) shown.push("use");
         // The Inbox and Gallery show while off too, saying how to turn them on
         if (phone) shown.push("inbox");
         if (handheld) shown.push("gallery");
@@ -737,6 +737,13 @@ Kirigami.Page {
                         onTriggered: page.deckOpen = true
                     }
                 }
+            }
+
+            // Its volumes, ringer, Do Not Disturb and flashlight, once it has said how they are
+            ControlsCard {
+                app: page.app
+                phoneId: page.info?.id ?? ""
+                phoneName: page.name
             }
 
             // Its terminal here: allowed with the code, or locked out after wrong ones
