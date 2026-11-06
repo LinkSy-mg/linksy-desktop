@@ -53,6 +53,10 @@
 //! `--turn-on` announces `turn_on` and says yes when a computer asks to turn one on.
 //! `--snap PICTURE` announces `snap` and, when a computer asks, sends that picture as a file
 //! and then to its clipboard; `--snap-refuse WHY` says no with that reason instead.
+//! `--controls` announces `phone_controls`: it answers `controls_watch` with made-up volumes and
+//! applies each `controls_set`, printing it as CONTROLS SET; `--no-dnd-access` refuses Do Not
+//! Disturb changes, and `--dnd-after SECONDS MODE` changes it by itself, as the phone's own
+//! switch would (`off`, `priority`, `alarms`, `silence`).
 
 use std::time::Duration;
 
@@ -94,6 +98,8 @@ async fn main() {
     let (mut deck_layout, mut deck_wait) = (false, 0u64);
     let (mut off, mut turn_on) = (Vec::<String>::new(), false);
     let (mut snap, mut snap_refuse) = (None::<std::path::PathBuf>, None::<String>);
+    let (mut controls, mut no_dnd_access) = (false, false);
+    let mut dnd_after: Option<(u64, linksy_core::Dnd)> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -158,6 +164,13 @@ async fn main() {
             "--turn-on" => turn_on = true,
             "--snap" => snap = Some(value().into()),
             "--snap-refuse" => snap_refuse = Some(value()),
+            "--controls" => controls = true,
+            "--no-dnd-access" => no_dnd_access = true,
+            "--dnd-after" => {
+                let after = value().parse().expect("--dnd-after SECONDS MODE");
+                let mode = serde_json::from_value(serde_json::Value::String(value())).expect("MODE: off, priority, alarms or silence");
+                dnd_after = Some((after, mode));
+            }
             other => panic!("unknown option {other}"),
         }
     }
@@ -187,6 +200,9 @@ async fn main() {
     }
     if snap.is_some() || snap_refuse.is_some() {
         config.features.push("snap".into());
+    }
+    if controls {
+        config.features.push("phone_controls".into());
     }
     config.features.retain(|f| !off.contains(f));
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
@@ -608,9 +624,27 @@ async fn main() {
     }
     let deadline = tokio::time::sleep(Duration::from_secs(seconds));
     tokio::pin!(deadline);
+    // The phone's controls, as made up, and who watches them
+    let mut phone = linksy_core::ControlsState { media: 0.4, ringtone: 0.8, alarm: 1.0, dnd_access: !no_dnd_access, flashlight: Some(false), ..Default::default() };
+    let mut watchers = std::collections::HashSet::new();
+    let (own_dnd, mut own_dnd_rx) = tokio::sync::mpsc::unbounded_channel::<linksy_core::Dnd>();
+    if let Some((after, mode)) = dnd_after {
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(after)).await;
+            let _ = own_dnd.send(mode);
+        });
+    }
     loop {
         tokio::select! {
             _ = &mut deadline => break,
+            Some(mode) = own_dnd_rx.recv() => {
+                println!("CONTROLS the phone's own Do Not Disturb: {mode:?}");
+                phone.dnd = mode;
+                phone.seq = seq();
+                for id in &watchers {
+                    let _ = node.send_controls_state(id, &phone).await;
+                }
+            }
             e = events.recv() => match e {
                 Ok(Event::Clipboard { from, text }) => println!("CLIPBOARD from {}: {text}", from.name),
                 Ok(Event::Ring { from, on }) => println!("{} {}", if on { "RING from" } else { "ring stopped by" }, from.name),
@@ -704,6 +738,45 @@ async fn main() {
                         println!("snap sent: {:?}", sent.map_err(|e| e.to_string()));
                         let on_clipboard = node.send_clipboard_file(&from.id, picture.clone()).await;
                         println!("snap on the clipboard: {:?}", on_clipboard.map_err(|e| e.to_string()));
+                    }
+                }
+                Ok(Event::ControlsWatch { from, on }) if controls => {
+                    println!("CONTROLS WATCH {on} by {}", from.name);
+                    if on {
+                        watchers.insert(from.id);
+                        phone.seq = seq();
+                        let _ = node.send_controls_state(&from.id, &phone).await;
+                    } else {
+                        watchers.remove(&from.id);
+                    }
+                }
+                Ok(Event::ControlsSet { from, change }) if controls => {
+                    println!("CONTROLS SET {}", serde_json::to_string(&change).unwrap_or_default());
+                    if let Some(l) = change.media {
+                        phone.media = l;
+                    }
+                    if let Some(l) = change.ringtone {
+                        phone.ringtone = l;
+                    }
+                    if let Some(l) = change.alarm {
+                        phone.alarm = l;
+                    }
+                    if let Some(r) = change.ringer {
+                        phone.ringer = r;
+                    }
+                    if let Some(d) = change.dnd {
+                        if phone.dnd_access {
+                            phone.dnd = d;
+                        } else {
+                            let _ = node.refuse_controls(&from.id, "dnd", "Allow Do Not Disturb access to Linksy on the phone first").await;
+                        }
+                    }
+                    if let Some(f) = change.flashlight {
+                        phone.flashlight = Some(f);
+                    }
+                    phone.seq = seq();
+                    if watchers.contains(&from.id) {
+                        let _ = node.send_controls_state(&from.id, &phone).await;
                     }
                 }
                 Ok(Event::LocateRequest { from }) => {
