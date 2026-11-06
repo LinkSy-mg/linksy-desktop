@@ -88,6 +88,8 @@ fn is_on(dnd: Dnd) -> bool {
 
 pub async fn run(node: Node) {
     let Some(controls) = CONTROLS.get() else { return };
+    // What this computer has for Do Not Disturb, found once
+    crate::controls::shared().probe().await;
     let mut events = node.subscribe();
     // What each side last was, so only a change on one is carried to the other
     let mut seen: HashMap<Fingerprint, bool> = HashMap::new();

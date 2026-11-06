@@ -236,6 +236,19 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             crate::phone_controls::CONTROLS.get().ok_or("phone controls aren't running")?.set_sync(id, on)?;
             Ok(Value::Null)
         }
+        Request::ComputerNotifications { phone } => {
+            let id = paired(node, &phone)?;
+            json(serde_json::to_value(crate::outbox::OUTBOX.get().ok_or("notifications for phones aren't running")?.info(&id)))
+        }
+        Request::SetComputerNotifications { phone, on } => {
+            let id = paired(node, &phone)?;
+            crate::outbox::OUTBOX.get().ok_or("notifications for phones aren't running")?.set(id, on)?;
+            Ok(Value::Null)
+        }
+        Request::MuteComputerApp { app, muted } => {
+            crate::outbox::OUTBOX.get().ok_or("notifications for phones aren't running")?.mute(&app, muted)?;
+            Ok(Value::Null)
+        }
         Request::Snap { to } => {
             let id = resolve(node, &to)?;
             node.request_snap(&id).await.map_err(|e| e.to_string())?;
