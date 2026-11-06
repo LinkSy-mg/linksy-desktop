@@ -42,6 +42,23 @@ pub enum Request {
     OpenUrl { to: String, url: String },
     /// Make a device ring so it can be found (`on`), or stop it.
     Ring { to: String, on: bool },
+    /// Ask a phone to open its camera and send what it takes (§4.23).
+    Snap { to: String },
+    /// "Why can't I see my phone?": what the service can find wrong, with what to do.
+    Doctor,
+    /// A phone's controls (docs/protocol.md §4.24): how they were when it last said, and
+    /// whether its Do Not Disturb follows this computer's.
+    PhoneControls { phone: String },
+    /// Change some of a phone's controls; only what is given. A refusal comes as an event.
+    SetPhoneControls { phone: String, change: linksy_core::ControlsChange },
+    /// Keep a phone's Do Not Disturb and this computer's the same, or stop.
+    SetDndSync { phone: String, on: bool },
+    /// This computer's notifications on a phone (docs/protocol.md §4.25): whether it gets them,
+    /// and which apps stay here.
+    ComputerNotifications { phone: String },
+    SetComputerNotifications { phone: String, on: bool },
+    /// Keep an app's notifications from going to phones, or let them.
+    MuteComputerApp { app: String, muted: bool },
     /// Ask a phone to turn on `feature`: `notifications` (the Inbox) or `gallery`
     /// (docs/protocol.md §4.21).
     TurnOn { to: String, feature: String },
@@ -391,6 +408,53 @@ pub enum UsbState {
     /// In accessory mode: the cable carries Linksy once the phone app opens it.
     Accessory,
     Failed,
+}
+
+/// One thing the Connection Doctor found.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Finding {
+    /// `firewall`, `vpn`, `other_network`, `silent`, `asleep`, `never_seen`, `cable_off`,
+    /// `cable_failed` or `fine`.
+    pub id: String,
+    pub title: String,
+    pub detail: String,
+    /// What Linksy can do about it, as a button.
+    pub action: Option<FindingAction>,
+}
+
+/// What this computer's notifications on a phone come to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComputerNotifications {
+    /// This computer can listen for its notifications (not from the Flatpak's sandbox).
+    pub available: bool,
+    /// This phone gets them.
+    pub on: bool,
+    /// Apps whose notifications stay here.
+    pub muted: Vec<String>,
+    /// Apps that notified lately, newest first, to choose from.
+    pub seen: Vec<String>,
+}
+
+/// A phone's controls as the apps show them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PhoneControlsInfo {
+    /// What the phone last said; none until it has, or when it has no controls.
+    pub state: Option<linksy_core::ControlsState>,
+    /// This phone's Do Not Disturb and this computer's follow each other.
+    pub sync_dnd: bool,
+    /// This computer has a Do Not Disturb to follow (GNOME and KDE).
+    pub can_sync: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "do", rename_all = "snake_case")]
+pub enum FindingAction {
+    /// Open Finish Setup (it opens the firewall).
+    FinishSetup,
+    /// Ask for an address to connect by, starting from this one.
+    ConnectByAddress { address: String },
+    /// Switch the cable on for this phone (`UsbConnect`'s key).
+    UsbConnect { phone: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -789,6 +853,38 @@ impl Client {
 
     pub async fn ring(&self, to: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::Ring { to: to.into(), on }).await
+    }
+
+    pub async fn doctor(&self) -> Result<Vec<Finding>, ClientError> {
+        self.call(Request::Doctor).await
+    }
+
+    pub async fn phone_controls(&self, phone: impl Into<String>) -> Result<PhoneControlsInfo, ClientError> {
+        self.call(Request::PhoneControls { phone: phone.into() }).await
+    }
+
+    pub async fn set_phone_controls(&self, phone: impl Into<String>, change: linksy_core::ControlsChange) -> Result<(), ClientError> {
+        self.call(Request::SetPhoneControls { phone: phone.into(), change }).await
+    }
+
+    pub async fn set_dnd_sync(&self, phone: impl Into<String>, on: bool) -> Result<(), ClientError> {
+        self.call(Request::SetDndSync { phone: phone.into(), on }).await
+    }
+
+    pub async fn computer_notifications(&self, phone: impl Into<String>) -> Result<ComputerNotifications, ClientError> {
+        self.call(Request::ComputerNotifications { phone: phone.into() }).await
+    }
+
+    pub async fn set_computer_notifications(&self, phone: impl Into<String>, on: bool) -> Result<(), ClientError> {
+        self.call(Request::SetComputerNotifications { phone: phone.into(), on }).await
+    }
+
+    pub async fn mute_computer_app(&self, app: impl Into<String>, muted: bool) -> Result<(), ClientError> {
+        self.call(Request::MuteComputerApp { app: app.into(), muted }).await
+    }
+
+    pub async fn snap(&self, to: impl Into<String>) -> Result<(), ClientError> {
+        self.call(Request::Snap { to: to.into() }).await
     }
 
     pub async fn turn_on(&self, to: impl Into<String>, feature: impl Into<String>) -> Result<(), ClientError> {

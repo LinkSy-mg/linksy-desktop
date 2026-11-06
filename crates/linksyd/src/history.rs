@@ -176,6 +176,8 @@ impl History {
                 Event::Clipboard { from, text } => self.upsert(incoming(&from, Shared::Clipboard { text })),
                 Event::Notification { from, title, body } => self.upsert(incoming(&from, Shared::Ping { title, body })),
                 Event::OpenUrl { from, url } => self.upsert(incoming(&from, Shared::Link { url })),
+                // A phone's sound along with its screen is part of that entry, not one of its own
+                Event::SessionStarted { kind: SessionKind::Sound, .. } => {}
                 Event::SessionStarted { session, peer, sharing, kind } => {
                     started.insert(session, std::time::Instant::now());
                     self.upsert(HistoryEntry {

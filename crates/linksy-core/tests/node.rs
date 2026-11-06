@@ -234,6 +234,152 @@ async fn an_address_of_a_device_not_paired_yet_pairs_with_it() {
     assert_eq!((a.node.trusted().len(), b.node.trusted().len()), (1, 1));
 }
 
+/// Whether `to` was asked before the transfer `id` completed there.
+async fn was_asked(rx: &mut broadcast::Receiver<Event>, id: uuid::Uuid) -> bool {
+    let mut asked = false;
+    wait_for(rx, |e| {
+        match e {
+            Event::TransferRequest { .. } => asked = true,
+            Event::TransferComplete { transfer, .. } if *transfer == id => return Some(()),
+            Event::TransferFailed { reason, .. } => panic!("transfer failed: {reason}"),
+            _ => {}
+        }
+        None
+    })
+    .await;
+    asked
+}
+
+#[tokio::test]
+async fn a_snap_that_was_asked_for_is_taken_without_asking() {
+    let (computer, phone) = paired_with(|c| c.features = vec!["snap".into()]).await;
+    let mut rc = computer.node.subscribe();
+    let mut rp = phone.node.subscribe();
+    let picture = phone.dir.path().join("snap.jpg");
+    std::fs::write(&picture, b"not really a jpeg").unwrap();
+
+    computer.node.request_snap(&phone.node.info().id).await.unwrap();
+    wait_for(&mut rp, |e| matches!(e, Event::SnapRequest { .. }).then_some(())).await;
+
+    let id = phone.node.send_files(&computer.node.info().id, vec![picture.clone()]).await.unwrap();
+    assert!(!was_asked(&mut rc, id).await, "the snap was asked about");
+    assert!(computer.downloads().join("snap.jpg").exists());
+
+    // One request, one picture: the next image asks as usual
+    let id = phone.node.send_files(&computer.node.info().id, vec![picture]).await.unwrap();
+    assert!(was_asked(&mut rc, id).await, "a second picture was taken without asking");
+}
+
+#[tokio::test]
+async fn a_picture_nobody_asked_for_still_asks() {
+    let (computer, phone) = paired_with(|c| c.features = vec!["snap".into()]).await;
+    let mut rc = computer.node.subscribe();
+    let picture = phone.dir.path().join("photo.jpg");
+    std::fs::write(&picture, b"x").unwrap();
+    let id = phone.node.send_files(&computer.node.info().id, vec![picture]).await.unwrap();
+    assert!(was_asked(&mut rc, id).await);
+}
+
+#[tokio::test]
+async fn only_an_image_or_a_pdf_counts_as_the_snap() {
+    let (computer, phone) = paired_with(|c| c.features = vec!["snap".into()]).await;
+    let mut rc = computer.node.subscribe();
+    computer.node.request_snap(&phone.node.info().id).await.unwrap();
+    let other = phone.dir.path().join("notes.txt");
+    std::fs::write(&other, b"x").unwrap();
+    let id = phone.node.send_files(&computer.node.info().id, vec![other]).await.unwrap();
+    assert!(was_asked(&mut rc, id).await);
+}
+
+#[tokio::test]
+async fn a_phone_that_cannot_snap_is_not_asked() {
+    let (computer, phone) = paired().await;
+    let err = computer.node.request_snap(&phone.node.info().id).await.unwrap_err();
+    assert!(matches!(err, Error::Unsupported), "{err}");
+}
+
+#[tokio::test]
+async fn a_phone_can_say_why_it_cannot_snap() {
+    let (computer, phone) = paired_with(|c| c.features = vec!["snap".into()]).await;
+    let mut rc = computer.node.subscribe();
+    let mut rp = phone.node.subscribe();
+    computer.node.request_snap(&phone.node.info().id).await.unwrap();
+    wait_for(&mut rp, |e| matches!(e, Event::SnapRequest { .. }).then_some(())).await;
+    phone.node.refuse_snap(&computer.node.info().id, "Linksy needs the camera permission").await.unwrap();
+    let reason = wait_for(&mut rc, |e| match e {
+        Event::SnapRefused { reason, .. } => Some(reason.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(reason, "Linksy needs the camera permission");
+    // Refused: a picture sent anyway is not expected any more
+    let picture = phone.dir.path().join("late.jpg");
+    std::fs::write(&picture, b"x").unwrap();
+    let id = phone.node.send_files(&computer.node.info().id, vec![picture]).await.unwrap();
+    assert!(was_asked(&mut rc, id).await);
+}
+
+#[tokio::test]
+async fn a_phones_controls_are_watched_changed_and_refused() {
+    use linksy_core::{ControlsChange, ControlsState, Dnd, Ringer};
+    let (computer, phone) = paired().await;
+    let (cid, pid) = (computer.node.info().id, phone.node.info().id);
+    let (mut rc, mut rp) = (computer.node.subscribe(), phone.node.subscribe());
+    let state = |seq| ControlsState { seq, media: 0.5, ringtone: 0.8, alarm: 1.0, ringer: Ringer::Normal, dnd: Dnd::Off, dnd_access: true, flashlight: Some(false) };
+
+    computer.node.watch_controls(&pid, true).await.unwrap();
+    wait_for(&mut rp, |e| matches!(e, Event::ControlsWatch { on: true, .. }).then_some(())).await;
+
+    // Sent out of order: the older one is dropped
+    phone.node.send_controls_state(&cid, &state(2)).await.unwrap();
+    phone.node.send_controls_state(&cid, &state(1)).await.unwrap();
+    phone.node.send_controls_state(&cid, &state(3)).await.unwrap();
+    let first = wait_for(&mut rc, |e| match e { Event::ControlsState { state, .. } => Some(state.seq), _ => None }).await;
+    let second = wait_for(&mut rc, |e| match e { Event::ControlsState { state, .. } => Some(state.seq), _ => None }).await;
+    assert_eq!((first, second), (2, 3));
+
+    // A level out of range is brought within it, and nothing at all is not sent
+    computer.node.set_controls(&pid, ControlsChange { media: Some(2.0), dnd: Some(Dnd::Priority), flashlight: Some(true), ..Default::default() }).await.unwrap();
+    let change = wait_for(&mut rp, |e| match e { Event::ControlsSet { change, .. } => Some(*change), _ => None }).await;
+    assert_eq!((change.media, change.dnd, change.flashlight, change.ringer), (Some(1.0), Some(Dnd::Priority), Some(true), None));
+    assert!(computer.node.set_controls(&pid, ControlsChange::default()).await.is_err());
+
+    // The phone says why it didn't do one
+    phone.node.refuse_controls(&cid, "dnd", "Allow Do Not Disturb access to Linksy on the phone first").await.unwrap();
+    let (what, reason) = wait_for(&mut rc, |e| match e { Event::ControlsRefused { what, reason, .. } => Some((what.clone(), reason.clone())), _ => None }).await;
+    assert_eq!((what.as_str(), reason.as_str()), ("dnd", "Allow Do Not Disturb access to Linksy on the phone first"));
+}
+
+#[tokio::test]
+async fn a_phone_tells_how_far_its_display_is_turned() {
+    let (computer, phone) = paired().await;
+    let cid = computer.node.info().id;
+    let mut rc = computer.node.subscribe();
+    // Only the four ways a display can be turned
+    assert!(phone.node.send_screen_rotation(&cid, 45).await.is_err());
+    assert!(phone.node.send_screen_rotation(&cid, 360).await.is_err());
+    phone.node.send_screen_rotation(&cid, 270).await.unwrap();
+    let degrees = wait_for(&mut rc, |e| match e { Event::ScreenRotation { degrees, .. } => Some(*degrees), _ => None }).await;
+    assert_eq!(degrees, 270);
+}
+
+#[tokio::test]
+async fn a_computers_notification_shows_on_the_phone() {
+    let (computer, phone) = paired().await;
+    let pid = phone.node.info().id;
+    let mut rp = phone.node.subscribe();
+    // Cut to what a notification holds, so a long one can't fill the phone
+    let long = "x".repeat(5000);
+    computer.node.send_computer_notification(&pid, "n1", "Thunderbird", "Mum", &long, 1760945000123).await.unwrap();
+    let (key, app, title, body, at) = wait_for(&mut rp, |e| match e {
+        Event::ComputerNotification { key, app, title, body, at_ms, .. } => Some((key.clone(), app.clone(), title.clone(), body.clone(), *at_ms)),
+        _ => None,
+    })
+    .await;
+    assert_eq!((key.as_str(), app.as_str(), title.as_str(), at), ("n1", "Thunderbird", "Mum", 1760945000123));
+    assert_eq!(body.chars().count(), 1000);
+}
+
 #[tokio::test]
 async fn sends_files_and_folders_intact() {
     let (a, b) = paired().await;
@@ -1471,6 +1617,17 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     assert_eq!(text, "from far away");
     assert_eq!(b.node.link(&ida), Some(Link::Away));
 
+    // A phone's notification crosses the same link: nothing in the core holds it back from away
+    let mut ra = a.node.subscribe();
+    let note = linksy_core::RemoteNotification { key: "k1".into(), app: "chat".into(), app_name: "Chat".into(), title: "Mum".into(), body: "Dinner?".into(), ..Default::default() };
+    b.node.post_notification(&ida, note).await.unwrap();
+    let title = wait_for(&mut ra, |e| match e {
+        Event::NotificationPosted { notification, .. } => Some(notification.title.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(title, "Mum");
+
     // A screen from away: refused without asking Beta's user, even allowed for good...
     let _incoming = b.node.incoming_sessions();
     b.node.set_allow_screen(&ida, true).unwrap();
@@ -1938,6 +2095,46 @@ async fn both_ends_of_a_transfer_hear_its_route() {
         .await;
         assert_eq!(route, Route::Direct);
     }
+}
+
+#[tokio::test]
+async fn the_host_is_told_the_joiners_wifi_channel_and_makes_its_group_there() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "direct_host".into(), "direct_join".into(), "direct_group".into()]).await;
+    let (host, joiner) = if a.node.info().id < b.node.info().id { (&a, &b) } else { (&b, &a) };
+    let host_id = host.node.info().id;
+    fake_direct_app(&a.node);
+    fake_direct_app(&b.node);
+    let mut on_host = host.node.subscribe();
+    // Not a Wi-Fi channel: not passed on
+    joiner.node.set_wifi_frequency(Some(80));
+    joiner.node.set_wifi_frequency(Some(5200));
+    joiner.node.direct_link(&host_id).await.unwrap();
+    let group = wait_for(&mut on_host, |e| match e {
+        Event::DirectWanted { group, .. } => Some(group.clone()),
+        _ => None,
+    })
+    .await
+    .expect("credentials for a group");
+    assert_eq!(group.frequency, Some(5200));
+    assert!(group.is_valid());
+}
+
+#[tokio::test]
+async fn without_a_known_channel_the_host_chooses_as_before() {
+    let (a, b) = paired_with(|c| c.features = vec!["files".into(), "direct_host".into(), "direct_join".into(), "direct_group".into()]).await;
+    let (host, joiner) = if a.node.info().id < b.node.info().id { (&a, &b) } else { (&b, &a) };
+    let host_id = host.node.info().id;
+    fake_direct_app(&a.node);
+    fake_direct_app(&b.node);
+    let mut on_host = host.node.subscribe();
+    joiner.node.direct_link(&host_id).await.unwrap();
+    let group = wait_for(&mut on_host, |e| match e {
+        Event::DirectWanted { group, .. } => Some(group.clone()),
+        _ => None,
+    })
+    .await
+    .expect("credentials for a group");
+    assert_eq!(group.frequency, None);
 }
 
 #[tokio::test]

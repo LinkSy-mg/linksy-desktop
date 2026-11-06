@@ -25,6 +25,9 @@
 //! session: decodes the stream read from the socket and offers it to every app as a
 //! PipeWire camera called NAME (browsers, Meet, GNOME Snapshot, OBS…).
 //!
+//! `linksy-screen speaker --socket PATH [--test]` plays the sound a phone shares with its screen
+//! (raw 16-bit 48 kHz stereo PCM) on this computer's speakers; `--test` plays nothing.
+//!
 //! `linksy-screen share --mic --socket PATH [--test]` shares this device's microphone, and
 //! `linksy-screen mic --socket PATH [--name NAME]` offers a received one to every app as
 //! a microphone called NAME. Audio crosses as raw 16-bit 48 kHz mono PCM (docs/protocol.md
@@ -52,6 +55,12 @@ struct Args {
     fps: u32,
     /// `mic` mode: publish the incoming audio as a microphone with this name.
     microphone: Option<String>,
+    /// The video bitrate in kbit/s (16000 on a local network or cable, less over the internet).
+    bitrate: u32,
+    /// The most frames a second (60; 30 over the internet).
+    max_fps: u32,
+    /// `speaker` mode: play the incoming sound.
+    speaker: bool,
     camera: bool,
     /// Share this device's microphone.
     mic: bool,
@@ -68,19 +77,26 @@ struct Args {
 
 fn parse_args() -> Result<Args, String> {
     let mut args = std::env::args().skip(1);
+    let mut speaker = false;
     let (mut webcam, mut microphone) = match args.next().as_deref() {
         Some("share") => (None, None),
+        Some("speaker") => {
+            speaker = true;
+            (None, None)
+        }
         Some("webcam") => (Some("Linksy Camera".to_string()), None),
         Some("mic") => (None, Some("Linksy Microphone".to_string())),
         _ => {
-            return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --mic | --control | --input-only] [--virtual [--size WxH]] [--output NAME] [--test]\n       \
+            return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --mic | --control | --input-only] [--virtual [--size WxH]] [--output NAME] [--bitrate KBPS] [--max-fps 30|60] [--test]\n       \
                         linksy-screen webcam --socket PATH [--name NAME] [--fps 30|60]\n       \
-                        linksy-screen mic --socket PATH [--name NAME]"
+                        linksy-screen mic --socket PATH [--name NAME]\n       \
+                        linksy-screen speaker --socket PATH [--test]"
                 .into());
         }
     };
     let (mut socket, mut token_file, mut control, mut test, mut camera, mut mic) = (None, None, false, false, false, false);
     let (mut input_only, mut output) = (false, None);
+    let (mut bitrate, mut max_fps) = (16_000u32, MAX_FPS);
     let mut fps = 30;
     let (mut is_virtual, mut size) = (false, (1920, 1080));
     while let Some(a) = args.next() {
@@ -96,6 +112,8 @@ fn parse_args() -> Result<Args, String> {
             }
             "--output" => output = args.next(),
             "--test" => test = true,
+            "--bitrate" => bitrate = args.next().and_then(|v| v.parse().ok()).filter(|k| (500..=60_000).contains(k)).ok_or("--bitrate takes kbit/s, 500 to 60000")?,
+            "--max-fps" => max_fps = args.next().and_then(|v| v.parse().ok()).filter(|f| matches!(f, 30 | 60)).ok_or("--max-fps takes 30 or 60")?,
             "--camera" => camera = true,
             "--mic" => mic = true,
             "--fps" => fps = args.next().and_then(|v| v.parse().ok()).filter(|f| matches!(f, 30 | 60)).ok_or("--fps takes 30 or 60")?,
@@ -104,7 +122,7 @@ fn parse_args() -> Result<Args, String> {
             other => return Err(format!("unknown option {other}")),
         }
     }
-    Ok(Args { webcam, fps, microphone, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), output, test })
+    Ok(Args { webcam, fps, microphone, bitrate, max_fps, speaker, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), output, test })
 }
 
 fn main() -> ExitCode {
@@ -140,6 +158,9 @@ fn run(args: Args) -> Result<(), String> {
     if let Some(name) = &args.microphone {
         return microphone(&args.socket, name);
     }
+    if args.speaker {
+        return speaker(&args.socket, args.test);
+    }
     if args.mic {
         return share_mic(&args.socket, args.test);
     }
@@ -160,7 +181,9 @@ fn run(args: Args) -> Result<(), String> {
             .ok()
             .and_then(|s| s.split_once('x').and_then(|(w, h)| Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))))
             .unwrap_or((1280, 720));
-        let pattern = format!("videotestsrc is-live=true pattern=ball motion=sweep background-color=0xff2563ff ! video/x-raw,width={w},height={h},framerate=30/1");
+        // LINKSY_SCREEN_TEST_FPS=60 imitates a screen that moves 60 times a second.
+        let fps: u32 = std::env::var("LINKSY_SCREEN_TEST_FPS").ok().and_then(|f| f.parse().ok()).unwrap_or(30);
+        let pattern = format!("videotestsrc is-live=true pattern=ball motion=sweep background-color=0xff2563ff ! video/x-raw,width={w},height={h},framerate={fps}/1");
         (pattern, args.control.then_some(portal::Input::Log))
     } else {
         open_capture(&args, &rt)?
@@ -196,11 +219,11 @@ fn run(args: Args) -> Result<(), String> {
     // can take longer to encode than a frame lasts: at most 30 a second there, converted on
     // several threads. A GPU encoder that's listed but doesn't work (a sandbox's drivers, an
     // unusual card) falls through to the next.
-    let mut attempts: Vec<(&str, &str, Memory)> = Vec::new();
-    for (encoder, format) in encoders() {
+    let mut attempts: Vec<(String, &str, Memory)> = Vec::new();
+    for (encoder, format) in encoders(args.bitrate) {
         let gpu = encoder.starts_with("va") && vapostproc;
         if gpu && screen {
-            attempts.push((encoder, format, Memory::Gpu));
+            attempts.push((encoder.clone(), format, Memory::Gpu));
         }
         attempts.push((encoder, format, Memory::System));
     }
@@ -208,7 +231,9 @@ fn run(args: Args) -> Result<(), String> {
     let tried: Vec<String> = attempts.iter().map(|(e, _, m)| format!("{}{}", e.split_whitespace().next().unwrap_or(""), if *m == Memory::Gpu { " (graphics memory)" } else { "" })).collect();
     eprintln!("linksy-screen: encoders, in order: {}", if tried.is_empty() { "none".to_string() } else { tried.join(", ") });
     let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(1, 4));
-    let chain = |(encoder, format, memory): (&str, &str, Memory), size: &str| -> String {
+    let max_fps = args.max_fps;
+    let chain = |(encoder, format, memory): &(String, &str, Memory), size: &str| -> String {
+        let (format, memory) = (*format, *memory);
         let gpu = encoder.starts_with("va") && vapostproc;
         // Copied: the desktop's few buffers go back to it at once
         let copy = if screen && memory == Memory::System { " always-copy=true" } else { "" };
@@ -219,10 +244,14 @@ fn run(args: Args) -> Result<(), String> {
             // Whatever the source gives (a bare "video/x-raw" isn't caps to the parser)
             Memory::System => "identity".to_string(),
         };
+        // Up to 60 frames a second, however fast the screen is (144 Hz ones too): dropped here
+        // where it costs nothing, and brought down to 30 by `adapt_rate` when the encoder can't
+        // keep up
+        let rate = format!("videorate name=rate drop-only=true max-rate={max_fps}");
         let convert = if gpu {
-            "vapostproc ! capsfilter caps=\"video/x-raw(memory:VAMemory),format=NV12\"".to_string()
+            format!("{rate} ! vapostproc ! capsfilter caps=\"video/x-raw(memory:VAMemory),format=NV12\"")
         } else {
-            format!("videorate drop-only=true max-rate=30 ! videoconvert n-threads={threads} ! video/x-raw,format={format}")
+            format!("{rate} ! videoconvert n-threads={threads} ! video/x-raw,format={format}")
         };
         format!("{copy} ! {caps} ! queue name=captured max-size-buffers=1 leaky=downstream ! {convert} ! queue max-size-buffers=2 leaky=downstream ! {encoder} name=encoder")
     };
@@ -234,14 +263,16 @@ fn run(args: Args) -> Result<(), String> {
     let mut restarts = 0;
     let mut attempt = 0;
     let result = loop {
-        let Some(&current) = attempts.get(attempt) else { break Err("no H.264 encoder here works (install openh264 or x264)".to_string()) };
-        let (encoder, _, memory) = current;
-        let name = encoder.split_whitespace().next().unwrap_or("encoder");
+        let Some(current) = attempts.get(attempt).cloned() else { break Err("no H.264 encoder here works (install openh264 or x264)".to_string()) };
+        let (encoder, _, memory) = &current;
+        let memory = *memory;
+        let name = encoder.split_whitespace().next().unwrap_or("encoder").to_string();
+        let name = name.as_str();
         let description = format!(
             "{source}{} ! video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1 \
              ! video/x-h264,stream-format=byte-stream,alignment=au \
              ! fdsink fd={} sync=false",
-            chain(current, &size),
+            chain(&current, &size),
             out.as_raw_fd()
         );
         let pipeline = match gst::parse::launch(&description) {
@@ -253,6 +284,7 @@ fn run(args: Args) -> Result<(), String> {
             }
         };
         let last_frame = count_frames(&pipeline, name);
+        adapt_rate(&pipeline, max_fps);
         let outcome = match pipeline.set_state(gst::State::Playing) {
             // Why, from the element that refused (set_state only says that one did)
             Err(_) => Some(Ended(Err(bus_error(&pipeline).unwrap_or_else(|| "an element failed to start".into())))),
@@ -400,6 +432,58 @@ fn open_capture(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(String, Op
     Ok((source, input))
 }
 
+/// The most frames a second a shared screen is encoded at; 30 is what it falls back to.
+const MAX_FPS: u32 = 60;
+const SLOW_FPS: u32 = 30;
+
+/// Encode at 60 where this computer can, and at 30 where it can't, by itself. Every two seconds
+/// it looks at how many of the frames the screen gave were encoded: when a screen that moves
+/// (more than 45 a second) is encoded at under 86 % of the rate wanted twice running, the rate limit goes
+/// down to 30 for good: an even 30 looks better than a 60 that stutters.
+fn adapt_rate(pipeline: &gst::Element, max_fps: u32) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Already at the slow rate
+    if max_fps <= SLOW_FPS {
+        return;
+    }
+    let Some(bin) = pipeline.downcast_ref::<gst::Bin>() else { return };
+    let Some(rate) = bin.by_name("rate") else { return };
+    let counts = std::sync::Arc::new([AtomicU64::new(0), AtomicU64::new(0)]);
+    // What the screen gives, and what comes out encoded
+    for (name, pad, i) in [("captured", "sink", 0), ("encoder", "src", 1)] {
+        if let Some(pad) = bin.by_name(name).and_then(|e| e.static_pad(pad)) {
+            let counts = counts.clone();
+            pad.add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                counts[i].fetch_add(1, Ordering::Relaxed);
+                gst::PadProbeReturn::Ok
+            });
+        }
+    }
+    let (counts, rate) = (std::sync::Arc::downgrade(&counts), rate.downgrade());
+    std::thread::spawn(move || {
+        let mut behind = 0;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let (Some(counts), Some(rate)) = (counts.upgrade(), rate.upgrade()) else { return };
+            let (shown, encoded) = (counts[0].swap(0, Ordering::Relaxed) as f64 / 2.0, counts[1].swap(0, Ordering::Relaxed) as f64 / 2.0);
+            let wanted = shown.min(MAX_FPS as f64);
+            behind = if falls_behind(shown, encoded) { behind + 1 } else { 0 };
+            if behind >= 2 {
+                eprintln!("linksy-screen: encoding {encoded:.0} of {wanted:.0} frames a second; keeping to {SLOW_FPS}");
+                rate.set_property("max-rate", SLOW_FPS as i32);
+                return;
+            }
+        }
+    });
+}
+
+/// Whether an encoder is too slow for 60 frames a second: the screen moves more than 45 times a
+/// second, and under 86 % of the frames wanted (the screen's, up to the limit) come out. A screen
+/// faster than the limit is meant to lose frames; the rest is the encoder's.
+fn falls_behind(shown: f64, encoded: f64) -> bool {
+    shown > 45.0 && encoded < shown.min(MAX_FPS as f64) * 0.86
+}
+
 /// Every 10 seconds, how many frames the screen gave and how many were encoded (the
 /// rest were dropped because the encoder was behind), for Save Logs. Returns when the last
 /// frame came (milliseconds since the epoch; 0 before the first). The report ends with the
@@ -471,14 +555,17 @@ fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
 /// The best H.264 encoder available, and the raw format it wants: the GPU first, then
 /// x264, then OpenH264 (always present on Fedora). All are asked for Constrained
 /// Baseline, which every H.264 decoder handles (OpenH264's, phones' hardware ones).
-fn encoders() -> Vec<(&'static str, &'static str)> {
-    let has = |name: &str| gst::ElementFactory::find(name).is_some();
+fn encoders(kbps: u32) -> Vec<(String, &'static str)> {
+    // LINKSY_SCREEN_ENCODERS=x264enc,openh264enc allows only those (to try the CPU ones where
+    // there is a GPU, say).
+    let only: Option<Vec<String>> = std::env::var("LINKSY_SCREEN_ENCODERS").ok().map(|l| l.split(',').map(|e| e.trim().to_string()).collect());
+    let has = |name: &str| gst::ElementFactory::find(name).is_some() && only.as_ref().is_none_or(|o| o.iter().any(|e| e == name));
     let mut list = Vec::new();
     if has("vah264lpenc") && constant_bitrate("vah264lpenc") {
-        list.push(("vah264lpenc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12"));
+        list.push((format!("vah264lpenc rate-control=cbr bitrate={kbps} key-int-max=60 target-usage=7"), "NV12"));
     }
     if has("vah264enc") && constant_bitrate("vah264enc") {
-        list.push(("vah264enc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12"));
+        list.push((format!("vah264enc rate-control=cbr bitrate={kbps} key-int-max=60 target-usage=7"), "NV12"));
     }
     if has("x264enc") {
         // One slice per frame: zerolatency would cut each frame into a slice per thread,
@@ -487,10 +574,11 @@ fn encoders() -> Vec<(&'static str, &'static str)> {
         // ultrafast: a sharp desktop with windows moving on it cost superfast 10 times more
         // live than a video does (half-pixel motion search), and fell to 4 fps on a laptop on
         // battery; 16 Mbit/s keeps it sharp, which a local network carries easily.
-        list.push(("x264enc tune=zerolatency speed-preset=ultrafast bitrate=16000 key-int-max=60 bframes=0 sliced-threads=false threads=2", "I420"));
+        list.push((format!("x264enc tune=zerolatency speed-preset=ultrafast bitrate={kbps} key-int-max=60 bframes=0 sliced-threads=false threads=2"), "I420"));
     }
     if has("openh264enc") {
-        list.push(("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate=8000000 gop-size=60", "I420"));
+        // OpenH264 counts in bit/s, and is held to half what the others get: it is the CPU's last resort
+        list.push((format!("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate={} gop-size=60", u64::from(kbps) * 500), "I420"));
     }
     list
 }
@@ -581,6 +669,21 @@ fn share_mic(socket: &std::path::Path, test: bool) -> Result<(), String> {
 /// The receiving end of a microphone session: offer the audio to every app as a
 /// microphone for as long as it lasts. A leaky queue keeps the delay at most 100 ms: after a
 /// Wi-Fi hiccup, late audio is dropped rather than played late forever.
+/// A phone's sound on this computer's speakers. Short buffers and a queue that drops the old
+/// when the sound comes in bursts, so what is heard is never seconds behind the screen.
+fn speaker(socket: &std::path::Path, test: bool) -> Result<(), String> {
+    let input = UnixStream::connect(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
+    let sink = if test { "fakesink sync=false" } else { "autoaudiosink sync=false" };
+    let description = format!(
+        "fdsrc fd={} ! rawaudioparse use-sink-caps=false format=pcm pcm-format=s16le sample-rate=48000 num-channels=2 \
+         ! queue max-size-time=120000000 max-size-buffers=0 max-size-bytes=0 leaky=downstream ! audioconvert ! audioresample ! {sink}",
+        input.as_raw_fd()
+    );
+    let result = play(&description);
+    drop(input);
+    result
+}
+
 fn microphone(socket: &std::path::Path, name: &str) -> Result<(), String> {
     let input = UnixStream::connect(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
     let name: String = name.chars().filter(|c| !matches!(c, '"' | '\\' | ',')).collect();
@@ -612,4 +715,31 @@ fn play(description: &str) -> Result<(), String> {
     };
     let _ = pipeline.set_state(gst::State::Null);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::falls_behind;
+
+    #[test]
+    fn an_encoder_that_keeps_up_stays_at_60() {
+        assert!(!falls_behind(60.0, 59.8));
+        assert!(!falls_behind(60.0, 53.0));
+        // A 144 Hz screen is cut to 60 on purpose
+        assert!(!falls_behind(144.0, 59.9));
+    }
+
+    #[test]
+    fn an_encoder_that_cannot_goes_down_to_30() {
+        assert!(falls_behind(60.0, 40.0));
+        assert!(falls_behind(60.0, 51.0));
+        assert!(falls_behind(144.0, 45.0));
+    }
+
+    #[test]
+    fn a_screen_that_hardly_moves_says_nothing() {
+        // A still desktop sends the keepalive 10 times a second; a video at 30 is already 30
+        assert!(!falls_behind(10.0, 2.0));
+        assert!(!falls_behind(30.0, 20.0));
+    }
 }

@@ -80,11 +80,12 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | Turn on the Inbox or Gallery from the computer | On main (not released) | Built, waits for the core pin that has it | `turn_on` (§4.21) |
 | Phone to phone: the route, a check before sending, apps | On main (not released) | In progress | §4.22 |
 | Position and seeking of the computer's players | On main (not released) | Nothing to do | the computer counts a browser's position itself and seeks exactly (§4.5) |
-| Snap: take a photo on the phone, it lands on the computer | To do (Now) | Built, not published | an ordinary file transfer, then `clipboard_file` where the computer announces it; the computer's "Snap from Phone" needs a new message |
+| Snap: take a photo on the phone, it lands on the computer | Done on branch `phone-work` (§4.23) | Built, not published | an ordinary file transfer, then `clipboard_file` where the computer announces it; "Snap from Phone" sends `snap_request` |
 | Copy to Computer (text from the phone's text menu) | Receives `clipboard` as before | Built, not published | to confirm against the phone's messages once they are published |
 | A USB button on the phone | Done (0.9) | Built, not published | `usb_plugged`, `usb_connect` (§4.11); mobile#11 |
-| Connection Doctor | To do (Now) | Its half built, not published | the computer checks its firewall, a VPN, devices kept apart and the cable |
-| The phone's controls on the computer (volumes, ringer, Do Not Disturb, flashlight) | To do (Now) | To do | messages to agree on first |
+| Connection Doctor | Done on branch `phone-work` | Its half built, not published | the computer checks its firewall, a VPN, a phone on another network or not answering, and the cable; no new messages |
+| The phone's controls on the computer (volumes, ringer, Do Not Disturb, flashlight) | Done on branch `phone-work`: core, service, `linksy controls`, a Sound and Silence section on the phone's page in both apps, Keep Do Not Disturb in Sync (§4.24) | To do | `controls_watch`, `controls_state`, `controls_set`, `controls_refused`; feature `phone_controls` |
+| This computer's notifications on the phone | Done on branch `phone-work`: a switch per phone in both apps, `linksy forward` (§4.25) | To do | `computer_notification`; feature `computer_notifications` |
 | Bluetooth (presence and a link) | Planned | Planned | `ROADMAP.md`; not started |
 
 ## 3. How to build the phone app (recommendation)
@@ -601,9 +602,15 @@ After `session_accept`:
 - **Sharer → viewer:** raw **H.264 Annex-B byte stream** (no framing): start codes,
   SPS/PPS repeated before every keyframe (`config-interval=-1`), access-unit aligned.
   **Profile: Constrained Baseline** (every decoder handles it, including OpenH264 and
-  phone hardware). Desktop sends ~8 Mbit/s, keyframe at least every 2 s (60 frames),
-  up to 30 fps, at the screen's resolution. While the screen is still, the
-  last frame comes again every 100 ms, so the newest change never waits in an encoder.
+  phone hardware). Desktop sends 8 to 16 Mbit/s, a keyframe at least every 60 frames (2 s at
+  30 fps, 1 s at 60), **up to 60 fps** (since desktop, after 0.12.4; 30 before), at the screen's
+  resolution. The computer encodes at 60 when its screen moves that fast (a 144 Hz screen is cut
+  to 60) and its encoder keeps up, and falls back to 30 by itself when it doesn't (a GPU encoder
+  keeps 60 at 4K here; x264 on the CPU keeps 60 at 1080p). The rate is not negotiated and not
+  announced: a decoder just sees frames come at 30 or 60 a second, so decode and show each as
+  it arrives, and ask the display for its highest refresh rate while a screen shows. While the
+  screen is still, the last frame comes again every 100 ms, so the newest change never waits in an
+  encoder.
 - **Viewer → sharer:** framed JSON control messages (u32 BE length + JSON). A sharer must
   keep reading this half and ignore unknown types. In `screen` sessions the viewer sends
   nothing; in **`control`** sessions (same media, plus input; the prompt says "wants to
@@ -654,6 +661,50 @@ On Android:
   (`session.send`). Events: `session_request {request, from, kind}`,
   `session_started {session, peer, kind, sharing}`, `session_ended {session}`.
 
+
+**The phone's own screen at 60 fps (what the phone must change).** The phone encodes with
+`MediaCodec` from a `MediaProjection` `VirtualDisplay` whose `Surface` is the encoder's input.
+The virtual display makes a frame whenever the screen changes, up to the display's refresh rate
+(90 or 120 on many phones), so the encoder is what to set:
+
+- `KEY_FRAME_RATE` 60 and `KEY_MAX_FPS_TO_ENCODER` 60 (API 29+; frames above 60 a second are
+  dropped before the encoder, not encoded), `KEY_OPERATING_RATE` 60 (API 23+) so the encoder
+  reserves the speed, and `KEY_PRIORITY` 0 (real time) and `KEY_LATENCY` 1 (API 30+).
+- `KEY_BITRATE_MODE` CBR at 12 to 16 Mbit/s (8 is too little at 60 for a scrolling page);
+  `KEY_I_FRAME_INTERVAL` 1 (a keyframe a second), no B-frames, Constrained Baseline, SPS/PPS
+  before every keyframe, as now.
+- `KEY_REPEAT_PREVIOUS_FRAME_AFTER` 100000 (µs) so a still screen sends its last frame ten times a
+  second and the computer's newest change never waits in the encoder.
+- Keep the capture at the screen's size: a `VirtualDisplay` of 1080 × 2400 at 60 is within every
+  phone's hardware encoder; if `MediaCodecInfo.VideoCapabilities.areSizeAndRateSupported(w, h, 60)`
+  is false, use 30 (`KEY_FRAME_RATE` 30, `KEY_MAX_FPS_TO_ENCODER` 30). Nothing is announced: the
+  computer sees the frames at whatever rate they come.
+- The computer decodes either; its viewer shows frames as they arrive.
+
+**The phone's sound with its screen (desktop, after 0.12.4; not tried on a phone).** A computer
+that shows a phone's screen (`screen` or `control`, including the cable) asks the phone for its
+sound as well, when the phone announces the feature `sound`:
+
+```json
+{"type":"session_request","id":"<uuid>","kind":"sound"}     // computer → phone, right after the screen
+```
+
+The phone asks its user, or says yes by itself while a screen session to that computer is running
+(its call), and answers `session_accept`; after that it writes **raw PCM, 16-bit signed little
+endian, 48 kHz, stereo** (4 bytes a frame), 10 ms at a time (1920 bytes), on the session's stream,
+with no framing and nothing in the other direction. The computer plays it on its speakers and ends
+it when the screen ends; the phone ends it when the screen ends too. On Android this is
+`AudioPlaybackCapture` (API 29+) through the **same `MediaProjection`** as the screen:
+`AudioPlaybackCaptureConfiguration.Builder(projection).addMatchingUsage(USAGE_MEDIA).addMatchingUsage(USAGE_GAME).build()`
+into an `AudioRecord` at 48000 Hz `CHANNEL_IN_STEREO` `ENCODING_PCM_16BIT`, read in 1920-byte
+chunks on a thread. It needs the microphone (`RECORD_AUDIO`) permission, which the phone's
+microphone feature has already; apps that opt out of capture, and protected audio, are silent.
+Don't capture what Linksy itself plays. A phone that can't announces nothing; a phone that does
+and won't answers `session_decline`. Keep the latency low: write each chunk as it is read, and
+don't buffer more than 100 ms. A computer that isn't asked ignores a `sound` request with
+`session_decline` `reason: "unsupported"` (core does this when `sound` isn't among its features).
+Core: `SessionKind::Sound`; the service starts and ends it; it has no entry of its own in the
+activity history.
 
 **Keep the screen on while it's a display (desktop 0.5.8; seen on a realme 15 Pro).** The
 phone's screen timeout turned its screen off a minute into a second display, which ended
@@ -818,7 +869,11 @@ phone), `direct_group` (hosts and joins Wi-Fi Direct groups by name and passphra
 its photos, §4.18), `deck` (a computer that runs a phone's deck, §4.19), `deck_layout` (a
 phone that draws the deck layouts a computer sends, §4.20), `turn_on` (a phone that asks its
 user when a computer asks it to turn something on, §4.21), `preflight` (answers the check
-before a send, §4.22; computers announce it too), `apps` (sends and installs apps, §4.22).
+before a send, §4.22; computers announce it too), `apps` (sends and installs apps, §4.22),
+`snap` (opens its camera when a computer asks, §4.23), `sound` (shares the sound it plays
+while a computer shows its screen, §4.8), `phone_controls` (a phone's volumes,
+ringer, Do Not Disturb and flashlight, §4.24), `computer_notifications` (a phone that shows
+the notifications of a computer, §4.25).
 Set `Config.features` in the core. To change them while running (`notifications` turned
 on or off), call `Node::set_features`: connected devices get a `features` message
 (at most 64 names of up to 64 bytes) and update at once, others see the new list at the
@@ -1010,9 +1065,18 @@ them once the phone is back. Phone side, please:
 - [ ] While a computer drives the phone (a `screen` session to it, and an input device
       named for the accessory appears in `InputManager`), show a lasting "Controlled from
       <computer>" notification with Stop.
-- [ ] Rotation: the touchscreen uses the natural orientation; in landscape the computer
-      would need the rotation. Send it with the screen (to be specified) or keep control
-      to portrait for now.
+- [ ] **Rotation (desktop, after 0.12.4; not tried on a phone).** The virtual touchscreen's
+      frame is the phone's natural orientation. If, with the phone in landscape, taps from the
+      computer land in the wrong place (turned a quarter), send
+      `{"type":"screen_rotation","degrees":90}` (core `node.send_screen_rotation`) on connecting
+      to the computer that is driving, and again whenever the display turns: `degrees` is
+      `Display.getRotation()` times 90 (`ROTATION_90`: the device turned counter-clockwise, its
+      picture clockwise, top on the left; `ROTATION_270`: top on the right). The computer then
+      turns each tap, and the finger of a scroll, back into the natural frame: for 90 the
+      picture's (u, v) becomes (1 − v, u), for 270 (v, 1 − u), for 180 (1 − u, 1 − v). If Android
+      already turns taps for the virtual touchscreen, send nothing (0 is what the computer assumes);
+      the check is one tap near a corner in landscape. The phone's video must be the upright
+      picture (landscape: wider than tall), as the viewer sends its positions as fractions of it.
 - [ ] **Without the cable:** an accessibility service (`dispatchGesture` for taps and
       swipes, global actions for Back/Home/Recents, `ACTION_SET_TEXT` for typing) gives
       the same control over any link. Sideloaded installs need "Allow restricted settings"
@@ -1381,7 +1445,7 @@ A link with no transfer for **20 s** (`Config.direct_idle`) closes on both sides
 handle `up` before `connecting` too):
 
 ```json
-{"type":"direct","step":{"type":"ask"}}                                     // joiner → host: "set one up"
+{"type":"direct","step":{"type":"ask","frequency":5200}}                   // joiner → host: "set one up" (frequency: its Wi-Fi's channel, MHz, when it is on one)
 {"type":"direct","step":{"type":"invite","address":"02:00:00:00:00:00","name":"realme 15 Pro 5G"}} // host → joiner: its Wi-Fi Direct address and name
 {"type":"direct","step":{"type":"listening","address":"d8:80:83:cb:0d:33"}} // joiner → host: findable at this address
 {"type":"direct","step":{"type":"connecting"}}                              // host → joiner: connecting to you now
@@ -1458,6 +1522,16 @@ Steps (no `listening`, no `connecting`):
    `requestGroupInfo` for its `frequency`, then
    `direct_send(id, Invite { address, name: Some(deviceName), group: Some(g with frequency) })`,
    and right after, `direct_send(id, Up { ip: groupOwnerAddress (192.168.49.1), port: node.local_addr().port })`.
+   **Same channel (desktop, after 0.12.4):** a computer's `ask` carries `frequency`, the channel its
+   Wi-Fi is on (from `iw dev … link`, kept up to date on every network change). The host's core
+   puts it in `DirectWanted`'s group as `g.frequency = Some(f)`. When `g.frequency` is `Some(f)`,
+   **create the group on it** with `.setGroupOperatingFrequency(f)` instead of the band (only one
+   of the two may be set on a Builder), and if `createGroup` fails with it (a channel the phone
+   may not host on, such as a DFS channel in some regions) create it again with the band as above.
+   A computer's Wi-Fi chip that serves its network on one channel and the group on another hops
+   between them, which is what made a transfer run at 17 MB/s instead of 79. `ask` from an older
+   computer has no `frequency`, and an older phone ignores it. Whether this holds the speed on a
+   different channel is **not measured yet**.
 3. **Joiner**, on `Event::Direct { step: Invite { group: Some(g), .. } }`:
    `connect(channel, WifiP2pConfig.Builder().setNetworkName(g.ssid).setPassphrase(g.passphrase)
    (.setGroupOperatingFrequency(f) when g.frequency is Some(f)).build(), listener)`. Only one of
@@ -1889,6 +1963,134 @@ features `preflight` and `apps`.
 probed apps); a picker for the phone's own photos, files and apps that calls `prepare_send`
 as it fills and sends once with `send_bundle`; install what `AppsReceived` lists in one
 session; show `TransferRoute`. The pairing and the 7-day away lease are unchanged (§4.13).
+
+### 4.23 Snap from Phone (desktop, after 0.12.4)
+
+A computer asks a phone to open its camera and send what the user takes. Additive: a phone
+that doesn't announce `snap` is never asked, and a computer that doesn't know the messages
+ignores them.
+
+```json
+{"type":"snap_request"}                                                  // computer → phone
+{"type":"snap_refused","reason":"Linksy needs the camera permission"}    // phone → computer
+```
+
+- **Feature `snap`:** the phone announces it while it can open its camera for a computer
+  (permission given, the switch on). The computer shows **Snap from Phone** on the phone's page
+  only then, and `node.request_snap(id)` is `Error::Unsupported` otherwise.
+- **The phone** opens its camera on `snap_request` (with the screen on; when Linksy is in the
+  background Android won't start an activity, so a notification "Take a picture for
+  *computer*" that opens it is the way). If it can't, it answers `snap_refused` with a
+  sentence to show as it is; the computer shows "*phone* can't take a picture: …". If the user
+  closes the camera without a picture, nothing is sent.
+- **The picture** is an ordinary offer (§4.5): **one file**, `.jpg`, `.jpeg`, `.png`, `.webp`,
+  `.heic`, `.heif` or `.pdf` (a straightened page), at most 40 MiB. For two minutes after its
+  `snap_request`, and once per request, the computer takes it **without asking** into
+  Downloads/Linksy, with the notification "Received *name*" (Open, Show in Folder). Any other
+  offer, a second picture, or one after the two minutes asks as usual, and so does a phone's own
+  "Snap to Computer" with no `snap_request` before it, unless Always Accept is on for that phone.
+- **The clipboard:** when the computer announces `clipboard_file`, send the same picture a second
+  time with `"clipboard":true` (§4.5; at most 10 MiB, so a scaled copy if it is bigger). The
+  computer puts it on its clipboard as an image and says "Image ready to paste". Send the file
+  first, then the clipboard copy: the first is what the notification opens.
+- **Core API:** `node.request_snap(id)`, `node.refuse_snap(id, reason)`;
+  `Event::SnapRequest { from }` on the phone, `Event::SnapRefused { from, reason }` on the
+  computer. `linksy snap <phone>` on the command line.
+- **Phone to-do:** announce `snap`; open the camera on `snap_request`; send the file, then the
+  clipboard copy; `snap_refused` with a reason when it can't.
+
+### 4.24 The phone's controls on the computer (desktop, after 0.12.4)
+
+A computer sets a phone's volumes, ringer, Do Not Disturb and flashlight, and sees them change.
+Feature `phone_controls`, announced by the phone. Modelled on the computer's volume (§4.5):
+watch, state, set.
+
+```json
+{"type":"controls_watch","on":true}                       // computer → phone: send me controls_state while connected
+{"type":"controls_state","seq":1760945000123,"media":0.4,"ringtone":0.8,"alarm":1.0,
+ "ringer":"normal","dnd":"off","dnd_access":true,"flashlight":false}   // phone → computer
+{"type":"controls_set","media":0.5,"dnd":"priority","flashlight":true}   // computer → phone: only what is given
+{"type":"controls_refused","what":"dnd","reason":"Allow Do Not Disturb access to Linksy on the phone first"}
+```
+
+- **Levels** (`media`, `ringtone`, `alarm`) run from 0 to 1 of each stream's own range
+  (`AudioManager` `STREAM_MUSIC`, `STREAM_RING`, `STREAM_ALARM`): the phone rounds to its steps.
+  The computer keeps them within 0 to 1; a value that isn't a number is dropped.
+- **`ringer`**: `normal`, `vibrate` or `silent` (`AudioManager.setRingerMode`). Going to `silent`
+  on a phone in Do Not Disturb needs the access below.
+- **`dnd`**: `off`, `priority` (what the phone's own Do Not Disturb settings let through),
+  `alarms` (only alarms) or `silence` (nothing): Android's interruption filter. Changing it needs
+  **Do Not Disturb access** (`NotificationManager.isNotificationPolicyAccessGranted`), a special
+  access the user gives in Android's settings; `dnd_access` says whether Linksy has it, so the
+  computer can say so instead of showing a switch that does nothing. Without it, answer a
+  `dnd` change with `controls_refused`.
+- **`flashlight`**: `CameraManager.setTorchMode`; absent from `controls_state` when the phone has
+  none. It can't be turned on while the camera is in use (the webcam): `controls_refused`.
+- **`seq`** as for `media_state`: the computer keeps the newest and drops late ones. Send a
+  `controls_state` on connecting (to a computer that asked), and again whenever any of them
+  changes, by the phone's own buttons too, but at most about four times a second while a level is
+  moving. Values from a newer Linksy that this one doesn't know (`ringer`, `dnd`) are read as
+  `unknown` and never sent back.
+- **`controls_refused`** says which one (`what`: `media`, `ringtone`, `alarm`, `ringer`, `dnd`,
+  `flashlight`) and why, in a sentence to show as it is. A `controls_set` with several keys
+  may do some and refuse others; each refusal is its own message.
+- **From away:** these are **not** among the things always allowed away from home (§4.13): a
+  phone refuses `controls_set` from away with `controls_refused` and `reason` "away" unless
+  Allow Everything From Away is on for that computer. (Reading `controls_state` is fine: it only
+  goes to a computer that asked.) This is the safe default; widening it is the user's decision.
+- **Keep Do Not Disturb in Sync** (computer, GNOME and KDE): while on for a phone, the computer's
+  Do Not Disturb and the phone's `dnd` follow each other: `off` and the others map to the
+  computer's off and on, and the last change wins. Nothing on the phone's side beyond the above.
+  The computer turns it on for the phone with `controls_set {"dnd":"priority"}` (the phone's own
+  Do Not Disturb settings decide what still gets through) and off with `{"dnd":"off"}`; when the
+  phone is in `alarms` or `silence` and the computer turns its own on, the phone is left alone.
+  Only a change carries over: turning it on starts from how each already is. It needs
+  `dnd_access` on the phone, and the switch is dimmed without it.
+- **When the computer watches:** the service sends `controls_watch` `on: true` once per connection
+  to every phone that announces `phone_controls`, as soon as it connects, and keeps the newest
+  `controls_state` for its apps (the device page, `linksy controls <phone>`). It never sends
+  `on: false`: the watch ends with the connection. A phone speaks only when something changes, so
+  this costs nothing while the controls are left alone.
+- **Core API:** `node.watch_controls(id, on)`, `node.set_controls(id, ControlsChange)`,
+  `node.send_controls_state(id, &ControlsState)`, `node.refuse_controls(id, what, reason)`;
+  `Event::ControlsState`, `ControlsSet`, `ControlsWatch`, `ControlsRefused`.
+- **Phone to-do:** announce `phone_controls`; answer `controls_watch` with `controls_state` and
+  keep it going while watched; apply each `controls_set` key and refuse what it can't; ask the user
+  for Do Not Disturb access from a button where `dnd_access` is false (Settings, "Do Not Disturb
+  access"), since a sideloaded app can ask for it without a permission prompt of the
+  restricted kind.
+
+### 4.25 This computer's notifications on the phone (desktop, after 0.12.4)
+
+What comes up on a computer comes up on a phone that asked for it. Feature
+`computer_notifications`, announced by the phone while the user lets it show them.
+
+```json
+{"type":"computer_notification","key":"4121-17","app":"Thunderbird","title":"Mum","body":"Dinner at eight?","at_ms":1760945000123}   // computer → phone
+```
+
+- **Who gets them:** only a phone that announces `computer_notifications`, and only once the
+  user turned it on for that phone on the computer ("This Computer's Notifications on the Phone",
+  off until then). The computer never sends to a phone that doesn't announce it, so announcing it
+  is how the phone says yes; leave it out of `features` while the user has it off on the phone.
+- **What is sent:** the notification's app name, summary (`title`) and text (`body`, may be empty),
+  and when it came up. `title` is cut at 200 characters, `body` at 1000, `app` and `key` at 80; the
+  phone cuts them too. A later one with the same `key` replaces the earlier one. Icons and
+  actions are not sent.
+- **What isn't:** Linksy's own notifications (a phone's notifications shown on the computer must
+  not go back to it), volume and brightness pop-ups, apps the user muted
+  (`linksy forward mute <app>`), anything while the computer's Do Not Disturb is on, and more than
+  20 a minute to one phone. There is no message to take one back.
+- **Phone to-do:** announce `computer_notifications` when allowed; on `computer_notification`
+  post an Android notification (its own channel, "From this computer", so the user can silence or
+  hide the channel) titled with `title`, text `body`, small text the computer's name and `app`;
+  replace one with the same `key`; never act on it beyond showing it. Nothing to send back.
+- **From away:** allowed, like the phone's notifications on the computer (§4.13): it is only
+  shown, and the computer sends it only after the user turned it on.
+- **Not available:** from the Flatpak's sandbox, where the session bus can't be listened to;
+  the switch isn't shown there.
+- **Core API:** `node.send_computer_notification(id, key, app, title, body, at_ms)`;
+  `Event::ComputerNotification`.
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 

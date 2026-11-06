@@ -8,6 +8,7 @@ mod codes;
 mod controls;
 #[cfg(target_os = "linux")]
 mod deck;
+mod doctor;
 mod gallery;
 mod history;
 mod inbox;
@@ -17,6 +18,10 @@ mod lock;
 mod mirror;
 #[cfg(target_os = "linux")]
 mod network;
+#[cfg(target_os = "linux")]
+mod outbox;
+#[cfg(target_os = "linux")]
+mod phone_controls;
 mod phone_files;
 mod photos;
 mod pictures;
@@ -263,6 +268,16 @@ async fn run() -> ExitCode {
     tokio::spawn(media::run(node.clone(), icons.join("art")));
     #[cfg(target_os = "linux")]
     tokio::spawn(volume::run(node.clone()));
+    #[cfg(target_os = "linux")]
+    {
+        let _ = outbox::OUTBOX.set(outbox::Outbox::load(data_dir.join("outbox.json")));
+        tokio::spawn(outbox::run(node.clone()));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let _ = phone_controls::CONTROLS.set(phone_controls::Controls::load(data_dir.join("dnd_sync.json")));
+        tokio::spawn(phone_controls::run(node.clone()));
+    }
     #[cfg(target_os = "linux")]
     {
         let deck = deck::Deck::load(data_dir.join("deck.json"), deck::System::default());

@@ -205,6 +205,16 @@ pub mod qobject {
         #[cxx_name = "setupChecked"]
         fn setup_checked(self: Pin<&mut Backend>, json: QString);
 
+        /// Whether the firewall would keep devices out, for the Connection Doctor;
+        /// `firewallChecked` answers with a finding (JSON), or "" when it is fine.
+        #[qinvokable]
+        #[cxx_name = "checkFirewall"]
+        fn check_firewall(self: Pin<&mut Self>);
+
+        #[qsignal]
+        #[cxx_name = "firewallChecked"]
+        fn firewall_checked(self: Pin<&mut Backend>, json: QString);
+
         #[qsignal]
         #[cxx_name = "setupStep"]
         fn setup_step(self: Pin<&mut Backend>, text: QString);
@@ -644,6 +654,15 @@ impl qobject::Backend {
         self.rust().rt.spawn_blocking(move || {
             let state = autostart_state();
             let _ = thread.queue(move |b| b.autostart_checked(state, QString::default()));
+        });
+    }
+
+    pub fn check_firewall(self: Pin<&mut Self>) {
+        let thread = self.qt_thread();
+        // firewall-cmd and polkit: off the Qt thread
+        self.rust().rt.spawn_blocking(move || {
+            let json = linksy_setup::firewall_finding().and_then(|f| serde_json::to_string(&f).ok()).unwrap_or_default();
+            let _ = thread.queue(move |b| b.firewall_checked(QString::from(&json)));
         });
     }
 

@@ -109,6 +109,13 @@ impl Window {
         body.append(&list);
         body.append(&terminal_list);
         body.append(&gtk::LinkButton::builder().uri(linksy_setup::BY_HAND).label(t!("What Linksy Needs")).halign(gtk::Align::Center).build());
+        let doctor = gtk::Button::builder().label(t!("Why Can't I See My Phone?")).halign(gtk::Align::Center).css_classes(["flat"]).build();
+        let (w, d) = (self.clone(), dialog.clone());
+        doctor.connect_clicked(move |_| {
+            d.close();
+            w.show_doctor();
+        });
+        body.append(&doctor);
         let scroller = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).propagate_natural_height(true).child(&body).build();
         let view = adw::ToolbarView::new();
         view.add_top_bar(&adw::HeaderBar::new());

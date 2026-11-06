@@ -35,6 +35,12 @@ Kirigami.ScrollablePage {
             onTriggered: app.openUsb()
         },
         Kirigami.Action {
+            icon.name: "help-contents"
+            text: app.t("Why Can't I See My Phone?")
+            displayHint: Kirigami.DisplayHint.AlwaysHide
+            onTriggered: app.openDoctor()
+        },
+        Kirigami.Action {
             icon.name: "folder-download"
             text: app.t("Open Received Files")
             displayHint: Kirigami.DisplayHint.AlwaysHide

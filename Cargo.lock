@@ -2680,6 +2680,7 @@ dependencies = [
  "gstreamer",
  "linksy-host",
  "linksy-i18n",
+ "linksy-ipc",
 ]
 
 [[package]]

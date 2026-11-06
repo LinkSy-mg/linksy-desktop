@@ -249,6 +249,7 @@ fn session_title(s: &ActiveSession) -> String {
         SessionKind::Camera => t!("{name}'s camera is on: “{camera}” in your apps", name, camera = format!("Linksy Camera ({name})")),
         SessionKind::Microphone if s.sharing => t!("{name} is using your microphone", name),
         SessionKind::Microphone => t!("{name}'s microphone is on: “{microphone}” in your apps", name, microphone = format!("Linksy Microphone ({name})")),
+        SessionKind::Sound => t!("{name}'s sound is playing here", name),
         SessionKind::Display => t!("{name} is your second display", name),
         SessionKind::Control => t!("{name} is controlling your screen", name),
         SessionKind::Input => t!("{name} is your touchpad and keyboard", name),

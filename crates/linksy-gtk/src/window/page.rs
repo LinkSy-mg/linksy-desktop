@@ -10,10 +10,11 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use linksy_ipc::linksy_core::{DeviceKind, DeviceView, Direction, Fingerprint, Uuid};
+use linksy_ipc::linksy_core::{ControlsChange, DeviceKind, DeviceView, Direction, Fingerprint, Uuid};
 use linksy_i18n::t;
-use linksy_ipc::{HistoryEntry, HistoryStatus, Shared, TerminalStatus};
+use linksy_ipc::{HistoryEntry, HistoryStatus, PhoneControlsInfo, Shared, TerminalStatus};
 
+use super::controls::ControlsPanel;
 use super::{LiveRow, Progress, drag_files, kind_icon, kind_name, progress_text, status_text};
 use crate::fmt;
 
@@ -52,6 +53,13 @@ pub enum Action {
     /// Let this device see and control the screen without asking.
     AllowScreen(bool),
     Locate,
+    /// Ask a phone to open its camera and send the picture.
+    Snap,
+    /// Change some of the phone's controls, or keep its Do Not Disturb in step with this computer's.
+    Controls(ControlsChange),
+    DndSync(bool),
+    /// Show this computer's notifications on the phone, or stop.
+    ForwardNotifications(bool),
     /// Ask the phone to turn on `notifications` (the Inbox) or `gallery`.
     TurnOn(&'static str),
     /// A tab shows, to fill.
@@ -132,6 +140,7 @@ pub struct DevicePage {
     send_tile: gtk::Button,
     ring_tile: gtk::Widget,
     locate_tile: gtk::Widget,
+    snap_tile: gtk::Widget,
     ping_tile: gtk::Widget,
     /// "Use the phone as": a card per feature, two by two.
     use_as: gtk::Box,
@@ -143,6 +152,7 @@ pub struct DevicePage {
     webcam_card: gtk::Box,
     mic_card: gtk::Box,
     deck_card: gtk::Box,
+    controls: ControlsPanel,
     deck_desc: gtk::Label,
     webcam_desc: gtk::Label,
     webcam_live: gtk::Label,
@@ -182,6 +192,8 @@ pub struct DevicePage {
     lock_row: adw::SwitchRow,
     /// "Allow Everything From Away" (docs/protocol.md §4.13).
     away_row: adw::SwitchRow,
+    /// This computer's notifications on the phone.
+    forward_row: adw::SwitchRow,
     /// "Always Accept Files".
     accept_row: adw::SwitchRow,
     /// "Always Allow Screen and Control".
@@ -356,6 +368,7 @@ impl DevicePage {
         tile("video-display-symbolic", t!("View Screen"), t!("Watch or take control"), false, || Action::ViewScreen);
         let ring_tile = tile("audio-volume-high-symbolic", t!("Ring"), t!("Loud, even on silent"), true, || Action::Ring);
         let locate_tile = tile("find-location-symbolic", t!("Locate"), t!("Asked once, never tracked"), true, || Action::Locate);
+        let snap_tile = tile("camera-photo-symbolic", t!("Snap from Phone"), t!("Take a picture, get it here"), false, || Action::Snap);
         let ping_tile = tile("preferences-system-notifications-symbolic", t!("Ping"), t!("Show a notification"), false, || Action::Ping);
         // Not expanding: their insides push text to the bottom, not the page.
         let actions = gtk::Box::builder().spacing(10).homogeneous(true).vexpand(false).build();
@@ -462,6 +475,14 @@ impl DevicePage {
                 e(Action::AwayAll(row.is_active()));
             }
         });
+        let forward_row = adw::SwitchRow::builder().title(t!("This Computer's Notifications on the Phone")).subtitle_lines(3).visible(false).build();
+        forward_row.add_prefix(&gtk::Image::builder().icon_name("preferences-system-notifications-symbolic").build());
+        let (e, s) = (emit.clone(), syncing.clone());
+        forward_row.connect_active_notify(move |row| {
+            if !s.get() {
+                e(Action::ForwardNotifications(row.is_active()));
+            }
+        });
         let accept_row = adw::SwitchRow::builder().title(t!("Always Accept Files")).subtitle_lines(2).build();
         accept_row.add_prefix(&gtk::Image::builder().icon_name("folder-download-symbolic").build());
         let (e, s) = (emit.clone(), syncing.clone());
@@ -516,6 +537,7 @@ impl DevicePage {
         settings.append(&lock_row);
         settings.append(&accept_row);
         settings.append(&screen_row);
+        settings.append(&forward_row);
         settings.append(&away_row);
         let terminals = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).visible(false).css_classes(["boxed-list"]).build();
 
@@ -583,6 +605,11 @@ impl DevicePage {
         // Tabs: a line under them all, the one showing underlined in the accent.
         let use_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(22).build();
         use_page.append(&use_as);
+        let controls = {
+            let (e1, e2) = (emit.clone(), emit.clone());
+            ControlsPanel::new(Rc::new(move |c| e1(Action::Controls(c))), Rc::new(move |on| e2(Action::DndSync(on))))
+        };
+        use_page.append(&controls.root);
         use_page.append(&terminal_box);
         use_page.append(&terminals);
         let inbox_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
@@ -852,6 +879,7 @@ impl DevicePage {
             send_tile,
             ring_tile,
             locate_tile,
+            snap_tile,
             ping_tile,
             use_as,
             use_as_title,
@@ -861,6 +889,7 @@ impl DevicePage {
             webcam_card,
             mic_card,
             deck_card,
+            controls,
             deck_desc,
             mic_desc,
             mic_live,
@@ -891,6 +920,7 @@ impl DevicePage {
             settings,
             lock_row,
             away_row,
+            forward_row,
             accept_row,
             screen_row,
             terminal_box,
@@ -953,6 +983,23 @@ impl DevicePage {
         }
     }
 
+    /// Whether this computer's notifications go to the phone; none hides the switch (the phone
+    /// can't show them, or this computer can't listen for them).
+    pub fn show_forward(&self, device: &str, info: Option<&linksy_ipc::ComputerNotifications>) {
+        let shown = info.is_some_and(|i| i.available);
+        self.forward_row.set_visible(shown);
+        self.forward_row.set_subtitle(&glib::markup_escape_text(&t!("What comes up here also comes up on {device}, except Linksy's own and while Do Not Disturb is on. Off until you turn it on.", device)));
+        self.syncing.set(true);
+        self.forward_row.set_active(info.is_some_and(|i| i.on));
+        self.syncing.set(false);
+        self.settings_visible(true);
+    }
+
+    /// The phone's controls as last known; none hides them.
+    pub fn show_controls(&self, info: Option<&PhoneControlsInfo>) {
+        self.controls.show(info);
+    }
+
     fn any_card(&self) -> bool {
         [&self.display_card, &self.webcam_card, &self.mic_card, &self.deck_card].iter().any(|c| c.is_visible())
     }
@@ -960,7 +1007,7 @@ impl DevicePage {
     /// Show the tabs this device has, and one of them.
     fn update_tabs(&self, d: &DeviceView) {
         let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
-        let any_use = self.any_card() || self.terminal_box.is_visible() || self.terminals.is_visible();
+        let any_use = self.any_card() || self.terminal_box.is_visible() || self.terminals.is_visible() || (d.trusted && super::can(&d.device, "phone_controls"));
         // Shown while off too, saying how to turn them on
         let has = |t: Tab| match t {
             Tab::Use => any_use,
@@ -1177,6 +1224,7 @@ impl DevicePage {
         self.actions.set_visible(d.trusted);
         self.ring_tile.set_visible(ring);
         self.locate_tile.set_visible(d.device.kind == DeviceKind::Phone && super::can(&d.device, "locate"));
+        self.snap_tile.set_visible(d.trusted && super::can(&d.device, "snap"));
         self.ping_tile.set_visible(!ring);
 
         self.display_card.set_visible(super::can(&d.device, "display"));

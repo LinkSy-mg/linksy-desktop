@@ -103,9 +103,14 @@ pub trait Desktop: Send + Sync + 'static {
     fn status(&self, ids: &HashSet<&str>) -> impl Future<Output = Status> + Send;
 }
 
-#[derive(Default)]
 pub struct System {
-    controls: crate::controls::Controls,
+    controls: &'static crate::controls::Controls,
+}
+
+impl Default for System {
+    fn default() -> Self {
+        Self { controls: crate::controls::shared() }
+    }
 }
 
 impl Desktop for System {

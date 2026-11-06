@@ -49,10 +49,15 @@ On main and not in a release yet:
 Built on the phone, not published (from the phone's side; the desktop has not seen its messages yet):
 - **Snap to Computer** and **Copy to Computer**, the phone's half of the **Connection Doctor**, and a **USB button** (`usb_plugged`, `usb_connect`, which the computer already answers).
 
-Being built on the computer, in this order:
-1. Snap from Phone, and checking that a snap lands where it should.
-2. The Connection Doctor.
-3. The phone's controls (volumes, ringer, Do Not Disturb, flashlight).
+Built on the computer, on branch `phone-work` (not on main yet):
+1. Snap from Phone: the picture lands in Downloads/Linksy and on the clipboard, with a notification to open it (§4.23).
+2. The Connection Doctor: "Why Can't I See My Phone?" in the device list and Finish Setup.
+3. The phone's controls (volumes, ringer, Do Not Disturb, flashlight): Sound and Silence on the phone's page in both apps, `linksy controls`, and Keep Do Not Disturb in Sync on GNOME and KDE (§4.24). The phone side is to do.
+4. This computer's notifications on the phone: a switch per phone in both apps (off until turned on), `linksy forward`, muted apps (§4.25). The phone side is to do.
+5. The phone's sound with its screen (§4.8) and taps turned right for a phone in landscape (§4.11). The phone side is to do, and neither was tried on a phone.
+6. Screens at up to 60 fps with a fallback to 30 (a screen shared over the internet is 4 Mbit/s at 30).
+
+Not done, and why: a Qt deck editor (the GTK one is 4000 lines, and where decks are edited is not decided); datagrams for video and the pointer, BBR over the internet and a bitrate that follows the link while it runs (each needs measuring on a real link first); transfers with no shared network and Bluetooth (the first needs the computer to host a hotspot, which cuts its own Wi-Fi; the second needs a phone); the Wi-Fi Direct speed measurement (needs a phone).
 
 
 ## Now, in detail
@@ -97,7 +102,8 @@ One button finds which, says it in a sentence, and fixes what it can.
 A direct link ran at about 79 MB/s when the phone picked the channel the computer's Wi-Fi
 was on, and about 17 MB/s when it picked another (5220 MHz against 5240): the computer's
 one Wi-Fi chip keeps hopping between the two.
-- **Desktop:** say which channel its Wi-Fi is on when it asks for a link.
+- **Desktop (done on branch `phone-work`, not measured):** says which channel its Wi-Fi is on when it
+  asks for a link (`ask` carries `frequency`, §4.17).
 - **Phone:** create the group on that channel (`setGroupOperatingFrequency`) and let the
   computer join it, instead of choosing during negotiation. First check that
   NetworkManager can join a group that already exists.
@@ -123,7 +129,12 @@ touchpad and the webcam feel immediate.
   back within 50 ms, and switching networks reconnects in under 2 seconds.
 
 ### 60 fps screens — M
-Today screens run at up to 30 fps (the webcam already does 60).
+The computer's screen on a phone now encodes at up to 60 fps (30 before), falling back to 30 by
+itself when its encoder can't keep up; the phone's own screen at 60 needs the settings in
+`docs/protocol.md` §4.8, and decoding at 60 on the phone is its half. Measured here: a GPU
+encoder keeps 60 fps at 1080p; x264 on the CPU keeps 60 at 1080p and 53 at 1440p; a 144 Hz
+screen is cut to 60. The first phone-side measurements are not in yet.
+Before: screens ran at up to 30 fps (the webcam already did 60).
 - **Both ways:** the computer's screen on the phone, controlling it, Sidecar, and the
   phone's screen on the computer, at 60 fps where both ends can encode and decode it.
 - **Phone:** 60 fps decoding and display, and 60 fps capture of its own screen; asks the

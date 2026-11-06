@@ -33,6 +33,12 @@ pub async fn run(node: Node) {
             debug!("network changed: {now:?}");
             known = now;
             node.network_changed();
+            // The Wi-Fi may be on another channel now: what a direct link is asked to match
+            #[cfg(target_os = "linux")]
+            {
+                let node = node.clone();
+                tokio::spawn(async move { node.set_wifi_frequency(crate::direct::wifi_frequency().await) });
+            }
         }
     }
 }

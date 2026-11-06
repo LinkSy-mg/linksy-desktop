@@ -123,6 +123,30 @@ If Linksy ever ships through the Play Store, the notification, media and control
 become possible again, but each needs a Play policy declaration, and SMS only for a
 default SMS app.
 
+## 3b. What the desktop built on branch `phone-work` that the phone follows (after 0.12.4)
+
+Each is in `docs/protocol.md`; the core rev to pin is in the desktop's release notes once merged.
+None needs the accessibility service or SMS access.
+
+- **Snap** (§4.23): `snap` feature; `snap_request` opens the camera, the picture goes as a normal
+  file, then to the clipboard (`clipboard` with `"clipboard":true`). Done on the phone.
+- **The phone's controls** (§4.24): `phone_controls`; answer `controls_watch` with `controls_state`,
+  apply `controls_set`, `controls_refused` with a sentence. Do Not Disturb needs the special
+  Do Not Disturb access (a Settings page, not a permission prompt).
+- **This computer's notifications on the phone** (§4.25): `computer_notifications`; post each
+  `computer_notification` in its own notification channel.
+- **The phone's sound with its screen** (§4.8): `sound`; on `session_request` kind `sound` write
+  raw 48 kHz stereo 16-bit PCM from `AudioPlaybackCapture`, through the screen's `MediaProjection`.
+- **Rotation for control in landscape** (§4.11): if taps from the computer land turned a quarter
+  with the phone in landscape, send `screen_rotation`.
+- **Screens at 60 fps** (§4.8): the computer sends up to 60; decode and show each frame as it
+  arrives. The phone's own screen at 60 needs the encoder settings listed there.
+- **Wi-Fi Direct on the computer's channel** (§4.17): `setGroupOperatingFrequency` with the
+  `frequency` the computer's `ask` step carries.
+- **Core messages to know about, as they are in the core:** `ControlsState`, `ControlsChange`,
+  `Ringer`, `Dnd`, `Message::ScreenRotation`, `Message::ComputerNotification`,
+  `SessionKind::Sound`, `DirectStep::Ask { frequency }`.
+
 ## 4. Not done yet on the phone (possible, just not built)
 
 - Bluetooth LE presence (planned on both sides; needs the nearby-devices runtime
@@ -132,6 +156,8 @@ default SMS app.
 
 ## Changelog
 
+- **2026-11-06** — §3b: what the desktop built on `phone-work` that the phone follows: controls,
+  this computer's notifications, the phone's sound, landscape control, 60 fps, the Wi-Fi channel.
 - **2026-11-05** — Inbox on by default (`phone_notifications` != `off`, migrated once), rows
   for the Inbox and Gallery on the first-run setup page, a one-time home card for people
   updating, the restricted-settings steps first on Android 13+. A computer's ask

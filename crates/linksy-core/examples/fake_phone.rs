@@ -51,6 +51,17 @@
 //! DECK_LAYOUT, in short); `--deck-wait SECONDS` keeps the deck open that long after the run.
 //! `--off FEATURE` starts without it (`notifications`, `gallery`), as with its switch off;
 //! `--turn-on` announces `turn_on` and says yes when a computer asks to turn one on.
+//! `--snap PICTURE` announces `snap` and, when a computer asks, sends that picture as a file
+//! and then to its clipboard; `--snap-refuse WHY` says no with that reason instead.
+//! `--sound` announces `sound` and says yes when a computer asks for the phone's sound: it sends a
+//! two-second 440 Hz tone (raw s16le 48 kHz stereo), as MediaProjection's playback capture would,
+//! and keeps any screen session open without sending a picture.
+//! `--computer-notifications` announces `computer_notifications` and prints each one as
+//! COMPUTER NOTIFICATION.
+//! `--controls` announces `phone_controls`: it answers `controls_watch` with made-up volumes and
+//! applies each `controls_set`, printing it as CONTROLS SET; `--no-dnd-access` refuses Do Not
+//! Disturb changes, and `--dnd-after SECONDS MODE` changes it by itself, as the phone's own
+//! switch would (`off`, `priority`, `alarms`, `silence`).
 
 use std::time::Duration;
 
@@ -91,6 +102,9 @@ async fn main() {
     let mut deck: Option<(String, Option<f64>)> = None;
     let (mut deck_layout, mut deck_wait) = (false, 0u64);
     let (mut off, mut turn_on) = (Vec::<String>::new(), false);
+    let (mut snap, mut snap_refuse) = (None::<std::path::PathBuf>, None::<String>);
+    let (mut controls, mut no_dnd_access, mut computer_notifications, mut sound) = (false, false, false, false);
+    let mut dnd_after: Option<(u64, linksy_core::Dnd)> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
         match a.as_str() {
@@ -153,6 +167,17 @@ async fn main() {
             "--notifications-later" => notifications_later = Some(value().parse().expect("--notifications-later SECONDS")),
             "--off" => off.push(value()),
             "--turn-on" => turn_on = true,
+            "--snap" => snap = Some(value().into()),
+            "--snap-refuse" => snap_refuse = Some(value()),
+            "--controls" => controls = true,
+            "--computer-notifications" => computer_notifications = true,
+            "--sound" => sound = true,
+            "--no-dnd-access" => no_dnd_access = true,
+            "--dnd-after" => {
+                let after = value().parse().expect("--dnd-after SECONDS MODE");
+                let mode = serde_json::from_value(serde_json::Value::String(value())).expect("MODE: off, priority, alarms or silence");
+                dnd_after = Some((after, mode));
+            }
             other => panic!("unknown option {other}"),
         }
     }
@@ -179,6 +204,18 @@ async fn main() {
     }
     if turn_on {
         config.features.push("turn_on".into());
+    }
+    if snap.is_some() || snap_refuse.is_some() {
+        config.features.push("snap".into());
+    }
+    if controls {
+        config.features.push("phone_controls".into());
+    }
+    if computer_notifications {
+        config.features.push("computer_notifications".into());
+    }
+    if sound {
+        config.features.push("sound".into());
     }
     config.features.retain(|f| !off.contains(f));
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
@@ -564,6 +601,42 @@ async fn main() {
             }
         });
     }
+    if sound {
+        let mut sessions = node.incoming_sessions().expect("sessions");
+        tokio::spawn(async move {
+            while let Some(mut s) = sessions.recv().await {
+                if s.kind != linksy_core::SessionKind::Sound {
+                    println!("{:?} session from {} kept open, with no picture", s.kind, s.peer.name);
+                    tokio::spawn(async move {
+                        let _s = s;
+                        tokio::time::sleep(Duration::from_secs(120)).await;
+                    });
+                    continue;
+                }
+                tokio::spawn(async move {
+                    let mut tick = tokio::time::interval(Duration::from_millis(10));
+                    let mut sent = 0u64;
+                    // Two seconds of a tone, in both ears, 10 ms at a time
+                    for n in (0..96_000u64).step_by(480) {
+                        tick.tick().await;
+                        let chunk: Vec<u8> = (n..n + 480)
+                            .flat_map(|i| {
+                                let sample = (((i as f64 / 48_000.0) * 440.0 * std::f64::consts::TAU).sin() * 6_000.0) as i16;
+                                [sample.to_le_bytes(), sample.to_le_bytes()].concat()
+                            })
+                            .collect();
+                        if s.send.write_all(&chunk).await.is_err() {
+                            break;
+                        }
+                        sent += chunk.len() as u64;
+                    }
+                    println!("SOUND sent {sent} bytes to {}", s.peer.name);
+                    let _ = s.send.finish();
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                });
+            }
+        });
+    }
     if mic {
         let mut sessions = node.incoming_sessions().expect("sessions");
         tokio::spawn(async move {
@@ -600,9 +673,27 @@ async fn main() {
     }
     let deadline = tokio::time::sleep(Duration::from_secs(seconds));
     tokio::pin!(deadline);
+    // The phone's controls, as made up, and who watches them
+    let mut phone = linksy_core::ControlsState { media: 0.4, ringtone: 0.8, alarm: 1.0, dnd_access: !no_dnd_access, flashlight: Some(false), ..Default::default() };
+    let mut watchers = std::collections::HashSet::new();
+    let (own_dnd, mut own_dnd_rx) = tokio::sync::mpsc::unbounded_channel::<linksy_core::Dnd>();
+    if let Some((after, mode)) = dnd_after {
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(after)).await;
+            let _ = own_dnd.send(mode);
+        });
+    }
     loop {
         tokio::select! {
             _ = &mut deadline => break,
+            Some(mode) = own_dnd_rx.recv() => {
+                println!("CONTROLS the phone's own Do Not Disturb: {mode:?}");
+                phone.dnd = mode;
+                phone.seq = seq();
+                for id in &watchers {
+                    let _ = node.send_controls_state(id, &phone).await;
+                }
+            }
             e = events.recv() => match e {
                 Ok(Event::Clipboard { from, text }) => println!("CLIPBOARD from {}: {text}", from.name),
                 Ok(Event::Ring { from, on }) => println!("{} {}", if on { "RING from" } else { "ring stopped by" }, from.name),
@@ -687,6 +778,57 @@ async fn main() {
                         println!("{feature} turned on");
                     }
                 }
+                Ok(Event::SnapRequest { from }) => {
+                    println!("SNAP ASKED by {}", from.name);
+                    if let Some(why) = &snap_refuse {
+                        let _ = node.refuse_snap(&from.id, why).await;
+                    } else if let Some(picture) = &snap {
+                        let sent = node.send_files(&from.id, vec![picture.clone()]).await;
+                        println!("snap sent: {:?}", sent.map_err(|e| e.to_string()));
+                        let on_clipboard = node.send_clipboard_file(&from.id, picture.clone()).await;
+                        println!("snap on the clipboard: {:?}", on_clipboard.map_err(|e| e.to_string()));
+                    }
+                }
+                Ok(Event::ComputerNotification { app, title, body, key, .. }) => println!("COMPUTER NOTIFICATION [{key}] {app}: {title} / {body}"),
+                Ok(Event::ControlsWatch { from, on }) if controls => {
+                    println!("CONTROLS WATCH {on} by {}", from.name);
+                    if on {
+                        watchers.insert(from.id);
+                        phone.seq = seq();
+                        let _ = node.send_controls_state(&from.id, &phone).await;
+                    } else {
+                        watchers.remove(&from.id);
+                    }
+                }
+                Ok(Event::ControlsSet { from, change }) if controls => {
+                    println!("CONTROLS SET {}", serde_json::to_string(&change).unwrap_or_default());
+                    if let Some(l) = change.media {
+                        phone.media = l;
+                    }
+                    if let Some(l) = change.ringtone {
+                        phone.ringtone = l;
+                    }
+                    if let Some(l) = change.alarm {
+                        phone.alarm = l;
+                    }
+                    if let Some(r) = change.ringer {
+                        phone.ringer = r;
+                    }
+                    if let Some(d) = change.dnd {
+                        if phone.dnd_access {
+                            phone.dnd = d;
+                        } else {
+                            let _ = node.refuse_controls(&from.id, "dnd", "Allow Do Not Disturb access to Linksy on the phone first").await;
+                        }
+                    }
+                    if let Some(f) = change.flashlight {
+                        phone.flashlight = Some(f);
+                    }
+                    phone.seq = seq();
+                    if watchers.contains(&from.id) {
+                        let _ = node.send_controls_state(&from.id, &phone).await;
+                    }
+                }
                 Ok(Event::LocateRequest { from }) => {
                     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
                     let r = match location {
@@ -697,6 +839,10 @@ async fn main() {
                 }
                 Ok(Event::PairingRequest { request, device, code, .. }) if accept_pairing => {
                     println!("pairing with {} (code {code}): accepting", device.name);
+                    node.respond(request, true);
+                }
+                Ok(Event::SessionRequest { request, from, kind }) if sound => {
+                    println!("{kind:?} requested by {}: accepting", from.name);
                     node.respond(request, true);
                 }
                 Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Camera }) if camera => {

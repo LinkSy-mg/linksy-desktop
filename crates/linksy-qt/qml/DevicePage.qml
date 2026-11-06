@@ -38,7 +38,7 @@ Kirigami.Page {
     readonly property string tabsKey: {
         if (!trusted || !info) return "";
         const shown = [];
-        if (handheld || ["display", "camera", "microphone"].some(f => app.can(info, f))) shown.push("use");
+        if (handheld || ["display", "camera", "microphone", "phone_controls"].some(f => app.can(info, f))) shown.push("use");
         // The Inbox and Gallery show while off too, saying how to turn them on
         if (phone) shown.push("inbox");
         if (handheld) shown.push("gallery");
@@ -591,6 +591,15 @@ Kirigami.Page {
                                 app.toast(ok ? app.t("Pinged {name}", { name: page.name }) : err))
                         }
                         BarButton {
+                            visible: page.trusted && page.info && app.can(page.info, "snap")
+                            iconName: "camera-photo"
+                            tint: Kirigami.Theme.neutralTextColor
+                            text: app.t("Snap from Phone")
+                            hint: app.t("Take a picture, get it here")
+                            onClicked: app.request("snap", { to: page.info.id }, (ok, err) =>
+                                app.toast(ok ? app.t("Take the picture on {name}, it arrives here", { name: page.name }) : app.t("Couldn't ask {name}: {reason}", { name: page.name, reason: err.charAt(0).toUpperCase() + err.slice(1) })))
+                        }
+                        BarButton {
                             visible: page.phone && page.info && app.can(page.info, "locate")
                             iconName: "find-location"
                             tint: Kirigami.Theme.neutralTextColor
@@ -728,6 +737,13 @@ Kirigami.Page {
                         onTriggered: page.deckOpen = true
                     }
                 }
+            }
+
+            // Its volumes, ringer, Do Not Disturb and flashlight, once it has said how they are
+            ControlsCard {
+                app: page.app
+                phoneId: page.info?.id ?? ""
+                phoneName: page.name
             }
 
             // Its terminal here: allowed with the code, or locked out after wrong ones
@@ -1031,6 +1047,30 @@ Kirigami.Page {
                     subtitle: app.t("{device} can see and control this screen without asking, on the same network or by cable. Linksy still tells you when it starts.", { device: page.name })
                     checked: page.view?.allow_screen ?? false
                     onSwitched: now => app.request("set_allow_screen", { device: page.info.id, on: now }, () => app.refreshDevices())
+                }
+                // This computer's notifications on the phone, once the phone can show them and this
+                // computer can listen for them
+                SwitchRow {
+                    id: forwardRow
+                    property var info: null
+                    visible: page.info !== null && app.can(page.info, "computer_notifications") && (info?.available ?? false)
+                    iconName: "preferences-desktop-notification"
+                    title: app.t("This Computer's Notifications on the Phone")
+                    subtitle: app.t("What comes up here also comes up on {device}, except Linksy's own and while Do Not Disturb is on. Off until you turn it on.", { device: page.name })
+                    checked: info?.on ?? false
+                    function load() {
+                        if (page.info === null || !app.can(page.info, "computer_notifications")) return;
+                        const id = page.info.id;
+                        app.request("computer_notifications", { phone: id }, (ok, got) => { if (ok && id === page.info?.id) forwardRow.info = got });
+                    }
+                    Component.onCompleted: load()
+                    onSwitched: now => app.request("set_computer_notifications", { phone: page.info.id, on: now }, (ok, err) => {
+                        if (ok) forwardRow.info = Object.assign({}, forwardRow.info, { on: now });
+                        else {
+                            app.toast(err);
+                            forwardRow.load();
+                        }
+                    })
                 }
                 SwitchRow {
                     visible: page.view !== null && page.view.away_until !== undefined

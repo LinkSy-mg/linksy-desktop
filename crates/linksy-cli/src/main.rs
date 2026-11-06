@@ -27,6 +27,14 @@ Usage:
   linksy open <device> <url>         open a web link in its browser
   linksy ring <device> [--stop]      make it ring so you can find it
   linksy locate <phone>              ask a phone where it is (it can say no)
+  linksy snap <phone>                ask a phone to open its camera and send the picture
+  linksy doctor                      why can't I see my phone? what to check, and what to do
+  linksy controls <phone> [media=40 ringtone=80 alarm=100 ringer=vibrate dnd=priority flashlight=on]
+                                     a phone's volumes, ringer, Do Not Disturb and flashlight
+  linksy controls <phone> sync-dnd on|off
+                                     keep its Do Not Disturb and this computer's the same
+  linksy forward <phone> [on|off]    show this computer's notifications on a phone, or not
+  linksy forward mute|unmute <app>   keep an app's notifications from going to phones
   linksy terminal                    terminals for phones: code set, allowed, running
   linksy terminal code               set the code a phone types to open a terminal here
   linksy terminal allow|deny <phone> let a phone open terminals here, or stop it
@@ -278,6 +286,86 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             println!("Ringing {to}. Stop it with: linksy ring {to} --stop");
         }
         ("ring", [to, stop]) if stop == "--stop" => c.ring(to.clone(), false).await.map_err(err)?,
+        ("doctor", []) => {
+            for f in c.doctor().await.map_err(err)? {
+                println!("{}\n  {}", f.title, f.detail);
+                match f.action {
+                    Some(linksy_ipc::FindingAction::ConnectByAddress { address }) if !address.is_empty() => println!("  Try: linksy pair {address}:47200"),
+                    Some(linksy_ipc::FindingAction::ConnectByAddress { .. }) => println!("  Try: linksy pair <address shown in Linksy on the phone>"),
+                    Some(linksy_ipc::FindingAction::UsbConnect { .. }) => println!("  Try: Connect by USB Cable on the phone's page in the app"),
+                    _ => {}
+                }
+            }
+            println!("\nThe firewall is checked by Finish Setup in the app.");
+        }
+        ("controls", [phone, what]) if what == "sync-dnd" => {
+            c.set_dnd_sync(phone.clone(), true).await.map_err(err)?;
+            println!("{phone}'s Do Not Disturb and this computer's now follow each other.");
+        }
+        ("controls", [phone, what, how]) if what == "sync-dnd" && (how == "on" || how == "off") => {
+            c.set_dnd_sync(phone.clone(), how == "on").await.map_err(err)?;
+            println!("{}", if how == "on" { "Do Not Disturb now follows between them." } else { "Do Not Disturb no longer follows." });
+        }
+        ("controls", [phone]) => {
+            let info = c.phone_controls(phone.clone()).await.map_err(err)?;
+            let Some(s) = info.state else {
+                return Err(format!("{phone} hasn't said how its controls are (it is away, or its Linksy is older)."));
+            };
+            let pct = |l: f64| (l * 100.0).round() as u64;
+            println!("Media {}%   Ringtone {}%   Alarm {}%", pct(s.media), pct(s.ringtone), pct(s.alarm));
+            println!("Ringer {:?}   Do Not Disturb {:?}{}", s.ringer, s.dnd, if s.dnd_access { "" } else { " (Linksy needs Do Not Disturb access on the phone to change it)" });
+            if let Some(f) = s.flashlight {
+                println!("Flashlight {}", on_off(f));
+            }
+            if info.can_sync {
+                println!("Do Not Disturb kept in sync with this computer: {}", on_off(info.sync_dnd));
+            }
+        }
+        ("controls", [phone, settings @ ..]) => {
+            let change = controls_change(settings)?;
+            let mut events = c.events();
+            c.set_phone_controls(phone.clone(), change).await.map_err(err)?;
+            // A refusal comes after, as its own message
+            let refused = tokio::time::timeout(std::time::Duration::from_millis(800), async {
+                loop {
+                    match events.recv().await {
+                        Ok(Event::ControlsRefused { what, reason, .. }) => return Some(format!("{what}: {reason}")),
+                        Err(_) => return None,
+                        _ => {}
+                    }
+                }
+            })
+            .await;
+            match refused {
+                Ok(Some(why)) => return Err(why),
+                _ => println!("Asked {phone}."),
+            }
+        }
+        ("forward", [what, app]) if what == "mute" || what == "unmute" => {
+            c.mute_computer_app(app.clone(), what == "mute").await.map_err(err)?;
+            println!("{app}'s notifications {} phones.", if what == "mute" { "stay here, not going to" } else { "go to" });
+        }
+        ("forward", [phone]) => {
+            let info = c.computer_notifications(phone.clone()).await.map_err(err)?;
+            if !info.available {
+                println!("This computer can't listen for its notifications here (not from the Flatpak's sandbox).");
+            }
+            println!("{phone} gets this computer's notifications: {}", on_off(info.on));
+            if !info.muted.is_empty() {
+                println!("Staying here: {}", info.muted.join(", "));
+            }
+            if !info.seen.is_empty() {
+                println!("Notified lately: {}   (mute one with: linksy forward mute <app>)", info.seen.join(", "));
+            }
+        }
+        ("forward", [phone, how]) if how == "on" || how == "off" => {
+            c.set_computer_notifications(phone.clone(), how == "on").await.map_err(err)?;
+            println!("{phone} {} this computer's notifications.", if how == "on" { "now gets" } else { "no longer gets" });
+        }
+        ("snap", [phone]) => {
+            c.snap(phone.clone()).await.map_err(err)?;
+            println!("Open the camera on {phone}: the picture arrives in Downloads/Linksy and on the clipboard.");
+        }
         ("locate", [phone]) => {
             println!("Asking {phone} where it is…");
             let l = c.locate(phone.clone()).await.map_err(err)?;
@@ -567,6 +655,8 @@ async fn watch(c: &Client) -> Result<(), String> {
                     linksy_ipc::linksy_core::SessionKind::Camera => println!("{} wants to use your camera.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Input => println!("{} wants to use your mouse and keyboard.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Microphone => println!("{} wants to use your microphone.", from.name),
+                    // A computer doesn't share its sound: the core answers that itself
+                    linksy_ipc::linksy_core::SessionKind::Sound => {}
                     linksy_ipc::linksy_core::SessionKind::Terminal => println!("{} wants a terminal on this computer (the right code was typed).", from.name),
                 }
                 let ok = ask("Allow?").await;
@@ -587,6 +677,45 @@ async fn ask(question: &str) -> bool {
     let mut line = String::new();
     let _ = BufReader::new(tokio::io::stdin()).read_line(&mut line).await;
     matches!(line.trim().to_lowercase().as_str(), "y" | "yes")
+}
+
+/// `media=40 ringer=vibrate dnd=priority flashlight=on` as a change to a phone's controls.
+fn controls_change(settings: &[String]) -> Result<linksy_ipc::linksy_core::ControlsChange, String> {
+    use linksy_ipc::linksy_core::{ControlsChange, Dnd, Ringer};
+    let mut change = ControlsChange::default();
+    for setting in settings {
+        let (key, value) = setting.split_once('=').ok_or_else(|| format!("{setting}: use key=value, like media=40"))?;
+        let level = || value.trim_end_matches('%').parse::<f64>().ok().filter(|p| (0.0..=100.0).contains(p)).map(|p| p / 100.0).ok_or_else(|| format!("{key}: a number from 0 to 100"));
+        match key {
+            "media" => change.media = Some(level()?),
+            "ringtone" => change.ringtone = Some(level()?),
+            "alarm" => change.alarm = Some(level()?),
+            "ringer" => {
+                change.ringer = Some(match value {
+                    "normal" => Ringer::Normal,
+                    "vibrate" => Ringer::Vibrate,
+                    "silent" => Ringer::Silent,
+                    _ => return Err("ringer: normal, vibrate or silent".into()),
+                })
+            }
+            "dnd" => {
+                change.dnd = Some(match value {
+                    "off" => Dnd::Off,
+                    "priority" => Dnd::Priority,
+                    "alarms" => Dnd::Alarms,
+                    "silence" => Dnd::Silence,
+                    _ => return Err("dnd: off, priority, alarms or silence".into()),
+                })
+            }
+            "flashlight" => change.flashlight = Some(match value {
+                "on" => true,
+                "off" => false,
+                _ => return Err("flashlight: on or off".into()),
+            }),
+            other => return Err(format!("{other}: not one of media, ringtone, alarm, ringer, dnd or flashlight")),
+        }
+    }
+    Ok(change)
 }
 
 fn kind_name(kind: DeviceKind) -> &'static str {
@@ -620,4 +749,28 @@ fn size(bytes: u64) -> String {
         unit += 1;
     }
     if unit == 0 { format!("{bytes} B") } else { format!("{v:.1} {}", UNITS[unit]) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::controls_change;
+    use linksy_ipc::linksy_core::{Dnd, Ringer};
+
+    fn words(s: &str) -> Vec<String> {
+        s.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn controls_are_read_as_key_equals_value() {
+        let c = controls_change(&words("media=40 ringtone=80% ringer=vibrate dnd=priority flashlight=on")).unwrap();
+        assert_eq!((c.media, c.ringtone, c.alarm), (Some(0.4), Some(0.8), None));
+        assert_eq!((c.ringer, c.dnd, c.flashlight), (Some(Ringer::Vibrate), Some(Dnd::Priority), Some(true)));
+    }
+
+    #[test]
+    fn a_control_that_makes_no_sense_is_said_so() {
+        for bad in ["media", "media=loud", "media=140", "ringer=loud", "dnd=maybe", "flashlight=dim", "volume=3"] {
+            assert!(controls_change(&words(bad)).is_err(), "{bad}");
+        }
+    }
 }

@@ -9,3 +9,4 @@ gio = "0.22.10"
 gstreamer = "0.25.4"
 linksy-i18n = { path = "../linksy-i18n" }
 linksy-host = { path = "../linksy-host" }
+linksy-ipc = { path = "../linksy-ipc" }

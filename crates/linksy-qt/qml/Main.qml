@@ -55,6 +55,8 @@ Kirigami.ApplicationWindow {
     signal alertsChanged(string phone)
     // A phone's photos changed (its page's gallery)
     signal galleryChanged(string phone)
+    // A phone said how its volumes, ringer, Do Not Disturb and flashlight are (its page's controls)
+    signal controlsChanged(string phone, var state)
     // A copy from or to a phone went on, or ended (its page's files)
     signal fsProgress(var progress)
 
@@ -245,8 +247,13 @@ Kirigami.ApplicationWindow {
         pageStack.pushDialogLayer(Qt.resolvedUrl("SetupPage.qml"), { app: root });
     }
 
-    function openInvite() {
+    function openInvite(address) {
+        inviteDialog.addressText = address ?? "";
         inviteDialog.open();
+    }
+
+    function openDoctor() {
+        pageStack.pushDialogLayer(Qt.resolvedUrl("DoctorPage.qml"), { app: root });
     }
 
     // Bring the window forward for a question the service asks
@@ -275,7 +282,7 @@ Kirigami.ApplicationWindow {
     // What a device can do for others; older versions don't say, so assume as the GTK app does
     function can(info, feature) {
         if (info.features && info.features.length) return info.features.includes(feature);
-        return !(info.os === "android" && ["sms", "notifications", "media_state", "control", "clipboard_file", "clipboard_watch", "microphone", "locate", "turn_on"].includes(feature));
+        return !(info.os === "android" && ["sms", "notifications", "media_state", "control", "clipboard_file", "clipboard_watch", "microphone", "locate", "turn_on", "snap", "phone_controls", "computer_notifications"].includes(feature));
     }
 
     function refreshAll() {
@@ -469,6 +476,17 @@ Kirigami.ApplicationWindow {
             break;
         case "ring":
             if (ev.on) toast(t("{name} is looking for this computer", { name: ev.from.name }));
+            break;
+        case "controls_state":
+            controlsChanged(ev.from.id, ev.state);
+            break;
+        case "controls_refused": {
+            const what = ({ media: t("the media volume"), ringtone: t("the ringtone volume"), alarm: t("the alarm volume"), ringer: t("the ringer"), dnd: t("Do Not Disturb"), flashlight: t("the flashlight") })[ev.what] ?? ev.what;
+            toast(t("{name} didn't change {what}: {reason}", { name: ev.from.name, what: what, reason: ev.reason.charAt(0).toUpperCase() + ev.reason.slice(1) }));
+            break;
+        }
+        case "snap_refused":
+            toast(t("{name} can't take a picture: {reason}", { name: ev.from.name, reason: ev.reason.charAt(0).toUpperCase() + ev.reason.slice(1) }));
             break;
         }
     }
