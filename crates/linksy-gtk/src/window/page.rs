@@ -10,10 +10,11 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::glib;
-use linksy_ipc::linksy_core::{DeviceKind, DeviceView, Direction, Fingerprint, Uuid};
+use linksy_ipc::linksy_core::{ControlsChange, DeviceKind, DeviceView, Direction, Fingerprint, Uuid};
 use linksy_i18n::t;
-use linksy_ipc::{HistoryEntry, HistoryStatus, Shared, TerminalStatus};
+use linksy_ipc::{HistoryEntry, HistoryStatus, PhoneControlsInfo, Shared, TerminalStatus};
 
+use super::controls::ControlsPanel;
 use super::{LiveRow, Progress, drag_files, kind_icon, kind_name, progress_text, status_text};
 use crate::fmt;
 
@@ -54,6 +55,9 @@ pub enum Action {
     Locate,
     /// Ask a phone to open its camera and send the picture.
     Snap,
+    /// Change some of the phone's controls, or keep its Do Not Disturb in step with this computer's.
+    Controls(ControlsChange),
+    DndSync(bool),
     /// Ask the phone to turn on `notifications` (the Inbox) or `gallery`.
     TurnOn(&'static str),
     /// A tab shows, to fill.
@@ -146,6 +150,7 @@ pub struct DevicePage {
     webcam_card: gtk::Box,
     mic_card: gtk::Box,
     deck_card: gtk::Box,
+    controls: ControlsPanel,
     deck_desc: gtk::Label,
     webcam_desc: gtk::Label,
     webcam_live: gtk::Label,
@@ -587,6 +592,11 @@ impl DevicePage {
         // Tabs: a line under them all, the one showing underlined in the accent.
         let use_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(22).build();
         use_page.append(&use_as);
+        let controls = {
+            let (e1, e2) = (emit.clone(), emit.clone());
+            ControlsPanel::new(Rc::new(move |c| e1(Action::Controls(c))), Rc::new(move |on| e2(Action::DndSync(on))))
+        };
+        use_page.append(&controls.root);
         use_page.append(&terminal_box);
         use_page.append(&terminals);
         let inbox_slot = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
@@ -866,6 +876,7 @@ impl DevicePage {
             webcam_card,
             mic_card,
             deck_card,
+            controls,
             deck_desc,
             mic_desc,
             mic_live,
@@ -958,6 +969,11 @@ impl DevicePage {
         }
     }
 
+    /// The phone's controls as last known; none hides them.
+    pub fn show_controls(&self, info: Option<&PhoneControlsInfo>) {
+        self.controls.show(info);
+    }
+
     fn any_card(&self) -> bool {
         [&self.display_card, &self.webcam_card, &self.mic_card, &self.deck_card].iter().any(|c| c.is_visible())
     }
@@ -965,7 +981,7 @@ impl DevicePage {
     /// Show the tabs this device has, and one of them.
     fn update_tabs(&self, d: &DeviceView) {
         let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
-        let any_use = self.any_card() || self.terminal_box.is_visible() || self.terminals.is_visible();
+        let any_use = self.any_card() || self.terminal_box.is_visible() || self.terminals.is_visible() || (d.trusted && super::can(&d.device, "phone_controls"));
         // Shown while off too, saying how to turn them on
         let has = |t: Tab| match t {
             Tab::Use => any_use,

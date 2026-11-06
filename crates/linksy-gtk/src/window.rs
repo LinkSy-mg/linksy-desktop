@@ -3,6 +3,7 @@
 //! service's events and history.
 
 mod camera;
+mod controls;
 mod corner;
 mod deck;
 mod doctor;
@@ -35,6 +36,7 @@ use linksy_ipc::{Client, HistoryEntry, Shared};
 use linksy_i18n::t;
 
 use crate::bridge::{Bridge, Update};
+use controls::controls_what;
 use crate::{fmt, mark};
 
 /// Progress of a running transfer, kept across page rebuilds.
@@ -114,6 +116,8 @@ struct State {
     moving: Vec<transfers::Moving>,
     recent: Vec<HistoryEntry>,
     direct: HashMap<Fingerprint, bool>,
+    /// Each phone's controls as last known, and whether its Do Not Disturb follows this computer's.
+    controls: HashMap<Fingerprint, linksy_ipc::PhoneControlsInfo>,
 }
 
 pub struct Window {
@@ -606,6 +610,8 @@ impl Window {
                 page::Action::AllowScreen(on) => w.allow_screen(id, on),
                 page::Action::Locate => w.locate(id),
                 page::Action::Snap => w.snap(id),
+                page::Action::Controls(change) => w.change_controls(id, change),
+                page::Action::DndSync(on) => w.keep_dnd_in_sync(id, on),
                 page::Action::TurnOn(feature) => w.ask_turn_on(id, feature),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
@@ -1097,8 +1103,18 @@ impl Window {
             Event::DeviceFound { .. }
             | Event::DeviceLost { .. }
             | Event::DeviceUpdated { .. }
-            | Event::Connected { .. }
-            | Event::Disconnected { .. } => self.refresh_devices(),
+            | Event::Disconnected { .. } => {
+                if let Event::Disconnected { id } = &ev {
+                    self.state.borrow_mut().controls.remove(id);
+                    self.show_controls();
+                }
+                self.refresh_devices();
+            }
+            Event::Connected { ref device } => {
+                let id = device.id;
+                self.refresh_devices();
+                self.load_controls(id);
+            }
             Event::PairingRequest { request, device, code, incoming, older } => self.show_pairing(request, device, code, incoming, older),
             Event::Paired { device } => {
                 self.close_pair_dialog(&device.id);
@@ -1230,7 +1246,9 @@ impl Window {
             // Locate is answered through the service (it waits for the reply).
             Event::SnapRequest { .. } => {}
             // A phone's controls (§4.24): the service watches them for the page
-            Event::ControlsState { .. } | Event::ControlsSet { .. } | Event::ControlsWatch { .. } | Event::ControlsRefused { .. } => {}
+            Event::ControlsState { from, state } => self.controls_said(from.id, state),
+            Event::ControlsRefused { from, what, reason } => self.toast(&t!("{name} didn't change {what}: {reason}", name = from.name, what = controls_what(&what), reason = fmt::capitalize(&reason))),
+            Event::ControlsSet { .. } | Event::ControlsWatch { .. } => {}
             Event::SnapRefused { from, reason } => self.toast(&t!("{name} can't take a picture: {reason}", name = from.name, reason = fmt::capitalize(&reason))),
             Event::LocateRequest { .. } | Event::Location { .. } | Event::LocationRefused { .. } | Event::TerminalListRequest { .. } | Event::Terminals { .. } => {}
             // Answers go to whoever asked (the service waits for them); requests are a phone's.
@@ -1521,6 +1539,7 @@ impl Window {
                 if inbox_on(&d.device) {
                     self.load_inbox(d.device.id);
                 }
+                self.load_controls(d.device.id);
                 match self.page.tab() {
                     page::Tab::Files => self.files_shown(d.device.id),
                     page::Tab::Gallery if can(&d.device, "gallery") => self.gallery_shown(d.device.id),
@@ -1572,6 +1591,7 @@ impl Window {
                 self.content.set_title(&d.device.name);
                 let locks = self.state.borrow().lock.devices.contains(&d.device.id);
                 self.page.show_device(&d, &staged, locks);
+                self.show_controls();
                 self.page.show_terminals(&d, self.state.borrow().terminals.as_ref());
                 self.page.avatar.set_custom_image(self.state.borrow().pictures.get(&d.device.id));
                 let camera = self.state.borrow().camera.filter(|(_, id)| *id == d.device.id);
@@ -2292,7 +2312,7 @@ pub(crate) fn can(d: &DeviceInfo, feature: &str) -> bool {
     if !d.features.is_empty() {
         return d.features.iter().any(|f| f == feature);
     }
-    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate" | "turn_on" | "snap"))
+    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate" | "turn_on" | "snap" | "phone_controls"))
 }
 
 /// Whether a phone shares its messages, for its Inbox.
