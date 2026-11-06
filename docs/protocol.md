@@ -1014,9 +1014,18 @@ them once the phone is back. Phone side, please:
 - [ ] While a computer drives the phone (a `screen` session to it, and an input device
       named for the accessory appears in `InputManager`), show a lasting "Controlled from
       <computer>" notification with Stop.
-- [ ] Rotation: the touchscreen uses the natural orientation; in landscape the computer
-      would need the rotation. Send it with the screen (to be specified) or keep control
-      to portrait for now.
+- [ ] **Rotation (desktop, after 0.12.4; not tried on a phone).** The virtual touchscreen's
+      frame is the phone's natural orientation. If, with the phone in landscape, taps from the
+      computer land in the wrong place (turned a quarter), send
+      `{"type":"screen_rotation","degrees":90}` (core `node.send_screen_rotation`) on connecting
+      to the computer that is driving, and again whenever the display turns: `degrees` is
+      `Display.getRotation()` times 90 (`ROTATION_90`: the device turned counter-clockwise, its
+      picture clockwise, top on the left; `ROTATION_270`: top on the right). The computer then
+      turns each tap, and the finger of a scroll, back into the natural frame: for 90 the
+      picture's (u, v) becomes (1 − v, u), for 270 (v, 1 − u), for 180 (1 − u, 1 − v). If Android
+      already turns taps for the virtual touchscreen, send nothing (0 is what the computer assumes);
+      the check is one tap near a corner in landscape. The phone's video must be the upright
+      picture (landscape: wider than tall), as the viewer sends its positions as fractions of it.
 - [ ] **Without the cable:** an accessibility service (`dispatchGesture` for taps and
       swipes, global actions for Back/Home/Recents, `ACTION_SET_TEXT` for typing) gives
       the same control over any link. Sideloaded installs need "Allow restricted settings"
