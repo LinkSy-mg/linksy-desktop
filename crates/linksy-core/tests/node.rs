@@ -1617,6 +1617,17 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     assert_eq!(text, "from far away");
     assert_eq!(b.node.link(&ida), Some(Link::Away));
 
+    // A phone's notification crosses the same link: nothing in the core holds it back from away
+    let mut ra = a.node.subscribe();
+    let note = linksy_core::RemoteNotification { key: "k1".into(), app: "chat".into(), app_name: "Chat".into(), title: "Mum".into(), body: "Dinner?".into(), ..Default::default() };
+    b.node.post_notification(&ida, note).await.unwrap();
+    let title = wait_for(&mut ra, |e| match e {
+        Event::NotificationPosted { notification, .. } => Some(notification.title.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(title, "Mum");
+
     // A screen from away: refused without asking Beta's user, even allowed for good...
     let _incoming = b.node.incoming_sessions();
     b.node.set_allow_screen(&ida, true).unwrap();
