@@ -52,8 +52,12 @@ Built on the phone, not published (from the phone's side; the desktop has not se
 Built on the computer, on branch `phone-work` (not on main yet):
 1. Snap from Phone: the picture lands in Downloads/Linksy and on the clipboard, with a notification to open it (§4.23).
 2. The Connection Doctor: "Why Can't I See My Phone?" in the device list and Finish Setup.
-
 3. The phone's controls (volumes, ringer, Do Not Disturb, flashlight): Sound and Silence on the phone's page in both apps, `linksy controls`, and Keep Do Not Disturb in Sync on GNOME and KDE (§4.24). The phone side is to do.
+4. This computer's notifications on the phone: a switch per phone in both apps (off until turned on), `linksy forward`, muted apps (§4.25). The phone side is to do.
+5. The phone's sound with its screen (§4.8) and taps turned right for a phone in landscape (§4.11). The phone side is to do, and neither was tried on a phone.
+6. Screens at up to 60 fps with a fallback to 30 (a screen shared over the internet is 4 Mbit/s at 30).
+
+Not done, and why: a Qt deck editor (the GTK one is 4000 lines, and where decks are edited is not decided); datagrams for video and the pointer, BBR over the internet and a bitrate that follows the link while it runs (each needs measuring on a real link first); transfers with no shared network and Bluetooth (the first needs the computer to host a hotspot, which cuts its own Wi-Fi; the second needs a phone); the Wi-Fi Direct speed measurement (needs a phone).
 
 
 ## Now, in detail
