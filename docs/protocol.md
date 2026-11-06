@@ -84,7 +84,7 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | Copy to Computer (text from the phone's text menu) | Receives `clipboard` as before | Built, not published | to confirm against the phone's messages once they are published |
 | A USB button on the phone | Done (0.9) | Built, not published | `usb_plugged`, `usb_connect` (§4.11); mobile#11 |
 | Connection Doctor | Done on branch `phone-work` | Its half built, not published | the computer checks its firewall, a VPN, a phone on another network or not answering, and the cable; no new messages |
-| The phone's controls on the computer (volumes, ringer, Do Not Disturb, flashlight) | Messages and core on branch `phone-work` (§4.24); the page and Do Not Disturb sync next | To do | `controls_watch`, `controls_state`, `controls_set`, `controls_refused`; feature `phone_controls` |
+| The phone's controls on the computer (volumes, ringer, Do Not Disturb, flashlight) | Done on branch `phone-work`: core, service, `linksy controls`, a Sound and Silence section on the phone's page in both apps, Keep Do Not Disturb in Sync (§4.24) | To do | `controls_watch`, `controls_state`, `controls_set`, `controls_refused`; feature `phone_controls` |
 | Bluetooth (presence and a link) | Planned | Planned | `ROADMAP.md`; not started |
 
 ## 3. How to build the phone app (recommendation)
@@ -1977,6 +1977,16 @@ watch, state, set.
 - **Keep Do Not Disturb in Sync** (computer, GNOME and KDE): while on for a phone, the computer's
   Do Not Disturb and the phone's `dnd` follow each other: `off` and the others map to the
   computer's off and on, and the last change wins. Nothing on the phone's side beyond the above.
+  The computer turns it on for the phone with `controls_set {"dnd":"priority"}` (the phone's own
+  Do Not Disturb settings decide what still gets through) and off with `{"dnd":"off"}`; when the
+  phone is in `alarms` or `silence` and the computer turns its own on, the phone is left alone.
+  Only a change carries over: turning it on starts from how each already is. It needs
+  `dnd_access` on the phone, and the switch is dimmed without it.
+- **When the computer watches:** the service sends `controls_watch` `on: true` once per connection
+  to every phone that announces `phone_controls`, as soon as it connects, and keeps the newest
+  `controls_state` for its apps (the device page, `linksy controls <phone>`). It never sends
+  `on: false`: the watch ends with the connection. A phone speaks only when something changes, so
+  this costs nothing while the controls are left alone.
 - **Core API:** `node.watch_controls(id, on)`, `node.set_controls(id, ControlsChange)`,
   `node.send_controls_state(id, &ControlsState)`, `node.refuse_controls(id, what, reason)`;
   `Event::ControlsState`, `ControlsSet`, `ControlsWatch`, `ControlsRefused`.

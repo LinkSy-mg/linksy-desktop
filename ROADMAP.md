@@ -53,7 +53,7 @@ Built on the computer, on branch `phone-work` (not on main yet):
 1. Snap from Phone: the picture lands in Downloads/Linksy and on the clipboard, with a notification to open it (§4.23).
 2. The Connection Doctor: "Why Can't I See My Phone?" in the device list and Finish Setup.
 
-The phone's controls (volumes, ringer, Do Not Disturb, flashlight): the messages are in §4.24 and the core has them; the phone's page and Keep Do Not Disturb in Sync are next.
+3. The phone's controls (volumes, ringer, Do Not Disturb, flashlight): Sound and Silence on the phone's page in both apps, `linksy controls`, and Keep Do Not Disturb in Sync on GNOME and KDE (§4.24). The phone side is to do.
 
 
 ## Now, in detail
