@@ -35,7 +35,11 @@ const KEYBOARD_DESCRIPTOR: &[u8] = &[
 /// The virtual devices on one phone, and where the finger and keys are.
 pub struct Hid {
     dev: nusb::Device,
-    at: (u16, u16),
+    /// Where the pointer is, as the viewer shows the screen (0..1 each way, upright).
+    at: (f64, f64),
+    /// How far the phone's display is turned from its natural orientation, in degrees: the
+    /// touchscreen's own frame is the natural one.
+    rotation: u16,
     touching: bool,
     /// Scrolling is a finger dragging: where it is (0..1 of the height) and when it last
     /// moved; lifted once scrolling stops (`settle`).
@@ -54,12 +58,19 @@ impl Hid {
         }
         // The phone makes the devices a moment later; input sent before then is refused
         tokio::time::sleep(Duration::from_secs(1)).await;
-        Ok(Hid { dev, at: (16_384, 16_384), touching: false, scroll: None, modifiers: 0, keys: Vec::new() })
+        Ok(Hid { dev, at: (0.5, 0.5), rotation: 0, touching: false, scroll: None, modifiers: 0, keys: Vec::new() })
     }
 
     pub async fn unregister(self) {
         for id in [TOUCH, KEYBOARD] {
             let _ = out(&self.dev, UNREGISTER, id, 0, &[]).await;
+        }
+    }
+
+    /// The phone's display is turned this far (0, 90, 180 or 270): taps are turned back.
+    pub fn set_rotation(&mut self, degrees: u16) {
+        if degrees < 360 && degrees % 90 == 0 {
+            self.rotation = degrees;
         }
     }
 
@@ -70,7 +81,7 @@ impl Hid {
         }
         match *msg {
             ControlMsg::Pointer { x, y } => {
-                self.at = (scale(x), scale(y));
+                self.at = (x.clamp(0.0, 1.0), y.clamp(0.0, 1.0));
                 if self.touching {
                     self.touch().await?;
                 }
@@ -100,8 +111,9 @@ impl Hid {
         self.report(self.at, self.touching).await
     }
 
-    /// The finger at `(x, y)`, touching the screen or not.
-    async fn report(&self, (x, y): (u16, u16), down: bool) -> Result<(), String> {
+    /// The finger at `point` (0..1 of what the viewer shows), touching the screen or not.
+    async fn report(&self, point: (f64, f64), down: bool) -> Result<(), String> {
+        let (x, y) = panel(self.rotation, point);
         // Tip switch and in range while touching, nothing (and no contact) otherwise
         let (flags, contacts) = if down { (0b11, 1) } else { (0, 0) };
         let report = [flags, 0, x as u8, (x >> 8) as u8, y as u8, (y >> 8) as u8, contacts];
@@ -116,8 +128,8 @@ impl Hid {
         let y = match self.scroll {
             Some((y, _)) => y,
             None => {
-                let y = self.at.1 as f64 / 32_767.0;
-                self.report((x, scale(y)), true).await?;
+                let y = self.at.1;
+                self.report((x, y), true).await?;
                 y
             }
         };
@@ -125,14 +137,14 @@ impl Hid {
         if !(0.02..=0.98).contains(&to) {
             return self.lift_scroll().await;
         }
-        self.report((x, scale(to)), true).await?;
+        self.report((x, to), true).await?;
         self.scroll = Some((to, std::time::Instant::now()));
         Ok(())
     }
 
     async fn lift_scroll(&mut self) -> Result<(), String> {
         match self.scroll.take() {
-            Some((y, _)) => self.report((self.at.0, scale(y)), false).await,
+            Some((y, _)) => self.report((self.at.0, y), false).await,
             None => Ok(()),
         }
     }
@@ -201,6 +213,21 @@ async fn out(dev: &nusb::Device, request: u8, value: u16, index: u16, data: &[u8
 /// 0..1 of the screen to the touchscreen's 0..32767.
 fn scale(f: f64) -> u16 {
     (f.clamp(0.0, 1.0) * 32_767.0).round() as u16
+}
+
+/// A point of the screen as the viewer shows it (0..1 across and down, upright) as the
+/// touchscreen has it: its frame is the phone's natural orientation, so when the display is
+/// turned (`rotation`, Android's `Display.getRotation()` times 90: the device turned
+/// counter-clockwise by that much, its picture clockwise) the point is turned back.
+fn panel(rotation: u16, (u, v): (f64, f64)) -> (u16, u16) {
+    let (u, v) = (u.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
+    let (x, y) = match rotation {
+        90 => (1.0 - v, u),
+        180 => (1.0 - u, 1.0 - v),
+        270 => (v, 1.0 - u),
+        _ => (u, v),
+    };
+    (scale(x), scale(y))
 }
 
 fn modifier_bit(keysym: u32) -> Option<u8> {
@@ -358,6 +385,29 @@ mod tests {
         assert_eq!(code_usage(2), Some(0x1e));
         assert_eq!(code_usage(11), Some(0x27));
         assert_eq!(code_modifier_bit(42), Some(0x02));
+    }
+
+    #[test]
+    fn a_turned_display_has_its_taps_turned_back() {
+        // Upright: as shown. The corners and the middle show which way each turn goes.
+        assert_eq!(panel(0, (0.0, 0.0)), (0, 0));
+        assert_eq!(panel(0, (1.0, 0.5)), (32_767, 16_384));
+        // Turned counter-clockwise (top on the left): the picture's top left is the
+        // touchscreen's top right, its top right is the touchscreen's bottom right
+        assert_eq!(panel(90, (0.0, 0.0)), (32_767, 0));
+        assert_eq!(panel(90, (1.0, 0.0)), (32_767, 32_767));
+        assert_eq!(panel(90, (0.0, 1.0)), (0, 0));
+        // The other way round (top on the right)
+        assert_eq!(panel(270, (0.0, 0.0)), (0, 32_767));
+        assert_eq!(panel(270, (1.0, 0.0)), (0, 0));
+        assert_eq!(panel(270, (0.0, 1.0)), (32_767, 32_767));
+        // Upside down
+        assert_eq!(panel(180, (0.0, 0.0)), (32_767, 32_767));
+        // The middle stays the middle, whatever the turn, and what isn't a turn is none
+        for r in [0, 90, 180, 270, 45] {
+            assert_eq!(panel(r, (0.5, 0.5)), (16_384, 16_384));
+        }
+        assert_eq!(panel(45, (0.2, 0.7)), panel(0, (0.2, 0.7)));
     }
 
     #[test]

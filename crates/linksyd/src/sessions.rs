@@ -14,7 +14,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// How long the sharer has to pick a screen in the desktop's dialog.
 const PICK_TIMEOUT: Duration = Duration::from_secs(120);
@@ -478,6 +478,8 @@ async fn drive(session: &mut Session, local: UnixStream, hid: crate::usb_hid::Hi
     let (mut local_rx, mut local_tx) = local.into_split();
     let phone = session.peer.id;
     info!("driving {} over the cable", session.peer.name);
+    // A phone with its display turned says so; taps are turned back for it
+    let mut events = node.subscribe();
     let input = async {
         let mut frames = crate::terminal::Frames::default();
         let mut buf = vec![0u8; 4096];
@@ -502,6 +504,15 @@ async fn drive(session: &mut Session, local: UnixStream, hid: crate::usb_hid::Hi
                 _ = settle.tick() => {
                     if let Some(hid) = hid.0.as_mut() {
                         let _ = hid.settle().await;
+                    }
+                    continue;
+                }
+                event = events.recv() => {
+                    if let (Ok(linksy_core::Event::ScreenRotation { from, degrees }), Some(hid)) = (event, hid.0.as_mut())
+                        && from.id == phone
+                    {
+                        debug!("{} is turned {degrees} degrees", from.name);
+                        hid.set_rotation(degrees);
                     }
                     continue;
                 }
