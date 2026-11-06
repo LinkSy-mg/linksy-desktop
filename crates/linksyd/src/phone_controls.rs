@@ -116,10 +116,8 @@ pub async fn run(node: Node) {
                     let now = is_on(state.dnd);
                     let before = seen.insert(from.id, now);
                     // The phone's own change, with a computer that has a Do Not Disturb to follow
-                    if controls.keeps(&from.id) && before.is_some_and(|b| b != now) && computer != Some(now) {
-                        if crate::controls::shared().set_dnd(now).await {
-                            computer = Some(now);
-                        }
+                    if controls.keeps(&from.id) && before.is_some_and(|b| b != now) && computer != Some(now) && crate::controls::shared().set_dnd(now).await {
+                        computer = Some(now);
                     }
                 }
                 Ok(_) | Err(RecvError::Lagged(_)) => {}

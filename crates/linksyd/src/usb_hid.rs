@@ -69,7 +69,7 @@ impl Hid {
 
     /// The phone's display is turned this far (0, 90, 180 or 270): taps are turned back.
     pub fn set_rotation(&mut self, degrees: u16) {
-        if degrees < 360 && degrees % 90 == 0 {
+        if degrees < 360 && degrees.is_multiple_of(90) {
             self.rotation = degrees;
         }
     }
