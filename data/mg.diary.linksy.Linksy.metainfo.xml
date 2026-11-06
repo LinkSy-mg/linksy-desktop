@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.13.0" date="2026-11-06">
+      <description>
+        <p>Your phone's volumes, ringer, Do Not Disturb and flashlight from its page; this computer's notifications, and the sound of a phone's screen, on the phone; Snap from Phone; Why Can't I See My Phone?; screens at up to 60 frames a second; Quit in the tray closes the windows; and the Flatpak shows cover art and your picture on the phone.</p>
+      </description>
+    </release>
     <release version="0.12.4" date="2026-11-04">
       <description>
         <p>Fixes: clicking or swiping away a phone's notification no longer stops Linksy in the background, and the Gallery drops photos deleted on the phone right away.</p>
