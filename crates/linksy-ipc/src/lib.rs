@@ -640,6 +640,10 @@ pub enum ServerMsg {
     FsProgress {
         fs_progress: FsProgress,
     },
+    /// The user chose Quit in the tray: the service is about to stop, and open windows go with it.
+    Quitting {
+        quitting: bool,
+    },
 }
 
 /// Where Linksy's sockets live: `$XDG_RUNTIME_DIR`, or in a Flatpak, the app's own folder
@@ -707,6 +711,7 @@ pub struct Client {
     history: broadcast::Sender<HistoryEntry>,
     inbox: broadcast::Sender<Conversation>,
     fs_progress: broadcast::Sender<FsProgress>,
+    quitting: broadcast::Sender<()>,
 }
 
 impl Client {
@@ -721,7 +726,8 @@ impl Client {
         let (history, _) = broadcast::channel(128);
         let (inbox, _) = broadcast::channel(128);
         let (fs_progress, _) = broadcast::channel(128);
-        let (p, ev, hist, convs, copies) = (pending.clone(), events.clone(), history.clone(), inbox.clone(), fs_progress.clone());
+        let (quitting, _) = broadcast::channel(4);
+        let (p, ev, hist, convs, copies, quit) = (pending.clone(), events.clone(), history.clone(), inbox.clone(), fs_progress.clone(), quitting.clone());
         tokio::spawn(async move {
             let mut lines = BufReader::new(read).lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -746,13 +752,16 @@ impl Client {
                     Ok(ServerMsg::FsProgress { fs_progress }) => {
                         let _ = copies.send(fs_progress);
                     }
+                    Ok(ServerMsg::Quitting { .. }) => {
+                        let _ = quit.send(());
+                    }
                     Err(_) => {}
                 }
             }
             // Daemon went away: fail everything still waiting. It's not you, it's the daemon.
             p.lock().unwrap().clear();
         });
-        Ok(Self { writer: tokio::sync::Mutex::new(write), pending, next: AtomicU64::new(1), events, history, inbox, fs_progress })
+        Ok(Self { writer: tokio::sync::Mutex::new(write), pending, next: AtomicU64::new(1), events, history, inbox, fs_progress, quitting })
     }
 
     pub fn events(&self) -> broadcast::Receiver<Event> {
@@ -772,6 +781,12 @@ impl Client {
     /// Copies from and to phones as they go (`fs_copy`, `fs_upload`).
     pub fn fs_progress(&self) -> broadcast::Receiver<FsProgress> {
         self.fs_progress.subscribe()
+    }
+
+    /// The user chose Quit in the tray: the service stops in a moment, and an app closes its
+    /// window instead of offering to start the service again.
+    pub fn quitting(&self) -> broadcast::Receiver<()> {
+        self.quitting.subscribe()
     }
 
     pub async fn inbox(&self) -> Result<Vec<Conversation>, ClientError> {
@@ -1148,5 +1163,28 @@ mod tests {
         let back: Envelope = serde_json::from_str(&serde_json::to_string(&env).unwrap()).unwrap();
         assert_eq!(back.id, 7);
         assert!(matches!(back.request, Request::EndTerminal { terminal } if terminal == "t1"));
+    }
+
+    #[test]
+    fn the_quitting_notice_is_not_mistaken_for_a_reply_or_an_event() {
+        let msg: ServerMsg = serde_json::from_str(r#"{"quitting":true}"#).unwrap();
+        assert!(matches!(msg, ServerMsg::Quitting { quitting: true }));
+        let reply: ServerMsg = serde_json::from_str(r#"{"id":1,"ok":null}"#).unwrap();
+        assert!(matches!(reply, ServerMsg::Reply { id: 1, .. }));
+    }
+
+    #[tokio::test]
+    async fn a_client_hears_the_quitting_notice() {
+        use tokio::io::AsyncWriteExt;
+        let dir = std::env::temp_dir().join(format!("linksy-ipc-quit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("s.sock");
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let client = Client::connect_to(&path).await.unwrap();
+        let mut quitting = client.quitting();
+        let (mut server, _) = listener.accept().await.unwrap();
+        server.write_all(b"{\"quitting\":true}\n").await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), quitting.recv()).await.expect("the notice arrives").unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

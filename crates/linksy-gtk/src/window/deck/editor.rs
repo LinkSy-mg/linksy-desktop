@@ -153,6 +153,7 @@ struct Ui {
     grid: Grid,
     dots: gtk::Box,
     inspector: gtk::Box,
+    details_toggle: gtk::ToggleButton,
     new_layout: gtk::Button,
     new_icon: gtk::Button,
     battery: gtk::Label,
@@ -175,9 +176,11 @@ pub struct Editor {
 /// LINKSY_SCREENSHOT_DECK_LANDSCAPE=1 shows landscape, reflowed from portrait if empty;
 /// LINKSY_SCREENSHOT_DECK_DRAG=move,80,60 (or resize,…) shows the picked tile mid-drag;
 /// LINKSY_SCREENSHOT_DECK_ON=1 shows the toggles on; LINKSY_SCREENSHOT_DECK_SAVE=1 saves
-/// once the rest is done; LINKSY_SCREENSHOT_DECK_BACK=1 then goes Back, as the button does.
+/// once the rest is done; LINKSY_SCREENSHOT_DECK_BACK=1 then goes Back, as the button does;
+/// LINKSY_SCREENSHOT_DECK_DETAILS=1 presses the Details tab of a narrow window.
 struct Aids {
     back: bool,
+    details: bool,
     theme: Option<String>,
     pick: Option<usize>,
     landscape: bool,
@@ -195,7 +198,7 @@ fn aids() -> &'static Aids {
             let resize = parts.next()? == "resize";
             Some((resize, parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
         });
-        Aids { theme: var("LINKSY_SCREENSHOT_DECK_THEME"), pick: var("LINKSY_SCREENSHOT_DECK_PICK").and_then(|n| n.parse().ok()), landscape: var("LINKSY_SCREENSHOT_DECK_LANDSCAPE").is_some(), drag, on: var("LINKSY_SCREENSHOT_DECK_ON").is_some(), save: var("LINKSY_SCREENSHOT_DECK_SAVE").is_some(), back: var("LINKSY_SCREENSHOT_DECK_BACK").is_some() }
+        Aids { theme: var("LINKSY_SCREENSHOT_DECK_THEME"), pick: var("LINKSY_SCREENSHOT_DECK_PICK").and_then(|n| n.parse().ok()), landscape: var("LINKSY_SCREENSHOT_DECK_LANDSCAPE").is_some(), drag, on: var("LINKSY_SCREENSHOT_DECK_ON").is_some(), save: var("LINKSY_SCREENSHOT_DECK_SAVE").is_some(), back: var("LINKSY_SCREENSHOT_DECK_BACK").is_some(), details: var("LINKSY_SCREENSHOT_DECK_DETAILS").is_some() }
     })
 }
 
@@ -264,6 +267,14 @@ impl Editor {
             glib::timeout_add_local_once(Duration::from_millis(1000), move || {
                 if let Some(win) = win.upgrade() {
                     win.leave_deck();
+                }
+            });
+        }
+        if aids.details {
+            let toggle = editor.ui.details_toggle.downgrade();
+            glib::timeout_add_local_once(Duration::from_millis(800), move || {
+                if let Some(toggle) = toggle.upgrade() {
+                    toggle.set_active(true);
                 }
             });
         }
@@ -1466,16 +1477,19 @@ fn build_ui() -> (adw::BreakpointBin, Ui) {
     stage.append(&flow);
     stage.append(&fit);
 
-    // The inspector
+    // The inspector, on the right
     let inspector = column(12);
     inspector.add_css_class("deck-inspector-box");
-    let inspector_scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).width_request(270).hexpand(false).propagate_natural_height(true).child(&inspector).css_classes(["deck-inspector"]).build();
+    let inspector_scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).child(&inspector).css_classes(["deck-inspector"]).build();
 
-    let work = gtk::Box::builder().css_classes(["deck-work"]).build();
-    work.append(&stage);
-    work.append(&inspector_scroll);
-    let work_scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vscrollbar_policy(gtk::PolicyType::Never).child(&work).build();
-    let split = adw::OverlaySplitView::builder().sidebar(&library).content(&work_scroll).min_sidebar_width(250.0).max_sidebar_width(270.0).build();
+    let work_scroll = gtk::ScrolledWindow::builder().hscrollbar_policy(gtk::PolicyType::Never).vscrollbar_policy(gtk::PolicyType::Never).child(&stage).build();
+    // On a narrow window the inspector is out of sight: this tab on the stage's right edge opens it
+    let details_toggle = gtk::ToggleButton::builder().icon_name("sidebar-show-right-symbolic").tooltip_text(t!("Details")).css_classes(["circular", "osd", "deck-details"]).halign(gtk::Align::End).valign(gtk::Align::Center).margin_end(8).active(true).visible(false).build();
+    let stage_overlay = gtk::Overlay::builder().child(&work_scroll).build();
+    stage_overlay.add_overlay(&details_toggle);
+    let details = adw::OverlaySplitView::builder().sidebar_position(gtk::PackType::End).sidebar(&inspector_scroll).content(&stage_overlay).min_sidebar_width(270.0).max_sidebar_width(270.0).build();
+    details_toggle.bind_property("active", &details, "show-sidebar").bidirectional().sync_create().build();
+    let split = adw::OverlaySplitView::builder().sidebar(&library).content(&details).min_sidebar_width(250.0).max_sidebar_width(270.0).build();
     library_toggle.bind_property("active", &split, "show-sidebar").bidirectional().sync_create().build();
 
     let body = gtk::Box::builder().orientation(gtk::Orientation::Vertical).build();
@@ -1484,19 +1498,18 @@ fn build_ui() -> (adw::BreakpointBin, Ui) {
     body.append(&split);
     let root = adw::BreakpointBin::builder().width_request(360).height_request(420).child(&body).build();
 
-    // Narrow: the library over the page on demand, the inspector under the phone
+    // Narrow: the library and the inspector each over the page on demand
     let narrow = adw::Breakpoint::new(adw::BreakpointCondition::parse("max-width: 860sp").expect("breakpoint"));
     narrow.add_setter(&split, "collapsed", Some(&true.to_value()));
     narrow.add_setter(&split, "show-sidebar", Some(&false.to_value()));
+    narrow.add_setter(&details, "collapsed", Some(&true.to_value()));
+    narrow.add_setter(&details, "show-sidebar", Some(&false.to_value()));
     narrow.add_setter(&library_toggle, "visible", Some(&true.to_value()));
+    narrow.add_setter(&details_toggle, "visible", Some(&true.to_value()));
     narrow.add_setter(&new_layout, "visible", Some(&false.to_value()));
     narrow.add_setter(&new_icon, "visible", Some(&true.to_value()));
     narrow.add_setter(&chip, "visible", Some(&false.to_value()));
-    narrow.add_setter(&work, "orientation", Some(&gtk::Orientation::Vertical.to_value()));
-    narrow.add_setter(&work, "css-classes", Some(&["deck-work", "narrow"].to_value()));
     narrow.add_setter(&work_scroll, "vscrollbar-policy", Some(&gtk::PolicyType::Automatic.to_value()));
-    narrow.add_setter(&inspector_scroll, "vscrollbar-policy", Some(&gtk::PolicyType::Never.to_value()));
-    narrow.add_setter(&inspector_scroll, "width-request", Some(&(-1).to_value()));
     narrow.add_setter(&stage, "height-request", Some(&640.to_value()));
     root.add_breakpoint(narrow);
 
@@ -1523,6 +1536,7 @@ fn build_ui() -> (adw::BreakpointBin, Ui) {
         grid,
         dots,
         inspector,
+        details_toggle,
         new_layout,
         new_icon,
         battery,

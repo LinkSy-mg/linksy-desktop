@@ -743,6 +743,12 @@ impl Window {
                             Update::History(h) => w.history_changed(h),
                             Update::Inbox(c) => w.inbox_changed(c),
                             Update::Files(p) => w.files_progress(p),
+                            // Quit in the tray: the window goes with the service
+                            Update::Quitting => {
+                                if let Some(app) = w.window.application() {
+                                    app.quit();
+                                }
+                            }
                         }
                     }
                     // Service went away.

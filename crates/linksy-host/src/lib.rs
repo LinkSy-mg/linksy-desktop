@@ -109,6 +109,26 @@ pub fn read(path: &Path) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// A file on the computer as bytes, or None when it's missing, unreadable or bigger than
+/// `max` (a picture, say, which the sandbox can't see).
+pub fn read_bytes(path: &Path, max: usize) -> Option<Vec<u8>> {
+    if !flatpak() {
+        if std::fs::metadata(path).ok()?.len() > max as u64 {
+            return None;
+        }
+        return std::fs::read(path).ok();
+    }
+    // One byte more than `max`, to tell a file that fits from one that doesn't
+    let out = command("head", &[]).arg("-c").arg((max + 1).to_string()).arg(path).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
+    (out.status.success() && out.stdout.len() <= max).then_some(out.stdout)
+}
+
+/// Whether programs on the computer can be run from here: always outside the Flatpak, and
+/// inside it while its host access (`org.freedesktop.Flatpak`) is on.
+pub fn host_access() -> bool {
+    !flatpak() || quiet(&mut command("true", &[]))
+}
+
 /// Write a file on the computer, making its folder first.
 pub fn write(path: &Path, contents: &[u8]) -> std::io::Result<()> {
     if !flatpak() {
@@ -158,6 +178,23 @@ mod tests {
     fn spawn_args_pass_the_environment_to_the_host() {
         assert_eq!(spawn_args(&[("TERM", "xterm-256color")], true), ["--host", "--watch-bus", "--env=TERM=xterm-256color"]);
         assert_eq!(spawn_args(&[], false), ["--host"]);
+    }
+
+    #[test]
+    fn reads_a_file_that_fits_and_not_one_that_does_not() {
+        let dir = std::env::temp_dir().join(format!("linksy-host-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("picture");
+        std::fs::write(&file, [7u8; 100]).unwrap();
+        assert_eq!(read_bytes(&file, 100).map(|b| b.len()), Some(100));
+        assert_eq!(read_bytes(&file, 99), None);
+        assert_eq!(read_bytes(&dir.join("missing"), 100), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn outside_the_flatpak_the_computer_is_always_reachable() {
+        assert!(host_access());
     }
 
     #[test]
