@@ -33,6 +33,8 @@ Usage:
                                      a phone's volumes, ringer, Do Not Disturb and flashlight
   linksy controls <phone> sync-dnd on|off
                                      keep its Do Not Disturb and this computer's the same
+  linksy forward <phone> [on|off]    show this computer's notifications on a phone, or not
+  linksy forward mute|unmute <app>   keep an app's notifications from going to phones
   linksy terminal                    terminals for phones: code set, allowed, running
   linksy terminal code               set the code a phone types to open a terminal here
   linksy terminal allow|deny <phone> let a phone open terminals here, or stop it
@@ -338,6 +340,27 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                 Ok(Some(why)) => return Err(why),
                 _ => println!("Asked {phone}."),
             }
+        }
+        ("forward", [what, app]) if what == "mute" || what == "unmute" => {
+            c.mute_computer_app(app.clone(), what == "mute").await.map_err(err)?;
+            println!("{app}'s notifications {} phones.", if what == "mute" { "stay here, not going to" } else { "go to" });
+        }
+        ("forward", [phone]) => {
+            let info = c.computer_notifications(phone.clone()).await.map_err(err)?;
+            if !info.available {
+                println!("This computer can't listen for its notifications here (not from the Flatpak's sandbox).");
+            }
+            println!("{phone} gets this computer's notifications: {}", on_off(info.on));
+            if !info.muted.is_empty() {
+                println!("Staying here: {}", info.muted.join(", "));
+            }
+            if !info.seen.is_empty() {
+                println!("Notified lately: {}   (mute one with: linksy forward mute <app>)", info.seen.join(", "));
+            }
+        }
+        ("forward", [phone, how]) if how == "on" || how == "off" => {
+            c.set_computer_notifications(phone.clone(), how == "on").await.map_err(err)?;
+            println!("{phone} {} this computer's notifications.", if how == "on" { "now gets" } else { "no longer gets" });
         }
         ("snap", [phone]) => {
             c.snap(phone.clone()).await.map_err(err)?;

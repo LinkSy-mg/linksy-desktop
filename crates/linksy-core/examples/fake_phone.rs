@@ -53,6 +53,8 @@
 //! `--turn-on` announces `turn_on` and says yes when a computer asks to turn one on.
 //! `--snap PICTURE` announces `snap` and, when a computer asks, sends that picture as a file
 //! and then to its clipboard; `--snap-refuse WHY` says no with that reason instead.
+//! `--computer-notifications` announces `computer_notifications` and prints each one as
+//! COMPUTER NOTIFICATION.
 //! `--controls` announces `phone_controls`: it answers `controls_watch` with made-up volumes and
 //! applies each `controls_set`, printing it as CONTROLS SET; `--no-dnd-access` refuses Do Not
 //! Disturb changes, and `--dnd-after SECONDS MODE` changes it by itself, as the phone's own
@@ -98,7 +100,7 @@ async fn main() {
     let (mut deck_layout, mut deck_wait) = (false, 0u64);
     let (mut off, mut turn_on) = (Vec::<String>::new(), false);
     let (mut snap, mut snap_refuse) = (None::<std::path::PathBuf>, None::<String>);
-    let (mut controls, mut no_dnd_access) = (false, false);
+    let (mut controls, mut no_dnd_access, mut computer_notifications) = (false, false, false);
     let mut dnd_after: Option<(u64, linksy_core::Dnd)> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
@@ -165,6 +167,7 @@ async fn main() {
             "--snap" => snap = Some(value().into()),
             "--snap-refuse" => snap_refuse = Some(value()),
             "--controls" => controls = true,
+            "--computer-notifications" => computer_notifications = true,
             "--no-dnd-access" => no_dnd_access = true,
             "--dnd-after" => {
                 let after = value().parse().expect("--dnd-after SECONDS MODE");
@@ -203,6 +206,9 @@ async fn main() {
     }
     if controls {
         config.features.push("phone_controls".into());
+    }
+    if computer_notifications {
+        config.features.push("computer_notifications".into());
     }
     config.features.retain(|f| !off.contains(f));
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
@@ -740,6 +746,7 @@ async fn main() {
                         println!("snap on the clipboard: {:?}", on_clipboard.map_err(|e| e.to_string()));
                     }
                 }
+                Ok(Event::ComputerNotification { app, title, body, key, .. }) => println!("COMPUTER NOTIFICATION [{key}] {app}: {title} / {body}"),
                 Ok(Event::ControlsWatch { from, on }) if controls => {
                     println!("CONTROLS WATCH {on} by {}", from.name);
                     if on {
