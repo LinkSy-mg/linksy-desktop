@@ -118,6 +118,8 @@ struct State {
     direct: HashMap<Fingerprint, bool>,
     /// Each phone's controls as last known, and whether its Do Not Disturb follows this computer's.
     controls: HashMap<Fingerprint, linksy_ipc::PhoneControlsInfo>,
+    /// Whether this computer's notifications go to each phone.
+    forward: HashMap<Fingerprint, linksy_ipc::ComputerNotifications>,
 }
 
 pub struct Window {
@@ -612,6 +614,7 @@ impl Window {
                 page::Action::Snap => w.snap(id),
                 page::Action::Controls(change) => w.change_controls(id, change),
                 page::Action::DndSync(on) => w.keep_dnd_in_sync(id, on),
+                page::Action::ForwardNotifications(on) => w.forward_notifications(id, on),
                 page::Action::TurnOn(feature) => w.ask_turn_on(id, feature),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
@@ -1114,6 +1117,7 @@ impl Window {
                 let id = device.id;
                 self.refresh_devices();
                 self.load_controls(id);
+                self.load_forward(id);
             }
             Event::PairingRequest { request, device, code, incoming, older } => self.show_pairing(request, device, code, incoming, older),
             Event::Paired { device } => {
@@ -1542,6 +1546,7 @@ impl Window {
                     self.load_inbox(d.device.id);
                 }
                 self.load_controls(d.device.id);
+                self.load_forward(d.device.id);
                 match self.page.tab() {
                     page::Tab::Files => self.files_shown(d.device.id),
                     page::Tab::Gallery if can(&d.device, "gallery") => self.gallery_shown(d.device.id),
@@ -1594,6 +1599,7 @@ impl Window {
                 let locks = self.state.borrow().lock.devices.contains(&d.device.id);
                 self.page.show_device(&d, &staged, locks);
                 self.show_controls();
+                self.show_forward();
                 self.page.show_terminals(&d, self.state.borrow().terminals.as_ref());
                 self.page.avatar.set_custom_image(self.state.borrow().pictures.get(&d.device.id));
                 let camera = self.state.borrow().camera.filter(|(_, id)| *id == d.device.id);
@@ -2314,7 +2320,7 @@ pub(crate) fn can(d: &DeviceInfo, feature: &str) -> bool {
     if !d.features.is_empty() {
         return d.features.iter().any(|f| f == feature);
     }
-    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate" | "turn_on" | "snap" | "phone_controls"))
+    !(d.os == "android" && matches!(feature, "sms" | "notifications" | "media_state" | "control" | "clipboard_file" | "clipboard_watch" | "microphone" | "locate" | "turn_on" | "snap" | "phone_controls" | "computer_notifications"))
 }
 
 /// Whether a phone shares its messages, for its Inbox.

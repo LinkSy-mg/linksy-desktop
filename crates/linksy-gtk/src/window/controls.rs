@@ -264,6 +264,49 @@ impl Window {
     }
 }
 
+impl Window {
+    /// Ask the service whether this computer's notifications go to the phone, for its page.
+    pub(super) fn load_forward(self: &Rc<Self>, id: Fingerprint) {
+        if !self.device(&id).is_some_and(|d| d.trusted && super::can(&d.device, "computer_notifications")) {
+            return;
+        }
+        let Some(c) = self.client() else { return };
+        let call = self.bridge.call(&c, move |c| async move { c.computer_notifications(id.to_string()).await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            if let Ok(info) = call.await {
+                w.state.borrow_mut().forward.insert(id, info);
+                w.show_forward();
+            }
+        });
+    }
+
+    pub(super) fn show_forward(&self) {
+        let Some(d) = self.selected_device() else { return };
+        let info = self.state.borrow().forward.get(&d.device.id).cloned();
+        self.page.show_forward(&d.device.name, info.as_ref().filter(|_| super::can(&d.device, "computer_notifications")));
+    }
+
+    pub(super) fn forward_notifications(self: &Rc<Self>, id: Fingerprint, on: bool) {
+        let Some(c) = self.client() else { return };
+        let call = self.bridge.call(&c, move |c| async move { c.set_computer_notifications(id.to_string(), on).await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            match call.await {
+                Ok(()) => {
+                    if let Some(info) = w.state.borrow_mut().forward.get_mut(&id) {
+                        info.on = on;
+                    }
+                }
+                Err(e) => {
+                    w.toast_error(&e, Some(id));
+                    w.load_forward(id);
+                }
+            }
+        });
+    }
+}
+
 /// What a phone refused to change, in a few words.
 pub(super) fn controls_what(what: &str) -> String {
     match what {

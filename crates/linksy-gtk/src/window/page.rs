@@ -58,6 +58,8 @@ pub enum Action {
     /// Change some of the phone's controls, or keep its Do Not Disturb in step with this computer's.
     Controls(ControlsChange),
     DndSync(bool),
+    /// Show this computer's notifications on the phone, or stop.
+    ForwardNotifications(bool),
     /// Ask the phone to turn on `notifications` (the Inbox) or `gallery`.
     TurnOn(&'static str),
     /// A tab shows, to fill.
@@ -190,6 +192,8 @@ pub struct DevicePage {
     lock_row: adw::SwitchRow,
     /// "Allow Everything From Away" (docs/protocol.md §4.13).
     away_row: adw::SwitchRow,
+    /// This computer's notifications on the phone.
+    forward_row: adw::SwitchRow,
     /// "Always Accept Files".
     accept_row: adw::SwitchRow,
     /// "Always Allow Screen and Control".
@@ -471,6 +475,14 @@ impl DevicePage {
                 e(Action::AwayAll(row.is_active()));
             }
         });
+        let forward_row = adw::SwitchRow::builder().title(t!("This Computer's Notifications on the Phone")).subtitle_lines(3).visible(false).build();
+        forward_row.add_prefix(&gtk::Image::builder().icon_name("preferences-system-notifications-symbolic").build());
+        let (e, s) = (emit.clone(), syncing.clone());
+        forward_row.connect_active_notify(move |row| {
+            if !s.get() {
+                e(Action::ForwardNotifications(row.is_active()));
+            }
+        });
         let accept_row = adw::SwitchRow::builder().title(t!("Always Accept Files")).subtitle_lines(2).build();
         accept_row.add_prefix(&gtk::Image::builder().icon_name("folder-download-symbolic").build());
         let (e, s) = (emit.clone(), syncing.clone());
@@ -525,6 +537,7 @@ impl DevicePage {
         settings.append(&lock_row);
         settings.append(&accept_row);
         settings.append(&screen_row);
+        settings.append(&forward_row);
         settings.append(&away_row);
         let terminals = gtk::ListBox::builder().selection_mode(gtk::SelectionMode::None).visible(false).css_classes(["boxed-list"]).build();
 
@@ -907,6 +920,7 @@ impl DevicePage {
             settings,
             lock_row,
             away_row,
+            forward_row,
             accept_row,
             screen_row,
             terminal_box,
@@ -967,6 +981,18 @@ impl DevicePage {
             badge.set_label(&count.to_string());
             badge.set_visible(count > 0);
         }
+    }
+
+    /// Whether this computer's notifications go to the phone; none hides the switch (the phone
+    /// can't show them, or this computer can't listen for them).
+    pub fn show_forward(&self, device: &str, info: Option<&linksy_ipc::ComputerNotifications>) {
+        let shown = info.is_some_and(|i| i.available);
+        self.forward_row.set_visible(shown);
+        self.forward_row.set_subtitle(&glib::markup_escape_text(&t!("What comes up here also comes up on {device}, except Linksy's own and while Do Not Disturb is on. Off until you turn it on.", device)));
+        self.syncing.set(true);
+        self.forward_row.set_active(info.is_some_and(|i| i.on));
+        self.syncing.set(false);
+        self.settings_visible(true);
     }
 
     /// The phone's controls as last known; none hides them.
