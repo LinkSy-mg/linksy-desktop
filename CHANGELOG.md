@@ -2,6 +2,63 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.13.0
+
+Most of what is new here works with Linksy for Android 0.3.5.
+
+### New
+- **A phone's volumes, ringer, Do Not Disturb and flashlight on its page:** Sound and
+  Silence, under Use As, in both apps (and `linksy controls`). Keep Do Not Disturb in
+  Sync carries the switch both ways between the phone and GNOME or Plasma, whichever you
+  changed last.
+- **This computer's notifications on the phone:** a switch on the phone's page, off until
+  you turn it on, and `linksy forward`. Linksy's own, volume and brightness pop-ups,
+  apps you muted and anything while Do Not Disturb is on stay here.
+- **The phone's sound with its screen:** when a phone's screen is shown here, what it
+  plays comes out of this computer, and stops with the screen.
+- **Snap from Phone:** a tile on the phone's page (and `linksy snap`) opens its camera;
+  the picture lands in Downloads/Linksy and on the clipboard.
+- **Why Can't I See My Phone?:** in the device list menu, in Finish Setup and as
+  `linksy doctor`. It looks for a VPN carrying the default route, a phone last seen on
+  another network, a phone that doesn't answer at its last address and a cable that
+  isn't connected, and says what to do, with a button where Linksy can act.
+- **Turn on a phone's Inbox or Gallery from here:** both tabs show while the feature is
+  off, with Ask the Phone.
+- **Phone to phone:** transfers say which way they go (direct link, USB cable, same
+  network or over the internet) and why there wasn't a direct link. A phone without
+  room for a file says how much it needs and has. Apps travel between phones as
+  their APK files.
+- **Gallery by day:** photos sit under a heading for each day, in both apps.
+- **Controlling a phone in landscape:** taps and scrolls land where they belong when the
+  phone is turned (over the cable).
+
+### Improved
+- **Screens at up to 60 frames a second** (a 144 Hz screen is cut to 60), falling back to
+  30 by itself when the computer can't keep up. Over the internet a screen is sent at 4
+  Mbit/s and 30 fps; the local network and the cable keep 16 Mbit/s.
+- **Direct links on the right channel:** the computer tells the phone which Wi-Fi channel
+  it is on, so Wi-Fi Direct can start there.
+- **Pair by Address on a device you already paired** reconnects it instead of starting a
+  new pairing; this is how a phone on another subnet of the same home gets back.
+- **The service starts again by itself** after a crash when nothing else restarts it
+  (the Flatpak, an autostart entry, the app starting it).
+- **A phone's player bar and seeking:** browsers that report no position now show it, and
+  a seek goes exactly where it was dragged.
+- **Gallery and Files from away:** when the phone refuses because it isn't on the same
+  network, the message names the setting that allows it.
+
+### Fixed
+- **Quit in the tray left the window open** (#84). Both apps now close with the service.
+- **The deck editor's right panel was hidden on a narrow window,** with nothing to say it
+  was there. A Details tab on the right edge of the phone opens it.
+- **Flatpak: cover art and this computer's picture** were missing on the phone, because
+  the sandbox can't see the folders they live in. They are now read from the computer,
+  and Finish Setup says when the Flatpak has lost the access it needs for that.
+- **A picture over 128 KiB** (many account photos) was never sent to the phone. It is
+  now scaled down to fit.
+- **Two services at login** (#82): the Flatpak started the service from two autostart
+  entries, and services started together could both stay. One stays now.
+
 ## 0.12.4
 
 ### Fixed
