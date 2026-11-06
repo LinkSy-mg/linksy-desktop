@@ -1183,7 +1183,16 @@ carries its packets, like the USB cable (§4.11).
   (screen, control, display, camera, microphone, input), answered
   `{"type":"session_decline","reason":"away"}` (`Error::NotFromAway` for the requester),
   and file browsing (`fs`, answered with an error). Always allowed: clipboard, links,
-  files sent (asked as usual), ring, battery, notifications, media controls, locate.
+  files sent (asked as usual), ring, battery, notifications, media controls, locate,
+  and, since desktop 0.13.1, the Gallery (§4.18, the phone's own switch still decides) and a
+  phone's controls (§4.24).
+- **Send whether or not a link is up.** A link closes after 60 s of nothing (unless Stay
+  Connected is on), and a device away from home is on none until something dials it, so
+  `node.send_*` connects first (on the network, or from away through the relay). A sender must not
+  hold a message back because the other device isn't `connected` or `nearby` right now: a phone's
+  notification, a computer's notification and a controls change go out to every paired device that
+  should get them. A device that can't be dialed fails the send; wait a minute before trying that
+  device again rather than on every message.
 - **Lock When Away** must ignore heartbeats that arrive from away (`node.link(id) ==
   Some(Link::Away)`): far away is not nearby. The computer does.
 - **Settings:** `Settings.away` (default on) turns it off entirely. *Desktop 0.11.3:* off
@@ -1628,7 +1637,8 @@ any of them → {"type":"gallery_error","message":"…"}
   the first page.
 - Core API: `Node::incoming_gallery()` gives the requests (`GalleryCall`: `albums`,
   `items`, `thumb`, `ok`, `error`). A device that takes none answers "doesn't share its
-  photos"; from away it answers "only on the same network" like files.
+  photos". From away it answers as on the network (desktop 0.13.1; before, it answered "only on
+  the same network" like files, which a phone built on an older core still does).
 
 ### 4.19 Deck: the phone as buttons for the computer (desktop 0.12.1)
 
@@ -2034,10 +2044,12 @@ watch, state, set.
 - **`controls_refused`** says which one (`what`: `media`, `ringtone`, `alarm`, `ringer`, `dnd`,
   `flashlight`) and why, in a sentence to show as it is. A `controls_set` with several keys
   may do some and refuse others; each refusal is its own message.
-- **From away:** these are **not** among the things always allowed away from home (§4.13): a
-  phone refuses `controls_set` from away with `controls_refused` and `reason` "away" unless
-  Allow Everything From Away is on for that computer. (Reading `controls_state` is fine: it only
-  goes to a computer that asked.) This is the safe default; widening it is the user's decision.
+- **From away:** allowed (desktop 0.13.1: the user decided the phone's volumes, ringer, Do Not
+  Disturb and flashlight are among what works from away, §4.13). A phone does not refuse
+  `controls_set` for being away, and `reason` "away" is no longer sent; the computer still shows
+  it as the sentence it is for a phone that does. A computer's page keeps the last
+  `controls_state` while the link is closed and dials the phone (`controls_watch`) when the page
+  opens, so the controls are there from away too.
 - **Keep Do Not Disturb in Sync** (computer, GNOME and KDE): while on for a phone, the computer's
   Do Not Disturb and the phone's `dnd` follow each other: `off` and the others map to the
   computer's off and on, and the last change wins. Nothing on the phone's side beyond the above.
@@ -2656,3 +2668,13 @@ robust against any encoder (GPU ones may slice too):
   folders of APKs in an offer, with `apps` describing them, `send_bundle` to send and
   `apps_received` to install; offers that would fill the disk are declined at once with the
   room said. Features `preflight` (computers too) and `apps`. Phone to-do: §4.22.
+- **2026-11-06** — Desktop 0.13.1: **more works from away** (§4.13). The Gallery is no longer
+  refused from away (the core no longer answers "only on the same network" to `gallery`;
+  `fs` and the media and input sessions still are, unless Allow Everything From Away). A
+  phone's controls are allowed from away (§4.24): the phone must stop refusing `controls_set`
+  with `reason` "away". And senders no longer wait for a link: the computer's notifications
+  for a phone and the page of a phone's controls dial the phone when no link is up (they had
+  been dropped after the link closed for being idle, on the network too). Phone to-do: §4.13
+  "Send whether or not a link is up" for its notifications to computers (it sent only to
+  computers `connected` or `nearby`), stop refusing `controls_set` from away, and take the
+  core with the Gallery change.
