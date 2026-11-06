@@ -136,7 +136,10 @@ async fn act(service: &Service, action: Action) {
             crate::sessions::open_window(&service.socket);
             return;
         }
-        Action::Quit => (None, service.ask(Request::Quit).await),
+        Action::Quit => {
+            crate::ipc::announce_quit().await;
+            (None, service.ask(Request::Quit).await)
+        }
         Action::SendFiles(d) => match pick_files(&t!("Send to {name}", name = d.name)).await {
             Some(paths) if !paths.is_empty() => (Some(d.name), service.ask(Request::Send { to: d.id.to_string(), paths }).await),
             _ => return,

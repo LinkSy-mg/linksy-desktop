@@ -32,6 +32,17 @@ pub async fn serve(node: Node, history: History, sessions: Sessions, mirror: Mir
     }
 }
 
+/// Told when the user chose Quit in the tray, so open apps close with the service.
+static QUITTING: std::sync::LazyLock<tokio::sync::broadcast::Sender<()>> = std::sync::LazyLock::new(|| tokio::sync::broadcast::channel(4).0);
+
+/// Tell every app the service is about to stop for good (the tray's Quit), and give the news
+/// a moment to arrive. Quitting for an update or a restart doesn't say it: those windows stay.
+pub async fn announce_quit() {
+    if QUITTING.send(()).is_ok() {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+}
+
 async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror, away: Away, photos: Photos, stream: UnixStream) {
     let (read, mut write) = stream.into_split();
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
@@ -49,6 +60,13 @@ async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => warn!("client lagged, dropped {n} events"),
                 Err(_) => break,
             }
+        }
+    });
+    let mut quitting = QUITTING.subscribe();
+    let quit_tx = tx.clone();
+    let forward_quit = tokio::spawn(async move {
+        if quitting.recv().await.is_ok() {
+            let _ = quit_tx.send(ServerMsg::Quitting { quitting: true });
         }
     });
     let mut updates = history.subscribe();
@@ -133,6 +151,7 @@ async fn client(node: Node, history: History, sessions: Sessions, mirror: Mirror
         });
     }
     forward.abort();
+    forward_quit.abort();
     forward_history.abort();
     forward_inbox.abort();
     if let Some(f) = forward_files {
