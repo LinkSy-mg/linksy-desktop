@@ -8,11 +8,16 @@
 //! volume and brightness pop-ups, notifications of an app that was muted, and everything while
 //! this computer's Do Not Disturb is on. A phone gets at most 20 a minute.
 //!
+//! A phone doesn't have to be connected at that moment: links close after a minute of nothing,
+//! and a phone away from home is on none. Sending dials it (on this network or from away), so
+//! every phone it is turned on for gets them; one that couldn't be dialed is left alone for a
+//! minute.
+//!
 //! Monitoring the bus is not allowed from the Flatpak's sandbox: the switch isn't offered there.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
@@ -140,8 +145,8 @@ pub async fn run(node: Node) {
 
     // To ask who the notification server is: the monitor can't send
     let Ok(caller) = zbus::Connection::session().await else { return };
-    // Which phones can show them: connected, and announcing it
-    let mut can: HashSet<Fingerprint> = node.devices().into_iter().filter(|d| d.connected && has(&d.device.features)).map(|d| d.device.id).collect();
+    // Phones a send could not reach lately, and when: they are not dialed again for a minute
+    let failed: Arc<Mutex<HashMap<Fingerprint, Instant>>> = Arc::default();
     let mut events = node.subscribe();
     let mut sent: HashMap<Fingerprint, VecDeque<Instant>> = HashMap::new();
     let mut messages = zbus::MessageStream::from(&bus);
@@ -168,7 +173,7 @@ pub async fn run(node: Node) {
                 if outbox.is_muted(&posted.app) {
                     continue;
                 }
-                let phones: Vec<Fingerprint> = outbox.wanted().into_iter().filter(|p| can.contains(p)).collect();
+                let phones: Vec<Fingerprint> = outbox.wanted().into_iter().filter(|p| can_show(&node, p) && !cooling(&failed, &node, p)).collect();
                 if phones.is_empty() {
                     continue;
                 }
@@ -192,27 +197,25 @@ pub async fn run(node: Node) {
                     recent.push_back(Instant::now());
                     let node = node.clone();
                     let (key, app, title, body) = (key.clone(), posted.app.clone(), posted.title.clone(), posted.body.clone());
+                    let failed = failed.clone();
                     tokio::spawn(async move {
-                        if let Err(e) = node.send_computer_notification(&phone, &key, &app, &title, &body, at).await {
-                            debug!("outbox: not sent: {e}");
+                        match node.send_computer_notification(&phone, &key, &app, &title, &body, at).await {
+                            Ok(()) => {
+                                failed.lock().unwrap().remove(&phone);
+                            }
+                            Err(e) => {
+                                debug!("outbox: not sent: {e}");
+                                failed.lock().unwrap().insert(phone, Instant::now());
+                            }
                         }
                     });
                 }
             }
             event = events.recv() => match event {
-                Ok(Event::Connected { device }) if has(&device.features) => {
-                    can.insert(device.id);
-                }
-                // A phone turning it on or off while connected
-                Ok(Event::DeviceUpdated { device }) => {
-                    if has(&device.features) && node.devices().iter().any(|d| d.connected && d.device.id == device.id) {
-                        can.insert(device.id);
-                    } else {
-                        can.remove(&device.id);
-                    }
+                Ok(Event::Connected { device }) => {
+                    failed.lock().unwrap().remove(&device.id);
                 }
                 Ok(Event::Disconnected { id }) => {
-                    can.remove(&id);
                     sent.remove(&id);
                 }
                 Ok(_) | Err(RecvError::Lagged(_)) => {}
@@ -226,6 +229,17 @@ pub async fn run(node: Node) {
 async fn server(caller: &zbus::Connection) -> Option<String> {
     let reply = tokio::time::timeout(Duration::from_secs(2), caller.call_method(Some("org.freedesktop.DBus"), "/org/freedesktop/DBus", Some("org.freedesktop.DBus"), "GetNameOwner", &(NOTIFICATIONS,))).await.ok()?.ok()?;
     reply.body().deserialize::<String>().ok()
+}
+
+/// Whether `phone` is paired and said it can show them. Connected or not: sending dials it.
+fn can_show(node: &Node, phone: &Fingerprint) -> bool {
+    node.devices().iter().any(|d| d.device.id == *phone && d.trusted && has(&d.device.features))
+}
+
+/// A phone that is not connected and could not be dialed in the last minute.
+fn cooling(failed: &Mutex<HashMap<Fingerprint, Instant>>, node: &Node, phone: &Fingerprint) -> bool {
+    let recently = failed.lock().unwrap().get(phone).is_some_and(|t| t.elapsed() < Duration::from_secs(60));
+    recently && !node.devices().iter().any(|d| d.device.id == *phone && d.connected)
 }
 
 fn has(features: &[String]) -> bool {
