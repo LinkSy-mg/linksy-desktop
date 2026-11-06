@@ -53,6 +53,12 @@ pub enum Request {
     SetPhoneControls { phone: String, change: linksy_core::ControlsChange },
     /// Keep a phone's Do Not Disturb and this computer's the same, or stop.
     SetDndSync { phone: String, on: bool },
+    /// This computer's notifications on a phone (docs/protocol.md §4.25): whether it gets them,
+    /// and which apps stay here.
+    ComputerNotifications { phone: String },
+    SetComputerNotifications { phone: String, on: bool },
+    /// Keep an app's notifications from going to phones, or let them.
+    MuteComputerApp { app: String, muted: bool },
     /// Ask a phone to turn on `feature`: `notifications` (the Inbox) or `gallery`
     /// (docs/protocol.md §4.21).
     TurnOn { to: String, feature: String },
@@ -414,6 +420,19 @@ pub struct Finding {
     pub detail: String,
     /// What Linksy can do about it, as a button.
     pub action: Option<FindingAction>,
+}
+
+/// What this computer's notifications on a phone come to.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ComputerNotifications {
+    /// This computer can listen for its notifications (not from the Flatpak's sandbox).
+    pub available: bool,
+    /// This phone gets them.
+    pub on: bool,
+    /// Apps whose notifications stay here.
+    pub muted: Vec<String>,
+    /// Apps that notified lately, newest first, to choose from.
+    pub seen: Vec<String>,
 }
 
 /// A phone's controls as the apps show them.
@@ -850,6 +869,18 @@ impl Client {
 
     pub async fn set_dnd_sync(&self, phone: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::SetDndSync { phone: phone.into(), on }).await
+    }
+
+    pub async fn computer_notifications(&self, phone: impl Into<String>) -> Result<ComputerNotifications, ClientError> {
+        self.call(Request::ComputerNotifications { phone: phone.into() }).await
+    }
+
+    pub async fn set_computer_notifications(&self, phone: impl Into<String>, on: bool) -> Result<(), ClientError> {
+        self.call(Request::SetComputerNotifications { phone: phone.into(), on }).await
+    }
+
+    pub async fn mute_computer_app(&self, app: impl Into<String>, muted: bool) -> Result<(), ClientError> {
+        self.call(Request::MuteComputerApp { app: app.into(), muted }).await
     }
 
     pub async fn snap(&self, to: impl Into<String>) -> Result<(), ClientError> {
