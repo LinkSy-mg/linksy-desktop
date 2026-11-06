@@ -15,6 +15,8 @@ pub enum Update {
     History(HistoryEntry),
     Inbox(Conversation),
     Files(FsProgress),
+    /// The user chose Quit in the tray.
+    Quitting,
 }
 
 pub struct Bridge {
@@ -38,7 +40,7 @@ impl Bridge {
         let handle = self.rt.spawn(async {
             let client = Arc::new(Client::connect().await.map_err(|e| e.to_string())?);
             let (tx, rx) = async_channel::unbounded();
-            let (mut events, mut history, mut inbox, mut files) = (client.events(), client.history_updates(), client.inbox_updates(), client.fs_progress());
+            let (mut events, mut history, mut inbox, mut files, mut quitting) = (client.events(), client.history_updates(), client.inbox_updates(), client.fs_progress(), client.quitting());
             tokio::spawn(async move {
                 use tokio::sync::broadcast::error::RecvError;
                 loop {
@@ -60,6 +62,11 @@ impl Bridge {
                         },
                         p = files.recv() => match p {
                             Ok(p) => Update::Files(p),
+                            Err(RecvError::Lagged(_)) => continue,
+                            Err(RecvError::Closed) => break,
+                        },
+                        q = quitting.recv() => match q {
+                            Ok(()) => Update::Quitting,
                             Err(RecvError::Lagged(_)) => continue,
                             Err(RecvError::Closed) => break,
                         },
