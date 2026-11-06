@@ -85,6 +85,7 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | A USB button on the phone | Done (0.9) | Built, not published | `usb_plugged`, `usb_connect` (§4.11); mobile#11 |
 | Connection Doctor | Done on branch `phone-work` | Its half built, not published | the computer checks its firewall, a VPN, a phone on another network or not answering, and the cable; no new messages |
 | The phone's controls on the computer (volumes, ringer, Do Not Disturb, flashlight) | Done on branch `phone-work`: core, service, `linksy controls`, a Sound and Silence section on the phone's page in both apps, Keep Do Not Disturb in Sync (§4.24) | To do | `controls_watch`, `controls_state`, `controls_set`, `controls_refused`; feature `phone_controls` |
+| This computer's notifications on the phone | Done on branch `phone-work`: a switch per phone in both apps, `linksy forward` (§4.25) | To do | `computer_notification`; feature `computer_notifications` |
 | Bluetooth (presence and a link) | Planned | Planned | `ROADMAP.md`; not started |
 
 ## 3. How to build the phone app (recommendation)
@@ -818,7 +819,10 @@ phone), `direct_group` (hosts and joins Wi-Fi Direct groups by name and passphra
 its photos, §4.18), `deck` (a computer that runs a phone's deck, §4.19), `deck_layout` (a
 phone that draws the deck layouts a computer sends, §4.20), `turn_on` (a phone that asks its
 user when a computer asks it to turn something on, §4.21), `preflight` (answers the check
-before a send, §4.22; computers announce it too), `apps` (sends and installs apps, §4.22).
+before a send, §4.22; computers announce it too), `apps` (sends and installs apps, §4.22),
+`snap` (opens its camera when a computer asks, §4.23), `phone_controls` (a phone's volumes,
+ringer, Do Not Disturb and flashlight, §4.24), `computer_notifications` (a phone that shows
+the notifications of a computer, §4.25).
 Set `Config.features` in the core. To change them while running (`notifications` turned
 on or off), call `Node::set_features`: connected devices get a `features` message
 (at most 64 names of up to 64 bytes) and update at once, others see the new list at the
@@ -1995,6 +1999,38 @@ watch, state, set.
   for Do Not Disturb access from a button where `dnd_access` is false (Settings, "Do Not Disturb
   access"), since a sideloaded app can ask for it without a permission prompt of the
   restricted kind.
+
+### 4.25 This computer's notifications on the phone (desktop, after 0.12.4)
+
+What comes up on a computer comes up on a phone that asked for it. Feature
+`computer_notifications`, announced by the phone while the user lets it show them.
+
+```json
+{"type":"computer_notification","key":"4121-17","app":"Thunderbird","title":"Mum","body":"Dinner at eight?","at_ms":1760945000123}   // computer → phone
+```
+
+- **Who gets them:** only a phone that announces `computer_notifications`, and only once the
+  user turned it on for that phone on the computer ("This Computer's Notifications on the Phone",
+  off until then). The computer never sends to a phone that doesn't announce it, so announcing it
+  is how the phone says yes; leave it out of `features` while the user has it off on the phone.
+- **What is sent:** the notification's app name, summary (`title`) and text (`body`, may be empty),
+  and when it came up. `title` is cut at 200 characters, `body` at 1000, `app` and `key` at 80; the
+  phone cuts them too. A later one with the same `key` replaces the earlier one. Icons and
+  actions are not sent.
+- **What isn't:** Linksy's own notifications (a phone's notifications shown on the computer must
+  not go back to it), volume and brightness pop-ups, apps the user muted
+  (`linksy forward mute <app>`), anything while the computer's Do Not Disturb is on, and more than
+  20 a minute to one phone. There is no message to take one back.
+- **Phone to-do:** announce `computer_notifications` when allowed; on `computer_notification`
+  post an Android notification (its own channel, "From this computer", so the user can silence or
+  hide the channel) titled with `title`, text `body`, small text the computer's name and `app`;
+  replace one with the same `key`; never act on it beyond showing it. Nothing to send back.
+- **From away:** allowed, like the phone's notifications on the computer (§4.13): it is only
+  shown, and the computer sends it only after the user turned it on.
+- **Not available:** from the Flatpak's sandbox, where the session bus can't be listened to;
+  the switch isn't shown there.
+- **Core API:** `node.send_computer_notification(id, key, app, title, body, at_ms)`;
+  `Event::ComputerNotification`.
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 
