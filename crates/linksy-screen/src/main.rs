@@ -174,7 +174,9 @@ fn run(args: Args) -> Result<(), String> {
             .ok()
             .and_then(|s| s.split_once('x').and_then(|(w, h)| Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?))))
             .unwrap_or((1280, 720));
-        let pattern = format!("videotestsrc is-live=true pattern=ball motion=sweep background-color=0xff2563ff ! video/x-raw,width={w},height={h},framerate=30/1");
+        // LINKSY_SCREEN_TEST_FPS=60 imitates a screen that moves 60 times a second.
+        let fps: u32 = std::env::var("LINKSY_SCREEN_TEST_FPS").ok().and_then(|f| f.parse().ok()).unwrap_or(30);
+        let pattern = format!("videotestsrc is-live=true pattern=ball motion=sweep background-color=0xff2563ff ! video/x-raw,width={w},height={h},framerate={fps}/1");
         (pattern, args.control.then_some(portal::Input::Log))
     } else {
         open_capture(&args, &rt)?
@@ -233,10 +235,14 @@ fn run(args: Args) -> Result<(), String> {
             // Whatever the source gives (a bare "video/x-raw" isn't caps to the parser)
             Memory::System => "identity".to_string(),
         };
+        // Up to 60 frames a second, however fast the screen is (144 Hz ones too): dropped here
+        // where it costs nothing, and brought down to 30 by `adapt_rate` when the encoder can't
+        // keep up
+        let rate = format!("videorate name=rate drop-only=true max-rate={MAX_FPS}");
         let convert = if gpu {
-            "vapostproc ! capsfilter caps=\"video/x-raw(memory:VAMemory),format=NV12\"".to_string()
+            format!("{rate} ! vapostproc ! capsfilter caps=\"video/x-raw(memory:VAMemory),format=NV12\"")
         } else {
-            format!("videorate drop-only=true max-rate=30 ! videoconvert n-threads={threads} ! video/x-raw,format={format}")
+            format!("{rate} ! videoconvert n-threads={threads} ! video/x-raw,format={format}")
         };
         format!("{copy} ! {caps} ! queue name=captured max-size-buffers=1 leaky=downstream ! {convert} ! queue max-size-buffers=2 leaky=downstream ! {encoder} name=encoder")
     };
@@ -267,6 +273,7 @@ fn run(args: Args) -> Result<(), String> {
             }
         };
         let last_frame = count_frames(&pipeline, name);
+        adapt_rate(&pipeline);
         let outcome = match pipeline.set_state(gst::State::Playing) {
             // Why, from the element that refused (set_state only says that one did)
             Err(_) => Some(Ended(Err(bus_error(&pipeline).unwrap_or_else(|| "an element failed to start".into())))),
@@ -414,6 +421,54 @@ fn open_capture(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(String, Op
     Ok((source, input))
 }
 
+/// The most frames a second a shared screen is encoded at; 30 is what it falls back to.
+const MAX_FPS: u32 = 60;
+const SLOW_FPS: u32 = 30;
+
+/// Encode at 60 where this computer can, and at 30 where it can't, by itself. Every two seconds
+/// it looks at how many of the frames the screen gave were encoded: when a screen that moves
+/// (more than 45 a second) is encoded at under 86 % of the rate wanted twice running, the rate limit goes
+/// down to 30 for good: an even 30 looks better than a 60 that stutters.
+fn adapt_rate(pipeline: &gst::Element) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let Some(bin) = pipeline.downcast_ref::<gst::Bin>() else { return };
+    let Some(rate) = bin.by_name("rate") else { return };
+    let counts = std::sync::Arc::new([AtomicU64::new(0), AtomicU64::new(0)]);
+    // What the screen gives, and what comes out encoded
+    for (name, pad, i) in [("captured", "sink", 0), ("encoder", "src", 1)] {
+        if let Some(pad) = bin.by_name(name).and_then(|e| e.static_pad(pad)) {
+            let counts = counts.clone();
+            pad.add_probe(gst::PadProbeType::BUFFER, move |_, _| {
+                counts[i].fetch_add(1, Ordering::Relaxed);
+                gst::PadProbeReturn::Ok
+            });
+        }
+    }
+    let (counts, rate) = (std::sync::Arc::downgrade(&counts), rate.downgrade());
+    std::thread::spawn(move || {
+        let mut behind = 0;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let (Some(counts), Some(rate)) = (counts.upgrade(), rate.upgrade()) else { return };
+            let (shown, encoded) = (counts[0].swap(0, Ordering::Relaxed) as f64 / 2.0, counts[1].swap(0, Ordering::Relaxed) as f64 / 2.0);
+            let wanted = shown.min(MAX_FPS as f64);
+            behind = if falls_behind(shown, encoded) { behind + 1 } else { 0 };
+            if behind >= 2 {
+                eprintln!("linksy-screen: encoding {encoded:.0} of {wanted:.0} frames a second; keeping to {SLOW_FPS}");
+                rate.set_property("max-rate", SLOW_FPS as i32);
+                return;
+            }
+        }
+    });
+}
+
+/// Whether an encoder is too slow for 60 frames a second: the screen moves more than 45 times a
+/// second, and under 86 % of the frames wanted (the screen's, up to the limit) come out. A screen
+/// faster than the limit is meant to lose frames; the rest is the encoder's.
+fn falls_behind(shown: f64, encoded: f64) -> bool {
+    shown > 45.0 && encoded < shown.min(MAX_FPS as f64) * 0.86
+}
+
 /// Every 10 seconds, how many frames the screen gave and how many were encoded (the
 /// rest were dropped because the encoder was behind), for Save Logs. Returns when the last
 /// frame came (milliseconds since the epoch; 0 before the first). The report ends with the
@@ -486,7 +541,10 @@ fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
 /// x264, then OpenH264 (always present on Fedora). All are asked for Constrained
 /// Baseline, which every H.264 decoder handles (OpenH264's, phones' hardware ones).
 fn encoders() -> Vec<(&'static str, &'static str)> {
-    let has = |name: &str| gst::ElementFactory::find(name).is_some();
+    // LINKSY_SCREEN_ENCODERS=x264enc,openh264enc allows only those (to try the CPU ones where
+    // there is a GPU, say).
+    let only: Option<Vec<String>> = std::env::var("LINKSY_SCREEN_ENCODERS").ok().map(|l| l.split(',').map(|e| e.trim().to_string()).collect());
+    let has = |name: &str| gst::ElementFactory::find(name).is_some() && only.as_ref().is_none_or(|o| o.iter().any(|e| e == name));
     let mut list = Vec::new();
     if has("vah264lpenc") && constant_bitrate("vah264lpenc") {
         list.push(("vah264lpenc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12"));
@@ -641,4 +699,31 @@ fn play(description: &str) -> Result<(), String> {
     };
     let _ = pipeline.set_state(gst::State::Null);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::falls_behind;
+
+    #[test]
+    fn an_encoder_that_keeps_up_stays_at_60() {
+        assert!(!falls_behind(60.0, 59.8));
+        assert!(!falls_behind(60.0, 53.0));
+        // A 144 Hz screen is cut to 60 on purpose
+        assert!(!falls_behind(144.0, 59.9));
+    }
+
+    #[test]
+    fn an_encoder_that_cannot_goes_down_to_30() {
+        assert!(falls_behind(60.0, 40.0));
+        assert!(falls_behind(60.0, 51.0));
+        assert!(falls_behind(144.0, 45.0));
+    }
+
+    #[test]
+    fn a_screen_that_hardly_moves_says_nothing() {
+        // A still desktop sends the keepalive 10 times a second; a video at 30 is already 30
+        assert!(!falls_behind(10.0, 2.0));
+        assert!(!falls_behind(30.0, 20.0));
+    }
 }
