@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use linksy_core::{Node, Session, SessionKind, Uuid};
+use linksy_core::{Fingerprint, Node, Session, SessionKind, Uuid};
 use linksy_ipc::{ActiveSession, PendingSession};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
@@ -39,6 +39,8 @@ pub struct Sessions {
     /// Cameras used here: where `camera_control` frames go, and the last `camera_state`
     /// each one sent (docs/protocol.md §4.8).
     cameras: Arc<Mutex<HashMap<Uuid, Camera>>>,
+    /// The sound session that plays along with each screen being shown (by the screen's id).
+    sounds: Arc<Mutex<HashMap<Uuid, Uuid>>>,
 }
 
 #[derive(Default)]
@@ -93,7 +95,7 @@ impl Camera {
 impl Sessions {
     pub fn new(data_dir: PathBuf, socket: PathBuf) -> Self {
         let test_pattern = std::env::var_os("LINKSY_SCREEN_TEST").is_some();
-        Self { running: Arc::default(), pending: Arc::default(), data_dir, socket, test_pattern, cameras: Arc::default() }
+        Self { running: Arc::default(), pending: Arc::default(), data_dir, socket, test_pattern, cameras: Arc::default(), sounds: Arc::default() }
     }
 
     /// Keep each camera's last `camera_state`, for a window opened later.
@@ -112,6 +114,11 @@ impl Sessions {
                 }
                 Ok(linksy_core::Event::SessionEnded { session }) => {
                     self.cameras.lock().unwrap().remove(&session);
+                    // The screen ended on the phone's side: its sound goes with it
+                    let sound = self.sounds.lock().unwrap().remove(&session);
+                    if let Some(sound) = sound {
+                        self.end(sound);
+                    }
                 }
                 Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                 Err(_) => break,
@@ -214,7 +221,10 @@ impl Sessions {
 
     async fn run_helper_on(&self, mut session: Session, device: bool, headless: Option<String>) -> std::io::Result<()> {
         let role = match session.kind {
+            // A computer plays a phone's sound; it never shares its own this way
+            SessionKind::Sound if !device => return Err(std::io::Error::other("this computer doesn't share its sound")),
             _ if !device => "share",
+            SessionKind::Sound => "speaker",
             SessionKind::Microphone => "mic",
             _ => "webcam",
         };
@@ -226,6 +236,7 @@ impl Sessions {
             SessionKind::Microphone if device => {
                 cmd.arg("--name").arg(format!("Linksy Microphone ({})", session.peer.name));
             }
+            SessionKind::Sound => {}
             _ if device => {
                 cmd.arg("--name").arg(format!("Linksy Camera ({})", session.peer.name));
             }
@@ -269,7 +280,7 @@ impl Sessions {
             }
             cmd.arg("--token-file").arg(token);
         }
-        if self.test_pattern && !device {
+        if self.test_pattern && (!device || session.kind == SessionKind::Sound) {
             cmd.arg("--test");
         }
         let mut child = cmd.kill_on_drop(true).spawn()?;
@@ -445,8 +456,40 @@ impl Sessions {
         self.running.lock().unwrap().values().map(|(_, info)| info.clone()).collect()
     }
 
+    /// Play a phone's sound while its screen is shown here (docs/protocol.md §4.8), if it says it
+    /// has some to share (`sound`). Asked for in the background, so the screen doesn't wait for
+    /// the phone's answer, and ended with the screen; a phone that says no is not heard of again.
+    pub fn play_sound_with(&self, node: &Node, phone: Fingerprint, screen: Uuid) {
+        let shares = node.devices().into_iter().any(|d| d.device.id == phone && d.device.features.iter().any(|f| f == "sound"));
+        if !shares {
+            return;
+        }
+        let (this, node) = (self.clone(), node.clone());
+        tokio::spawn(async move {
+            let session = match node.request_session(&phone, SessionKind::Sound).await {
+                Ok(session) => session,
+                Err(e) => {
+                    debug!("the phone's sound: {e}");
+                    return;
+                }
+            };
+            // The screen ended while the phone was being asked
+            let alive = this.running.lock().unwrap().contains_key(&screen) || this.pending.lock().unwrap().contains_key(&screen);
+            if !alive {
+                return;
+            }
+            this.sounds.lock().unwrap().insert(screen, session.id);
+            this.spawn_device(session);
+        });
+    }
+
     /// Stop a session from either side. Returns false if it wasn't running.
     pub fn end(&self, id: Uuid) -> bool {
+        // Its sound goes with a screen
+        let sound = self.sounds.lock().unwrap().remove(&id);
+        if let Some(sound) = sound {
+            self.end(sound);
+        }
         self.pending.lock().unwrap().remove(&id);
         match self.running.lock().unwrap().remove(&id) {
             Some((task, _)) => {

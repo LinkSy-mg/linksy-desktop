@@ -113,6 +113,8 @@ pub async fn run(node: Node) {
                         t!("{device} wants to see your screen", device = from.name),
                         t!("{device} will see everything on your screen until you stop sharing.", device = from.name),
                     ),
+                    // Never asked of a computer: the core answers that this one can't
+                    SessionKind::Sound => continue,
                     SessionKind::Terminal => (
                         t!("{device} wants a terminal on this computer", device = from.name),
                         t!("The right code was typed on {device}. Its terminal runs commands as you until it's ended. Linksy asks once a day.", device = from.name),

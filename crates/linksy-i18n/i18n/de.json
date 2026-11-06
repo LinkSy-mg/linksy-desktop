@@ -847,6 +847,7 @@
   "{name}'s camera is on. Open its page to preview it.": "Die Kamera von {name} ist an. Öffne seine Seite für eine Vorschau.",
   "{name}'s camera is on: “{camera}” in your apps": "Die Kamera von {name} ist an: „{camera}“ in deinen Apps",
   "{name}'s microphone is on: “{microphone}” in your apps": "Das Mikrofon von {name} ist an: „{microphone}“ in deinen Apps",
+  "{name}'s sound is playing here": "Der Ton von {name} wird hier abgespielt",
   "{n} devices connected": "{n} Geräte verbunden",
   "{n} hours left": "noch {n} Stunden",
   "{n} items": "{n} Elemente",

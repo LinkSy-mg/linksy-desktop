@@ -536,8 +536,10 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
                 let session = node.request_session(&id, linksy_core::SessionKind::Screen).await.map_err(|e| e.to_string())?;
                 let session_id = session.id;
                 let socket = sessions.view_driven(session, dev, node.clone()).map_err(|e| e.to_string())?;
+                sessions.play_sound_with(node, id, session_id);
                 return json(serde_json::to_value(SessionInfo { session: session_id, socket: Some(socket) }));
             }
+            let phone_id = id;
             let session = node.request_session(&id, kind).await.map_err(|e| e.to_string())?;
             let id = session.id;
             // A second display: this device shares, the service runs that side. A camera or
@@ -551,6 +553,10 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             } else {
                 Some(sessions.view(session).map_err(|e| e.to_string())?)
             };
+            // A phone's screen, here: its sound too
+            if matches!(kind, linksy_core::SessionKind::Screen | linksy_core::SessionKind::Control) {
+                sessions.play_sound_with(node, phone_id, id);
+            }
             json(serde_json::to_value(SessionInfo { session: id, socket }))
         }
         Request::PendingSessions => json(serde_json::to_value(sessions.pending())),
