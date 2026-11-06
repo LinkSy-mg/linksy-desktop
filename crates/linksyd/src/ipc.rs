@@ -221,6 +221,21 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             Ok(Value::Null)
         }
         Request::Doctor => json(serde_json::to_value(crate::doctor::run(node, usb_status().phones).await)),
+        Request::PhoneControls { phone } => {
+            let id = paired(node, &phone)?;
+            let controls = crate::phone_controls::CONTROLS.get().ok_or("phone controls aren't running")?;
+            json(serde_json::to_value(controls.info(&id).await))
+        }
+        Request::SetPhoneControls { phone, change } => {
+            let id = paired(node, &phone)?;
+            node.set_controls(&id, change).await.map_err(|e| e.to_string())?;
+            Ok(Value::Null)
+        }
+        Request::SetDndSync { phone, on } => {
+            let id = paired(node, &phone)?;
+            crate::phone_controls::CONTROLS.get().ok_or("phone controls aren't running")?.set_sync(id, on)?;
+            Ok(Value::Null)
+        }
         Request::Snap { to } => {
             let id = resolve(node, &to)?;
             node.request_snap(&id).await.map_err(|e| e.to_string())?;

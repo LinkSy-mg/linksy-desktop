@@ -89,6 +89,13 @@ pub struct Controls {
     inhibit: tokio::sync::Mutex<Option<(zbus::Connection, u32)>>,
 }
 
+/// The one set of these for the whole service, so a deck and a phone's sync agree on the
+/// Do Not Disturb they hold.
+pub fn shared() -> &'static Controls {
+    static SHARED: OnceLock<Controls> = OnceLock::new();
+    SHARED.get_or_init(Controls::default)
+}
+
 /// Which desktop this is: GNOME, KDE.
 fn desktop() -> (bool, bool) {
     let desktop = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default().to_lowercase();
@@ -167,12 +174,42 @@ impl Controls {
         self.found.get().cloned().unwrap_or_default()
     }
 
-    /// Whether Do Not Disturb is on.
+    /// Whether Do Not Disturb is on. In Plasma, whoever turned it on: Plasma says so itself.
     pub async fn dnd(&self) -> Option<bool> {
         match self.found().dnd? {
             Dnd::Gnome => gsetting(BANNERS).await.map(|banners| !banners),
-            Dnd::Kde => Some(self.inhibit.lock().await.is_some()),
+            Dnd::Kde => match kde_inhibited().await {
+                Some(on) => Some(on),
+                None => Some(self.inhibit.lock().await.is_some()),
+            },
         }
+    }
+
+    /// Turn Do Not Disturb on or off; whether it is so now. Plasma's own switch can't be undone
+    /// from here, only what this service turned on.
+    pub async fn set_dnd(&self, on: bool) -> bool {
+        match self.found().dnd {
+            Some(Dnd::Gnome) => set_gsetting(BANNERS, !on).await,
+            Some(Dnd::Kde) => {
+                let mut held = self.inhibit.lock().await;
+                let done = match (on, held.take()) {
+                    (true, None) => tokio::time::timeout(WAIT, inhibit()).await.map(|r| r.map(|now| *held = Some(now))),
+                    (true, kept) => {
+                        *held = kept;
+                        Ok(Ok(()))
+                    }
+                    (false, Some((bus, cookie))) => tokio::time::timeout(WAIT, bus.call_method(Some(NOTIFICATIONS), NOTIFICATIONS_PATH, Some(NOTIFICATIONS), "UnInhibit", &(cookie,))).await.map(|r| r.map(|_| ())),
+                    (false, None) => Ok(Ok(())),
+                };
+                match done {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => debug!("Do Not Disturb: {e}"),
+                    Err(_) => debug!("Do Not Disturb: no answer"),
+                }
+            }
+            None => return false,
+        }
+        self.dnd().await == Some(on)
     }
 
     pub async fn toggle_dnd(&self) {
@@ -294,6 +331,20 @@ async fn inhibits() -> bool {
         reply.body().deserialize::<Vec<String>>()
     };
     matches!(tokio::time::timeout(WAIT, asked).await, Ok(Ok(caps)) if caps.iter().any(|c| c == "inhibitions"))
+}
+
+/// Plasma's `Inhibited`: whether its notifications are held back, by whatever.
+async fn kde_inhibited() -> Option<bool> {
+    let asked = async {
+        let bus = zbus::Connection::session().await?;
+        let reply = bus.call_method(Some(NOTIFICATIONS), NOTIFICATIONS_PATH, Some("org.freedesktop.DBus.Properties"), "Get", &(NOTIFICATIONS, "Inhibited")).await?;
+        let value: zbus::zvariant::OwnedValue = reply.body().deserialize()?;
+        bool::try_from(value).map_err(zbus::Error::from)
+    };
+    match tokio::time::timeout(WAIT, asked).await {
+        Ok(Ok(on)) => Some(on),
+        _ => None,
+    }
 }
 
 /// Hold the notifications back on a connection of its own, kept while it's on.
