@@ -520,6 +520,18 @@ pub fn check(ui: Ui) -> Vec<Item> {
         why: t!("Browsers, Zoom and Discord only see this kind of camera. Without it, the phone's camera works in OBS and PipeWire apps only."),
         need: camera,
     }];
+    // The Flatpak's way out of its sandbox can be switched off (Flatseal, a build without it)
+    if !linksy_host::host_access() {
+        items.insert(
+            0,
+            Item {
+                id: "host-access",
+                title: t!("Access to Your Computer"),
+                why: t!("Without it, this Flatpak can't use your picture or the cover of what's playing, and Finish Setup can't change anything here."),
+                need: Need::Manual(t!("Allow it with: flatpak override --user --talk-name=org.freedesktop.Flatpak mg.diary.linksy.Linksy (or in Flatseal, under Session Bus), then restart Linksy.")),
+            },
+        );
+    }
     items.push(Item {
         id: "usb",
         title: t!("Phones by USB Cable"),
