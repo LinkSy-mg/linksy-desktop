@@ -243,6 +243,14 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
         Request::PhoneControls { phone } => {
             let id = paired(node, &phone)?;
             let controls = crate::phone_controls::CONTROLS.get().ok_or("phone controls aren't running")?;
+            // A phone with no link now (idle, or away from home) is dialed, and says how they are
+            let idle = node.devices().iter().any(|d| d.device.id == id && !d.connected && d.device.features.iter().any(|f| f == "phone_controls"));
+            if idle {
+                let node = node.clone();
+                tokio::spawn(async move {
+                    let _ = node.watch_controls(&id, true).await;
+                });
+            }
             json(serde_json::to_value(controls.info(&id).await))
         }
         Request::SetPhoneControls { phone, change } => {

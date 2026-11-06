@@ -69,10 +69,6 @@ impl Controls {
         self.lock().states.insert(phone, state);
     }
 
-    fn forget(&self, phone: &Fingerprint) {
-        self.lock().states.remove(phone);
-    }
-
     /// The phones that follow this computer and can be told to: they gave Linksy Do Not
     /// Disturb access.
     fn followers(&self) -> Vec<(Fingerprint, Dnd)> {
@@ -107,8 +103,9 @@ pub async fn run(node: Node) {
                         }
                     });
                 }
+                // The last it said stays for its page: a link closes after a minute of nothing, and a
+                // phone away from home is on none. Opening the page asks again (it dials).
                 Ok(Event::Disconnected { id }) => {
-                    controls.forget(&id);
                     seen.remove(&id);
                 }
                 Ok(Event::ControlsState { from, state }) => {
