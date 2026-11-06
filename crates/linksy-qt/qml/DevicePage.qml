@@ -1048,6 +1048,30 @@ Kirigami.Page {
                     checked: page.view?.allow_screen ?? false
                     onSwitched: now => app.request("set_allow_screen", { device: page.info.id, on: now }, () => app.refreshDevices())
                 }
+                // This computer's notifications on the phone, once the phone can show them and this
+                // computer can listen for them
+                SwitchRow {
+                    id: forwardRow
+                    property var info: null
+                    visible: page.info !== null && app.can(page.info, "computer_notifications") && (info?.available ?? false)
+                    iconName: "preferences-desktop-notification"
+                    title: app.t("This Computer's Notifications on the Phone")
+                    subtitle: app.t("What comes up here also comes up on {device}, except Linksy's own and while Do Not Disturb is on. Off until you turn it on.", { device: page.name })
+                    checked: info?.on ?? false
+                    function load() {
+                        if (page.info === null || !app.can(page.info, "computer_notifications")) return;
+                        const id = page.info.id;
+                        app.request("computer_notifications", { phone: id }, (ok, got) => { if (ok && id === page.info?.id) forwardRow.info = got });
+                    }
+                    Component.onCompleted: load()
+                    onSwitched: now => app.request("set_computer_notifications", { phone: page.info.id, on: now }, (ok, err) => {
+                        if (ok) forwardRow.info = Object.assign({}, forwardRow.info, { on: now });
+                        else {
+                            app.toast(err);
+                            forwardRow.load();
+                        }
+                    })
+                }
                 SwitchRow {
                     visible: page.view !== null && page.view.away_until !== undefined
                     iconName: "network-wireless-hotspot"

@@ -282,7 +282,7 @@ Kirigami.ApplicationWindow {
     // What a device can do for others; older versions don't say, so assume as the GTK app does
     function can(info, feature) {
         if (info.features && info.features.length) return info.features.includes(feature);
-        return !(info.os === "android" && ["sms", "notifications", "media_state", "control", "clipboard_file", "clipboard_watch", "microphone", "locate", "turn_on", "snap", "phone_controls"].includes(feature));
+        return !(info.os === "android" && ["sms", "notifications", "media_state", "control", "clipboard_file", "clipboard_watch", "microphone", "locate", "turn_on", "snap", "phone_controls", "computer_notifications"].includes(feature));
     }
 
     function refreshAll() {
