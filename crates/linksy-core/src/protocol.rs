@@ -421,6 +421,10 @@ pub enum Message {
     SnapRequest,
     /// The phone can't or won't (turned off, no camera permission, the camera is in use).
     SnapRefused { reason: String },
+    /// How far the phone's display is turned from its natural orientation, in degrees (0, 90,
+    /// 180 or 270, as Android's `Display.getRotation()` times 90). Sent by a phone while a
+    /// computer controls its screen over the cable (docs/protocol.md §4.11).
+    ScreenRotation { degrees: u16 },
     /// A notification that came up on the computer, for the phone to show too (computer →
     /// phone, docs/protocol.md §4.25). A later one with the same `key` replaces it.
     ComputerNotification {
@@ -1157,6 +1161,13 @@ mod tests {
         let refused = serde_json::to_string(&Message::SnapRefused { reason: "Linksy needs the camera permission".into() }).unwrap();
         assert_eq!(refused, r#"{"type":"snap_refused","reason":"Linksy needs the camera permission"}"#);
         assert!(matches!(serde_json::from_str::<Message>(&refused), Ok(Message::SnapRefused { .. })));
+    }
+
+    #[test]
+    fn screen_rotation_has_the_name_the_phone_is_told() {
+        let json = serde_json::to_string(&Message::ScreenRotation { degrees: 90 }).unwrap();
+        assert_eq!(json, r#"{"type":"screen_rotation","degrees":90}"#);
+        assert_eq!(serde_json::from_str::<Message>(&json).unwrap(), Message::ScreenRotation { degrees: 90 });
     }
 
     #[test]

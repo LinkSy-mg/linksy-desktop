@@ -1255,6 +1255,8 @@ impl Window {
             Event::ControlsSet { .. } | Event::ControlsWatch { .. } => {}
             // A phone's to show (docs/protocol.md §4.25)
             Event::ComputerNotification { .. } => {}
+            // The service turns a driven phone's taps back (docs/protocol.md §4.11)
+            Event::ScreenRotation { .. } => {}
             Event::SnapRefused { from, reason } => self.toast(&t!("{name} can't take a picture: {reason}", name = from.name, reason = fmt::capitalize(&reason))),
             Event::LocateRequest { .. } | Event::Location { .. } | Event::LocationRefused { .. } | Event::TerminalListRequest { .. } | Event::Terminals { .. } => {}
             // Answers go to whoever asked (the service waits for them); requests are a phone's.

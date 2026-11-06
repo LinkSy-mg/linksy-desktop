@@ -351,6 +351,19 @@ async fn a_phones_controls_are_watched_changed_and_refused() {
 }
 
 #[tokio::test]
+async fn a_phone_tells_how_far_its_display_is_turned() {
+    let (computer, phone) = paired().await;
+    let cid = computer.node.info().id;
+    let mut rc = computer.node.subscribe();
+    // Only the four ways a display can be turned
+    assert!(phone.node.send_screen_rotation(&cid, 45).await.is_err());
+    assert!(phone.node.send_screen_rotation(&cid, 360).await.is_err());
+    phone.node.send_screen_rotation(&cid, 270).await.unwrap();
+    let degrees = wait_for(&mut rc, |e| match e { Event::ScreenRotation { degrees, .. } => Some(*degrees), _ => None }).await;
+    assert_eq!(degrees, 270);
+}
+
+#[tokio::test]
 async fn a_computers_notification_shows_on_the_phone() {
     let (computer, phone) = paired().await;
     let pid = phone.node.info().id;
