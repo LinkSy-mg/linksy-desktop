@@ -351,6 +351,23 @@ async fn a_phones_controls_are_watched_changed_and_refused() {
 }
 
 #[tokio::test]
+async fn a_computers_notification_shows_on_the_phone() {
+    let (computer, phone) = paired().await;
+    let pid = phone.node.info().id;
+    let mut rp = phone.node.subscribe();
+    // Cut to what a notification holds, so a long one can't fill the phone
+    let long = "x".repeat(5000);
+    computer.node.send_computer_notification(&pid, "n1", "Thunderbird", "Mum", &long, 1760945000123).await.unwrap();
+    let (key, app, title, body, at) = wait_for(&mut rp, |e| match e {
+        Event::ComputerNotification { key, app, title, body, at_ms, .. } => Some((key.clone(), app.clone(), title.clone(), body.clone(), *at_ms)),
+        _ => None,
+    })
+    .await;
+    assert_eq!((key.as_str(), app.as_str(), title.as_str(), at), ("n1", "Thunderbird", "Mum", 1760945000123));
+    assert_eq!(body.chars().count(), 1000);
+}
+
+#[tokio::test]
 async fn sends_files_and_folders_intact() {
     let (a, b) = paired().await;
     let src = a.dir.path().join("out");

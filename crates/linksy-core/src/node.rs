@@ -298,6 +298,8 @@ pub enum Event {
     SnapRequest { from: DeviceInfo },
     /// A phone couldn't open its camera for a snap.
     SnapRefused { from: DeviceInfo, reason: String },
+    /// A notification that came up on a computer, to show here too (docs/protocol.md §4.25).
+    ComputerNotification { from: DeviceInfo, key: String, app: String, title: String, body: String, at_ms: u64 },
     /// A device asks which terminals run here for it (answer with `send_terminals`).
     TerminalListRequest { from: DeviceInfo },
     /// The terminals running on a device for this one.
@@ -1018,6 +1020,13 @@ impl Node {
 
     pub async fn notify(&self, to: &Fingerprint, title: &str, body: &str) -> Result<()> {
         self.send_message(to, &Message::Notify { title: title.into(), body: body.into() }).await
+    }
+
+    /// Show a notification of this computer on a phone (`computer_notifications`, §4.25). The
+    /// texts are cut to what a notification holds.
+    pub async fn send_computer_notification(&self, to: &Fingerprint, key: &str, app: &str, title: &str, body: &str, at_ms: u64) -> Result<()> {
+        let cut = |s: &str, n: usize| s.chars().take(n).collect::<String>();
+        self.send_message(to, &Message::ComputerNotification { key: cut(key, 80), app: cut(app, 80), title: cut(title, 200), body: cut(body, 1000), at_ms }).await
     }
 
     /// Share clipboard text with a connected device.
@@ -2257,6 +2266,10 @@ impl Node {
                                 }
                                 Ok(Message::LocationRefused { reason }) => {
                                     node.emit(Event::LocationRefused { from, reason: reason.chars().take(200).collect() })
+                                }
+                                Ok(Message::ComputerNotification { key, app, title, body, at_ms }) => {
+                                    let cut = |s: String, n: usize| s.chars().take(n).collect::<String>();
+                                    node.emit(Event::ComputerNotification { from, key: cut(key, 80), app: cut(app, 80), title: cut(title, 200), body: cut(body, 1000), at_ms })
                                 }
                                 Ok(Message::SnapRequest) => node.emit(Event::SnapRequest { from }),
                                 Ok(Message::SnapRefused { reason }) => {

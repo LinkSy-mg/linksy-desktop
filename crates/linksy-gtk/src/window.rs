@@ -1249,6 +1249,8 @@ impl Window {
             Event::ControlsState { from, state } => self.controls_said(from.id, state),
             Event::ControlsRefused { from, what, reason } => self.toast(&t!("{name} didn't change {what}: {reason}", name = from.name, what = controls_what(&what), reason = fmt::capitalize(&reason))),
             Event::ControlsSet { .. } | Event::ControlsWatch { .. } => {}
+            // A phone's to show (docs/protocol.md §4.25)
+            Event::ComputerNotification { .. } => {}
             Event::SnapRefused { from, reason } => self.toast(&t!("{name} can't take a picture: {reason}", name = from.name, reason = fmt::capitalize(&reason))),
             Event::LocateRequest { .. } | Event::Location { .. } | Event::LocationRefused { .. } | Event::TerminalListRequest { .. } | Event::Terminals { .. } => {}
             // Answers go to whoever asked (the service waits for them); requests are a phone's.

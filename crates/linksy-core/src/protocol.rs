@@ -421,6 +421,19 @@ pub enum Message {
     SnapRequest,
     /// The phone can't or won't (turned off, no camera permission, the camera is in use).
     SnapRefused { reason: String },
+    /// A notification that came up on the computer, for the phone to show too (computer →
+    /// phone, docs/protocol.md §4.25). A later one with the same `key` replaces it.
+    ComputerNotification {
+        key: String,
+        /// The app that posted it, as the computer's notification names it.
+        app: String,
+        title: String,
+        #[serde(default)]
+        body: String,
+        /// When it came up, in milliseconds since the Unix epoch.
+        #[serde(default)]
+        at_ms: u64,
+    },
     /// Texting from the computer. Requests (computer → phone):
     SmsListThreads { limit: u32 },
     SmsListMessages {
@@ -1144,6 +1157,17 @@ mod tests {
         let refused = serde_json::to_string(&Message::SnapRefused { reason: "Linksy needs the camera permission".into() }).unwrap();
         assert_eq!(refused, r#"{"type":"snap_refused","reason":"Linksy needs the camera permission"}"#);
         assert!(matches!(serde_json::from_str::<Message>(&refused), Ok(Message::SnapRefused { .. })));
+    }
+
+    #[test]
+    fn computer_notifications_have_the_names_the_phone_is_told() {
+        let shown = Message::ComputerNotification { key: "7".into(), app: "Thunderbird".into(), title: "Mum".into(), body: "Dinner?".into(), at_ms: 1760945000123 };
+        let json = serde_json::to_string(&shown).unwrap();
+        assert_eq!(json, r#"{"type":"computer_notification","key":"7","app":"Thunderbird","title":"Mum","body":"Dinner?","at_ms":1760945000123}"#);
+        assert_eq!(serde_json::from_str::<Message>(&json).unwrap(), shown);
+        // A notification with no body or time is still one
+        let bare: Message = serde_json::from_str(r#"{"type":"computer_notification","key":"7","app":"Clock","title":"Alarm"}"#).unwrap();
+        assert!(matches!(bare, Message::ComputerNotification { ref body, at_ms: 0, .. } if body.is_empty()));
     }
 
     #[test]
