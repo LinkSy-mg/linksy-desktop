@@ -257,6 +257,10 @@ pub mod qobject {
         /// Couldn't reach the service, or it went away.
         #[qsignal]
         fn offline(self: Pin<&mut Backend>, why: QString);
+
+        /// The user chose Quit in the tray: the window closes with the service.
+        #[qsignal]
+        fn quitting(self: Pin<&mut Backend>);
     }
 
     impl cxx_qt::Threading for Backend {}
@@ -333,7 +337,7 @@ impl qobject::Backend {
                 b.as_mut().set_starting(false);
                 b.as_mut().set_connected(true);
             });
-            let (mut events, mut history, mut inbox, mut copies) = (client.events(), client.history_updates(), client.inbox_updates(), client.fs_progress());
+            let (mut events, mut history, mut inbox, mut copies, mut quitting) = (client.events(), client.history_updates(), client.inbox_updates(), client.fs_progress(), client.quitting());
             use tokio::sync::broadcast::error::RecvError;
             loop {
                 tokio::select! {
@@ -365,6 +369,13 @@ impl qobject::Backend {
                         Ok(p) => {
                             let json = serde_json::to_string(&p).unwrap_or_default();
                             let _ = thread.queue(move |b| b.fs_progress(QString::from(&json)));
+                        }
+                        Err(RecvError::Lagged(_)) => continue,
+                        Err(RecvError::Closed) => break,
+                    },
+                    q = quitting.recv() => match q {
+                        Ok(()) => {
+                            let _ = thread.queue(|b| b.quitting());
                         }
                         Err(RecvError::Lagged(_)) => continue,
                         Err(RecvError::Closed) => break,

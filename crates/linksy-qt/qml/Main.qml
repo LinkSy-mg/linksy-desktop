@@ -91,6 +91,8 @@ Kirigami.ApplicationWindow {
             if (open === "messages") openMessagesSoon.start();
         }
         onOffline: why => { if (why) root.toast(why) }
+        // Quit in the tray: the window goes with the service
+        onQuitting: Qt.quit()
         onSetupChecked: json => root.setup = JSON.parse(json)
         onAutostartChecked: (state, error) => {
             root.autostart = state;
