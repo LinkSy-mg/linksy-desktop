@@ -46,6 +46,13 @@ pub enum Request {
     Snap { to: String },
     /// "Why can't I see my phone?": what the service can find wrong, with what to do.
     Doctor,
+    /// A phone's controls (docs/protocol.md §4.24): how they were when it last said, and
+    /// whether its Do Not Disturb follows this computer's.
+    PhoneControls { phone: String },
+    /// Change some of a phone's controls; only what is given. A refusal comes as an event.
+    SetPhoneControls { phone: String, change: linksy_core::ControlsChange },
+    /// Keep a phone's Do Not Disturb and this computer's the same, or stop.
+    SetDndSync { phone: String, on: bool },
     /// Ask a phone to turn on `feature`: `notifications` (the Inbox) or `gallery`
     /// (docs/protocol.md §4.21).
     TurnOn { to: String, feature: String },
@@ -407,6 +414,17 @@ pub struct Finding {
     pub detail: String,
     /// What Linksy can do about it, as a button.
     pub action: Option<FindingAction>,
+}
+
+/// A phone's controls as the apps show them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PhoneControlsInfo {
+    /// What the phone last said; none until it has, or when it has no controls.
+    pub state: Option<linksy_core::ControlsState>,
+    /// This phone's Do Not Disturb and this computer's follow each other.
+    pub sync_dnd: bool,
+    /// This computer has a Do Not Disturb to follow (GNOME and KDE).
+    pub can_sync: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -820,6 +838,18 @@ impl Client {
 
     pub async fn doctor(&self) -> Result<Vec<Finding>, ClientError> {
         self.call(Request::Doctor).await
+    }
+
+    pub async fn phone_controls(&self, phone: impl Into<String>) -> Result<PhoneControlsInfo, ClientError> {
+        self.call(Request::PhoneControls { phone: phone.into() }).await
+    }
+
+    pub async fn set_phone_controls(&self, phone: impl Into<String>, change: linksy_core::ControlsChange) -> Result<(), ClientError> {
+        self.call(Request::SetPhoneControls { phone: phone.into(), change }).await
+    }
+
+    pub async fn set_dnd_sync(&self, phone: impl Into<String>, on: bool) -> Result<(), ClientError> {
+        self.call(Request::SetDndSync { phone: phone.into(), on }).await
     }
 
     pub async fn snap(&self, to: impl Into<String>) -> Result<(), ClientError> {
