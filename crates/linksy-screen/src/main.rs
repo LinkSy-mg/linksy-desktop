@@ -55,6 +55,10 @@ struct Args {
     fps: u32,
     /// `mic` mode: publish the incoming audio as a microphone with this name.
     microphone: Option<String>,
+    /// The video bitrate in kbit/s (16000 on a local network or cable, less over the internet).
+    bitrate: u32,
+    /// The most frames a second (60; 30 over the internet).
+    max_fps: u32,
     /// `speaker` mode: play the incoming sound.
     speaker: bool,
     camera: bool,
@@ -83,7 +87,7 @@ fn parse_args() -> Result<Args, String> {
         Some("webcam") => (Some("Linksy Camera".to_string()), None),
         Some("mic") => (None, Some("Linksy Microphone".to_string())),
         _ => {
-            return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --mic | --control | --input-only] [--virtual [--size WxH]] [--output NAME] [--test]\n       \
+            return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --mic | --control | --input-only] [--virtual [--size WxH]] [--output NAME] [--bitrate KBPS] [--max-fps 30|60] [--test]\n       \
                         linksy-screen webcam --socket PATH [--name NAME] [--fps 30|60]\n       \
                         linksy-screen mic --socket PATH [--name NAME]\n       \
                         linksy-screen speaker --socket PATH [--test]"
@@ -92,6 +96,7 @@ fn parse_args() -> Result<Args, String> {
     };
     let (mut socket, mut token_file, mut control, mut test, mut camera, mut mic) = (None, None, false, false, false, false);
     let (mut input_only, mut output) = (false, None);
+    let (mut bitrate, mut max_fps) = (16_000u32, MAX_FPS);
     let mut fps = 30;
     let (mut is_virtual, mut size) = (false, (1920, 1080));
     while let Some(a) = args.next() {
@@ -107,6 +112,8 @@ fn parse_args() -> Result<Args, String> {
             }
             "--output" => output = args.next(),
             "--test" => test = true,
+            "--bitrate" => bitrate = args.next().and_then(|v| v.parse().ok()).filter(|k| (500..=60_000).contains(k)).ok_or("--bitrate takes kbit/s, 500 to 60000")?,
+            "--max-fps" => max_fps = args.next().and_then(|v| v.parse().ok()).filter(|f| matches!(f, 30 | 60)).ok_or("--max-fps takes 30 or 60")?,
             "--camera" => camera = true,
             "--mic" => mic = true,
             "--fps" => fps = args.next().and_then(|v| v.parse().ok()).filter(|f| matches!(f, 30 | 60)).ok_or("--fps takes 30 or 60")?,
@@ -115,7 +122,7 @@ fn parse_args() -> Result<Args, String> {
             other => return Err(format!("unknown option {other}")),
         }
     }
-    Ok(Args { webcam, fps, microphone, speaker, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), output, test })
+    Ok(Args { webcam, fps, microphone, bitrate, max_fps, speaker, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), output, test })
 }
 
 fn main() -> ExitCode {
@@ -212,11 +219,11 @@ fn run(args: Args) -> Result<(), String> {
     // can take longer to encode than a frame lasts: at most 30 a second there, converted on
     // several threads. A GPU encoder that's listed but doesn't work (a sandbox's drivers, an
     // unusual card) falls through to the next.
-    let mut attempts: Vec<(&str, &str, Memory)> = Vec::new();
-    for (encoder, format) in encoders() {
+    let mut attempts: Vec<(String, &str, Memory)> = Vec::new();
+    for (encoder, format) in encoders(args.bitrate) {
         let gpu = encoder.starts_with("va") && vapostproc;
         if gpu && screen {
-            attempts.push((encoder, format, Memory::Gpu));
+            attempts.push((encoder.clone(), format, Memory::Gpu));
         }
         attempts.push((encoder, format, Memory::System));
     }
@@ -224,7 +231,9 @@ fn run(args: Args) -> Result<(), String> {
     let tried: Vec<String> = attempts.iter().map(|(e, _, m)| format!("{}{}", e.split_whitespace().next().unwrap_or(""), if *m == Memory::Gpu { " (graphics memory)" } else { "" })).collect();
     eprintln!("linksy-screen: encoders, in order: {}", if tried.is_empty() { "none".to_string() } else { tried.join(", ") });
     let threads = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).clamp(1, 4));
-    let chain = |(encoder, format, memory): (&str, &str, Memory), size: &str| -> String {
+    let max_fps = args.max_fps;
+    let chain = |(encoder, format, memory): &(String, &str, Memory), size: &str| -> String {
+        let (format, memory) = (*format, *memory);
         let gpu = encoder.starts_with("va") && vapostproc;
         // Copied: the desktop's few buffers go back to it at once
         let copy = if screen && memory == Memory::System { " always-copy=true" } else { "" };
@@ -238,7 +247,7 @@ fn run(args: Args) -> Result<(), String> {
         // Up to 60 frames a second, however fast the screen is (144 Hz ones too): dropped here
         // where it costs nothing, and brought down to 30 by `adapt_rate` when the encoder can't
         // keep up
-        let rate = format!("videorate name=rate drop-only=true max-rate={MAX_FPS}");
+        let rate = format!("videorate name=rate drop-only=true max-rate={max_fps}");
         let convert = if gpu {
             format!("{rate} ! vapostproc ! capsfilter caps=\"video/x-raw(memory:VAMemory),format=NV12\"")
         } else {
@@ -254,14 +263,16 @@ fn run(args: Args) -> Result<(), String> {
     let mut restarts = 0;
     let mut attempt = 0;
     let result = loop {
-        let Some(&current) = attempts.get(attempt) else { break Err("no H.264 encoder here works (install openh264 or x264)".to_string()) };
-        let (encoder, _, memory) = current;
-        let name = encoder.split_whitespace().next().unwrap_or("encoder");
+        let Some(current) = attempts.get(attempt).cloned() else { break Err("no H.264 encoder here works (install openh264 or x264)".to_string()) };
+        let (encoder, _, memory) = &current;
+        let memory = *memory;
+        let name = encoder.split_whitespace().next().unwrap_or("encoder").to_string();
+        let name = name.as_str();
         let description = format!(
             "{source}{} ! video/x-h264,profile=constrained-baseline ! h264parse config-interval=-1 \
              ! video/x-h264,stream-format=byte-stream,alignment=au \
              ! fdsink fd={} sync=false",
-            chain(current, &size),
+            chain(&current, &size),
             out.as_raw_fd()
         );
         let pipeline = match gst::parse::launch(&description) {
@@ -273,7 +284,7 @@ fn run(args: Args) -> Result<(), String> {
             }
         };
         let last_frame = count_frames(&pipeline, name);
-        adapt_rate(&pipeline);
+        adapt_rate(&pipeline, max_fps);
         let outcome = match pipeline.set_state(gst::State::Playing) {
             // Why, from the element that refused (set_state only says that one did)
             Err(_) => Some(Ended(Err(bus_error(&pipeline).unwrap_or_else(|| "an element failed to start".into())))),
@@ -429,8 +440,12 @@ const SLOW_FPS: u32 = 30;
 /// it looks at how many of the frames the screen gave were encoded: when a screen that moves
 /// (more than 45 a second) is encoded at under 86 % of the rate wanted twice running, the rate limit goes
 /// down to 30 for good: an even 30 looks better than a 60 that stutters.
-fn adapt_rate(pipeline: &gst::Element) {
+fn adapt_rate(pipeline: &gst::Element, max_fps: u32) {
     use std::sync::atomic::{AtomicU64, Ordering};
+    // Already at the slow rate
+    if max_fps <= SLOW_FPS {
+        return;
+    }
     let Some(bin) = pipeline.downcast_ref::<gst::Bin>() else { return };
     let Some(rate) = bin.by_name("rate") else { return };
     let counts = std::sync::Arc::new([AtomicU64::new(0), AtomicU64::new(0)]);
@@ -540,17 +555,17 @@ fn input_only(args: &Args, rt: &tokio::runtime::Runtime) -> Result<(), String> {
 /// The best H.264 encoder available, and the raw format it wants: the GPU first, then
 /// x264, then OpenH264 (always present on Fedora). All are asked for Constrained
 /// Baseline, which every H.264 decoder handles (OpenH264's, phones' hardware ones).
-fn encoders() -> Vec<(&'static str, &'static str)> {
+fn encoders(kbps: u32) -> Vec<(String, &'static str)> {
     // LINKSY_SCREEN_ENCODERS=x264enc,openh264enc allows only those (to try the CPU ones where
     // there is a GPU, say).
     let only: Option<Vec<String>> = std::env::var("LINKSY_SCREEN_ENCODERS").ok().map(|l| l.split(',').map(|e| e.trim().to_string()).collect());
     let has = |name: &str| gst::ElementFactory::find(name).is_some() && only.as_ref().is_none_or(|o| o.iter().any(|e| e == name));
     let mut list = Vec::new();
     if has("vah264lpenc") && constant_bitrate("vah264lpenc") {
-        list.push(("vah264lpenc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12"));
+        list.push((format!("vah264lpenc rate-control=cbr bitrate={kbps} key-int-max=60 target-usage=7"), "NV12"));
     }
     if has("vah264enc") && constant_bitrate("vah264enc") {
-        list.push(("vah264enc rate-control=cbr bitrate=16000 key-int-max=60 target-usage=7", "NV12"));
+        list.push((format!("vah264enc rate-control=cbr bitrate={kbps} key-int-max=60 target-usage=7"), "NV12"));
     }
     if has("x264enc") {
         // One slice per frame: zerolatency would cut each frame into a slice per thread,
@@ -559,10 +574,11 @@ fn encoders() -> Vec<(&'static str, &'static str)> {
         // ultrafast: a sharp desktop with windows moving on it cost superfast 10 times more
         // live than a video does (half-pixel motion search), and fell to 4 fps on a laptop on
         // battery; 16 Mbit/s keeps it sharp, which a local network carries easily.
-        list.push(("x264enc tune=zerolatency speed-preset=ultrafast bitrate=16000 key-int-max=60 bframes=0 sliced-threads=false threads=2", "I420"));
+        list.push((format!("x264enc tune=zerolatency speed-preset=ultrafast bitrate={kbps} key-int-max=60 bframes=0 sliced-threads=false threads=2"), "I420"));
     }
     if has("openh264enc") {
-        list.push(("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate=8000000 gop-size=60", "I420"));
+        // OpenH264 counts in bit/s, and is held to half what the others get: it is the CPU's last resort
+        list.push((format!("openh264enc usage-type=screen complexity=low rate-control=bitrate bitrate={} gop-size=60", u64::from(kbps) * 500), "I420"));
     }
     list
 }

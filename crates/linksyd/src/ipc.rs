@@ -545,7 +545,8 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             // A second display: this device shares, the service runs that side. A camera or
             // microphone: the service turns it into a device here. Otherwise the app shows it.
             let socket = if session.sharing {
-                sessions.spawn_share(session);
+                let link = node.link(&phone_id);
+                sessions.spawn_share(session, link);
                 None
             } else if kind.is_device() {
                 sessions.spawn_device(session);

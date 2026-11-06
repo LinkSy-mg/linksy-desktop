@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use linksy_core::{Fingerprint, Node, Session, SessionKind, Uuid};
+use linksy_core::{Fingerprint, Link, Node, Session, SessionKind, Uuid};
 use linksy_ipc::{ActiveSession, PendingSession};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{UnixListener, UnixStream};
@@ -157,7 +157,8 @@ impl Sessions {
                     t.attach(session);
                 }
             } else if session.sharing {
-                self.spawn_share(session);
+                let link = node.link(&session.peer.id);
+                self.spawn_share(session, link);
             } else if let Err(e) = self.show(session) {
                 warn!("could not show a second display: {e}");
             }
@@ -165,22 +166,22 @@ impl Sessions {
     }
 
     /// Run the sharing side of `session` until it ends.
-    pub fn spawn_share(&self, session: Session) {
-        self.spawn_helper(session, false);
+    pub fn spawn_share(&self, session: Session, link: Option<Link>) {
+        self.spawn_helper(session, false, link);
     }
 
     /// Use the camera or microphone `session` receives as a device here until it ends.
     pub fn spawn_device(&self, session: Session) {
-        self.spawn_helper(session, true);
+        self.spawn_helper(session, true, None);
     }
 
     /// `device`: this side receives a camera or microphone and publishes it to apps.
-    fn spawn_helper(&self, session: Session, device: bool) {
+    fn spawn_helper(&self, session: Session, device: bool, link: Option<Link>) {
         let id = session.id;
         let info = active(&session);
         let this = self.clone();
         let task = tokio::spawn(async move {
-            if let Err(e) = this.run_helper(session, device).await {
+            if let Err(e) = this.run_helper(session, device, link).await {
                 warn!("session ended: {e}");
             }
             this.running.lock().unwrap().remove(&id);
@@ -189,7 +190,7 @@ impl Sessions {
     }
 
     /// Start `linksy-screen` for this side of the session and relay its socket.
-    async fn run_helper(&self, session: Session, device: bool) -> std::io::Result<()> {
+    async fn run_helper(&self, session: Session, device: bool, link: Option<Link>) -> std::io::Result<()> {
         if device && session.kind == SessionKind::Camera {
             return self.run_webcam(session).await;
         }
@@ -212,14 +213,14 @@ impl Sessions {
                 linksy_i18n::t!("{output} is the second display for {device}. Choose it in the next window; Linksy remembers the choice.", output = output.name, device = session.peer.name),
             );
         }
-        let result = self.run_helper_on(session, device, headless.as_ref().map(|o| o.name.clone())).await;
+        let result = self.run_helper_on(session, device, headless.as_ref().map(|o| o.name.clone()), link).await;
         if let Some(output) = headless {
             output.remove().await;
         }
         result
     }
 
-    async fn run_helper_on(&self, mut session: Session, device: bool, headless: Option<String>) -> std::io::Result<()> {
+    async fn run_helper_on(&self, mut session: Session, device: bool, headless: Option<String>, link: Option<Link>) -> std::io::Result<()> {
         let role = match session.kind {
             // A computer plays a phone's sound; it never shares its own this way
             SessionKind::Sound if !device => return Err(std::io::Error::other("this computer doesn't share its sound")),
@@ -232,6 +233,10 @@ impl Sessions {
         let listener = bind(&path)?;
         let mut cmd = helper_command("linksy-screen");
         cmd.arg(role).arg("--socket").arg(&path);
+        if !device {
+            let (kbps, fps) = picture_for(link);
+            cmd.arg("--bitrate").arg(kbps.to_string()).arg("--max-fps").arg(fps.to_string());
+        }
         match session.kind {
             SessionKind::Microphone if device => {
                 cmd.arg("--name").arg(format!("Linksy Microphone ({})", session.peer.name));
@@ -498,6 +503,16 @@ impl Sessions {
             }
             None => false,
         }
+    }
+}
+
+/// How a shared screen is encoded for the way it travels, as (kbit/s, most frames a second): the
+/// local network and the cable carry 16 Mbit/s at 60 a second; over the internet, through a relay
+/// or not, 4 Mbit/s at 30 is what most home connections upload without queueing.
+fn picture_for(link: Option<Link>) -> (u32, u32) {
+    match link {
+        Some(Link::Away) => (4_000, 30),
+        _ => (16_000, 60),
     }
 }
 
@@ -831,6 +846,16 @@ fn monitor_size((w, h): (u32, u32)) -> (u32, u32) {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn a_screen_over_the_internet_is_encoded_lighter() {
+        assert_eq!(picture_for(Some(Link::Away)), (4_000, 30));
+        for link in [Some(Link::Lan), Some(Link::Usb), None] {
+            assert_eq!(picture_for(link), (16_000, 60));
+        }
+    }
+
     #[test]
     fn monitor_takes_the_phone_shape() {
         assert_eq!(super::monitor_size((2400, 1080)), (2400, 1080));
