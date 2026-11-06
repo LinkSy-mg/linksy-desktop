@@ -29,6 +29,8 @@ const PLAYER: &str = "org.mpris.MediaPlayer2.Player";
 const OURS: &str = "org.mpris.MediaPlayer2.Linksy.";
 /// Largest cover art passed along (the protocol allows 64 KiB).
 const MAX_ART: usize = 48 * 1024;
+/// A file bigger than this is not read as a cover at all.
+const MAX_ART_FILE: usize = 16 * 1024 * 1024;
 /// A bigger picture is scaled down to fit this many pixels a side, as JPEG.
 const ART_SIDES: [u32; 3] = [400, 300, 200];
 
@@ -326,14 +328,20 @@ impl Local {
     /// Cover art from a local file, small enough to pass along.
     fn art(&self, url: &str) -> Option<String> {
         let path = percent_decode(url.strip_prefix("file://")?);
-        let modified = std::fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+        // The Flatpak can't see the player's folder, so the computer reads it, one process a
+        // time: no asking after the file's time on every call, it is read again every 10 s.
+        let modified = if linksy_host::flatpak() {
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() / 10 * 10)
+        } else {
+            std::fs::metadata(&path).and_then(|m| m.modified()).ok()?
+        };
         let mut known = self.art.lock().unwrap();
         if let Some((when, art)) = known.get(&path)
             && *when == modified
         {
             return art.clone();
         }
-        let art = std::fs::read(&path).ok().and_then(small_art).map(|a| base64::engine::general_purpose::STANDARD.encode(a));
+        let art = linksy_host::read_bytes(std::path::Path::new(&path), MAX_ART_FILE).and_then(small_art).map(|a| base64::engine::general_purpose::STANDARD.encode(a));
         // Players come and go: only the pictures of late
         if known.len() > 16 {
             known.clear();
