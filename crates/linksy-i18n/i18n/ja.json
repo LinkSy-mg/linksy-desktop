@@ -170,6 +170,7 @@
   "Delete “{name}”?": "「{name}」を削除しますか？",
   "Delete…": "削除…",
   "Descending": "降順",
+  "Details": "詳細",
   "Device Menu": "デバイスメニュー",
   "Device Name": "デバイス名",
   "Didn't work: {error}. Unplug the phone, plug it in again, and try again.": "うまくいきませんでした: {error}。スマートフォンを抜き差しして、もう一度お試しください。",
