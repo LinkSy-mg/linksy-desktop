@@ -1628,6 +1628,20 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     .await;
     assert_eq!(title, "Mum");
 
+    // The phone's Gallery is not held back from away; its files and screens still are
+    let mut calls = b.node.incoming_gallery().unwrap();
+    tokio::spawn(async move {
+        while let Some(call) = calls.recv().await {
+            call.albums(vec![GalleryAlbum { id: "camera".into(), name: "Camera".into(), count: 3 }]).await.unwrap();
+        }
+    });
+    let Ok(GalleryAnswer::Albums(albums)) = a.node.gallery(&idb, GalleryRequest::Albums).await else { panic!("the Gallery was refused from away") };
+    assert_eq!(albums[0].name, "Camera");
+    let mut files = b.node.incoming_fs().unwrap();
+    tokio::spawn(async move { while files.recv().await.is_some() {} });
+    let browsed = a.node.fs(&idb, FsRequest::List { path: "/".into() }, &[]).await;
+    assert!(matches!(browsed, Err(Error::NotFromAway)), "{browsed:?}");
+
     // A screen from away: refused without asking Beta's user, even allowed for good...
     let _incoming = b.node.incoming_sessions();
     b.node.set_allow_screen(&ida, true).unwrap();

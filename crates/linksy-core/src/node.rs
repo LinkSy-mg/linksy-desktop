@@ -2467,12 +2467,8 @@ impl Node {
                 let Ok(request) = serde_json::from_value::<GalleryRequest>(first) else {
                     return debug!("bad gallery request from {}", from.name);
                 };
-                let away_refused = !self.allowed_from_here(&from.id);
+                // Not held back from away: the Gallery is the phone's own switch (it can be off)
                 let call = GalleryCall::new(from, request, send);
-                if away_refused {
-                    let _ = call.error("this device shows its photos only on the same network").await;
-                    return;
-                }
                 let served = self.inner.gallery.lock().unwrap().is_none();
                 let unserved = if served { self.inner.gallery_tx.send(call).err().map(|e| e.0) } else { Some(call) };
                 if let Some(call) = unserved {
