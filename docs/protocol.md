@@ -656,6 +656,31 @@ On Android:
   `session_started {session, peer, kind, sharing}`, `session_ended {session}`.
 
 
+**The phone's sound with its screen (desktop, after 0.12.4; not tried on a phone).** A computer
+that shows a phone's screen (`screen` or `control`, including the cable) asks the phone for its
+sound as well, when the phone announces the feature `sound`:
+
+```json
+{"type":"session_request","id":"<uuid>","kind":"sound"}     // computer → phone, right after the screen
+```
+
+The phone asks its user, or says yes by itself while a screen session to that computer is running
+(its call), and answers `session_accept`; after that it writes **raw PCM, 16-bit signed little
+endian, 48 kHz, stereo** (4 bytes a frame), 10 ms at a time (1920 bytes), on the session's stream,
+with no framing and nothing in the other direction. The computer plays it on its speakers and ends
+it when the screen ends; the phone ends it when the screen ends too. On Android this is
+`AudioPlaybackCapture` (API 29+) through the **same `MediaProjection`** as the screen:
+`AudioPlaybackCaptureConfiguration.Builder(projection).addMatchingUsage(USAGE_MEDIA).addMatchingUsage(USAGE_GAME).build()`
+into an `AudioRecord` at 48000 Hz `CHANNEL_IN_STEREO` `ENCODING_PCM_16BIT`, read in 1920-byte
+chunks on a thread. It needs the microphone (`RECORD_AUDIO`) permission, which the phone's
+microphone feature has already; apps that opt out of capture, and protected audio, are silent.
+Don't capture what Linksy itself plays. A phone that can't announces nothing; a phone that does
+and won't answers `session_decline`. Keep the latency low: write each chunk as it is read, and
+don't buffer more than 100 ms. A computer that isn't asked ignores a `sound` request with
+`session_decline` `reason: "unsupported"` (core does this when `sound` isn't among its features).
+Core: `SessionKind::Sound`; the service starts and ends it; it has no entry of its own in the
+activity history.
+
 **Keep the screen on while it's a display (desktop 0.5.8; seen on a realme 15 Pro).** The
 phone's screen timeout turned its screen off a minute into a second display, which ended
 the session and took the monitor away. While showing a `display` (and while watching a
@@ -820,7 +845,8 @@ its photos, §4.18), `deck` (a computer that runs a phone's deck, §4.19), `deck
 phone that draws the deck layouts a computer sends, §4.20), `turn_on` (a phone that asks its
 user when a computer asks it to turn something on, §4.21), `preflight` (answers the check
 before a send, §4.22; computers announce it too), `apps` (sends and installs apps, §4.22),
-`snap` (opens its camera when a computer asks, §4.23), `phone_controls` (a phone's volumes,
+`snap` (opens its camera when a computer asks, §4.23), `sound` (shares the sound it plays
+while a computer shows its screen, §4.8), `phone_controls` (a phone's volumes,
 ringer, Do Not Disturb and flashlight, §4.24), `computer_notifications` (a phone that shows
 the notifications of a computer, §4.25).
 Set `Config.features` in the core. To change them while running (`notifications` turned
