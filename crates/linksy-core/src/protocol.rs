@@ -125,6 +125,10 @@ pub enum SessionKind {
     /// The receiver shares its microphone; the requester uses it as a microphone. Raw
     /// 16-bit 48 kHz mono PCM, little-endian (docs/protocol.md §4.8).
     Microphone,
+    /// The receiver (a phone) shares the sound it plays; the requester (a computer) plays it
+    /// while it shows the phone's screen. Raw 16-bit 48 kHz stereo PCM, little-endian
+    /// (docs/protocol.md §4.8).
+    Sound,
     /// A shell on the receiver (a computer), shown on the requester (a phone): raw
     /// terminal output one way, `term_*` control messages the other (docs/protocol.md §4.15).
     Terminal,

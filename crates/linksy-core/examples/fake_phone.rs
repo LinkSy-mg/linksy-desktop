@@ -53,6 +53,9 @@
 //! `--turn-on` announces `turn_on` and says yes when a computer asks to turn one on.
 //! `--snap PICTURE` announces `snap` and, when a computer asks, sends that picture as a file
 //! and then to its clipboard; `--snap-refuse WHY` says no with that reason instead.
+//! `--sound` announces `sound` and says yes when a computer asks for the phone's sound: it sends a
+//! two-second 440 Hz tone (raw s16le 48 kHz stereo), as MediaProjection's playback capture would,
+//! and keeps any screen session open without sending a picture.
 //! `--computer-notifications` announces `computer_notifications` and prints each one as
 //! COMPUTER NOTIFICATION.
 //! `--controls` announces `phone_controls`: it answers `controls_watch` with made-up volumes and
@@ -100,7 +103,7 @@ async fn main() {
     let (mut deck_layout, mut deck_wait) = (false, 0u64);
     let (mut off, mut turn_on) = (Vec::<String>::new(), false);
     let (mut snap, mut snap_refuse) = (None::<std::path::PathBuf>, None::<String>);
-    let (mut controls, mut no_dnd_access, mut computer_notifications) = (false, false, false);
+    let (mut controls, mut no_dnd_access, mut computer_notifications, mut sound) = (false, false, false, false);
     let mut dnd_after: Option<(u64, linksy_core::Dnd)> = None;
     while let Some(a) = args.next() {
         let mut value = || args.next().expect("option needs a value");
@@ -168,6 +171,7 @@ async fn main() {
             "--snap-refuse" => snap_refuse = Some(value()),
             "--controls" => controls = true,
             "--computer-notifications" => computer_notifications = true,
+            "--sound" => sound = true,
             "--no-dnd-access" => no_dnd_access = true,
             "--dnd-after" => {
                 let after = value().parse().expect("--dnd-after SECONDS MODE");
@@ -209,6 +213,9 @@ async fn main() {
     }
     if computer_notifications {
         config.features.push("computer_notifications".into());
+    }
+    if sound {
+        config.features.push("sound".into());
     }
     config.features.retain(|f| !off.contains(f));
     config.relay = Some(std::env::var("LINKSY_RELAY").unwrap_or_else(|_| "https://linksy-relay.diary.mg".into()));
@@ -594,6 +601,42 @@ async fn main() {
             }
         });
     }
+    if sound {
+        let mut sessions = node.incoming_sessions().expect("sessions");
+        tokio::spawn(async move {
+            while let Some(mut s) = sessions.recv().await {
+                if s.kind != linksy_core::SessionKind::Sound {
+                    println!("{:?} session from {} kept open, with no picture", s.kind, s.peer.name);
+                    tokio::spawn(async move {
+                        let _s = s;
+                        tokio::time::sleep(Duration::from_secs(120)).await;
+                    });
+                    continue;
+                }
+                tokio::spawn(async move {
+                    let mut tick = tokio::time::interval(Duration::from_millis(10));
+                    let mut sent = 0u64;
+                    // Two seconds of a tone, in both ears, 10 ms at a time
+                    for n in (0..96_000u64).step_by(480) {
+                        tick.tick().await;
+                        let chunk: Vec<u8> = (n..n + 480)
+                            .flat_map(|i| {
+                                let sample = (((i as f64 / 48_000.0) * 440.0 * std::f64::consts::TAU).sin() * 6_000.0) as i16;
+                                [sample.to_le_bytes(), sample.to_le_bytes()].concat()
+                            })
+                            .collect();
+                        if s.send.write_all(&chunk).await.is_err() {
+                            break;
+                        }
+                        sent += chunk.len() as u64;
+                    }
+                    println!("SOUND sent {sent} bytes to {}", s.peer.name);
+                    let _ = s.send.finish();
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                });
+            }
+        });
+    }
     if mic {
         let mut sessions = node.incoming_sessions().expect("sessions");
         tokio::spawn(async move {
@@ -796,6 +839,10 @@ async fn main() {
                 }
                 Ok(Event::PairingRequest { request, device, code, .. }) if accept_pairing => {
                     println!("pairing with {} (code {code}): accepting", device.name);
+                    node.respond(request, true);
+                }
+                Ok(Event::SessionRequest { request, from, kind }) if sound => {
+                    println!("{kind:?} requested by {}: accepting", from.name);
                     node.respond(request, true);
                 }
                 Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Camera }) if camera => {

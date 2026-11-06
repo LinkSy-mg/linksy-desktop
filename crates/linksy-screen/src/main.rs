@@ -25,6 +25,9 @@
 //! session: decodes the stream read from the socket and offers it to every app as a
 //! PipeWire camera called NAME (browsers, Meet, GNOME Snapshot, OBS…).
 //!
+//! `linksy-screen speaker --socket PATH [--test]` plays the sound a phone shares with its screen
+//! (raw 16-bit 48 kHz stereo PCM) on this computer's speakers; `--test` plays nothing.
+//!
 //! `linksy-screen share --mic --socket PATH [--test]` shares this device's microphone, and
 //! `linksy-screen mic --socket PATH [--name NAME]` offers a received one to every app as
 //! a microphone called NAME. Audio crosses as raw 16-bit 48 kHz mono PCM (docs/protocol.md
@@ -52,6 +55,8 @@ struct Args {
     fps: u32,
     /// `mic` mode: publish the incoming audio as a microphone with this name.
     microphone: Option<String>,
+    /// `speaker` mode: play the incoming sound.
+    speaker: bool,
     camera: bool,
     /// Share this device's microphone.
     mic: bool,
@@ -68,14 +73,20 @@ struct Args {
 
 fn parse_args() -> Result<Args, String> {
     let mut args = std::env::args().skip(1);
+    let mut speaker = false;
     let (mut webcam, mut microphone) = match args.next().as_deref() {
         Some("share") => (None, None),
+        Some("speaker") => {
+            speaker = true;
+            (None, None)
+        }
         Some("webcam") => (Some("Linksy Camera".to_string()), None),
         Some("mic") => (None, Some("Linksy Microphone".to_string())),
         _ => {
             return Err("usage: linksy-screen share --socket PATH [--token-file PATH] [--camera | --mic | --control | --input-only] [--virtual [--size WxH]] [--output NAME] [--test]\n       \
                         linksy-screen webcam --socket PATH [--name NAME] [--fps 30|60]\n       \
-                        linksy-screen mic --socket PATH [--name NAME]"
+                        linksy-screen mic --socket PATH [--name NAME]\n       \
+                        linksy-screen speaker --socket PATH [--test]"
                 .into());
         }
     };
@@ -104,7 +115,7 @@ fn parse_args() -> Result<Args, String> {
             other => return Err(format!("unknown option {other}")),
         }
     }
-    Ok(Args { webcam, fps, microphone, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), output, test })
+    Ok(Args { webcam, fps, microphone, speaker, camera, mic, socket: socket.ok_or("--socket is required")?, token_file, control, input_only, virtual_size: is_virtual.then_some(size), output, test })
 }
 
 fn main() -> ExitCode {
@@ -139,6 +150,9 @@ fn run(args: Args) -> Result<(), String> {
     }
     if let Some(name) = &args.microphone {
         return microphone(&args.socket, name);
+    }
+    if args.speaker {
+        return speaker(&args.socket, args.test);
     }
     if args.mic {
         return share_mic(&args.socket, args.test);
@@ -581,6 +595,21 @@ fn share_mic(socket: &std::path::Path, test: bool) -> Result<(), String> {
 /// The receiving end of a microphone session: offer the audio to every app as a
 /// microphone for as long as it lasts. A leaky queue keeps the delay at most 100 ms: after a
 /// Wi-Fi hiccup, late audio is dropped rather than played late forever.
+/// A phone's sound on this computer's speakers. Short buffers and a queue that drops the old
+/// when the sound comes in bursts, so what is heard is never seconds behind the screen.
+fn speaker(socket: &std::path::Path, test: bool) -> Result<(), String> {
+    let input = UnixStream::connect(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
+    let sink = if test { "fakesink sync=false" } else { "autoaudiosink sync=false" };
+    let description = format!(
+        "fdsrc fd={} ! rawaudioparse use-sink-caps=false format=pcm pcm-format=s16le sample-rate=48000 num-channels=2 \
+         ! queue max-size-time=120000000 max-size-buffers=0 max-size-bytes=0 leaky=downstream ! audioconvert ! audioresample ! {sink}",
+        input.as_raw_fd()
+    );
+    let result = play(&description);
+    drop(input);
+    result
+}
+
 fn microphone(socket: &std::path::Path, name: &str) -> Result<(), String> {
     let input = UnixStream::connect(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
     let name: String = name.chars().filter(|c| !matches!(c, '"' | '\\' | ',')).collect();

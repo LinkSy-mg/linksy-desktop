@@ -655,6 +655,8 @@ async fn watch(c: &Client) -> Result<(), String> {
                     linksy_ipc::linksy_core::SessionKind::Camera => println!("{} wants to use your camera.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Input => println!("{} wants to use your mouse and keyboard.", from.name),
                     linksy_ipc::linksy_core::SessionKind::Microphone => println!("{} wants to use your microphone.", from.name),
+                    // A computer doesn't share its sound: the core answers that itself
+                    linksy_ipc::linksy_core::SessionKind::Sound => {}
                     linksy_ipc::linksy_core::SessionKind::Terminal => println!("{} wants a terminal on this computer (the right code was typed).", from.name),
                 }
                 let ok = ask("Allow?").await;

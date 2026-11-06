@@ -2494,6 +2494,12 @@ impl Node {
             let _ = send.finish();
             return;
         }
+        // The sound a device plays is shared only by one that says it can (feature `sound`)
+        if kind == SessionKind::Sound && !self.info().features.iter().any(|f| f == "sound") {
+            let _ = write_msg(&mut send, &decline("unsupported", None)).await;
+            let _ = send.finish();
+            return;
+        }
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
         // A terminal: whoever runs them judges the code first.
         let mut terminal_id = None;
