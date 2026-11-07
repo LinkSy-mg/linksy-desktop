@@ -2,6 +2,7 @@
 //! its stream's size is in pixels, but KDE places pointer positions in the desktop's own
 //! coordinates, which are smaller when the display is scaled (125 %: a tap meant for the
 //! middle landed lower right, desktop#51). GNOME takes positions in the stream's pixels.
+//! When the display isn't scaled but the first screen is, KDE uses that screen's scale.
 
 use std::sync::{Arc, Mutex};
 
@@ -77,7 +78,7 @@ pub fn follow_kde_display(name: Option<String>, pixels: (f64, f64), size: Size) 
     if queue.roundtrip(&mut state).is_err() {
         return;
     }
-    let mut last = pick(&state.list, name.as_deref(), pixels);
+    let mut last = target(&state.list, name.as_deref(), pixels);
     say(last, pixels, &state.list, name.as_deref());
     set(&size, last, pixels);
     if !kde {
@@ -89,8 +90,8 @@ pub fn follow_kde_display(name: Option<String>, pixels: (f64, f64), size: Size) 
             if !std::mem::take(&mut state.changed) {
                 continue;
             }
-            let now = pick(&state.list, name.as_deref(), pixels);
-            if now.is_some() && now != last {
+            let now = target(&state.list, name.as_deref(), pixels);
+            if now != Target::Pixels && now != last {
                 say(now, pixels, &state.list, name.as_deref());
                 set(&size, now, pixels);
                 last = now;
@@ -109,19 +110,65 @@ pub(crate) fn connect() -> Result<Connection, String> {
     })
 }
 
-fn set(size: &Size, desktop: Option<(f64, f64)>, pixels: (f64, f64)) {
-    *size.lock().unwrap() = Some(desktop.unwrap_or(pixels));
+/// Where the phone's taps go on the second display.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Target {
+    /// The display's own size on the desktop.
+    Display((f64, f64)),
+    /// The display isn't scaled but the desktop's first screen is, and KDE places taps as if it
+    /// were: the display's pixels over that scale.
+    Compensated { size: (f64, f64), scale: f64 },
+    /// Nothing known: the stream's pixels.
+    Pixels,
 }
 
-fn say(desktop: Option<(f64, f64)>, pixels: (f64, f64), outputs: &[Output], name: Option<&str>) {
-    match desktop {
-        Some(d) if d != pixels => eprintln!("linksy-screen: the second display is {}x{} pixels, {}x{} on the desktop (scaled); the phone's taps follow the desktop's", pixels.0, pixels.1, d.0, d.1),
-        Some(_) => eprintln!("linksy-screen: the second display is {}x{}, not scaled", pixels.0, pixels.1),
-        None if name.is_some() => {
+fn set(size: &Size, target: Target, pixels: (f64, f64)) {
+    *size.lock().unwrap() = Some(match target {
+        Target::Display(d) => d,
+        Target::Compensated { size, .. } => size,
+        Target::Pixels => pixels,
+    });
+}
+
+fn say(target: Target, pixels: (f64, f64), outputs: &[Output], name: Option<&str>) {
+    match target {
+        Target::Display(d) if d != pixels => eprintln!("linksy-screen: the second display is {}x{} pixels, {}x{} on the desktop (scaled); the phone's taps follow the desktop's", pixels.0, pixels.1, d.0, d.1),
+        Target::Display(_) => eprintln!("linksy-screen: the second display is {}x{}, not scaled", pixels.0, pixels.1),
+        Target::Compensated { size, scale } => eprintln!("linksy-screen: the second display is {}x{}, not scaled, but the desktop's first screen is at {scale}: the phone's taps go to {}x{}", pixels.0, pixels.1, size.0, size.1),
+        Target::Pixels if name.is_some() => {
             let seen: Vec<String> = outputs.iter().filter_map(|o| Some(format!("{} {:?}/{:?}", o.name.as_deref()?, o.mode?, o.logical?))).collect();
             eprintln!("linksy-screen: no output named {} yet (outputs: {}); taps assume it isn't scaled", name.unwrap_or_default(), seen.join(", "));
         }
-        None => {}
+        Target::Pixels => {}
+    }
+}
+
+/// How scaled the desktop's first screen (the oldest output that isn't KDE's second display) is.
+/// The mode and the size on the desktop are compared by area, so a turned screen counts too.
+fn primary_scale(outputs: &[Output]) -> Option<f64> {
+    let first = outputs.iter().filter(|o| o.name.as_deref().is_some_and(|n| !n.contains("virtual-xdp-kde"))).min_by_key(|o| o.id)?;
+    let (mode, logical) = (first.mode?, first.logical?);
+    let (mode, logical) = (mode.0 as f64 * mode.1 as f64, logical.0 as f64 * logical.1 as f64);
+    let scale = if logical > 0.0 { (mode / logical).sqrt() } else { 1.0 };
+    let scale = (scale * 100.0).round() / 100.0;
+    (scale > 1.0).then_some(scale)
+}
+
+/// KDE's second display is either scaled itself (its size on the desktop is what taps follow),
+/// or it isn't while the desktop's first screen is, and then KDE places taps by that screen's
+/// scale instead (desktop#51).
+fn target(outputs: &[Output], name: Option<&str>, pixels: (f64, f64)) -> Target {
+    let shown = pick(outputs, name, pixels);
+    if let Some(d) = shown.filter(|d| *d != pixels) {
+        return Target::Display(d);
+    }
+    // Another desktop's display
+    if name.is_none() && shown.is_none() {
+        return Target::Pixels;
+    }
+    match primary_scale(outputs) {
+        Some(scale) => Target::Compensated { size: (pixels.0 / scale, pixels.1 / scale), scale },
+        None => shown.map_or(Target::Pixels, Target::Display),
     }
 }
 
@@ -219,6 +266,44 @@ mod tests {
         ];
         assert_eq!(pick(&outputs, Some("Virtual-virtual-xdp-kde--1"), (1920.0, 1080.0)), Some((2048.0, 1152.0)));
         assert_eq!(pick(&outputs, Some("Virtual-virtual-xdp-kde--2"), (1920.0, 1080.0)), None);
+    }
+
+    const PIXELS: (f64, f64) = (1920.0, 1080.0);
+
+    #[test]
+    fn an_unscaled_display_follows_the_first_screens_scale() {
+        // desktop#51: the display at 100 %, the laptop at 125 %
+        let outputs = [output(40, "eDP-1", (1920, 1080), (1536, 864)), output(61, "Virtual-virtual-xdp-kde-", (1920, 1080), (1920, 1080))];
+        assert_eq!(target(&outputs, Some("Virtual-virtual-xdp-kde-"), PIXELS), Target::Compensated { size: (1536.0, 864.0), scale: 1.25 });
+        // Not found yet: the first screen still tells
+        assert_eq!(target(&outputs[..1], Some("Virtual-virtual-xdp-kde-"), PIXELS), Target::Compensated { size: (1536.0, 864.0), scale: 1.25 });
+    }
+
+    #[test]
+    fn the_first_screen_is_the_oldest_and_a_turned_one_counts() {
+        let outputs = [output(50, "HDMI-A-1", (1920, 1080), (1920, 1080)), output(40, "DP-1", (1080, 1920), (864, 1536)), output(61, "Virtual-virtual-xdp-kde-", (1920, 1080), (1920, 1080))];
+        assert_eq!(primary_scale(&outputs), Some(1.25));
+        assert_eq!(primary_scale(&[output(40, "eDP-1", (2560, 1440), (1280, 720)), output(41, "DP-1", (1920, 1080), (1920, 1080))]), Some(2.0));
+    }
+
+    #[test]
+    fn a_scaled_display_keeps_its_own_size() {
+        let outputs = [output(40, "eDP-1", (1920, 1080), (1536, 864)), output(61, "Virtual-virtual-xdp-kde-", (1920, 1080), (1536, 864))];
+        assert_eq!(target(&outputs, Some("Virtual-virtual-xdp-kde-"), PIXELS), Target::Display((1536.0, 864.0)));
+    }
+
+    #[test]
+    fn nothing_changes_when_nothing_is_scaled() {
+        let outputs = [output(40, "eDP-1", (1920, 1080), (1920, 1080)), output(61, "Virtual-virtual-xdp-kde-", (1920, 1080), (1920, 1080))];
+        assert_eq!(primary_scale(&outputs), None);
+        assert_eq!(target(&outputs, Some("Virtual-virtual-xdp-kde-"), PIXELS), Target::Display(PIXELS));
+        assert_eq!(target(&outputs[..1], Some("Virtual-virtual-xdp-kde-"), PIXELS), Target::Pixels);
+    }
+
+    #[test]
+    fn another_desktops_display_is_left_alone() {
+        let outputs = [output(40, "eDP-1", (1920, 1080), (1536, 864)), output(41, "Meta-0", (1920, 1080), (960, 540))];
+        assert_eq!(target(&outputs, None, PIXELS), Target::Pixels);
     }
 
     #[test]
