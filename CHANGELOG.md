@@ -2,6 +2,23 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Fixed
+- **A browser's track showed twice on the phone** (#87): with Plasma's browser
+  integration, Firefox's own player and Plasma's both went to the phone. Where Plasma's
+  has the track, the other copy is left out.
+- **Taps on the phone as a second screen, on KDE** (#51): with the phone's display at
+  100% and the computer's own screen scaled (125%), taps landed too far right and down.
+  They now follow the first screen's scale in that case, and the log says which scale.
+- **Finish Setup leaves a trace** (releases#9): what the setup helper printed goes to
+  `~/.local/state/linksy/setup.log`, and Save Logs includes the newest of it. A helper
+  that couldn't run no longer says the password wasn't given, and the camera helper says
+  when it couldn't write the service that brings the camera back after a restart.
+- **The deck editor showed colours that did nothing:** a tile's colour is drawn by the
+  Pixel theme only, and the layout's accent by Stock and Dots only. The other themes no
+  longer offer them.
+
 ## 0.13.0
 
 Most of what is new here works with Linksy for Android 0.3.5.
