@@ -32,7 +32,7 @@ if [ ! -d /run/systemd/system ]; then
   echo v4l2loopback > /etc/modules-load.d/linksy-camera.conf
   echo 'options v4l2loopback devices=1 card_label="Linksy Camera" exclusive_caps=1 max_width=1920 max_height=1920' > /etc/modprobe.d/linksy-camera.conf
 else
-cat > /etc/systemd/system/linksy-camera.service <<'EOF'
+cat > /etc/systemd/system/linksy-camera.service <<'EOF' || { echo "can't write /etc/systemd/system/linksy-camera.service: the camera won't come back after a restart" >&2; exit 1; }
 [Unit]
 Description=Linksy Camera (a phone's camera as a webcam in every app)
 After=systemd-modules-load.service
@@ -46,7 +46,7 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 systemctl daemon-reload
-systemctl enable linksy-camera.service >/dev/null 2>&1
+systemctl enable linksy-camera.service >/dev/null 2>&1 || echo "systemctl couldn't enable linksy-camera.service: the camera won't come back after a restart" >&2
 fi
 
 # Secure Boot refuses a driver built here until its key is approved, once, in the blue
@@ -105,6 +105,9 @@ if [ ! -d /sys/module/v4l2loopback ]; then
   fi
 fi
 if ! have_device; then
-  v4l2loopback-ctl add --name "$NAME" --exclusive-caps 1 --max-width 1920 --max-height 1920 >/dev/null || exit 1
+  if ! v4l2loopback-ctl add --name "$NAME" --exclusive-caps 1 --max-width 1920 --max-height 1920 >/dev/null; then
+    echo "v4l2loopback-ctl couldn't add the Linksy Camera" >&2
+    exit 1
+  fi
 fi
 echo "Linksy Camera is ready"
