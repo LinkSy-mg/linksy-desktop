@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.13.1" date="2026-11-07">
+      <description>
+        <p>Fixes: a browser's track no longer shows twice on the phone with Plasma's browser integration, taps on a phone used as a second screen follow a scaled KDE screen, the deck editor offers only the colours a theme draws, and Finish Setup keeps a log of what its helper printed.</p>
+      </description>
+    </release>
     <release version="0.13.0" date="2026-11-06">
       <description>
         <p>Your phone's volumes, ringer, Do Not Disturb and flashlight from its page; this computer's notifications, and the sound of a phone's screen, on the phone; Snap from Phone; Why Can't I See My Phone?; screens at up to 60 frames a second; Quit in the tray closes the windows; and the Flatpak shows cover art and your picture on the phone.</p>
