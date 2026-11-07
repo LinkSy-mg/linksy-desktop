@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.13.1
 
 ### Fixed
 - **A browser's track showed twice on the phone** (#87): with Plasma's browser
