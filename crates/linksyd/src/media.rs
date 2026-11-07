@@ -218,7 +218,7 @@ impl Local {
         }
         self.clocks.lock().unwrap().retain(|name, _| names.contains(name));
         let seq = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-        MediaState { seq, players }
+        MediaState { seq, players: drop_shadowed(players) }
     }
 
     async fn player(&self, name: &str) -> zbus::Result<MediaPlayer> {
@@ -632,9 +632,68 @@ fn owned(v: Value<'_>) -> OwnedValue {
     v.try_to_owned().expect("plain values convert")
 }
 
+/// Plasma's browser integration reports a tab's media beside the browser's own MPRIS player,
+/// so one track shows up twice. Where the integration has a track, the others playing the
+/// same one are dropped; its better metadata stays.
+fn drop_shadowed(players: Vec<MediaPlayer>) -> Vec<MediaPlayer> {
+    const PLASMA: &str = "plasma-browser-integration";
+    let plasma: Vec<(String, String)> = players.iter().filter(|p| p.id.starts_with(PLASMA) && !p.title.is_empty()).map(|p| (p.title.clone(), p.artist.clone())).collect();
+    if plasma.is_empty() {
+        return players;
+    }
+    players
+        .into_iter()
+        .filter(|p| p.id.starts_with(PLASMA) || !plasma.iter().any(|(title, artist)| *title == p.title && (artist.is_empty() || p.artist.is_empty() || *artist == p.artist)))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn player(id: &str, title: &str, artist: &str) -> MediaPlayer {
+        MediaPlayer {
+            id: id.into(),
+            app: id.into(),
+            title: title.into(),
+            artist: artist.into(),
+            album: String::new(),
+            playing: true,
+            position_ms: None,
+            length_ms: None,
+            can_next: false,
+            can_previous: false,
+            can_seek: false,
+            art: None,
+        }
+    }
+
+    fn ids(players: &[MediaPlayer]) -> Vec<&str> {
+        players.iter().map(|p| p.id.as_str()).collect()
+    }
+
+    #[test]
+    fn the_browsers_own_copy_of_a_track_gives_way_to_plasmas() {
+        let kept = drop_shadowed(vec![player("firefox.instance_1_234", "Song", "Band"), player("plasma-browser-integration", "Song", "Band")]);
+        assert_eq!(ids(&kept), ["plasma-browser-integration"]);
+        // Plasma often has no artist where the browser does, or the other way round
+        let kept = drop_shadowed(vec![player("firefox.instance_1_234", "Song", ""), player("plasma-browser-integration", "Song", "Band")]);
+        assert_eq!(ids(&kept), ["plasma-browser-integration"]);
+    }
+
+    #[test]
+    fn other_players_stay() {
+        let kept = drop_shadowed(vec![player("spotify", "Other", "Band"), player("plasma-browser-integration", "Song", "Band"), player("vlc", "Song", "Someone Else")]);
+        assert_eq!(ids(&kept), ["spotify", "plasma-browser-integration", "vlc"]);
+    }
+
+    #[test]
+    fn nothing_changes_without_plasma_or_a_track() {
+        let two = vec![player("mpv.instance1", "Song", "Band"), player("mpv.instance2", "Song", "Band")];
+        assert_eq!(drop_shadowed(two.clone()), two);
+        let idle = vec![player("firefox.instance_1_234", "Song", "Band"), player("plasma-browser-integration", "", "")];
+        assert_eq!(drop_shadowed(idle.clone()), idle);
+    }
 
 
     #[test]
