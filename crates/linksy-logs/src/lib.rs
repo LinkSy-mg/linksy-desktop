@@ -27,6 +27,33 @@ pub fn service_log() -> PathBuf {
     crash_dir().with_file_name("linksyd.log")
 }
 
+/// What Finish Setup's helper printed, `~/.local/state/linksy/setup.log`: the dialog shows only
+/// its last lines, and the helper runs as root where no journal of Linksy's reaches.
+pub fn setup_log() -> PathBuf {
+    crash_dir().with_file_name("setup.log")
+}
+
+/// Bigger than this and the setup log starts over.
+const SETUP_LOG_MAX: u64 = 256 << 10;
+/// Lines of the setup log in `logs.txt`.
+const SETUP_LINES: usize = 150;
+
+/// Add one run of the setup helper to the setup log: what it was asked, its exit status and
+/// everything it printed.
+pub fn record_setup(asked: &str, code: i32, output: &str) {
+    use std::io::Write as _;
+    let path = setup_log();
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if std::fs::metadata(&path).is_ok_and(|m| m.len() > SETUP_LOG_MAX) {
+        let _ = std::fs::rename(&path, path.with_extension("log.old"));
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(file, "{} (unix time) setup {asked}: exit {code}\n{output}\n", now());
+    }
+}
+
 /// The log file's previous contents, once it grew too big.
 const LOG_MAX: u64 = 4 << 20;
 
@@ -123,6 +150,11 @@ pub fn collect(revision: &str) -> String {
     let _ = writeln!(out, "\nCrashes ({})\n-----------", files.len());
     for f in files.iter().take(5) {
         let _ = writeln!(out, "\n{}", std::fs::read_to_string(f).unwrap_or_default().trim_end());
+    }
+
+    if let Ok(setup) = std::fs::read_to_string(setup_log()) {
+        let lines: Vec<&str> = setup.lines().collect();
+        let _ = writeln!(out, "\nSetup\n-----\n\n{}", lines[lines.len().saturating_sub(SETUP_LINES)..].join("\n"));
     }
 
     let _ = writeln!(out, "\nLog\n---\n");

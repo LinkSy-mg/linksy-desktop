@@ -2681,6 +2681,7 @@ dependencies = [
  "linksy-host",
  "linksy-i18n",
  "linksy-ipc",
+ "linksy-logs",
 ]
 
 [[package]]

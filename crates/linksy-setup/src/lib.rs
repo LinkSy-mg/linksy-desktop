@@ -759,12 +759,17 @@ pub fn step_text(step: &str) -> String {
     }
 }
 
+/// Lines of the helper's output kept for the setup log.
+const TRANSCRIPT_LINES: usize = 400;
+
 /// Reads the helper's output as it comes: steps to show, the Secure Boot code, and the last
 /// lines for when it fails.
 #[derive(Default)]
 pub struct Progress {
     enroll: Option<String>,
     last: std::collections::VecDeque<String>,
+    /// All of it but the Secure Boot code, the newest lines, for the setup log.
+    transcript: std::collections::VecDeque<String>,
     /// pkexec had nobody to ask for the password, not even on its terminal.
     no_agent: bool,
     timed_out: bool,
@@ -774,6 +779,12 @@ pub struct Progress {
 impl Progress {
     /// One line of output; the step to show now, if it is one.
     pub fn line(&mut self, line: &str) -> Option<String> {
+        if !line.trim().is_empty() {
+            self.transcript.push_back(if line.starts_with("ENROLL ") { "ENROLL (code left out)".into() } else { line.trim_end().to_string() });
+            if self.transcript.len() > TRANSCRIPT_LINES {
+                self.transcript.pop_front();
+            }
+        }
         if let Some(step) = line.strip_prefix("STEP ") {
             return Some(t!("{step}…", step = step_text(step)));
         }
@@ -791,6 +802,20 @@ impl Progress {
         None
     }
 
+    /// Everything the helper printed, to keep.
+    pub fn transcript(&self) -> String {
+        self.transcript.iter().map(String::as_str).collect::<Vec<_>>().join("\n")
+    }
+
+    /// pkexec's 127 is also the helper that can't be run; its message says so, unlike the
+    /// ones about the password.
+    fn explains_itself(&self) -> bool {
+        self.last.back().is_some_and(|l| {
+            let l = l.to_lowercase();
+            !l.contains("authoriz") && !l.contains("authentic") && !l.contains("password")
+        })
+    }
+
     /// What the helper's exit status means.
     pub fn finish(self, status: i32) -> Result<(), Failure> {
         match status {
@@ -799,6 +824,7 @@ impl Progress {
             _ if self.wrong => Err(Failure::Message(t!("Not set up: the password didn't work.").into())),
             _ if self.no_agent => Err(no_agent()),
             4 => Err(Failure::Restart(self.enroll)),
+            127 if self.explains_itself() => Err(Failure::Message(t!("Setup didn't finish: {details}", details = self.last.into_iter().collect::<Vec<_>>().join(" ")))),
             126 | 127 => Err(Failure::Message(t!("Not set up: the password wasn't given.").into())),
             _ => Err(Failure::Message(t!("Setup didn't finish: {details}", details = self.last.into_iter().collect::<Vec<_>>().join(" ")))),
         }
@@ -835,6 +861,7 @@ pub fn run_as_root(args: &[String], ask: impl FnMut(&Prompt) -> Option<String>, 
     .map_err(|e| Failure::Message(e.to_string()))?;
     progress.timed_out = outcome.timed_out;
     progress.wrong = outcome.wrong;
+    linksy_logs::record_setup(&args.join(" "), outcome.code, &progress.transcript());
     progress.finish(outcome.code)
 }
 
@@ -1019,6 +1046,37 @@ mod tests {
         assert!(p.line("STEP Making the Linksy Camera").is_some());
         assert!(p.line("ENROLL 12345678").is_none());
         assert!(matches!(p.finish(4), Err(Failure::Restart(Some(c))) if c == "12345678"));
+    }
+
+    #[test]
+    fn a_helper_that_could_not_run_says_why() {
+        let mut p = Progress::default();
+        p.line("Error executing command as another user: No such file or directory");
+        assert!(matches!(p.finish(127), Err(Failure::Message(m)) if m.contains("No such file or directory")));
+        // About the password: the password's message
+        let mut p = Progress::default();
+        p.line("Error executing command as another user: Not authorized");
+        assert!(matches!(p.finish(127), Err(Failure::Message(m)) if !m.contains("Not authorized")));
+        assert!(matches!(Progress::default().finish(127), Err(Failure::Message(_))));
+        // Cancelled
+        let mut p = Progress::default();
+        p.line("something printed before");
+        assert!(matches!(p.finish(126), Err(Failure::Message(m)) if !m.contains("something printed before")));
+    }
+
+    #[test]
+    fn the_transcript_keeps_everything_but_the_secure_boot_code() {
+        let mut p = Progress::default();
+        p.line("STEP Making the Linksy Camera");
+        p.line("");
+        p.line("ENROLL 12345678");
+        p.line("v4l2loopback-ctl: no such option");
+        assert_eq!(p.transcript(), "STEP Making the Linksy Camera\nENROLL (code left out)\nv4l2loopback-ctl: no such option");
+        for i in 0..TRANSCRIPT_LINES + 10 {
+            p.line(&format!("line {i}"));
+        }
+        assert_eq!(p.transcript().lines().count(), TRANSCRIPT_LINES);
+        assert!(p.transcript().ends_with(&format!("line {}", TRANSCRIPT_LINES + 9)));
     }
 
     #[test]
