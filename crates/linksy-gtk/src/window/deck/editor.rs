@@ -728,16 +728,17 @@ impl Editor {
         b.append(&entry);
 
         b.append(&field(t!("Colour")));
-        let color = if t.color.is_empty() { model::default_color(&t.kind, t.action.as_deref()).to_string() } else { t.color.clone() };
-        b.append(&self.swatches(&model::COLORS, &color, {
-            let (e, id) = (Rc::downgrade(self), t.id.clone());
-            move |c| {
-                if let Some(e) = e.upgrade() {
-                    e.set_color(&id, c);
+        if st.theme() == Theme::Pixel {
+            let color = if t.color.is_empty() { model::default_color(&t.kind, t.action.as_deref()).to_string() } else { t.color.clone() };
+            b.append(&self.swatches(&model::COLORS, &color, {
+                let (e, id) = (Rc::downgrade(self), t.id.clone());
+                move |c| {
+                    if let Some(e) = e.upgrade() {
+                        e.set_color(&id, c);
+                    }
                 }
-            }
-        }));
-        if st.theme() != Theme::Pixel {
+            }));
+        } else {
             b.append(&label(&t!("{theme} draws every tile alike; Pixel colours each one.", theme = st.theme().name()), &["deck-hint"]));
         }
 
@@ -838,15 +839,17 @@ impl Editor {
         b.append(&entry);
         b.append(&field(t!("Theme")));
         b.append(&label(&t!("{theme}. Pick another above the phone. The phone draws it; it's saved with this layout.", theme = st.theme().name()), &["deck-where"]));
-        b.append(&field(t!("Accent, for what's on")));
-        b.append(&self.swatches(&model::ACCENTS, &l.theme.accent, {
-            let e = Rc::downgrade(self);
-            move |c| {
-                if let Some(e) = e.upgrade() {
-                    e.set_accent(c);
+        if matches!(st.theme(), Theme::Stock | Theme::Dots) {
+            b.append(&field(t!("Accent, for what's on")));
+            b.append(&self.swatches(&model::ACCENTS, &l.theme.accent, {
+                let e = Rc::downgrade(self);
+                move |c| {
+                    if let Some(e) = e.upgrade() {
+                        e.set_accent(c);
+                    }
                 }
-            }
-        }));
+            }));
+        }
         let n = st.tiles().len();
         let count = match n {
             0 => t!("No tiles on this page yet. Add widgets from the left.").to_string(),
