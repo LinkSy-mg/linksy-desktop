@@ -66,6 +66,12 @@ Qt app, Qt 6.8+ and KDE Frameworks 6.13+. The background service starts with you
 The Flatpak does everything the packages do: it has host access (`org.freedesktop.Flatpak`),
 so Finish Setup turns on starting at login, the webcam driver and the USB cable there too,
 and the terminal for phones is the computer's own shell.
+
+The command line is `linksy` (`linksy --help`). The packages put it in `/usr/bin`, the tarball
+and `scripts/install-local.sh` in `~/.local/bin` (which needs to be in your `PATH`). The Flatpak
+keeps it inside: `flatpak run --command=linksy mg.diary.linksy.Linksy devices`, or an alias
+for that in your shell. A build from source has it at `target/release/linksy` until installed.
+
 [docs/dependencies.md](docs/dependencies.md) lists everything Linksy relies on, with the
 packages for each distribution, for installing it by hand.
 
