@@ -613,6 +613,19 @@ pub fn camera_device() -> Option<PathBuf> {
     })
 }
 
+/// The step that gives the decoded stream a fixed frame rate, which a camera device needs.
+/// `capssetter` (gst-plugins-good's "debug" plugin) does it without touching the frames; some
+/// installs lack it and the session then ended at once (desktop#85), so `videorate`, from
+/// gst-plugins-base, does it there. With no timestamps to go by it passes every frame on.
+fn fixed_rate(fps: u32) -> String {
+    if gst::ElementFactory::find("capssetter").is_some() {
+        format!("capssetter caps=video/x-raw,framerate={fps}/1")
+    } else {
+        eprintln!("linksy-screen: no capssetter (gst-plugins-good's debug plugin); the camera's frame rate is set with videorate");
+        format!("videorate ! video/x-raw,framerate={fps}/1")
+    }
+}
+
 /// The receiving end of a camera session: decode and offer it as a camera for as long as
 /// the stream lasts: on the Linksy Camera device when there is one, else to PipeWire apps.
 fn webcam(socket: &std::path::Path, name: &str, fps: u32) -> Result<(), String> {
@@ -644,8 +657,9 @@ fn webcam(socket: &std::path::Path, name: &str, fps: u32) -> Result<(), String> 
     };
     let description = format!(
         "fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! video/x-raw,format=YUY2 \
-         ! capssetter caps=video/x-raw,framerate={fps}/1 ! {sink}",
-        input.as_raw_fd()
+         ! {} ! {sink}",
+        input.as_raw_fd(),
+        fixed_rate(fps)
     );
     let result = play(&description);
     drop(input);
