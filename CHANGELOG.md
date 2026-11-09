@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.13.2
 
 ### Fixed
 - **Firefox still showed twice on the phone** (#87): 0.13.1 matched Plasma's browser
