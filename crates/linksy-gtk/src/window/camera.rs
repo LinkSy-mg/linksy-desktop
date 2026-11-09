@@ -47,6 +47,7 @@ impl Controls {
         let auto_focus = gtk::Button::builder().label(t!("Auto Focus")).tooltip_text(t!("Click the picture to focus there")).css_classes(["pill"]).visible(false).build();
 
         let exposure = gtk::Scale::with_range(gtk::Orientation::Horizontal, -12.0, 12.0, 1.0);
+        exposure.adjustment().set_page_increment(1.0);
         exposure.set_hexpand(true);
         exposure.set_draw_value(false);
         exposure.add_mark(0.0, gtk::PositionType::Bottom, None);

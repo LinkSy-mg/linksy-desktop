@@ -77,6 +77,8 @@ impl ControlsPanel {
 
         let level = |icon: &str, title: &str, set: fn(&mut ControlsChange, f64)| -> Level {
             let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.05);
+            // The wheel and Page Up/Down move by the page increment, 10 steps unless set
+            scale.adjustment().set_page_increment(0.05);
             scale.set_draw_value(false);
             scale.set_width_request(220);
             scale.set_valign(gtk::Align::Center);
