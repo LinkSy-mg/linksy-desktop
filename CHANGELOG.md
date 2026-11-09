@@ -2,6 +2,22 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Fixed
+- **Firefox still showed twice on the phone** (#87): 0.13.1 matched Plasma's browser
+  integration to the browser's own player only by an identical track title, which a real
+  Firefox doesn't give. The browser's own player now also goes when it names the same
+  desktop entry or app.
+- **The camera ended at once on some installs** (#85): without GStreamer's `capssetter`
+  (the "debug" plugin of gst-plugins-good), every camera session stopped with "no element
+  capssetter". The frame rate is set another way there, and the log says so.
+- **A Ping showed "From <phone>" twice** on the computer: the phone's text already says it.
+- **The wheel on a volume slider jumped to 0, 50 or 100%:** it moves by 5% now, in the
+  GTK app (and by one stop on the camera's exposure).
+- **Notices piling up** when a phone leaves and re-enters its touchpad page: a session
+  allowed without asking is announced once a minute, not at every start.
+
 ## 0.13.1
 
 ### Fixed
