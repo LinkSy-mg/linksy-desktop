@@ -163,8 +163,7 @@ pub async fn run(node: Node) {
                 show(t!("Paired with {device}", device = device.name), t!("You can now share files and more.").into());
             }
             Event::Notification { from, title, body } => {
-                let from = t!("From {device}", device = from.name);
-                let body = if body.is_empty() { from } else { format!("{body}\n{from}") };
+                let body = with_sender(&body, &from.name, t!("From {device}", device = from.name));
                 show(title, body);
             }
             Event::Battery { from, battery } if battery.level <= LOW_BATTERY && !battery.charging => {
@@ -199,6 +198,18 @@ pub async fn run(node: Node) {
             }
             _ => {}
         }
+    }
+}
+
+/// A phone's notification with the device it came from added under the text, unless the
+/// text already says it (a Ping's does, which showed the line twice).
+fn with_sender(body: &str, device: &str, from: String) -> String {
+    if body.is_empty() {
+        from
+    } else if body.contains(device) {
+        body.to_string()
+    } else {
+        format!("{body}\n{from}")
     }
 }
 
@@ -343,4 +354,18 @@ pub fn human_size(bytes: u64) -> String {
         unit += 1;
     }
     if v < 10.0 { format!("{v:.1} {}", UNITS[unit]) } else { format!("{v:.0} {}", UNITS[unit]) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_notification_names_its_phone_once() {
+        let from = || "From Pixel".to_string();
+        assert_eq!(with_sender("", "Pixel", from()), "From Pixel");
+        assert_eq!(with_sender("Lunch?", "Pixel", from()), "Lunch?\nFrom Pixel");
+        assert_eq!(with_sender("From Pixel", "Pixel", from()), "From Pixel");
+        assert_eq!(with_sender("Ping from Pixel", "Pixel", from()), "Ping from Pixel");
+    }
 }
