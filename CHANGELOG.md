@@ -2,6 +2,31 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Changed
+- **The deck is edited on the phone.** The computer's own deck editor is gone (it was in the
+  GTK app only). A phone's deck page on the computer is now what it may do here: a switch
+  for each action, by group, with Turn All On and Off for the ones that don't ask first; what
+  its saved deck asked for; and your own commands. Both apps have it, the same. Layouts you
+  made on the computer before stay, and show on the phone.
+- **A phone can't turn on an action by putting a button for it on its deck.** Restart, Shut
+  Down, Airplane Mode and your commands stay off until you allow them on the computer. When a
+  saved deck uses one, the page lists it under "Asked for by" the phone, and a notification
+  offers Allow.
+
+### Added
+- **The computer keeps the deck the phone saves** (`deck_layout_save`, docs/protocol.md
+  §4.26): saved on the version the computer has, kept one version on and sent back; a stale
+  one is refused with the current layouts, a broken one with why. The phone side of saving is
+  in the next phone release.
+- **Your commands can have a group, an icon and a question first,** and be a switch: one
+  command to turn on, one to turn off (or the same flips it), and a check that succeeds while
+  it is on. The deck shows the switch's state, asked every 3 seconds while it is open.
+- **Try It Now** beside a command line: runs it once and shows the exit code and what it
+  printed.
+- Network, Power and Time group names are translated in the Qt app, like in the GTK app.
+
 ## 0.13.3
 
 ### Fixed

@@ -37,7 +37,7 @@ feature, feature by feature, is `docs/protocol.md` §2.
 | The phone's notifications on the computer, with reply; the Messages page and copied codes | 0.11.4 | 0.3.2 |
 | **The Inbox**: other notifications, earlier messages, replies after the notification | 0.12.1 | 0.3.3 |
 | **The Gallery**: the phone's photos and videos, page by page | 0.12.1 | 0.3.3 |
-| **The Deck**, with layouts made on the computer (the editor is GTK only) | 0.12.1 | 0.3.3 |
+| **The Deck**: the phone as buttons for the computer; the computer decides what it may run (0.12.1), your own commands with groups, icons and switches, and layouts saved from the phone's own editor (0.14.0) | 0.14.0 | 0.3.5, saving to do |
 
 ## Now
 
@@ -57,7 +57,7 @@ Built on the computer, on branch `phone-work` (not on main yet):
 5. The phone's sound with its screen (§4.8) and taps turned right for a phone in landscape (§4.11). The phone side is to do, and neither was tried on a phone.
 6. Screens at up to 60 fps with a fallback to 30 (a screen shared over the internet is 4 Mbit/s at 30).
 
-Not done, and why: a Qt deck editor (the GTK one is 4000 lines, and where decks are edited is not decided); datagrams for video and the pointer, BBR over the internet and a bitrate that follows the link while it runs (each needs measuring on a real link first); transfers with no shared network and Bluetooth (the first needs the computer to host a hotspot, which cuts its own Wi-Fi; the second needs a phone); the Wi-Fi Direct speed measurement (needs a phone).
+Not done, and why: datagrams for video and the pointer, BBR over the internet and a bitrate that follows the link while it runs (each needs measuring on a real link first); transfers with no shared network and Bluetooth (the first needs the computer to host a hotspot, which cuts its own Wi-Fi; the second needs a phone); the Wi-Fi Direct speed measurement (needs a phone).
 
 
 ## Now, in detail
@@ -220,24 +220,25 @@ offices): the phone and the computer make their own link.
 - **Done when:** a video playing on the phone is heard on the computer, in sync, while its
   screen is shown.
 
-### The Qt Deck editor — M
-The phone as a deck of buttons for the computer, laid out exactly the way you want.
-- **Desktop (keeps the layouts):** an editor with the phone drawn true to size, portrait
-  and landscape: tiles (buttons, volume, music, clock) dragged in from a library, moved,
-  resized and themed (Stock, Dot Matrix, E-Ink, Terminal, Pixel), several layouts per
-  phone. What this computer offers, each on or off for that phone: media, volume and
-  mute, microphone mute, the sound output, lock, Do Not Disturb, Wi-Fi, Bluetooth,
-  airplane mode, power modes, restart, shut down, and commands of your own. The phone only
-  ever asks for an action by its id: anything off, or not on the list, is refused. Live
-  state is sent while the deck is open. The GTK editor is done (0.12.1); the Qt app has the deck's actions and layouts but not
-  the editor yet.
-- **Phone (draws it):** the layout from the computer, kept for when it's away, with its
-  own themes if it likes; asks first for restart, shut down and the like; keeps the screen
-  on while the deck shows, dimmed after a minute.
-- **Protocol:** the computer sends its actions, their state and the layouts (§4.19,
-  §4.20); the phone sends "run this action", with a value for a slider.
-- **Done when:** a deck of mixed-size tiles is arranged on the phone by dragging and every
-  tile works on the computer, and an action turned off on the computer stops at once.
+### The Deck, edited on the phone — M
+The phone as a deck of buttons for the computer, laid out exactly the way you want, on the
+phone, where it is touched. The computer decides what the phone may run.
+- **Desktop (decides, keeps, runs):** one page per phone in both apps. What this computer
+  offers, a switch each, by group: media, volume and mute, microphone mute, the sound
+  output, lock, Do Not Disturb, Wi-Fi, Bluetooth, airplane mode, power modes, restart, shut
+  down, and commands of your own (buttons, or switches with a check that says whether
+  they're on, in groups you name, with an icon and an "ask first"). The phone only ever
+  asks for an action by its id: anything off, or not on the list, is refused, and a layout
+  the phone saves never turns one on: what its tiles need that is off shows as asked for,
+  with a notification to allow it. The computer keeps each phone's layouts (§4.26). Done in
+  0.14.0; the GTK editor of 0.12.1 is gone.
+- **Phone (edits and draws it):** the editor is done (0.3.5); saving to the computer
+  (`deck_layout_save`) and custom themes (`deck_themes`) are to do on the phone.
+- **Themes (next, desktop):** your own looks, made on the computer from one of the five and
+  shown live on the phone before they're kept (§4.26, `deck_theme_draft`).
+- **Done when:** a deck is arranged on the phone, saved to the computer, and every tile
+  works; an action turned off on the computer stops at once, and one the phone asks for
+  waits for your OK.
 
 ### Calls on the computer — L
 - **Control:** see who's calling, answer, decline and hang up from the computer (the phone

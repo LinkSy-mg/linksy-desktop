@@ -96,8 +96,9 @@ Finish Setup doesn't look: it shows the firewall as to set up until Linksy has o
   click, and a file manager for the folder it shares: copy both ways, rename, delete.
 - **Deck.** The phone as a deck of buttons for the computer: media, volume, microphone,
   sound output, lock, Do Not Disturb, Wi-Fi, Bluetooth, power modes, restart, and your own
-  commands. Build it on the computer, on a phone drawn true to size, in five looks (the
-  editor is in the GTK app for now).
+  commands (buttons, or switches that show whether they're on). Lay it out on the phone, in
+  its own editor, in five looks; the computer decides what the phone may run, with a switch
+  for each, and the phone can't turn on anything that is off.
 - **Share.** Files and folders both ways, resumable and checked; the clipboard (text, images,
   small files), automatically where the desktop allows; notifications. "Send with Linksy" in
   Files, Dolphin and Thunar.
@@ -129,7 +130,7 @@ With no window open, Linksy is one small process (about 20 MB of memory, no CPU 
   </tr>
   <tr>
     <td><img src="docs/screenshots/inbox.webp" alt="The Inbox: the phone's conversations, with one open and a reply field"></td>
-    <td><img src="docs/screenshots/deck-editor.webp" alt="The deck editor: widgets on the left, the phone true to size, its settings on the right"></td>
+    <td><img src="docs/screenshots/deck-page.webp" alt="A phone's deck on the computer: what it asked for, and a switch for each action, by group"></td>
   </tr>
   <tr>
     <td><img src="docs/screenshots/kde-device-page.webp" alt="The Qt app on KDE Plasma: a phone's page in Breeze"></td>
