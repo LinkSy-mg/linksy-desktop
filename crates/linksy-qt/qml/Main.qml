@@ -245,6 +245,12 @@ Kirigami.ApplicationWindow {
         if (page) page.deckOpen = true;
     }
 
+    // A phone saved its deck: what it asked for may have changed, so its page asks again
+    function deckSaved(id) {
+        const page = pageStack.get(1);
+        if (page && page.deckOpen && page.deviceId === id) page.deckReload();
+    }
+
     function openSetup() {
         pageStack.pushDialogLayer(Qt.resolvedUrl("SetupPage.qml"), { app: root });
     }
@@ -397,6 +403,9 @@ Kirigami.ApplicationWindow {
             break;
         case "transfer_request":
             offerDialog.ask(ev.transfer, ev.from, ev.files, ev.total);
+            break;
+        case "deck_layout_save":
+            deckSaved(ev.from.id);
             break;
         case "direct_wanted": case "direct_linked": case "direct_ended": case "direct": {
             const id = ev.type === "direct" ? ev.from.id : ev.id;

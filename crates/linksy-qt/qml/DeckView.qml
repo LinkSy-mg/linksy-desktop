@@ -1,6 +1,6 @@
-// A phone's deck, from this computer's side, shown in place of its page: which actions the
-// phone may run here, a switch each by group, and your own commands. The phone lays the
-// buttons out.
+// A phone's deck, from this computer's side, shown in place of its page: what the phone may do
+// here (a switch each, by group), what its saved deck asked for, and your own commands. The
+// phone lays the buttons out and edits them (docs/protocol.md §4.26).
 import QtQuick
 import QtQuick.Controls as QQC2
 import QtQuick.Layouts
@@ -14,9 +14,18 @@ ColumnLayout {
     // The actions the computer offers, each with whether it's on for this phone
     property var options: []
     property var commands: []
+    // Ids of what the phone's saved tiles run that is off here
+    property var asked: []
+    // What the computer keeps of the phone's layouts, if anything
+    property var layout: null
+    // The phone's icon names a command may have
+    property var icons: []
     property string error: ""
+    property string query: ""
+    readonly property string needle: query.trim().toLowerCase()
     // The groups, in the order the service gives them
     readonly property var groups: options.reduce((out, a) => out.includes(a.group) ? out : out.concat([a.group]), [])
+    readonly property var askedOptions: asked.map(id => options.find(a => a.id === id)).filter(a => a !== undefined)
 
     Component.onCompleted: load()
 
@@ -32,20 +41,54 @@ ColumnLayout {
             }
             page.options = prefs.actions;
             page.commands = prefs.commands;
+            page.asked = prefs.asked ?? [];
+            page.layout = prefs.layout ?? null;
+            page.icons = prefs.icons ?? [];
         });
     }
 
-    // The service names its groups in English; each shows in the app's language
+    // The service names its groups in English; each shows in the app's language. One of the
+    // user's own shows as they typed it.
     function groupTitle(group) {
-        return ({ Media: app.t("Media"), Sound: app.t("Sound"), System: app.t("System"), Commands: app.t("Commands") })[group] ?? group;
+        return ({ Media: app.t("Media"), Sound: app.t("Sound"), Time: app.t("Time"), System: app.t("System"), Network: app.t("Network"),
+                  Power: app.t("Power"), Commands: app.t("Commands") })[group] ?? group;
+    }
+
+    // The phone's icon names, as words
+    function iconTitle(key) {
+        return ({ play_pause: app.t("Play or Pause"), play: app.t("Play"), pause: app.t("Pause"), previous: app.t("Previous"), next: app.t("Next"),
+                  speaker: app.t("Speaker"), speaker_off: app.t("Speaker Off"), microphone: app.t("Microphone"), microphone_off: app.t("Microphone Off"),
+                  lock: app.t("Lock"), terminal: app.t("Terminal"), lightning: app.t("Lightning"), star: app.t("Star"), moon: app.t("Moon"),
+                  sun: app.t("Sun"), house: app.t("House"), bell: app.t("Bell"), code: app.t("Code"), power: app.t("Power"), rocket: app.t("Rocket"),
+                  game: app.t("Game"), camera: app.t("Camera"), heart: app.t("Heart"), coffee: app.t("Coffee"), music: app.t("Music"),
+                  monitor: app.t("Monitor"), broadcast: app.t("Broadcast"), flag: app.t("Flag"), folder: app.t("Folder"), globe: app.t("Globe"),
+                  cloud: app.t("Cloud"), timer: app.t("Timer") })[key] ?? key.replace(/_/g, " ");
+    }
+
+    function matches(action) {
+        return needle === "" || action.name.toLowerCase().includes(needle) || groupTitle(action.group).toLowerCase().includes(needle);
+    }
+
+    // The ones that ask first keep their own switch: a button for all of them could do harm
+    function plain(group) {
+        return options.filter(a => a.group === group && matches(a) && !a.confirm);
+    }
+
+    function shownIn(group) {
+        return options.filter(a => a.group === group && matches(a));
+    }
+
+    function whenSaved(ms) {
+        return new Date(ms).toLocaleString(Qt.locale(), Locale.ShortFormat);
     }
 
     // All of them go back (a new one without an id); then what's offered, with their actions
-    function saveCommands(list) {
+    function saveCommands(list, done) {
         error = "";
         app.request("set_deck_commands", { commands: list }, (ok, err) => {
             if (ok) page.load();
-            else page.error = page.capitalize(err);
+            else if (!done) page.error = page.capitalize(err);
+            if (done) done(ok, ok ? "" : page.capitalize(err));
         });
     }
 
@@ -53,10 +96,25 @@ ColumnLayout {
     function setAction(row, action, on) {
         error = "";
         app.request("set_deck_action", { phone: phone, action: action, on: on }, (ok, err) => {
-            if (ok) return;
-            page.error = page.capitalize(err);
-            row.checked = !on;
+            if (!ok) {
+                page.error = page.capitalize(err);
+                row.checked = !on;
+            } else if (page.asked.includes(action)) {
+                page.load();
+            }
         });
+    }
+
+    // Several at once (a group's buttons, or all it asked for); then the list as it is
+    function setMany(ids, on) {
+        error = "";
+        let left = ids.length;
+        for (const id of ids) {
+            app.request("set_deck_action", { phone: phone, action: id, on: on }, (ok, err) => {
+                if (!ok) page.error = page.capitalize(err);
+                if (--left === 0) page.load();
+            });
+        }
     }
 
     ColumnLayout {
@@ -70,12 +128,89 @@ ColumnLayout {
             text: page.error
         }
 
+        Kirigami.SearchField {
+            Layout.fillWidth: true
+            placeholderText: page.app.t("Search Actions")
+            onTextChanged: page.query = text
+        }
+
         QQC2.Label {
             Layout.fillWidth: true
             wrapMode: Text.Wrap
             opacity: 0.7
             textFormat: Text.PlainText
-            text: page.app.t("What {device} may do on this computer. Arrange the buttons on {device}.", { device: page.name })
+            text: page.app.t("What {device} may do on this computer. Arrange its buttons on {device}: open its deck and tap the pencil.", { device: page.name })
+        }
+
+        // What the computer keeps of the phone's layouts
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 0
+            visible: page.needle === ""
+            QQC2.Label {
+                Layout.fillWidth: true
+                font.bold: true
+                elide: Text.ElideRight
+                textFormat: Text.PlainText
+                text: page.layout ? page.app.t("Layout: {name}", { name: page.layout.name }) : page.app.t("No layout saved yet")
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                textFormat: Text.PlainText
+                text: !page.layout
+                    ? page.app.t("Until {device} saves one, it shows a first layout of what is offered here.", { device: page.name })
+                    : page.app.t("{saved}, version {version}", {
+                        saved: page.layout.saved_at ? page.app.t("Saved from {device} on {when}", { device: page.name, when: page.whenSaved(page.layout.saved_at) }) : page.app.t("Made on this computer"),
+                        version: page.layout.version })
+            }
+        }
+
+        // What its saved tiles run that is off here: the phone asked, you decide
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.topMargin: Kirigami.Units.largeSpacing
+            spacing: 0
+            visible: page.needle === "" && page.askedOptions.length > 0
+            RowLayout {
+                Layout.fillWidth: true
+                Kirigami.Heading {
+                    Layout.fillWidth: true
+                    level: 4
+                    elide: Text.ElideRight
+                    text: page.app.t("Asked for by {device}", { device: page.name })
+                }
+                QQC2.ToolButton {
+                    flat: true
+                    text: page.app.t("Allow All")
+                    onClicked: page.setMany(page.askedOptions.map(a => a.id), true)
+                }
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                text: page.app.t("Its deck has buttons for these, which stay off until you allow them.")
+            }
+            Repeater {
+                model: page.askedOptions
+                delegate: QQC2.SwitchDelegate {
+                    id: askedRow
+                    required property var modelData
+                    Layout.fillWidth: true
+                    text: modelData.name
+                    checked: modelData.on
+                    onToggled: page.setAction(askedRow, modelData.id, checked)
+                    // Names show as they are, never as markup
+                    contentItem: QQC2.Label {
+                        text: askedRow.text
+                        textFormat: Text.PlainText
+                        elide: Text.ElideRight
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
         }
 
         Repeater {
@@ -83,15 +218,30 @@ ColumnLayout {
             delegate: ColumnLayout {
                 id: group
                 required property string modelData
+                readonly property var shown: page.shownIn(modelData)
+                readonly property var every: page.plain(modelData)
+                visible: shown.length > 0
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.largeSpacing
                 spacing: 0
-                Kirigami.Heading {
-                    level: 4
-                    text: page.groupTitle(group.modelData)
+                RowLayout {
+                    Layout.fillWidth: true
+                    Kirigami.Heading {
+                        Layout.fillWidth: true
+                        level: 4
+                        elide: Text.ElideRight
+                        text: page.groupTitle(group.modelData)
+                    }
+                    QQC2.ToolButton {
+                        readonly property bool allOn: group.every.every(a => a.on)
+                        flat: true
+                        visible: group.every.length > 1
+                        text: allOn ? page.app.t("Turn All Off") : page.app.t("Turn All On")
+                        onClicked: page.setMany(group.every.map(a => a.id), !allOn)
+                    }
                 }
                 Repeater {
-                    model: page.options.filter(a => a.group === group.modelData)
+                    model: group.shown
                     delegate: QQC2.SwitchDelegate {
                         id: actionRow
                         required property var modelData
@@ -100,122 +250,320 @@ ColumnLayout {
                         checked: modelData.on
                         onToggled: page.setAction(actionRow, modelData.id, checked)
                         // Names show as they are, never as markup
-                        contentItem: QQC2.Label {
-                            text: actionRow.text
-                            textFormat: Text.PlainText
-                            elide: Text.ElideRight
-                            verticalAlignment: Text.AlignVCenter
+                        contentItem: ColumnLayout {
+                            spacing: 0
+                            QQC2.Label {
+                                Layout.fillWidth: true
+                                text: actionRow.text
+                                textFormat: Text.PlainText
+                                elide: Text.ElideRight
+                            }
+                            QQC2.Label {
+                                Layout.fillWidth: true
+                                visible: !!actionRow.modelData.confirm
+                                opacity: 0.7
+                                font: Kirigami.Theme.smallFont
+                                textFormat: Text.PlainText
+                                text: page.app.t("Asks first on {device}", { device: page.name })
+                            }
                         }
                     }
                 }
             }
         }
 
-        Kirigami.Heading {
-            Layout.topMargin: Kirigami.Units.largeSpacing
-            level: 4
-            text: page.app.t("Your Commands")
-        }
-        QQC2.Label {
+        // Your own commands
+        ColumnLayout {
             Layout.fillWidth: true
-            wrapMode: Text.Wrap
-            opacity: 0.7
-            textFormat: Text.PlainText
-            text: page.app.t("Each runs on this computer as you, with sh -c. Turn it on under Commands for {device}.", { device: page.name })
-        }
-        Repeater {
-            model: page.commands
-            delegate: RowLayout {
-                id: command
-                required property var modelData
+            Layout.topMargin: Kirigami.Units.largeSpacing
+            spacing: 0
+            visible: page.needle === ""
+            RowLayout {
                 Layout.fillWidth: true
-                ColumnLayout {
+                Kirigami.Heading {
                     Layout.fillWidth: true
-                    spacing: 0
-                    QQC2.Label {
-                        Layout.fillWidth: true
-                        text: command.modelData.name
-                        textFormat: Text.PlainText
-                        elide: Text.ElideRight
-                    }
-                    QQC2.Label {
-                        Layout.fillWidth: true
-                        text: command.modelData.command
-                        textFormat: Text.PlainText
-                        font.family: "monospace"
-                        wrapMode: Text.WrapAnywhere
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
-                        opacity: 0.7
-                    }
+                    level: 4
+                    text: page.app.t("Your Commands")
                 }
-                QQC2.ToolButton {
-                    icon.name: "user-trash"
-                    text: page.app.t("Remove Command")
-                    display: QQC2.AbstractButton.IconOnly
-                    QQC2.ToolTip.text: text
-                    QQC2.ToolTip.visible: hovered
-                    onClicked: page.saveCommands(page.commands.filter(o => o.id !== command.modelData.id))
+                QQC2.Button {
+                    icon.name: "list-add"
+                    text: page.app.t("Add Command…")
+                    onClicked: form.openFor(-1)
+                }
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                textFormat: Text.PlainText
+                text: page.app.t("Run anything on this computer from {device}'s deck: a script, a shortcut, a switch for a VPN. Each runs as you, with sh -c. Turn it on under its group above.", { device: page.name })
+            }
+            Repeater {
+                model: page.commands
+                delegate: RowLayout {
+                    id: command
+                    required property var modelData
+                    required property int index
+                    Layout.fillWidth: true
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 0
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            text: command.modelData.name
+                            textFormat: Text.PlainText
+                            elide: Text.ElideRight
+                        }
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            text: command.modelData.kind === "toggle"
+                                ? command.modelData.command + " / " + (command.modelData.off ? command.modelData.off : page.app.t("same command"))
+                                : command.modelData.command
+                            textFormat: Text.PlainText
+                            font.family: "monospace"
+                            wrapMode: Text.WrapAnywhere
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            opacity: 0.7
+                        }
+                    }
+                    QQC2.ToolButton {
+                        icon.name: "document-edit"
+                        text: page.app.t("Edit Command")
+                        display: QQC2.AbstractButton.IconOnly
+                        QQC2.ToolTip.text: text
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: form.openFor(command.index)
+                    }
+                    QQC2.ToolButton {
+                        icon.name: "user-trash"
+                        text: page.app.t("Remove Command")
+                        display: QQC2.AbstractButton.IconOnly
+                        QQC2.ToolTip.text: text
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: page.saveCommands(page.commands.filter((o, i) => i !== command.index))
+                    }
                 }
             }
         }
-        QQC2.Button {
-            icon.name: "list-add"
-            text: page.app.t("Add Command…")
-            onClicked: adding.open()
-        }
     }
 
-    // A name and a command line; Add once both are there
-    Kirigami.PromptDialog {
-        id: adding
-        readonly property bool filled: nameField.text.trim() !== "" && lineField.text.trim() !== ""
-        title: page.app.t("Add Command")
-        subtitle: page.app.t("A button for the deck that runs this on this computer, as if typed in a terminal.")
+    // A command's form: a new one, or the one at `editing`; Save once it has what it needs
+    Kirigami.Dialog {
+        id: form
+        // Where the command is in the list; -1: a new one
+        property int editing: -1
+        property var groupKeys: []
+        property var iconKeys: []
+        property string problem: ""
+        readonly property bool switchKind: kindBox.currentIndex === 1
+        readonly property bool newGroup: groupBox.currentIndex === groupKeys.length
+        readonly property bool filled: nameField.text.trim() !== "" && onField.text.trim() !== ""
+            && (!switchKind || stateField.text.trim() !== "") && (!newGroup || newGroupField.text.trim() !== "")
+        title: editing >= 0 ? page.app.t("Edit Command") : page.app.t("Add Command")
+        preferredWidth: Kirigami.Units.gridUnit * 28
         standardButtons: Kirigami.Dialog.NoButton
-        onOpened: {
-            nameField.text = "";
-            lineField.text = "";
+
+        function openFor(index) {
+            const c = index >= 0 ? page.commands[index] : {};
+            editing = index;
+            problem = "";
+            const custom = [];
+            for (const other of page.commands) if (other.group && !custom.includes(other.group)) custom.push(other.group);
+            groupKeys = [""].concat(custom);
+            iconKeys = [""].concat(page.icons);
+            nameField.text = c.name ?? "";
+            kindBox.currentIndex = c.kind === "toggle" ? 1 : 0;
+            onField.text = c.command ?? "";
+            offField.text = c.off ?? "";
+            stateField.text = c.state ?? "";
+            groupBox.currentIndex = Math.max(0, groupKeys.indexOf(c.group ?? ""));
+            newGroupField.text = "";
+            iconBox.currentIndex = Math.max(0, iconKeys.indexOf(c.icon ?? ""));
+            askBox.checked = c.confirm === true;
+            tried.text = "";
+            open();
             nameField.forceActiveFocus();
         }
-        function add() {
+
+        function save() {
             if (!filled) return;
-            page.saveCommands(page.commands.concat([{ name: nameField.text.trim(), command: lineField.text.trim() }]));
-            close();
+            const chosen = {
+                id: editing >= 0 ? page.commands[editing].id : "",
+                name: nameField.text.trim(),
+                command: onField.text.trim(),
+                group: newGroup ? newGroupField.text.trim() : groupKeys[groupBox.currentIndex],
+                icon: iconKeys[iconBox.currentIndex] ?? "",
+                confirm: askBox.checked,
+                kind: switchKind ? "toggle" : "button",
+                off: switchKind ? offField.text.trim() : "",
+                state: switchKind ? stateField.text.trim() : ""
+            };
+            const list = page.commands.slice();
+            if (editing >= 0) list[editing] = chosen;
+            else list.push(chosen);
+            page.saveCommands(list, (ok, why) => {
+                if (ok) form.close();
+                else form.problem = why;
+            });
         }
+
+        // Run a line once on this computer and say how it went
+        function tryLine(line) {
+            if (line.trim() === "") return;
+            tried.text = page.app.t("Running…");
+            page.app.request("test_deck_command", { line: line }, (ok, run) => {
+                if (!ok) {
+                    tried.text = page.capitalize(run);
+                    return;
+                }
+                const code = run.timed_out ? page.app.t("It was still running after 10 seconds, so it was stopped.")
+                    : run.code === null ? page.app.t("It didn't start.") : page.app.t("Ended with code {code}.", { code: run.code });
+                tried.text = run.output ? code + "\n" + run.output : code;
+            });
+        }
+
         customFooterActions: [
             Kirigami.Action {
-                text: page.app.t("Add")
-                icon.name: "list-add"
-                enabled: adding.filled
-                onTriggered: adding.add()
+                text: form.editing >= 0 ? page.app.t("Save") : page.app.t("Add")
+                icon.name: "document-save"
+                enabled: form.filled
+                onTriggered: form.save()
             },
             Kirigami.Action {
                 text: page.app.t("Cancel")
                 icon.name: "dialog-cancel"
-                onTriggered: adding.close()
+                onTriggered: form.close()
             }
         ]
+
         ColumnLayout {
-            QQC2.Label {
-                text: page.app.t("Name")
+            spacing: Kirigami.Units.smallSpacing
+
+            Kirigami.InlineMessage {
+                Layout.fillWidth: true
+                visible: form.problem !== ""
+                type: Kirigami.MessageType.Error
+                text: form.problem
             }
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                text: page.app.t("Runs on this computer as you, with sh -c. A switch turns something on and off; its check says which it is, by succeeding while it is on.")
+            }
+            QQC2.Label { text: page.app.t("Name") }
             QQC2.TextField {
                 id: nameField
                 Layout.fillWidth: true
                 Layout.minimumWidth: Kirigami.Units.gridUnit * 18
                 Accessible.name: page.app.t("Name")
-                onAccepted: adding.add()
+                onAccepted: form.save()
+            }
+            QQC2.Label { text: page.app.t("Type") }
+            QQC2.ComboBox {
+                id: kindBox
+                Layout.fillWidth: true
+                model: [page.app.t("Button"), page.app.t("Switch")]
+                Accessible.name: page.app.t("Type")
+            }
+            QQC2.Label { text: page.app.t("Command") }
+            RowLayout {
+                Layout.fillWidth: true
+                QQC2.TextField {
+                    id: onField
+                    Layout.fillWidth: true
+                    font.family: "monospace"
+                    Accessible.name: page.app.t("Command")
+                    onAccepted: form.save()
+                }
+                QQC2.ToolButton {
+                    icon.name: "media-playback-start"
+                    text: page.app.t("Try It Now")
+                    display: QQC2.AbstractButton.IconOnly
+                    QQC2.ToolTip.text: text
+                    QQC2.ToolTip.visible: hovered
+                    onClicked: form.tryLine(onField.text)
+                }
+            }
+            QQC2.Label { text: page.app.t("Command to turn it off (optional)"); visible: form.switchKind }
+            RowLayout {
+                Layout.fillWidth: true
+                visible: form.switchKind
+                QQC2.TextField {
+                    id: offField
+                    Layout.fillWidth: true
+                    font.family: "monospace"
+                    Accessible.name: page.app.t("Command to turn it off (optional)")
+                }
+                QQC2.ToolButton {
+                    icon.name: "media-playback-start"
+                    text: page.app.t("Try It Now")
+                    display: QQC2.AbstractButton.IconOnly
+                    QQC2.ToolTip.text: text
+                    QQC2.ToolTip.visible: hovered
+                    onClicked: form.tryLine(offField.text)
+                }
+            }
+            QQC2.Label { text: page.app.t("Check: succeeds while it is on"); visible: form.switchKind }
+            RowLayout {
+                Layout.fillWidth: true
+                visible: form.switchKind
+                QQC2.TextField {
+                    id: stateField
+                    Layout.fillWidth: true
+                    font.family: "monospace"
+                    Accessible.name: page.app.t("Check: succeeds while it is on")
+                }
+                QQC2.ToolButton {
+                    icon.name: "media-playback-start"
+                    text: page.app.t("Try It Now")
+                    display: QQC2.AbstractButton.IconOnly
+                    QQC2.ToolTip.text: text
+                    QQC2.ToolTip.visible: hovered
+                    onClicked: form.tryLine(stateField.text)
+                }
             }
             QQC2.Label {
-                text: page.app.t("Command")
+                id: tried
+                Layout.fillWidth: true
+                visible: text !== ""
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                font.family: "monospace"
+                textFormat: Text.PlainText
+            }
+            QQC2.Label { text: page.app.t("Group") }
+            QQC2.ComboBox {
+                id: groupBox
+                Layout.fillWidth: true
+                model: form.groupKeys.map(k => k === "" ? page.groupTitle("Commands") : k).concat([page.app.t("New Group…")])
+                Accessible.name: page.app.t("Group")
             }
             QQC2.TextField {
-                id: lineField
+                id: newGroupField
                 Layout.fillWidth: true
-                font.family: "monospace"
-                Accessible.name: page.app.t("Command")
-                onAccepted: adding.add()
+                visible: form.newGroup
+                placeholderText: page.app.t("New group's name")
+                Accessible.name: page.app.t("New group's name")
+                onAccepted: form.save()
+            }
+            QQC2.Label { text: page.app.t("Icon") }
+            QQC2.ComboBox {
+                id: iconBox
+                Layout.fillWidth: true
+                model: form.iconKeys.map(k => k === "" ? page.app.t("Default") : page.iconTitle(k))
+                Accessible.name: page.app.t("Icon")
+            }
+            QQC2.CheckBox {
+                id: askBox
+                text: page.app.t("Ask First")
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                text: page.app.t("The phone asks \"Run it?\" before it does.")
             }
         }
     }

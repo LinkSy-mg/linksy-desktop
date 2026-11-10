@@ -57,6 +57,16 @@ Kirigami.Page {
     // Its deck shows in place of the page, with Back
     property bool deckOpen: false
 
+    // The phone saved its deck: the deck page asks again, once the service has kept it
+    function deckReload() {
+        if (deckOpen) deckAgain.restart();
+    }
+    Timer {
+        id: deckAgain
+        interval: 700
+        onTriggered: if (deck.item) deck.item.load()
+    }
+
     title: deckOpen ? app.t("Deck") : name
     padding: 0
     flickable: deckOpen ? deckFlick : flick
@@ -731,7 +741,7 @@ Kirigami.Page {
                         }
                     }
                     actions: Kirigami.Action {
-                        text: app.t("Choose Actions…")
+                        text: app.t("Manage Deck…")
                         icon.name: app.sym("configure")
                         icon.color: Kirigami.Theme.linkColor
                         onTriggered: page.deckOpen = true
