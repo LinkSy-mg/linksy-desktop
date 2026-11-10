@@ -21,7 +21,7 @@ adds.
 | Controlling this computer, the phone as a touchpad | GNOME or KDE Plasma (the RemoteDesktop portal), or any X11 desktop (XTest, part of the X server). |
 | The phone as a webcam in OBS and PipeWire apps | PipeWire, with its GStreamer plugin (`pipewiresink`). |
 | The phone as a webcam in browsers, Zoom, Discord | The v4l2loopback driver and its `v4l2loopback-ctl` tool, then the "Linksy Camera" device (below). With Secure Boot on, `mokutil` to approve the driver. |
-| The phone as a microphone | PipeWire, with its GStreamer plugin. Apps see "Linksy Microphone (the phone's name)". |
+| The phone as a microphone | PipeWire, with its GStreamer plugin, and `pactl` (PipeWire's PulseAudio layer, `pipewire-pulse`), which makes the microphone. Apps see "Linksy Microphone (the phone's name)". Without `pactl` the microphone is a plain PipeWire node, which stops delivering after a moment on PipeWire 1.6. |
 | Text from the phone on the clipboard while Linksy's window is closed | `wl-copy` (wl-clipboard) on Wayland; `xclip` or `xsel` on X11. |
 | Copies on the computer reaching the phone by themselves | `wl-paste` (wl-clipboard) on KDE, Hyprland, Sway; `xclip` or `xsel` on X11. GNOME doesn't let apps watch the clipboard. |
 | Phones by USB cable | Linksy's udev rule (below). The .deb and .rpm install it. |

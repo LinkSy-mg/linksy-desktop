@@ -2,6 +2,18 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Fixed
+- **The phone's microphone gave no sound on PipeWire 1.6** (#89): a PipeWire node
+  published the way Linksy did it stops delivering after a moment there (PipeWire's own
+  issue 5378). The microphone is now made through PipeWire's PulseAudio layer (`pactl`): a
+  null sink the audio is played into, and a microphone listening to it. Both are removed
+  when the session ends, and the service asks the helper to stop before it kills it, so
+  they go every time. Where there is no `pactl` it works as before. The camera's PipeWire
+  node (OBS's camera source) is published the same way and is not changed yet; browsers
+  and Zoom use the Linksy Camera device.
+
 ## 0.13.2
 
 ### Fixed
