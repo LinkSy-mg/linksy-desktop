@@ -49,6 +49,9 @@
 //! gets, runs that action (a slider with VALUE), prints the state after, then closes it.
 //! `--deck-layout` announces `deck_layout`, so the deck also gets its layouts (printed as
 //! DECK_LAYOUT, in short); `--deck-wait SECONDS` keeps the deck open that long after the run.
+//! `--deck-save FILE` (DeckLayouts JSON) then saves those layouts with `deck_layout_save`, made
+//! on the version of the layouts it got (`--deck-save-base N`: on N), and prints the answer
+//! (DECK_LAYOUT, or DECK_REFUSED); `--deck-themes` announces `deck_themes`.
 //! `--off FEATURE` starts without it (`notifications`, `gallery`), as with its switch off;
 //! `--turn-on` announces `turn_on` and says yes when a computer asks to turn one on.
 //! `--snap PICTURE` announces `snap` and, when a computer asks, sends that picture as a file
@@ -101,6 +104,7 @@ async fn main() {
     let mut accept_pairing = false;
     let mut deck: Option<(String, Option<f64>)> = None;
     let (mut deck_layout, mut deck_wait) = (false, 0u64);
+    let (mut deck_save, mut deck_save_base, mut deck_themes) = (None::<std::path::PathBuf>, None::<u64>, false);
     let (mut off, mut turn_on) = (Vec::<String>::new(), false);
     let (mut snap, mut snap_refuse) = (None::<std::path::PathBuf>, None::<String>);
     let (mut controls, mut no_dnd_access, mut computer_notifications, mut sound) = (false, false, false, false);
@@ -163,6 +167,9 @@ async fn main() {
             }
             "--deck-layout" => deck_layout = true,
             "--deck-wait" => deck_wait = value().parse().expect("--deck-wait SECONDS"),
+            "--deck-save" => deck_save = Some(value().into()),
+            "--deck-save-base" => deck_save_base = Some(value().parse().expect("--deck-save-base VERSION")),
+            "--deck-themes" => deck_themes = true,
             "--chats" => chats = true,
             "--notifications-later" => notifications_later = Some(value().parse().expect("--notifications-later SECONDS")),
             "--off" => off.push(value()),
@@ -201,6 +208,9 @@ async fn main() {
     }
     if deck_layout {
         config.features.push("deck_layout".into());
+    }
+    if deck_themes {
+        config.features.push("deck_themes".into());
     }
     if turn_on {
         config.features.push("turn_on".into());
@@ -412,6 +422,7 @@ async fn main() {
             // Its list, its layouts if it takes them, then the state: each a stream of its
             // own, in whichever order
             let (mut listed, mut stated, mut laid) = (false, false, !deck_layout);
+            let mut seen_version = 0;
             while !(listed && stated && laid) {
                 let Some(e) = deck_message(&mut events, &pc).await else {
                     println!("no deck answer from {}", t.device.name);
@@ -420,6 +431,9 @@ async fn main() {
                 listed |= matches!(e, Event::DeckActions { .. });
                 stated |= matches!(e, Event::DeckState { .. });
                 laid |= matches!(e, Event::DeckLayout { .. });
+                if let Event::DeckLayout { layouts, .. } = &e {
+                    seen_version = layouts.version;
+                }
                 print_deck(&e, "DECK_STATE");
             }
             let r = node.deck_run(&pc, action, *value).await;
@@ -440,6 +454,21 @@ async fn main() {
             while tokio::time::Instant::now() < until {
                 if let Ok(Some(e)) = tokio::time::timeout_at(until, deck_message(&mut events, &pc)).await {
                     print_deck(&e, "DECK_STATE");
+                }
+            }
+            if let Some(path) = &deck_save {
+                let layouts: linksy_core::DeckLayouts = serde_json::from_slice(&std::fs::read(path).expect("--deck-save FILE")).expect("--deck-save FILE is DeckLayouts JSON");
+                let base = deck_save_base.unwrap_or(seen_version);
+                let r = node.deck_layout_save(&pc, base, &layouts).await;
+                println!("saved the deck on version {base}: {:?}", r.map_err(|e| e.to_string()));
+                // The answer: the layouts (also after a stale refusal) or a refusal that is final
+                while let Some(e) = deck_message(&mut events, &pc).await {
+                    print_deck(&e, "DECK_STATE");
+                    match e {
+                        Event::DeckLayout { .. } => break,
+                        Event::DeckLayoutRefused { code, .. } if code != linksy_core::DeckRefusal::Stale => break,
+                        _ => {}
+                    }
                 }
             }
             let _ = node.deck_open(&pc, false).await;
@@ -874,7 +903,7 @@ async fn deck_message(events: &mut tokio::sync::broadcast::Receiver<Event>, pc: 
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(_) => return None,
             };
-            if let Event::DeckActions { from, .. } | Event::DeckState { from, .. } | Event::DeckLayout { from, .. } = &e
+            if let Event::DeckActions { from, .. } | Event::DeckState { from, .. } | Event::DeckLayout { from, .. } | Event::DeckLayoutRefused { from, .. } = &e
                 && from.id == *pc
             {
                 return Some(e);
@@ -894,8 +923,10 @@ fn print_deck(e: &Event, state: &str) {
         Event::DeckLayout { layouts, .. } => {
             let tiles = |f: &linksy_core::DeckFace| f.pages.iter().map(Vec::len).sum::<usize>();
             let each: Vec<String> = layouts.layouts.iter().map(|l| format!("{}:{}/{}", l.id, tiles(&l.portrait), tiles(&l.landscape))).collect();
-            println!("DECK_LAYOUT version={} active={} layouts={} tiles(portrait/landscape)={}", layouts.version, layouts.active, layouts.layouts.len(), each.join(","));
+            let themes: Vec<String> = layouts.layouts.iter().map(|l| l.theme.id.clone()).collect();
+            println!("DECK_LAYOUT version={} active={} layouts={} tiles(portrait/landscape)={} themes={} custom_themes={}", layouts.version, layouts.active, layouts.layouts.len(), each.join(","), themes.join(","), layouts.themes.len());
         }
+        Event::DeckLayoutRefused { code, reason, version, .. } => println!("DECK_REFUSED code={code:?} version={version} reason={reason}"),
         _ => {}
     }
 }
