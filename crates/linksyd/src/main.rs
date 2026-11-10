@@ -67,7 +67,7 @@ pub static QUIT: tokio::sync::Notify = tokio::sync::Notify::const_new();
 const FEATURES: &[&str] = &[
     "files", "clipboard", "open_url", "ring", "battery", "media_state", "media_remote", "call_state", "heartbeat",
     "import", "fs", "input", "screen", "control", "display", "camera", "watch", "notifications", "sms",
-    "clipboard_file", "microphone", "picture", "deck", "preflight",
+    "clipboard_file", "microphone", "picture", "deck", "deck_layout_save", "preflight",
 ];
 
 /// Fixed default port so a peer's last known address stays valid across restarts.

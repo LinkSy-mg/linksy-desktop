@@ -1822,6 +1822,11 @@ impl Node {
         self.inner.peers.lock().unwrap().get(id).map(|p| p.device.clone())
     }
 
+    /// Whether a connected device announced `feature`.
+    pub fn peer_has(&self, id: &Fingerprint, feature: &str) -> bool {
+        self.peer_info(id).is_some_and(|p| p.features.iter().any(|f| f == feature))
+    }
+
     /// Where a connected device's connection comes from now (over the USB cable, the
     /// bridge's local port).
     pub fn peer_address(&self, id: &Fingerprint) -> Option<SocketAddr> {

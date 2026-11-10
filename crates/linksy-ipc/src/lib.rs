@@ -336,6 +336,24 @@ impl Default for LockPrefs {
 pub struct DeckPrefs {
     pub actions: Vec<DeckOption>,
     pub commands: Vec<DeckCommand>,
+    /// Ids of actions that are off for this phone but that a tile it saved runs: it asked
+    /// for them (docs/protocol.md §4.26).
+    #[serde(default)]
+    pub asked: Vec<String>,
+    /// What this computer keeps of the phone's layouts; none until it has any.
+    #[serde(default)]
+    pub layout: Option<DeckLayoutInfo>,
+}
+
+/// The layouts a computer keeps for a phone, for the deck's page.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeckLayoutInfo {
+    pub version: u64,
+    /// The layout the phone shows.
+    pub name: String,
+    pub layouts: usize,
+    /// When the phone last saved them, in milliseconds since the epoch; none: never.
+    pub saved_at: Option<u64>,
 }
 
 /// An action this computer offers, and whether it's on for the phone asked about.

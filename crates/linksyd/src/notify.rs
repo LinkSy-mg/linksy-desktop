@@ -245,6 +245,30 @@ pub(crate) fn show(summary: String, body: String) {
     });
 }
 
+/// A phone's saved deck uses actions that are off here (docs/protocol.md §4.26): which, and
+/// an Allow that turns them on for that phone. Nothing else decides it: the phone can't.
+pub(crate) fn deck_asks(phone: Fingerprint, device: String, actions: Vec<(String, String)>) {
+    tokio::task::spawn_blocking(move || {
+        let names = actions.iter().map(|(_, name)| name.as_str()).collect::<Vec<_>>().join(", ");
+        let mut n = base(&t!("{device}'s deck needs your OK", device = device), &t!("It uses {actions}, which are off on this computer. Allow them here, or choose in Linksy, on {device}'s page.", actions = names, device = device));
+        n.action("allow", t!("Allow"));
+        match n.show() {
+            Ok(handle) => handle.wait_for_action(|action| {
+                if action != "allow" {
+                    return;
+                }
+                let Some(deck) = crate::deck::DECK.get() else { return };
+                for (id, _) in &actions {
+                    if let Err(e) = deck.set_action(&phone, id, true) {
+                        debug!("could not allow {id}: {e}");
+                    }
+                }
+            }),
+            Err(e) => debug!("notification failed: {e}"),
+        }
+    });
+}
+
 /// A notification with Accept/Decline that answers the request when clicked. It stays until
 /// answered (critical, no timeout), and goes when it is: clicking a button closes it (it
 /// isn't resident), and an answer from the app or the other device closes it too.

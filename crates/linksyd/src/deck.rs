@@ -11,9 +11,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use linksy_core::deck_layout::{self, MAX_BYTES};
-use linksy_core::{DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckState, DeckTheme, DeckTile, Event, Fingerprint, MediaCommand, Node, Uuid};
+use linksy_core::{DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckRefusal, DeckState, DeckTheme, DeckThemeDef, DeckTile, Event, Fingerprint, MediaCommand, Node, Uuid};
 use linksy_i18n::t;
-use linksy_ipc::{DeckCommand, DeckOption, DeckPrefs};
+use linksy_ipc::{DeckCommand, DeckLayoutInfo, DeckOption, DeckPrefs};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
@@ -216,6 +216,10 @@ struct Saved {
     commands: Vec<DeckCommand>,
     /// Each phone's layouts as the user saved them.
     layouts: HashMap<Fingerprint, DeckLayouts>,
+    /// The user's own deck themes (docs/protocol.md §4.26), which every phone's layouts may name.
+    themes: Vec<DeckThemeDef>,
+    /// When each phone last saved its layouts from the phone, in ms since the epoch.
+    layouts_at: HashMap<Fingerprint, u64>,
 }
 
 impl Saved {
@@ -228,6 +232,26 @@ impl Saved {
             }
         }
     }
+}
+
+/// Why a phone's save wasn't kept (docs/protocol.md §4.26), and the version kept now.
+#[derive(Debug, PartialEq)]
+pub struct Refused {
+    pub code: DeckRefusal,
+    pub reason: String,
+    pub version: u64,
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
+}
+
+/// The actions `phone`'s saved tiles run that are off for it: what it asked for, in the
+/// order `offered`.
+fn asked_in(offered: &[DeckAction], saved: &Saved, phone: &Fingerprint) -> Vec<String> {
+    let Some(layouts) = saved.layouts.get(phone) else { return Vec::new() };
+    let used: HashSet<&str> = runs(layouts).collect();
+    offered.iter().filter(|a| used.contains(a.id.as_str()) && !saved.on(phone, &a.id)).map(|a| a.id.clone()).collect()
 }
 
 enum Job {
@@ -266,6 +290,8 @@ struct Inner<D> {
     status: Mutex<Status>,
     /// For the names in the questions actions ask.
     node: OnceLock<Node>,
+    /// What each phone has been told it asked for, so it is said once (see [`Deck::news`]).
+    said: Mutex<HashMap<Fingerprint, HashSet<String>>>,
 }
 
 impl<D: Desktop> Deck<D> {
@@ -282,6 +308,7 @@ impl<D: Desktop> Deck<D> {
             caps: tokio::sync::OnceCell::new(),
             status: Mutex::default(),
             node: OnceLock::new(),
+            said: Mutex::default(),
         };
         Self { inner: Arc::new(inner) }
     }
@@ -361,9 +388,16 @@ impl<D: Desktop> Deck<D> {
         let offered = self.offered(&saved);
         let on: Vec<bool> = offered.iter().map(|a| saved.on(phone, &a.id)).collect();
         let commands = saved.commands.clone();
+        let asked = asked_in(&offered, &saved, phone);
+        let layout = saved.layouts.get(phone).map(|l| DeckLayoutInfo {
+            version: l.version,
+            name: l.layouts.iter().find(|x| x.id == l.active).map(|x| x.name.clone()).unwrap_or_default(),
+            layouts: l.layouts.len(),
+            saved_at: saved.layouts_at.get(phone).copied(),
+        });
         drop(saved);
         let actions = self.named(phone, offered).into_iter().zip(on).map(|(action, on)| DeckOption { action, on }).collect();
-        DeckPrefs { actions, commands }
+        DeckPrefs { actions, commands, asked, layout }
     }
 
     /// The questions with this computer's name and `phone`'s.
@@ -408,7 +442,8 @@ impl<D: Desktop> Deck<D> {
             list.push(DeckCommand { id, name: name.into(), command: command.into() });
         }
         let ids: HashSet<String> = list.iter().map(|c| format!("command.{}", c.id)).collect();
-        let mut next = Saved { phones: saved.phones.clone(), commands: list, layouts: saved.layouts.clone() };
+        let mut next = saved.clone();
+        next.commands = list;
         for choices in next.phones.values_mut() {
             choices.retain(|id, _| !id.starts_with("command.") || ids.contains(id));
         }
@@ -457,6 +492,66 @@ impl<D: Desktop> Deck<D> {
         drop(saved);
         let _ = self.inner.jobs.send(Job::Layouts(*phone));
         Ok(layouts)
+    }
+
+    /// What a phone saved from its own editor (docs/protocol.md §4.26), made on
+    /// `base_version`. It is kept only when that is the version kept now, and it never turns
+    /// an action on: a tile whose action is off shows as unavailable until the user allows it.
+    pub fn save_from_phone(&self, phone: &Fingerprint, base_version: u64, mut layouts: DeckLayouts) -> Result<DeckLayouts, Refused> {
+        let mut saved = self.inner.saved.lock().unwrap();
+        let current = match saved.layouts.get(phone) {
+            Some(kept) => kept.clone(),
+            None => self.first_layouts(&saved),
+        };
+        let version = current.version;
+        let refuse = |code, reason: String| Refused { code, reason, version };
+        if base_version != version {
+            return Err(refuse(DeckRefusal::Stale, "the layouts on this computer changed since the ones you edited".into()));
+        }
+        // The computer's own themes are the ones that count, whatever came with the save
+        layouts.themes.clear();
+        if !layouts.layouts.iter().any(|l| l.id == layouts.active) {
+            layouts.active = layouts.layouts.first().map(|l| l.id.clone()).unwrap_or_default();
+        }
+        layouts.version = version;
+        if layouts == current {
+            return Ok(current);
+        }
+        let offered: HashSet<String> = self.offered(&saved).into_iter().map(|a| a.id).collect();
+        // A tile kept from before whose action this computer no longer offers (a tool
+        // removed) doesn't stop the save: the phone shows it as unavailable
+        let before: HashSet<&str> = runs(&current).collect();
+        let custom: HashSet<&str> = saved.themes.iter().map(|t| t.id.as_str()).collect();
+        layouts.check_with(|a| offered.contains(a) || before.contains(a), |id| custom.contains(id)).map_err(|why| refuse(DeckRefusal::Invalid, why))?;
+        layouts.version = version + 1;
+        let size = serde_json::to_vec(&layouts).map_err(|e| refuse(DeckRefusal::Invalid, e.to_string()))?.len();
+        if size > MAX_BYTES {
+            return Err(refuse(DeckRefusal::TooBig, format!("these layouts are too big to send back ({} KiB, at most {} KiB)", size.div_ceil(1024), MAX_BYTES / 1024)));
+        }
+        let mut next = saved.clone();
+        next.layouts.insert(*phone, layouts.clone());
+        next.layouts_at.insert(*phone, now_ms());
+        self.save(&next).map_err(|why| refuse(DeckRefusal::Invalid, why))?;
+        *saved = next;
+        Ok(layouts)
+    }
+
+    /// The actions `phone` has been newly asked to allow by what it saved: their ids and
+    /// names, none when it has been told about all of them already. Allowed or taken off
+    /// its tiles, an action is forgotten, so asking for it again is news again.
+    fn news(&self, phone: &Fingerprint) -> Vec<(String, String)> {
+        let (asked, names) = {
+            let saved = self.inner.saved.lock().unwrap();
+            let offered = self.offered(&saved);
+            let asked = asked_in(&offered, &saved, phone);
+            let names: Vec<(String, String)> = offered.into_iter().filter(|a| asked.contains(&a.id)).map(|a| (a.id, a.name)).collect();
+            (asked, names)
+        };
+        let mut said = self.inner.said.lock().unwrap();
+        let told = said.entry(*phone).or_default();
+        let fresh = asked.iter().any(|id| !told.contains(id));
+        *told = asked.into_iter().collect();
+        if fresh { names } else { Vec::new() }
     }
 
     /// The layout a deck has until the user saves one: the clock, the player, the volume,
@@ -574,7 +669,11 @@ impl<D: Desktop> Deck<D> {
                             None => debug!("{} may not run {action} here", from.name),
                         }
                     }
-                    Ok(Event::DeckOpen { from } | Event::DeckRun { from, .. }) => debug!("deck of {}, which isn't paired", from.name),
+                    Ok(Event::DeckLayoutSave { from, base_version, layouts }) if paired(&from.id) => {
+                        self.ready().await;
+                        self.answer_save(&node, &from.id, &from.name, base_version, layouts).await;
+                    }
+                    Ok(Event::DeckOpen { from } | Event::DeckRun { from, .. } | Event::DeckLayoutSave { from, .. }) => debug!("deck of {}, which isn't paired", from.name),
                     Ok(Event::DeckClose { from }) => {
                         self.inner.open.lock().unwrap().remove(&from.id);
                     }
@@ -670,12 +769,49 @@ impl<D: Desktop> Deck<D> {
         if !self.reachable(node, &phone) {
             return;
         }
-        match node.deck_layout(&phone, &self.layouts(&phone)).await {
-            Ok(()) | Err(linksy_core::Error::Unsupported) => {}
-            Err(e) => {
-                debug!("deck layouts: {e}");
-                self.inner.open.lock().unwrap().remove(&phone);
+        if let Err(e) = self.push_layouts(node, &phone).await {
+            debug!("deck layouts: {e}");
+            self.inner.open.lock().unwrap().remove(&phone);
+        }
+    }
+
+    /// `phone`'s layouts as that phone can draw them: with the user's themes if it draws
+    /// them, else each by its base look.
+    fn layouts_for(&self, node: &Node, phone: &Fingerprint) -> DeckLayouts {
+        let library = self.inner.saved.lock().unwrap().themes.clone();
+        self.layouts(phone).for_phone(&library, node.peer_has(phone, "deck_themes"))
+    }
+
+    /// Send the layouts now, deck showing or not; a phone that doesn't take them is fine.
+    async fn push_layouts(&self, node: &Node, phone: &Fingerprint) -> Result<(), linksy_core::Error> {
+        match node.deck_layout(phone, &self.layouts_for(node, phone)).await {
+            Err(linksy_core::Error::Unsupported) => Ok(()),
+            other => other,
+        }
+    }
+
+    /// A phone's save (§4.26): kept, and the layouts sent back with their new version; or
+    /// refused with why (a stale one gets the current layouts too, to edit again).
+    async fn answer_save(&self, node: &Node, phone: &Fingerprint, name: &str, base_version: u64, layouts: DeckLayouts) {
+        match self.save_from_phone(phone, base_version, layouts) {
+            Ok(_) => {
+                let asked = self.news(phone);
+                if !asked.is_empty() {
+                    crate::notify::deck_asks(*phone, name.to_string(), asked);
+                }
             }
+            Err(refused) => {
+                debug!("{name}'s deck was not saved: {}", refused.reason);
+                if let Err(e) = node.deck_layout_refused(phone, refused.code, &refused.reason, refused.version).await {
+                    debug!("deck refusal: {e}");
+                }
+                if refused.code != DeckRefusal::Stale {
+                    return;
+                }
+            }
+        }
+        if let Err(e) = self.push_layouts(node, phone).await {
+            debug!("deck layouts: {e}");
         }
     }
 
@@ -1125,6 +1261,106 @@ mod tests {
         let later = ready(dir.path().join("deck.json"), Fake { without: &["power_off", "airplane"], ..Default::default() });
         assert!(later.set_layouts(&p, off).is_ok(), "kept from before");
         assert!(later.set_layouts(&p, layouts("work", vec![tile("e", "button", (0, 0), (1, 1), Some("network.airplane"))])).is_err());
+    }
+
+    #[test]
+    fn a_phone_saves_on_the_version_it_edited_and_never_turns_an_action_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        assert_eq!(d.layouts(&p).version, 0);
+        assert_eq!(d.prefs(&p).layout, None, "nothing kept yet");
+        let mine = layouts("games", vec![tile("a", "button", (0, 0), (1, 1), Some("system.restart")), tile("b", "music", (0, 1), (4, 2), None)]);
+
+        let saved = d.save_from_phone(&p, 0, mine.clone()).unwrap();
+        assert_eq!((saved.version, saved.active.as_str()), (1, "games"), "the version is counted here");
+        assert_eq!(saved.layouts, mine.layouts);
+        assert_eq!(d.layouts(&p), saved);
+        assert_eq!(d.act(&p, "system.restart", None), None, "a save doesn't allow what its tiles run");
+        assert_eq!(d.layouts(&phone(2)).version, 0, "another phone has its own");
+
+        // What it asked for: said once, until it is allowed and asked again
+        assert_eq!(d.prefs(&p).asked, ["system.restart"]);
+        assert_eq!(d.news(&p), [("system.restart".to_string(), "Restart".to_string())]);
+        assert_eq!(d.news(&p), [], "told already");
+        d.set_action(&p, "system.restart", true).unwrap();
+        assert_eq!((d.prefs(&p).asked, d.news(&p)), (Vec::new(), Vec::new()));
+        assert_eq!(d.act(&p, "system.restart", None), Some(Act::Restart), "the user's choice, on the computer");
+        d.set_action(&p, "system.restart", false).unwrap();
+        assert_eq!(d.news(&p).len(), 1, "asked for again");
+
+        // A version it didn't edit is stale; the same layouts again change nothing
+        assert_eq!(d.save_from_phone(&p, 0, mine.clone()), Err(Refused { code: DeckRefusal::Stale, reason: "the layouts on this computer changed since the ones you edited".into(), version: 1 }));
+        assert_eq!(d.save_from_phone(&p, 1, mine.clone()).unwrap().version, 1);
+        let more = layouts("work", vec![tile("a", "clock", (0, 0), (2, 1), None)]);
+        assert_eq!(d.save_from_phone(&p, 1, more).unwrap().version, 2);
+
+        let info = d.prefs(&p).layout.unwrap();
+        assert_eq!((info.version, info.name.as_str(), info.layouts), (2, "Work", 2));
+        assert!(info.saved_at.is_some_and(|at| at > 0));
+        let again = deck(&dir);
+        assert_eq!((again.layouts(&p).version, again.act(&p, "system.restart", None)), (2, None), "kept, and nothing turned on");
+    }
+
+    #[test]
+    fn a_save_that_breaks_a_rule_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        d.save_from_phone(&p, 0, layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("media.next"))])).unwrap();
+        let file = std::fs::read(dir.path().join("deck.json")).unwrap();
+        for bad in [
+            layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("system.screen_off"))]),
+            layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("command.nope"))]),
+            layouts("work", vec![tile("a", "music", (0, 0), (4, 2), None), tile("b", "clock", (1, 1), (2, 1), None)]),
+            layouts("work", vec![tile("a", "volume", (0, 0), (3, 1), Some("sound.volume"))]),
+            layouts("work", vec![tile("a", "weather", (0, 0), (1, 1), None)]),
+            layouts("work", vec![DeckTile { icon: "No Good".into(), ..tile("a", "button", (0, 0), (1, 1), Some("media.next")) }]),
+        ] {
+            assert_eq!(d.save_from_phone(&p, 1, bad).unwrap_err().code, DeckRefusal::Invalid);
+        }
+        let mut big = layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("media.next"))]);
+        big.layouts[0].portrait.pages[0][0].props.insert("note".into(), "x".repeat(MAX_BYTES));
+        let refused = d.save_from_phone(&p, 1, big).unwrap_err();
+        assert_eq!((refused.code, refused.version), (DeckRefusal::TooBig, 1), "{}", refused.reason);
+        assert_eq!(d.layouts(&p).version, 1);
+        assert_eq!(std::fs::read(dir.path().join("deck.json")).unwrap(), file);
+    }
+
+    #[test]
+    fn a_saved_deck_may_name_the_computers_themes_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        let mine = DeckThemeDef::from_preset("dots", "t:sun", "Sunset").unwrap();
+        d.inner.saved.lock().unwrap().themes.push(mine.clone());
+        let themed = |id: &str| {
+            let mut deck = layouts("work", vec![]);
+            deck.layouts[0].theme = DeckTheme { id: id.into(), accent: "#ff7a59".into() };
+            deck.themes = vec![DeckThemeDef { name: "From the phone".into(), ..mine.clone() }];
+            deck
+        };
+        assert_eq!(d.save_from_phone(&p, 0, themed("t:gone")).unwrap_err().code, DeckRefusal::Invalid, "a theme nobody has");
+        let saved = d.save_from_phone(&p, 0, themed("t:sun")).unwrap();
+        assert_eq!(saved.layouts[0].theme.id, "t:sun");
+        assert!(saved.themes.is_empty() && d.layouts(&p).themes.is_empty(), "the library is the computer's, not stored per phone");
+        assert_eq!(d.save_from_phone(&p, 1, themed("pixel")).unwrap().layouts[0].theme.id, "pixel");
+    }
+
+    #[test]
+    fn a_save_keeps_a_tile_whose_tool_is_gone_but_refuses_a_new_one_and_fixes_the_active_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        let off = layouts("work", vec![tile("d", "button", (0, 0), (1, 1), Some("system.shutdown"))]);
+        d.save_from_phone(&p, 0, off.clone()).unwrap();
+        let later = ready(dir.path().join("deck.json"), Fake { without: &["power_off", "airplane"], ..Default::default() });
+        assert!(later.save_from_phone(&p, 1, layouts("work", vec![tile("d", "button", (0, 0), (1, 1), Some("system.shutdown")), tile("c", "clock", (2, 0), (2, 1), None)])).is_ok(), "kept from before");
+        assert!(later.save_from_phone(&p, 2, layouts("work", vec![tile("e", "button", (0, 0), (1, 1), Some("network.airplane"))])).is_err());
+        for active in ["", "gone"] {
+            let version = later.layouts(&p).version;
+            assert_eq!(later.save_from_phone(&p, version, layouts(active, vec![tile("z", "clock", (0, 0), (2, 1), None)])).unwrap().active, "work");
+        }
     }
 
     #[test]
