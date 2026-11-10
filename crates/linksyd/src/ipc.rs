@@ -447,6 +447,12 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             Ok(Value::Null)
         }
         Request::SetDeckCommands { commands } => json(serde_json::to_value(deck().await?.set_commands(commands)?)),
+        Request::TestDeckCommand { line } => {
+            if line.trim().is_empty() || line.len() > crate::deck_cmd::MAX_LINE {
+                return Err("a command line is 1 to 4000 characters".into());
+            }
+            json(serde_json::to_value(crate::deck_cmd::test(&line).await))
+        }
         Request::DeckLayouts { phone } => json(serde_json::to_value(deck().await?.layouts(&paired(node, &phone)?))),
         Request::SetDeckLayouts { phone, layouts } => json(serde_json::to_value(deck().await?.set_layouts(&paired(node, &phone)?, layouts)?)),
         Request::ForgetScreen => Ok(Value::Bool(sessions.forget_screen())),

@@ -148,7 +148,7 @@ impl Window {
         let (w, field) = (self.clone(), name.clone());
         ask.connect_response(Some("add"), move |_, _| {
             let mut next = commands.clone();
-            next.push(DeckCommand { id: String::new(), name: field.text().trim().into(), command: line.text().trim().into() });
+            next.push(DeckCommand { id: String::new(), name: field.text().trim().into(), command: line.text().trim().into(), ..Default::default() });
             w.save_deck_commands(id, next);
         });
         ask.present(Some(&self.window));

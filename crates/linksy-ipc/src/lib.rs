@@ -131,6 +131,8 @@ pub enum Request {
     SetDeckAction { phone: String, action: String, on: bool },
     /// The user's commands, all of them (a new one without an `id`); answers them as saved.
     SetDeckCommands { commands: Vec<DeckCommand> },
+    /// Try one command line on this computer, as the deck would; answers how it went.
+    TestDeckCommand { line: String },
     /// A phone's deck layouts (docs/protocol.md §4.20), as the editor shows them.
     DeckLayouts { phone: String },
     /// Save a phone's layouts (checked; their version is set here); answers them as saved.
@@ -370,7 +372,50 @@ pub struct DeckCommand {
     #[serde(default)]
     pub id: String,
     pub name: String,
+    /// What a button runs; what a toggle runs to turn on.
     pub command: String,
+    /// The list it shows in on the phone, as typed; none: "Commands".
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub group: String,
+    /// A name from the phone's icon set; none: the phone's own.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub icon: String,
+    /// The phone asks "Run <name>?" first.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub confirm: bool,
+    #[serde(default)]
+    pub kind: CommandKind,
+    /// A toggle's command to turn off; none: `command` flips it.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub off: String,
+    /// A toggle's check: it exits 0 while the toggle is on.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub state: String,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+/// What a command of the user's is on the deck.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommandKind {
+    /// Runs when pressed.
+    #[default]
+    Button,
+    /// Turns something on and off, and shows which (docs/protocol.md §4.26).
+    Toggle,
+}
+
+/// A command line tried once, as the user's own shell would run it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommandRun {
+    /// How it ended; none if it didn't start or was stopped for taking too long.
+    pub code: Option<i32>,
+    /// The start of what it printed, both streams together.
+    pub output: String,
+    pub timed_out: bool,
 }
 
 /// Where a phone said it is.
@@ -1043,6 +1088,10 @@ impl Client {
 
     pub async fn set_deck_commands(&self, commands: Vec<DeckCommand>) -> Result<Vec<DeckCommand>, ClientError> {
         self.call(Request::SetDeckCommands { commands }).await
+    }
+
+    pub async fn test_deck_command(&self, line: impl Into<String>) -> Result<CommandRun, ClientError> {
+        self.call(Request::TestDeckCommand { line: line.into() }).await
     }
 
     pub async fn deck_layouts(&self, phone: impl Into<String>) -> Result<linksy_core::DeckLayouts, ClientError> {

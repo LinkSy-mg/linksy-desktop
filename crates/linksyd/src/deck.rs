@@ -6,26 +6,28 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::path::PathBuf;
-use std::process::Stdio;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use linksy_core::deck_layout::{self, MAX_BYTES};
 use linksy_core::{DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckRefusal, DeckState, DeckTheme, DeckThemeDef, DeckTile, Event, Fingerprint, MediaCommand, Node, Uuid};
 use linksy_i18n::t;
-use linksy_ipc::{DeckCommand, DeckLayoutInfo, DeckOption, DeckPrefs};
+use linksy_ipc::{CommandKind, DeckCommand, DeckLayoutInfo, DeckOption, DeckPrefs};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
+use crate::deck_cmd::{self, MAX_COMMANDS};
+
 pub static DECK: OnceLock<Deck> = OnceLock::new();
 
-/// So a deck's list stays well within what a phone takes in one message.
-const MAX_COMMANDS: usize = 100;
-const MAX_NAME: usize = 100;
 /// Longest one action may hold the next ones up (a player that doesn't answer).
 const ACT_WAIT: Duration = Duration::from_secs(5);
+/// How often the user's toggles are asked while a deck shows what they are.
+const POLL: Duration = Duration::from_secs(3);
+/// At most this many of a toggle's checks run at once.
+const CHECKS_AT_ONCE: usize = 4;
 
 const MEDIA: &str = "Media";
 const SOUND: &str = "Sound";
@@ -55,6 +57,8 @@ pub enum Act {
     Profile(&'static str),
     PowerAuto,
     Command { name: String, line: String },
+    /// One of the user's toggles: its `state` check says which of `on` and `off` to run.
+    CommandToggle { name: String, on: String, off: String, state: String },
 }
 
 /// What this computer can do for a deck besides media and locking, found out once.
@@ -93,6 +97,8 @@ pub struct Status {
     /// The power profile now, as powerprofilesctl names it.
     pub profile: Option<String>,
     pub power_auto: Option<bool>,
+    /// Whether each of the user's toggles is on, by its action id; the ones that answered.
+    pub commands: HashMap<String, bool>,
 }
 
 /// What runs the actions: this desktop, or a stand-in in tests.
@@ -101,6 +107,8 @@ pub trait Desktop: Send + Sync + 'static {
     fn run(&self, act: Act) -> impl Future<Output = ()> + Send;
     /// The state of what the actions `ids` show; the rest stays unknown.
     fn status(&self, ids: &HashSet<&str>) -> impl Future<Output = Status> + Send;
+    /// What a toggle's check says (it exits 0 while on); none if it can't say.
+    fn check(&self, line: &str) -> impl Future<Output = Option<bool>> + Send;
 }
 
 pub struct System {
@@ -148,8 +156,17 @@ impl Desktop for System {
             Act::Airplane => self.controls.toggle_airplane().await,
             Act::Profile(profile) => self.controls.set_profile(profile).await,
             Act::PowerAuto => self.controls.toggle_power_auto().await,
-            Act::Command { name, line } => spawn(&name, &line),
+            Act::Command { name, line } => deck_cmd::spawn(&name, &line),
+            Act::CommandToggle { name, on, off, state } => {
+                let line = deck_cmd::toggle_line(deck_cmd::check(&state).await, &on, &off).to_string();
+                // Waited for, so the state read after it is the new one
+                deck_cmd::run_waiting(&name, &line, ACT_WAIT).await;
+            }
         }
+    }
+
+    async fn check(&self, line: &str) -> Option<bool> {
+        deck_cmd::check(line).await
     }
 
     async fn status(&self, ids: &HashSet<&str>) -> Status {
@@ -181,30 +198,8 @@ impl Desktop for System {
             airplane,
             profile,
             power_auto,
+            commands: HashMap::new(),
         }
-    }
-}
-
-/// Start one of the user's commands on its own (from the Flatpak, on the computer): it reads
-/// nothing, its output goes nowhere, and nothing waits for it.
-fn spawn(name: &str, line: &str) {
-    let mut command = tokio::process::Command::from(linksy_host::detached("sh", &[]));
-    command.args(["-c", line]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).process_group(0);
-    if let Some(home) = std::env::var_os("HOME") {
-        command.current_dir(home);
-    }
-    match command.spawn() {
-        Ok(mut child) => {
-            let name = name.to_string();
-            tokio::spawn(async move {
-                if let Ok(status) = child.wait().await
-                    && !status.success()
-                {
-                    debug!("deck command {name}: {status}");
-                }
-            });
-        }
-        Err(e) => warn!("could not run the deck command {name}: {e}"),
     }
 }
 
@@ -264,6 +259,19 @@ enum Job {
     Layouts(Fingerprint),
     /// The volume changed.
     Sound,
+    /// Time to ask the user's toggles what they are now.
+    Poll,
+}
+
+/// What a batch of jobs makes the state read again.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Refresh {
+    /// Everything the decks show.
+    All,
+    /// Only the volume and mute (a slider, the keyboard).
+    Sound,
+    /// Only the user's toggles.
+    Commands,
 }
 
 pub struct Deck<D: Desktop = System> {
@@ -371,7 +379,17 @@ impl<D: Desktop> Deck<D> {
         if caps.power_auto {
             all.push(action("power.auto", t!("Power Saver on Low Battery"), DeckKind::Toggle, POWER));
         }
-        all.extend(saved.commands.iter().map(|c| action(&format!("command.{}", c.id), &c.name, DeckKind::Button, COMMANDS)));
+        all.extend(saved.commands.iter().map(|c| {
+            let kind = if c.kind == CommandKind::Toggle { DeckKind::Toggle } else { DeckKind::Button };
+            let mut a = action(&format!("command.{}", c.id), &c.name, kind, if c.group.is_empty() { COMMANDS } else { &c.group });
+            if !c.icon.is_empty() {
+                a.icon = Some(c.icon.clone());
+            }
+            if c.confirm {
+                a.confirm = Some(t!("Run {name}?", name = c.name));
+            }
+            a
+        }));
         all
     }
 
@@ -430,16 +448,12 @@ impl<D: Desktop> Deck<D> {
         let mut kept = HashSet::new();
         let mut list = Vec::with_capacity(commands.len());
         for c in commands {
-            let (name, command) = (c.name.trim(), c.command.trim());
-            if name.is_empty() || command.is_empty() {
-                return Err("each command needs a name and a command line".into());
-            }
-            if name.chars().count() > MAX_NAME {
-                return Err(format!("a command's name can be at most {MAX_NAME} characters long"));
-            }
+            let mut c = deck_cmd::clean(c)?;
             let known = saved.commands.iter().any(|s| s.id == c.id) && kept.insert(c.id.clone());
-            let id = if known { c.id } else { Uuid::new_v4().simple().to_string() };
-            list.push(DeckCommand { id, name: name.into(), command: command.into() });
+            if !known {
+                c.id = Uuid::new_v4().simple().to_string();
+            }
+            list.push(c);
         }
         let ids: HashSet<String> = list.iter().map(|c| format!("command.{}", c.id)).collect();
         let mut next = saved.clone();
@@ -642,7 +656,10 @@ impl<D: Desktop> Deck<D> {
             _ => {
                 let id = id.strip_prefix("command.")?;
                 let c = saved.commands.iter().find(|c| c.id == id)?;
-                Act::Command { name: c.name.clone(), line: c.command.clone() }
+                match c.kind {
+                    CommandKind::Button => Act::Command { name: c.name.clone(), line: c.command.clone() },
+                    CommandKind::Toggle => Act::CommandToggle { name: c.name.clone(), on: c.command.clone(), off: c.off.clone(), state: c.state.clone() },
+                }
             }
         })
     }
@@ -653,8 +670,15 @@ impl<D: Desktop> Deck<D> {
         tokio::spawn(self.clone().work(node.clone(), jobs));
         let mut events = node.subscribe();
         let paired = |id: &Fingerprint| node.trusted().iter().any(|t| t.device.id == *id);
+        let mut poll = tokio::time::interval(POLL);
+        poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
+                _ = poll.tick() => {
+                    if self.shows_toggles() {
+                        let _ = self.inner.jobs.send(Job::Poll);
+                    }
+                }
                 event = events.recv() => match event {
                     Ok(Event::DeckOpen { from }) if paired(&from.id) => {
                         self.inner.open.lock().unwrap().insert(from.id, None);
@@ -701,8 +725,15 @@ impl<D: Desktop> Deck<D> {
                 batch.push(job);
             }
             self.ready().await;
-            // Only the volume moved (a slider, the keyboard): read the sound alone again
-            let sound_only = batch.iter().all(|j| matches!(j, Job::Sound | Job::Run(_, Act::Volume(_))));
+            // Only the volume moved (a slider, the keyboard): read the sound alone again; only
+            // time passed: ask the user's toggles
+            let refresh = if batch.iter().all(|j| matches!(j, Job::Sound | Job::Run(_, Act::Volume(_)))) {
+                Refresh::Sound
+            } else if batch.iter().all(|j| matches!(j, Job::Poll)) {
+                Refresh::Commands
+            } else {
+                Refresh::All
+            };
             let mut told = HashSet::new();
             let mut acts = Vec::new();
             for job in batch {
@@ -723,11 +754,11 @@ impl<D: Desktop> Deck<D> {
                             self.send_actions(&node, phone).await;
                         }
                     }
-                    Job::Sound => {}
+                    Job::Sound | Job::Poll => {}
                 }
             }
             self.perform(acts).await;
-            self.send_states(&node, &told, sound_only).await;
+            self.send_states(&node, &told, refresh).await;
         }
     }
 
@@ -815,21 +846,63 @@ impl<D: Desktop> Deck<D> {
         }
     }
 
+    /// Whether a deck that shows now has one of the user's toggles on it, so it's worth asking.
+    fn shows_toggles(&self) -> bool {
+        let open = self.inner.open.lock().unwrap();
+        if open.is_empty() {
+            return false;
+        }
+        let saved = self.inner.saved.lock().unwrap();
+        saved.commands.iter().any(|c| c.kind == CommandKind::Toggle && open.keys().any(|p| saved.on(p, &format!("command.{}", c.id))))
+    }
+
+    /// The toggles of the user's among the actions `shown`: their action ids and checks.
+    fn toggles_among(&self, shown: &HashSet<&str>) -> Vec<(String, String)> {
+        let saved = self.inner.saved.lock().unwrap();
+        let toggles = saved.commands.iter().filter(|c| c.kind == CommandKind::Toggle).map(|c| (format!("command.{}", c.id), c.state.clone()));
+        toggles.filter(|(id, _)| shown.contains(id.as_str())).collect()
+    }
+
+    /// What each of those toggles says, a few at a time; one that can't say is left out.
+    async fn toggle_states(&self, toggles: Vec<(String, String)>) -> HashMap<String, bool> {
+        let mut found = HashMap::new();
+        for batch in toggles.chunks(CHECKS_AT_ONCE) {
+            let mut checks = tokio::task::JoinSet::new();
+            for (id, line) in batch.iter().cloned() {
+                let deck = self.clone();
+                checks.spawn(async move { (id, deck.inner.desktop.check(&line).await) });
+            }
+            while let Some(Ok((id, on))) = checks.join_next().await {
+                if let Some(on) = on {
+                    found.insert(id, on);
+                }
+            }
+        }
+        found
+    }
+
     /// The state to the decks `told` something, and to the other open ones if it changed.
-    async fn send_states(&self, node: &Node, told: &HashSet<Fingerprint>, sound_only: bool) {
+    async fn send_states(&self, node: &Node, told: &HashSet<Fingerprint>, refresh: Refresh) {
         let phones: Vec<Fingerprint> = self.inner.open.lock().unwrap().keys().copied().collect();
         let lists: Vec<(Fingerprint, Vec<DeckAction>)> = phones.into_iter().map(|p| (p, self.enabled(&p))).collect();
         let mut shown: HashSet<&str> = lists.iter().flat_map(|(_, actions)| actions.iter().map(|a| a.id.as_str())).collect();
-        if sound_only {
-            shown.retain(|id| ["sound.volume", "sound.mute"].contains(id));
+        let toggles = self.toggles_among(&shown);
+        match refresh {
+            Refresh::Sound => shown.retain(|id| ["sound.volume", "sound.mute"].contains(id)),
+            Refresh::Commands => shown.clear(),
+            Refresh::All => {}
         }
         let fresh = if shown.is_empty() { Status::default() } else { self.inner.desktop.status(&shown).await };
+        let commands = if refresh == Refresh::Sound { None } else { Some(self.toggle_states(toggles).await) };
         let status = {
             let mut last = self.inner.status.lock().unwrap();
-            if sound_only {
-                (last.level, last.muted) = (fresh.level, fresh.muted);
-            } else {
-                *last = fresh;
+            match refresh {
+                Refresh::Sound => (last.level, last.muted) = (fresh.level, fresh.muted),
+                Refresh::All => *last = fresh,
+                Refresh::Commands => {}
+            }
+            if let Some(commands) = commands {
+                last.commands = commands;
             }
             last.clone()
         };
@@ -891,6 +964,7 @@ fn states(actions: &[DeckAction], now: &Status) -> Vec<DeckState> {
                 "power.balanced" => state(Some(now.profile.as_deref()? == "balanced"), None),
                 "power.performance" => state(Some(now.profile.as_deref()? == "performance"), None),
                 "power.auto" => state(Some(now.power_auto?), None),
+                id if id.starts_with("command.") => state(Some(*now.commands.get(id)?), None),
                 _ => None,
             }
         })
@@ -907,6 +981,8 @@ mod tests {
     struct Fake {
         without: &'static [&'static str],
         ran: Mutex<Vec<Act>>,
+        /// What each toggle check line says; a line not here can't say.
+        checks: Mutex<HashMap<String, bool>>,
     }
 
     impl Fake {
@@ -950,7 +1026,12 @@ mod tests {
                 airplane: has("network.airplane").then_some(false),
                 profile: ["power.saver", "power.balanced", "power.performance"].iter().any(|p| has(p)).then(|| "balanced".into()),
                 power_auto: has("power.auto").then_some(true),
+                commands: HashMap::new(),
             }
+        }
+
+        async fn check(&self, line: &str) -> Option<bool> {
+            self.checks.lock().unwrap().get(line).copied()
         }
     }
 
@@ -971,7 +1052,7 @@ mod tests {
     }
 
     fn command(id: &str, name: &str, line: &str) -> DeckCommand {
-        DeckCommand { id: id.into(), name: name.into(), command: line.into() }
+        DeckCommand { id: id.into(), name: name.into(), command: line.into(), ..Default::default() }
     }
 
     fn on(deck: &Deck<Fake>, p: &Fingerprint) -> Vec<String> {
@@ -1052,7 +1133,7 @@ mod tests {
         for bad in [command("", "  ", "true"), command("", "Empty", " \n ")] {
             assert!(d.set_commands(vec![list[0].clone(), bad]).is_err());
         }
-        assert!(d.set_commands(vec![command("", &"x".repeat(MAX_NAME + 1), "true")]).is_err());
+        assert!(d.set_commands(vec![command("", &"x".repeat(deck_cmd::MAX_NAME + 1), "true")]).is_err());
         assert_eq!(d.prefs(&phone(1)).commands, list);
 
         // The second one goes, the first is kept with its id (even listed twice), and renamed
@@ -1068,6 +1149,90 @@ mod tests {
         assert!(d.set_commands(vec![command("", "Many", "true"); MAX_COMMANDS + 1]).is_err());
         assert!(d.set_commands(Vec::new()).unwrap().is_empty());
         assert_eq!(d.act(&phone(1), &first, None), None);
+    }
+
+    fn toggle(name: &str, on: &str, off: &str, state: &str) -> DeckCommand {
+        DeckCommand { kind: CommandKind::Toggle, off: off.into(), state: state.into(), ..command("", name, on) }
+    }
+
+    #[test]
+    fn commands_have_their_own_group_icon_question_and_kind_on_the_phone() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let list = d
+            .set_commands(vec![
+                DeckCommand { group: " Work ".into(), icon: "terminal".into(), confirm: true, ..command("", "Back Up", "rsync -a ~/a ~/b") },
+                command("", "Plain", "true"),
+                toggle("VPN", "vpn up", "vpn down", "vpn status"),
+            ])
+            .unwrap();
+        let id = |i: usize| format!("command.{}", list[i].id);
+        let by_id = |id: &str| d.prefs(&phone(1)).actions.into_iter().map(|a| a.action).find(|a| a.id == id).unwrap();
+
+        let backup = by_id(&id(0));
+        assert_eq!((backup.kind, backup.group.as_str(), backup.icon.as_deref(), backup.confirm.as_deref()), (DeckKind::Button, "Work", Some("terminal"), Some("Run Back Up?")));
+        let plain = by_id(&id(1));
+        assert_eq!((plain.group.as_str(), plain.icon, plain.confirm), (COMMANDS, None, None), "what it was before");
+        let vpn = by_id(&id(2));
+        assert_eq!((vpn.kind, vpn.group.as_str()), (DeckKind::Toggle, COMMANDS));
+
+        // Run: a button as it is, a toggle with its pieces (which one runs is decided when it does)
+        for p in [phone(1)] {
+            for i in 0..3 {
+                d.set_action(&p, &id(i), true).unwrap();
+            }
+        }
+        assert_eq!(d.act(&phone(1), &id(0), None), Some(Act::Command { name: "Back Up".into(), line: "rsync -a ~/a ~/b".into() }));
+        assert_eq!(d.act(&phone(1), &id(2), None), Some(Act::CommandToggle { name: "VPN".into(), on: "vpn up".into(), off: "vpn down".into(), state: "vpn status".into() }));
+
+        // Refused: a toggle that can't say whether it is on, a bad group or icon; nothing changes
+        for bad in [toggle("T", "a", "b", ""), DeckCommand { icon: "Bad Icon".into(), ..command("", "I", "true") }, DeckCommand { group: "a\nb".into(), ..command("", "G", "true") }] {
+            assert!(d.set_commands(vec![bad]).is_err());
+        }
+        assert_eq!(d.prefs(&phone(1)).commands, list);
+        let again = deck(&dir);
+        assert_eq!(again.prefs(&phone(1)).commands, list, "kept with all they have");
+    }
+
+    #[tokio::test]
+    async fn a_toggle_shows_what_its_check_says_and_polls_only_while_a_deck_shows_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        let list = d.set_commands(vec![toggle("VPN", "vpn up", "vpn down", "vpn on?"), toggle("Lamp", "lamp", "", "lamp on?"), toggle("Dead", "x", "", "never answers"), command("", "Button", "true")]).unwrap();
+        let id = |i: usize| format!("command.{}", list[i].id);
+        d.inner.desktop.checks.lock().unwrap().extend([("vpn on?".to_string(), true), ("lamp on?".to_string(), false)]);
+
+        assert!(!d.shows_toggles(), "no deck is open");
+        d.inner.open.lock().unwrap().insert(p, None);
+        assert!(!d.shows_toggles(), "commands are off until the user allows them");
+        d.set_action(&p, &id(0), true).unwrap();
+        assert!(d.shows_toggles());
+        d.set_action(&p, &id(0), false).unwrap();
+        d.set_action(&p, &id(3), true).unwrap();
+        assert!(!d.shows_toggles(), "a button has no state to poll");
+
+        for i in [0, 1, 2, 3] {
+            d.set_action(&p, &id(i), true).unwrap();
+        }
+        let shown: HashSet<String> = d.enabled(&p).into_iter().map(|a| a.id).collect();
+        let toggles = d.toggles_among(&shown.iter().map(String::as_str).collect());
+        assert_eq!(toggles.len(), 3, "the three toggles, not the button");
+        let found = d.toggle_states(toggles).await;
+        assert_eq!((found.get(&id(0)), found.get(&id(1)), found.get(&id(2))), (Some(&true), Some(&false), None), "one that can't say is left out");
+
+        let now = Status { commands: found, ..Default::default() };
+        let tiles = states(&d.enabled(&p), &now);
+        assert_eq!(tiles, [DeckState { id: id(0), on: Some(true), value: None, text: None }, DeckState { id: id(1), on: Some(false), value: None, text: None }]);
+
+        // Enough toggles to need more than one batch of checks
+        let many: Vec<DeckCommand> = (0..CHECKS_AT_ONCE * 2 + 1).map(|i| toggle(&format!("T{i}"), "a", "", &format!("t{i}?"))).collect();
+        let kept = d.set_commands(many).unwrap();
+        d.inner.desktop.checks.lock().unwrap().extend((0..kept.len()).map(|i| (format!("t{i}?"), i % 2 == 0)));
+        let all: Vec<(String, String)> = kept.iter().map(|c| (format!("command.{}", c.id), c.state.clone())).collect();
+        let found = d.toggle_states(all.clone()).await;
+        assert_eq!(found.len(), all.len());
+        assert!(all.iter().enumerate().all(|(i, (id, _))| found[id] == (i % 2 == 0)));
     }
 
     #[tokio::test]
@@ -1411,6 +1576,8 @@ mod tests {
         assert_eq!(d.act(&phone(1), "system.lock", None), Some(Act::Lock));
         assert_eq!(d.act(&phone(1), "media.next", None), None);
         assert_eq!(d.prefs(&phone(1)).commands.len(), 1);
+        let old_command = d.prefs(&phone(1)).actions.into_iter().find(|a| a.action.id == "command.c1").unwrap().action;
+        assert_eq!((old_command.kind, old_command.group.as_str(), old_command.icon, old_command.confirm), (DeckKind::Button, COMMANDS, None, None), "a command from before is a plain button");
         assert_eq!(d.layouts(&phone(1)).version, 0);
         assert_eq!(d.set_layouts(&phone(1), layouts("work", vec![])).unwrap().version, 1);
         assert_eq!(deck(&dir).prefs(&phone(1)).commands.len(), 1, "kept beside the layouts");
