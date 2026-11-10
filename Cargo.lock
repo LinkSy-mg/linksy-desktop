@@ -2661,6 +2661,7 @@ dependencies = [
  "gstreamer",
  "libc",
  "linksy-core",
+ "linksy-host",
  "linksy-logs",
  "tokio",
  "wayland-backend",

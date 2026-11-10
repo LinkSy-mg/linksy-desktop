@@ -36,6 +36,7 @@
 mod mutter;
 mod outputs;
 mod portal;
+mod virtual_mic;
 mod wlr;
 mod x11;
 
@@ -43,6 +44,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
@@ -701,17 +703,44 @@ fn speaker(socket: &std::path::Path, test: bool) -> Result<(), String> {
 fn microphone(socket: &std::path::Path, name: &str) -> Result<(), String> {
     let input = UnixStream::connect(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
     let name: String = name.chars().filter(|c| !matches!(c, '"' | '\\' | ',')).collect();
-    // Audio/Source, not Audio/Source/Virtual: PipeWire 1.6 crashes the stream with the latter.
+    // The service ends this with SIGTERM: the virtual microphone goes with it
+    stop_on_term();
+    // A virtual source that audio is played into. A node published with `mode=provide` stops
+    // delivering on PipeWire 1.6 (desktop#89); that stays the way when there is no pactl.
+    let (sink, _source) = match virtual_mic::VirtualMic::create(&name) {
+        Ok(source) => (virtual_mic::feed(), Some(source)),
+        Err(e) => {
+            eprintln!("linksy-screen: {e}; the microphone is published as a PipeWire node, which stops after a moment on PipeWire 1.6");
+            // Audio/Source, not Audio/Source/Virtual: PipeWire 1.6 crashes the stream with the latter.
+            let node = format!(
+                "pipewiresink mode=provide sync=false \
+                 stream-properties=\"props,media.class=Audio/Source,node.name=linksy-mic,node.description=\\\"{name}\\\"\""
+            );
+            (node, None)
+        }
+    };
     let description = format!(
         "fdsrc fd={} ! rawaudioparse use-sink-caps=false format=pcm pcm-format=s16le sample-rate=48000 num-channels=1 \
-         ! queue max-size-time=100000000 max-size-buffers=0 max-size-bytes=0 leaky=downstream ! audioconvert \
-         ! pipewiresink mode=provide sync=false \
-         stream-properties=\"props,media.class=Audio/Source,node.name=linksy-mic,node.description=\\\"{name}\\\"\"",
+         ! queue max-size-time=100000000 max-size-buffers=0 max-size-bytes=0 leaky=downstream ! audioconvert ! {sink}",
         input.as_raw_fd()
     );
     let result = play(&description);
     drop(input);
     result
+}
+
+/// Set by SIGTERM, so a run can end the proper way and put back what it made.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_term(_: libc::c_int) {
+    STOP.store(true, Ordering::Relaxed);
+}
+
+fn stop_on_term() {
+    // SAFETY: the handler only stores to an atomic
+    unsafe {
+        libc::signal(libc::SIGTERM, on_term as extern "C" fn(libc::c_int) as libc::sighandler_t);
+    }
 }
 
 /// Run a pipeline until it ends or fails.
@@ -720,7 +749,11 @@ fn play(description: &str) -> Result<(), String> {
     pipeline.set_state(gst::State::Playing).map_err(|e| format!("could not start: {e}"))?;
     let bus = pipeline.bus().ok_or("pipeline has no bus")?;
     let result = loop {
-        let Some(msg) = bus.timed_pop(gst::ClockTime::NONE) else { break Ok(()) };
+        if STOP.load(Ordering::Relaxed) {
+            break Ok(());
+        }
+        // Wakes up now and then to look at STOP
+        let Some(msg) = bus.timed_pop(gst::ClockTime::from_mseconds(200)) else { continue };
         match msg.view() {
             gst::MessageView::Eos(_) => break Ok(()),
             gst::MessageView::Error(e) => break Err(format!("{} ({:?})", e.error(), e.debug())),
