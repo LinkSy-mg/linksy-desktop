@@ -25,6 +25,7 @@ use uuid::Uuid;
 
 use crate::apps::{AppInfo, AppProbe, AppSend, DirectReady, MAX_APKS, MAX_PROBES, PreflightMsg, PreflightReply, ReceivedApp, is_apk, received_apps, valid_apps};
 use crate::deck_layout::DeckLayouts;
+use crate::deck_theme::DeckThemeDef;
 use crate::discovery::{Announce, Discovery, DiscoveryEvent, DiscoveryKey};
 use crate::error::{Error, Result, invalid, protocol};
 use crate::identity::{DeviceInfo, DeviceKind, Fingerprint, Identity};
@@ -33,7 +34,7 @@ use crate::gallery::GalleryCall;
 use crate::invite::{self, Invite};
 use crate::preflight::PreflightCall;
 use crate::settings::Settings;
-use crate::protocol::{Battery, CallState, ControlsChange, ControlsState, ConversationMessage, DeckAction, DeckState, DirectGroup, DirectStep, PluggedPhone, FsRequest, GalleryRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState,
+use crate::protocol::{Battery, CallState, ControlsChange, ControlsState, ConversationMessage, DeckAction, DeckRefusal, DeckState, DirectGroup, DirectStep, PluggedPhone, FsRequest, GalleryRequest, SmsMessage, SmsThread, MediaCommand, MediaState, RemoteNotification, VolumeState,
     FileEntry, Handshake, Intent, Message, PAIRING_VERSION, PROTOCOL_VERSION, RejectReason, SessionKind, SessionMsg, TransferMsg, read_msg,
     read_value, write_msg,
 };
@@ -347,6 +348,12 @@ pub enum Event {
     DeckState { from: DeviceInfo, states: Vec<DeckState> },
     /// The layouts a computer keeps for this phone's deck (§4.20).
     DeckLayout { from: DeviceInfo, layouts: DeckLayouts },
+    /// A phone saves the layouts it edited, made on `base_version` (§4.26).
+    DeckLayoutSave { from: DeviceInfo, base_version: u64, layouts: DeckLayouts },
+    /// A computer didn't save them (§4.26).
+    DeckLayoutRefused { from: DeviceInfo, code: DeckRefusal, reason: String, version: u64 },
+    /// A computer shows a theme on the open deck, or stops (§4.26).
+    DeckThemeDraft { from: DeviceInfo, theme: Option<DeckThemeDef> },
 }
 
 /// A running media session: the stream pair, kept open (and the connection with it) until
@@ -1151,6 +1158,29 @@ impl Node {
             return Err(Error::Unsupported);
         }
         self.send_message(to, &Message::DeckLayout { layouts: layouts.clone() }).await
+    }
+
+    /// The layouts a phone edited (§4.26), to a connected computer that announces
+    /// `deck_layout_save` ([`Error::Unsupported`] otherwise: the phone keeps them).
+    pub async fn deck_layout_save(&self, to: &Fingerprint, base_version: u64, layouts: &DeckLayouts) -> Result<()> {
+        if !self.peer_info(to).is_some_and(|p| p.features.iter().any(|f| f == "deck_layout_save")) {
+            return Err(Error::Unsupported);
+        }
+        self.send_message(to, &Message::DeckLayoutSave { base_version, layouts: layouts.clone() }).await
+    }
+
+    /// Nothing was saved (§4.26): why, and the version this computer has.
+    pub async fn deck_layout_refused(&self, to: &Fingerprint, code: DeckRefusal, reason: &str, version: u64) -> Result<()> {
+        self.send_message(to, &Message::DeckLayoutRefused { code, reason: reason.into(), version }).await
+    }
+
+    /// A theme for the phone's open deck to show without keeping it, or `None` to stop
+    /// (§4.26), to a connected phone that announces `deck_themes`.
+    pub async fn deck_theme_draft(&self, to: &Fingerprint, theme: Option<&DeckThemeDef>) -> Result<()> {
+        if !self.peer_info(to).is_some_and(|p| p.features.iter().any(|f| f == "deck_themes")) {
+            return Err(Error::Unsupported);
+        }
+        self.send_message(to, &Message::DeckThemeDraft { theme: theme.cloned() }).await
     }
 
     /// The mirrored notification `key` is gone here.
@@ -2335,6 +2365,11 @@ impl Node {
                                 Ok(Message::DeckState { states }) if states.len() <= MAX_DECK => node.emit(Event::DeckState { from, states }),
                                 Ok(Message::DeckRun { .. } | Message::DeckActions { .. } | Message::DeckState { .. }) => debug!("bad deck message from {}", from.name),
                                 Ok(Message::DeckLayout { layouts }) => node.emit(Event::DeckLayout { from, layouts }),
+                                Ok(Message::DeckLayoutSave { base_version, layouts }) => node.emit(Event::DeckLayoutSave { from, base_version, layouts }),
+                                Ok(Message::DeckLayoutRefused { code, reason, version }) if reason.len() <= MAX_KEY => node.emit(Event::DeckLayoutRefused { from, code, reason, version }),
+                                Ok(Message::DeckLayoutRefused { .. }) => debug!("bad deck_layout_refused from {}", from.name),
+                                Ok(Message::DeckThemeDraft { theme }) if theme.as_ref().is_none_or(|t| t.check().is_ok()) => node.emit(Event::DeckThemeDraft { from, theme }),
+                                Ok(Message::DeckThemeDraft { .. }) => debug!("bad deck_theme_draft from {}", from.name),
                                 Err(e) => debug!("bad message from {}: {e}", from.name),
                             }
                         });

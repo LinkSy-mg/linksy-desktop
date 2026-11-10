@@ -296,7 +296,7 @@ pub fn starter(prefs: &DeckPrefs, name: &str) -> DeckLayouts {
         add(&mut face, "button", Some(a), &name_of(a), x as u8, 4, 1, 1);
     }
     let id = new_id(|id| taken.contains(id));
-    DeckLayouts { version: 0, active: id.clone(), layouts: vec![DeckLayout { id, name: name.into(), theme: DeckTheme::default(), portrait: face, landscape: DeckFace::landscape() }] }
+    DeckLayouts { version: 0, active: id.clone(), layouts: vec![DeckLayout { id, name: name.into(), theme: DeckTheme::default(), portrait: face, landscape: DeckFace::landscape() }], themes: Vec::new() }
 }
 
 /// A tile's colour when it has none of its own.

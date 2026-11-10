@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::deck_layout::DeckLayouts;
+use crate::deck_theme::DeckThemeDef;
 use crate::error::{Result, protocol};
 use crate::identity::DeviceInfo;
 
@@ -488,6 +489,26 @@ pub enum Message {
     DeckState { states: Vec<DeckState> },
     /// The deck's layouts (§4.20), computer → phone, only to a phone with `deck_layout`.
     DeckLayout { layouts: DeckLayouts },
+    /// The layouts a phone edited (§4.26), phone → computer, only to a computer with
+    /// `deck_layout_save`. Answered by `deck_layout`, or `deck_layout_refused`.
+    DeckLayoutSave { base_version: u64, layouts: DeckLayouts },
+    /// Nothing was saved, and why (§4.26); `version` is the computer's.
+    DeckLayoutRefused { code: DeckRefusal, reason: String, version: u64 },
+    /// A theme to show on the open deck without keeping it (§4.26), computer → phone,
+    /// only to a phone with `deck_themes`; none ends it.
+    DeckThemeDraft { theme: Option<DeckThemeDef> },
+}
+
+/// Why a computer didn't save a phone's layouts (§4.26).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DeckRefusal {
+    /// The computer's layouts changed since the ones the phone edited.
+    Stale,
+    /// The layouts break a rule of §4.20.
+    Invalid,
+    /// Too big to send back in one message.
+    TooBig,
 }
 
 /// The steps of a direct link (docs/protocol.md §4.17), between a device that hosts it
@@ -947,6 +968,9 @@ pub struct DeckAction {
     /// The question the phone asks before running it ("Restart Office PC?").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub confirm: Option<String>,
+    /// A name from the phone's icon set, for the user's own commands (§4.26).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1143,7 +1167,7 @@ mod tests {
         let older = r#"{"type":"deck_actions","actions":[{"id":"media.next","name":"Next Track","kind":"button","group":"Media"}]}"#;
         let Message::DeckActions { actions } = serde_json::from_str(older).unwrap() else { panic!() };
         assert_eq!(actions[0].confirm, None);
-        let restart = DeckAction { id: "system.restart".into(), name: "Restart".into(), kind: DeckKind::Button, group: "System".into(), confirm: Some("Restart Office PC?".into()) };
+        let restart = DeckAction { id: "system.restart".into(), name: "Restart".into(), kind: DeckKind::Button, group: "System".into(), confirm: Some("Restart Office PC?".into()), icon: None };
         let json = serde_json::to_string(&Message::DeckActions { actions: vec![restart.clone()] }).unwrap();
         assert!(json.contains(r#""confirm":"Restart Office PC?""#), "{json}");
         let state = DeckState { id: "sound.output".into(), on: None, value: None, text: Some("Speakers".into()) };
@@ -1157,6 +1181,23 @@ mod tests {
         assert_eq!(before.id, "system.restart");
         // A kind it doesn't know fails the whole list, so the computer adds none
         assert!(serde_json::from_str::<Message>(&json.replace(r#""kind":"button""#, r#""kind":"dial""#)).is_err());
+    }
+
+    #[test]
+    fn deck_save_messages_have_the_names_the_phone_is_told() {
+        let save = Message::DeckLayoutSave { base_version: 3, layouts: DeckLayouts { version: 3, active: "work".into(), layouts: Vec::new(), themes: Vec::new() } };
+        assert_eq!(serde_json::to_string(&save).unwrap(), r#"{"type":"deck_layout_save","base_version":3,"layouts":{"version":3,"active":"work","layouts":[]}}"#);
+        let refused = Message::DeckLayoutRefused { code: DeckRefusal::TooBig, reason: "too big".into(), version: 5 };
+        assert_eq!(serde_json::to_string(&refused).unwrap(), r#"{"type":"deck_layout_refused","code":"too_big","reason":"too big","version":5}"#);
+        assert_eq!(serde_json::to_string(&Message::DeckThemeDraft { theme: None }).unwrap(), r#"{"type":"deck_theme_draft","theme":null}"#);
+        let theme = DeckThemeDef::from_preset("term", "t:a1", "Green").unwrap();
+        let draft = serde_json::to_string(&Message::DeckThemeDraft { theme: Some(theme.clone()) }).unwrap();
+        assert_eq!(serde_json::from_str::<Message>(&draft).unwrap(), Message::DeckThemeDraft { theme: Some(theme) });
+        // A phone leaves "themes" out of a save, an older one doesn't know the field
+        let from_phone = r#"{"type":"deck_layout_save","base_version":0,"layouts":{"version":0,"active":"","layouts":[]}}"#;
+        assert!(matches!(serde_json::from_str::<Message>(from_phone), Ok(Message::DeckLayoutSave { base_version: 0, .. })));
+        let icon = DeckAction { id: "command.ab".into(), name: "Backup".into(), kind: DeckKind::Toggle, group: "Work".into(), confirm: None, icon: Some("terminal".into()) };
+        assert!(serde_json::to_string(&icon).unwrap().ends_with(r#""icon":"terminal"}"#));
     }
 
     #[test]

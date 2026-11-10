@@ -5,6 +5,7 @@ pub mod apps;
 pub mod away;
 pub mod cable;
 pub mod deck_layout;
+pub mod deck_theme;
 mod discovery;
 pub mod invite;
 pub mod error;
@@ -22,11 +23,12 @@ pub mod transfer;
 pub mod trust;
 
 pub use deck_layout::{DeckFace, DeckLayout, DeckLayouts, DeckTheme, DeckTile};
+pub use deck_theme::DeckThemeDef;
 pub use error::{Error, Result};
 pub use identity::{DeviceInfo, DeviceKind, Fingerprint};
 pub use node::{Config, DeviceView, Direction, Event, MAX_CLIPBOARD, Node, Session, folder_name, over_usb, Link, link_of};
 pub use protocol::{
-    Battery, CallState, ControlMsg, ControlsChange, ControlsState, ConversationMessage, DeckAction, DeckKind, DeckState, DirectGroup, DirectStep, FileEntry, FsEntry, FsReply, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryReply, GalleryRequest, MediaCommand, MediaPlayer,
+    Battery, CallState, ControlMsg, ControlsChange, ControlsState, ConversationMessage, DeckAction, DeckKind, DeckRefusal, DeckState, DirectGroup, DirectStep, FileEntry, FsEntry, FsReply, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryReply, GalleryRequest, MediaCommand, MediaPlayer,
     MediaState, MouseButton, NotificationButton, PluggedPhone, RemoteNotification, SessionKind, SmsMessage, SmsThread, TerminalInfo, TerminalOpen, VolumeState,
 };
 pub use protocol::{Dnd, Ringer};

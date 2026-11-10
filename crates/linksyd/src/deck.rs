@@ -299,7 +299,7 @@ impl<D: Desktop> Deck<D> {
     /// `{phone}`, for [`Deck::named`].
     fn offered(&self, saved: &Saved) -> Vec<DeckAction> {
         let caps = self.caps();
-        let action = |id: &str, name: &str, kind, group: &str| DeckAction { id: id.into(), name: name.into(), kind, group: group.into(), confirm: None };
+        let action = |id: &str, name: &str, kind, group: &str| DeckAction { id: id.into(), name: name.into(), kind, group: group.into(), confirm: None, icon: None };
         let mut all = vec![
             action("media.play_pause", t!("Play or Pause"), DeckKind::Button, MEDIA),
             action("media.next", t!("Next Track"), DeckKind::Button, MEDIA),
@@ -506,7 +506,7 @@ impl<D: Desktop> Deck<D> {
             portrait: face(DeckFace::portrait(), (0, 0), (0, 1), (0, 3)),
             landscape: face(DeckFace::landscape(), (4, 0), (0, 0), (0, 2)),
         };
-        DeckLayouts { version: 0, active: layout.id.clone(), layouts: vec![layout] }
+        DeckLayouts { version: 0, active: layout.id.clone(), layouts: vec![layout], themes: Vec::new() }
     }
 
     fn save(&self, saved: &Saved) -> Result<(), String> {
@@ -1060,7 +1060,7 @@ mod tests {
         portrait.pages[0] = tiles;
         let work = DeckLayout { id: "work".into(), name: "Work".into(), theme: DeckTheme::default(), portrait, landscape: DeckFace::landscape() };
         let games = DeckLayout { id: "games".into(), name: "Games".into(), ..work.clone() };
-        DeckLayouts { version: 99, active: active.into(), layouts: vec![work, games] }
+        DeckLayouts { version: 99, active: active.into(), layouts: vec![work, games], themes: Vec::new() }
     }
 
     fn kinds(face: &DeckFace) -> Vec<(&str, Option<&str>)> {

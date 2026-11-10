@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use linksy_core::gallery::GalleryAnswer;
 use linksy_core::{
-    AppHave, AppInfo, AppProbe, AppSend, AppState, DirectReady, PreflightAnswer, Battery, CallState, Config, ControlMsg, ConversationMessage, DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckTheme, DeckTile, DirectGroup, DirectPlan, DirectStep, Error, Event, FsEntry, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryRequest, MediaCommand, MediaPlayer, MediaState, Node,
+    AppHave, AppInfo, AppProbe, AppSend, AppState, DirectReady, PreflightAnswer, Battery, CallState, Config, ControlMsg, ConversationMessage, DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckRefusal, DeckTheme, DeckThemeDef, DeckTile, DirectGroup, DirectPlan, DirectStep, Error, Event, FsEntry, FsRequest, GalleryAlbum, GalleryCursor, GalleryItem, GalleryRequest, MediaCommand, MediaPlayer, MediaState, Node,
     NotificationButton, RemoteNotification, Route, SessionKind, SmsThread, Skip, VolumeState, Link,
 };
 use tokio::io::AsyncReadExt;
@@ -570,7 +570,7 @@ async fn deck_and_conversation_history_travel() {
 
     phone.node.deck_open(&pc_id, true).await.unwrap();
     wait_for(&mut on_pc, |e| matches!(e, Event::DeckOpen { .. }).then_some(())).await;
-    let action = DeckAction { id: "system.restart".into(), name: "Restart".into(), kind: DeckKind::Button, group: "System".into(), confirm: Some("Restart Beta?".into()) };
+    let action = DeckAction { id: "system.restart".into(), name: "Restart".into(), kind: DeckKind::Button, group: "System".into(), confirm: Some("Restart Beta?".into()), icon: None };
     pc.node.deck_actions(&phone_id, vec![action.clone()]).await.unwrap();
     let got = wait_for(&mut on_phone, |e| match e {
         Event::DeckActions { actions, .. } => Some(actions.clone()),
@@ -611,7 +611,57 @@ async fn deck_and_conversation_history_travel() {
 fn some_layouts() -> DeckLayouts {
     let mut layout = DeckLayout { id: "work".into(), name: "Work".into(), theme: DeckTheme::default(), portrait: DeckFace::portrait(), landscape: DeckFace::landscape() };
     layout.portrait.pages[0].push(DeckTile { id: "a".into(), kind: "button".into(), w: 1, h: 1, action: Some("media.next".into()), ..Default::default() });
-    DeckLayouts { version: 3, active: "work".into(), layouts: vec![layout] }
+    DeckLayouts { version: 3, active: "work".into(), layouts: vec![layout], themes: Vec::new() }
+}
+
+#[tokio::test]
+async fn a_phone_saves_its_deck_and_a_computer_tries_a_theme() {
+    let (phone, pc) = paired_with(|c| match c.name.as_str() {
+        "Alpha" => c.features = vec!["deck_themes".into()],
+        _ => c.features = vec!["deck_layout_save".into()],
+    })
+    .await;
+    let (phone_id, pc_id) = (phone.node.info().id, pc.node.info().id);
+    let (mut on_pc, mut on_phone) = (pc.node.subscribe(), phone.node.subscribe());
+
+    let layouts = some_layouts();
+    phone.node.deck_layout_save(&pc_id, 3, &layouts).await.unwrap();
+    let saved = wait_for(&mut on_pc, |e| match e {
+        Event::DeckLayoutSave { from, base_version, layouts } if from.id == phone_id => Some((*base_version, layouts.clone())),
+        _ => None,
+    })
+    .await;
+    assert_eq!(saved, (3, layouts));
+
+    pc.node.deck_layout_refused(&phone_id, DeckRefusal::Stale, "changed since", 5).await.unwrap();
+    let refused = wait_for(&mut on_phone, |e| match e {
+        Event::DeckLayoutRefused { code, reason, version, .. } => Some((*code, reason.clone(), *version)),
+        _ => None,
+    })
+    .await;
+    assert_eq!(refused, (DeckRefusal::Stale, "changed since".to_string(), 5));
+
+    let theme = DeckThemeDef::from_preset("pixel", "t:try", "Try").unwrap();
+    pc.node.deck_theme_draft(&phone_id, Some(&theme)).await.unwrap();
+    let draft = wait_for(&mut on_phone, |e| match e {
+        Event::DeckThemeDraft { theme, .. } => Some(theme.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(draft, Some(theme));
+    pc.node.deck_theme_draft(&phone_id, None).await.unwrap();
+    let ended = wait_for(&mut on_phone, |e| match e {
+        Event::DeckThemeDraft { theme, .. } => Some(theme.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(ended, None);
+
+    // A computer that doesn't say it keeps layouts is never sent a save, a phone that doesn't
+    // draw custom themes never gets a draft
+    let (old_phone, old_pc) = paired().await;
+    assert!(matches!(old_phone.node.deck_layout_save(&old_pc.node.info().id, 0, &some_layouts()).await, Err(Error::Unsupported)));
+    assert!(matches!(old_pc.node.deck_theme_draft(&old_phone.node.info().id, None).await, Err(Error::Unsupported)));
 }
 
 #[tokio::test]

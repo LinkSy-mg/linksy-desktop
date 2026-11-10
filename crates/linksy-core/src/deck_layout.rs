@@ -7,7 +7,11 @@ use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
+use crate::deck_theme::DeckThemeDef;
+
 pub const MAX_LAYOUTS: usize = 20;
+/// Longest a tile's `icon` name is.
+pub const MAX_ICON: usize = 32;
 pub const MAX_PAGES: usize = 8;
 pub const MAX_TILES: usize = 64;
 pub const MAX_LABEL: usize = 60;
@@ -31,6 +35,10 @@ pub struct DeckLayouts {
     pub active: String,
     #[serde(default)]
     pub layouts: Vec<DeckLayout>,
+    /// The custom themes the layouts may name (§4.26), only on the way to a phone that
+    /// draws them. The computer's own library is the one that counts, not this.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub themes: Vec<DeckThemeDef>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -114,6 +122,9 @@ pub struct DeckTile {
     /// What the kind needs besides: a clock's second time zone, say.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub props: BTreeMap<String, String>,
+    /// A name from the phone's own icon set (§4.26), kept as it comes.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub icon: String,
 }
 
 /// A kind of tile: the sizes it takes (width, height, the first one the default) and
@@ -139,14 +150,20 @@ pub fn kind(id: &str) -> Option<&'static TileKind> {
     KINDS.iter().find(|k| k.id == id)
 }
 
-fn is_color(s: &str) -> bool {
+pub(crate) fn is_color(s: &str) -> bool {
     s.len() == 7 && s.starts_with('#') && s[1..].chars().all(|c| c.is_ascii_hexdigit())
 }
 
 impl DeckLayouts {
     /// Whether these can be saved: known kinds at sizes they take, inside their grid and
-    /// clear of each other, actions `offered` here, known themes, and within the limits.
+    /// clear of each other, actions `offered` here, the five built-in themes, and within
+    /// the limits.
     pub fn check(&self, offered: impl Fn(&str) -> bool) -> Result<(), String> {
+        self.check_with(offered, |_| false)
+    }
+
+    /// [`check`](Self::check), with the custom themes `custom` says exist (§4.26).
+    pub fn check_with(&self, offered: impl Fn(&str) -> bool, custom: impl Fn(&str) -> bool) -> Result<(), String> {
         if self.layouts.len() > MAX_LAYOUTS {
             return Err(format!("at most {MAX_LAYOUTS} layouts"));
         }
@@ -161,7 +178,7 @@ impl DeckLayouts {
             if l.name.trim().is_empty() || l.name.chars().count() > MAX_LABEL {
                 return Err(format!("a layout's name is 1 to {MAX_LABEL} characters"));
             }
-            if !THEMES.contains(&l.theme.id.as_str()) || !is_color(&l.theme.accent) {
+            if !(THEMES.contains(&l.theme.id.as_str()) || custom(&l.theme.id)) || !is_color(&l.theme.accent) {
                 return Err(format!("unknown theme \"{}\" or accent \"{}\"", l.theme.id, l.theme.accent));
             }
             for face in [&l.portrait, &l.landscape] {
@@ -169,6 +186,27 @@ impl DeckLayouts {
             }
         }
         Ok(())
+    }
+}
+
+impl DeckLayouts {
+    /// What a phone gets (§4.26). Stored layouts carry no themes of their own: a phone that
+    /// draws custom themes gets the `library` with them; one that doesn't gets each custom
+    /// theme a layout names as its `base`. A custom id the library no longer has is Stock.
+    pub fn for_phone(&self, library: &[DeckThemeDef], draws_custom: bool) -> DeckLayouts {
+        let mut out = self.clone();
+        out.themes = if draws_custom { library.to_vec() } else { Vec::new() };
+        for l in &mut out.layouts {
+            if THEMES.contains(&l.theme.id.as_str()) {
+                continue;
+            }
+            l.theme.id = match library.iter().find(|t| t.id == l.theme.id) {
+                Some(t) if draws_custom => t.id.clone(),
+                Some(t) => t.base.clone(),
+                None => "stock".into(),
+            };
+        }
+        out
     }
 }
 
@@ -195,6 +233,9 @@ fn check_face(face: &DeckFace, offered: &impl Fn(&str) -> bool) -> Result<(), St
             }
             if t.label.chars().count() > MAX_LABEL || (!t.color.is_empty() && !is_color(&t.color)) {
                 return Err(format!("tile \"{}\": a label of at most {MAX_LABEL} characters, a colour like #2563ff", t.id));
+            }
+            if t.icon.len() > MAX_ICON || !t.icon.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+                return Err(format!("tile \"{}\": an icon is up to {MAX_ICON} of a-z, 0-9 and _", t.id));
             }
             match (&t.action, k.runs) {
                 (Some(a), true) if offered(a) => {}
@@ -223,7 +264,7 @@ mod tests {
     fn one(tiles: Vec<DeckTile>) -> DeckLayouts {
         let mut portrait = DeckFace::portrait();
         portrait.pages[0] = tiles;
-        DeckLayouts { version: 1, active: "work".into(), layouts: vec![DeckLayout { id: "work".into(), name: "Work".into(), theme: DeckTheme::default(), portrait, landscape: DeckFace::landscape() }] }
+        DeckLayouts { version: 1, active: "work".into(), layouts: vec![DeckLayout { id: "work".into(), name: "Work".into(), theme: DeckTheme::default(), portrait, landscape: DeckFace::landscape() }], themes: Vec::new() }
     }
 
     #[test]
@@ -249,6 +290,50 @@ mod tests {
         let mut themed = one(vec![]);
         themed.layouts[0].theme.id = "glass".into();
         assert!(themed.check(offered).is_err());
+    }
+
+    #[test]
+    fn custom_themes_and_icons() {
+        let none = |_: &str| true;
+        let mut deck = one(vec![DeckTile { icon: "terminal".into(), ..tile("a", "button", 0, 0, 1, 1, Some("media.next")) }]);
+        assert_eq!(deck.check(none), Ok(()), "an icon of the phone's set is kept as it comes");
+        deck.layouts[0].theme = DeckTheme { id: "t:7f3a09".into(), accent: "#ff7a59".into() };
+        assert!(deck.check(none).is_err(), "a custom theme nobody has");
+        assert_eq!(deck.check_with(none, |id| id == "t:7f3a09"), Ok(()));
+        assert!(deck.check_with(none, |id| id == "t:other").is_err());
+        for icon in ["Terminal", "a b", "x".repeat(MAX_ICON + 1).as_str()] {
+            let bad = one(vec![DeckTile { icon: icon.into(), ..tile("a", "button", 0, 0, 1, 1, Some("media.next")) }]);
+            assert!(bad.check(none).is_err(), "{icon:?}");
+        }
+    }
+
+    #[test]
+    fn a_phone_gets_the_themes_it_can_draw() {
+        let sunset = DeckThemeDef::from_preset("dots", "t:sun", "Sunset").unwrap();
+        let mut deck = one(vec![]);
+        let named = |id: &str| DeckLayout { id: id.into(), name: id.into(), theme: DeckTheme { id: id.into(), accent: "#ff7a59".into() }, ..deck.layouts[0].clone() };
+        deck.layouts = vec![named("t:sun"), named("pixel"), named("t:gone")];
+        let library = vec![sunset.clone()];
+        let ids = |d: &DeckLayouts| d.layouts.iter().map(|l| l.theme.id.clone()).collect::<Vec<_>>();
+
+        let modern = deck.for_phone(&library, true);
+        assert_eq!((ids(&modern), modern.themes.clone()), (vec!["t:sun".into(), "pixel".into(), "stock".into()], library.clone()));
+        let older = deck.for_phone(&library, false);
+        assert_eq!((ids(&older), older.themes.is_empty()), (vec!["dots".into(), "pixel".into(), "stock".into()], true));
+        assert_eq!(ids(&deck), ["t:sun", "pixel", "t:gone"], "what is stored is left as it was");
+        assert!(deck.themes.is_empty());
+    }
+
+    #[test]
+    fn themes_travel_only_when_there_are_some() {
+        let mut deck = one(vec![]);
+        assert!(!serde_json::to_string(&deck).unwrap().contains("themes"));
+        deck.themes.push(DeckThemeDef::from_preset("stock", "t:abc", "Mine").unwrap());
+        let json = serde_json::to_string(&deck).unwrap();
+        assert!(json.contains(r#""themes":[{"id":"t:abc""#), "{json}");
+        assert_eq!(serde_json::from_str::<DeckLayouts>(&json).unwrap(), deck);
+        let old: DeckLayouts = serde_json::from_str(r#"{"version":2,"active":"a","layouts":[]}"#).unwrap();
+        assert!(old.themes.is_empty(), "layouts kept before themes still load");
     }
 
     #[test]
