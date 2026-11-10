@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.13.3" date="2026-11-10">
+      <description>
+        <p>Fix: the phone's microphone no longer goes silent after a moment on PipeWire 1.6.</p>
+      </description>
+    </release>
     <release version="0.13.2" date="2026-11-09">
       <description>
         <p>Fixes: Firefox no longer shows twice on the phone with Plasma's browser integration, the camera works where GStreamer lacks capssetter, a Ping names its phone once, the wheel on a volume slider moves by 5%, and a session allowed without asking is announced once a minute.</p>

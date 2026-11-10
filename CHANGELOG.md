@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.13.3
 
 ### Fixed
 - **The phone's microphone gave no sound on PipeWire 1.6** (#89): a PipeWire node
