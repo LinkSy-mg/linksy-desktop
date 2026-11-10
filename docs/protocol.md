@@ -65,6 +65,7 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | Gallery: the phone's photos page by page | Done (0.12.1) | Done (0.3.3) | `gallery` stream, thumbnails, `send` (§4.18) |
 | Deck: the phone as buttons for the computer | Done (0.12.1) | Done (0.3.3) | `deck_open`, `deck_actions`, `deck_run` (§4.19) |
 | Deck layouts made on the computer | Done (0.12.1) | Done (0.3.3) | `deck_layout`, feature `deck_layout` (§4.20) |
+| Deck edited on the phone, saved to the computer; custom themes and commands | Building (0.14.0) | Editor done (0.3.5), saving and themes to do | `deck_layout_save`, `deck_layout_refused`, `deck_theme_draft`, features `deck_layout_save`, `deck_themes` (§4.26) |
 | Images/files on the clipboard | Done | Done | offer with `"clipboard":true` (§4.5) |
 | Automatic clipboard sync, computer → phone | Done (not on GNOME) | Done (phone asks) | `clipboard_watch` (§4.5) |
 | Phone as microphone | Done | Done | session `microphone`, raw PCM (§4.8) |
@@ -867,7 +868,9 @@ controlled), `display`, `camera`, `watch`, `notifications` (mirrors its notifica
 phone), `direct_group` (hosts and joins Wi-Fi Direct groups by name and passphrase: phones,
 §4.17 "Phone to phone"), `inbox_history` (answers `inbox_history`, §4.5), `gallery` (shows
 its photos, §4.18), `deck` (a computer that runs a phone's deck, §4.19), `deck_layout` (a
-phone that draws the deck layouts a computer sends, §4.20), `turn_on` (a phone that asks its
+phone that draws the deck layouts a computer sends, §4.20), `deck_layout_save` (a computer
+that keeps the layouts a phone saves, §4.26), `deck_themes` (a phone that draws a computer's
+custom deck themes, §4.26), `turn_on` (a phone that asks its
 user when a computer asks it to turn something on, §4.21), `preflight` (answers the check
 before a send, §4.22; computers announce it too), `apps` (sends and installs apps, §4.22),
 `snap` (opens its camera when a computer asks, §4.23), `sound` (shares the sound it plays
@@ -1633,9 +1636,9 @@ any of them → {"type":"gallery_error","message":"…"}
 ### 4.19 Deck: the phone as buttons for the computer (desktop 0.12.1)
 
 The computer says what it lets that phone do, and runs it. Computers announce feature
-`deck`. The layout (pages of tiles, sizes, colours, a theme) is made in the computer's
-editor and comes to a phone that announces `deck_layout` (§4.20); a phone without it lays
-its tiles out itself.
+`deck`. The layout (pages of tiles, sizes, colours, a theme) is made on the phone, kept by
+the computer and comes to a phone that announces `deck_layout` (§4.20, §4.26); a phone
+without it lays its tiles out itself.
 
 ```json
 phone → computer {"type":"deck_open"}           the deck shows: send me what I may do
@@ -1686,7 +1689,8 @@ phone → computer {"type":"deck_close"}          the deck is gone: stop sending
   the language (`name` is in the computer's).
 - Desktop: media, sound, power profiles, Do Not Disturb, Lock, Wi-Fi and Bluetooth are on
   for a phone until the user turns them off; restart, turn off, airplane mode and the
-  user's commands are off until turned on (or until a tile for it is saved, §4.20). A
+  user's commands are off until turned on on the computer (a tile saved for one doesn't turn
+  it on, §4.26). A
   tile kept from before whose action the computer no longer offers stays in its layout;
   the phone shows it as unavailable. A
   `deck_state` comes after every run that was allowed, so a refused run gets no answer.
@@ -1696,8 +1700,8 @@ phone → computer {"type":"deck_close"}          the deck is gone: stop sending
 
 ### 4.20 Deck layouts: made on the computer, drawn by the phone (desktop 0.12.1)
 
-The user lays out a phone's deck in the computer's editor; the computer keeps the layouts
-(one set per phone) and sends them. The phone draws them and runs their tiles as in §4.19.
+The user lays out a phone's deck on the phone (until desktop 0.14.0, in the computer's
+editor too); the computer keeps the layouts (one set per phone) and sends them. The phone draws them and runs their tiles as in §4.19.
 Phones that do announce feature `deck_layout`; the computer sends nothing new to a phone
 that doesn't.
 
@@ -1746,7 +1750,7 @@ computer → phone {"type":"deck_state",…}         as in §4.19
   https://claude.ai/artifact/7zVv6HaFHYyY2i8sPjeC71
 - Away from the computer, the phone keeps showing the last layouts it got from it (kept
   per computer, with their `version`); its tiles are unavailable until the computer is
-  back. The phone doesn't send layouts back (it may later).
+  back. The phone sends its edits back with `deck_layout_save` (§4.26).
 - The screen, while the deck shows: the phone keeps it on, over its own screen timeout
   (`FLAG_KEEP_SCREEN_ON` on the deck's window). After 60 s without a touch it dims to
   about 20 % brightness (the window's `screenBrightness`), and a touch brings it back.
@@ -1754,8 +1758,8 @@ computer → phone {"type":"deck_state",…}         as in §4.19
 - Limits: at most 20 layouts, 8 pages a face, 64 tiles a page, names and labels of 60
   characters; the computer refuses to save layouts whose JSON is over 1 MiB less 1 KiB, so
   the message stays within a frame (§4.4).
-- Desktop: placing a tile in the editor allows its action for that phone (the same as
-  turning it on in §4.19). Until the user saves, the first layout is a clock, the player,
+- Desktop: a layout saved from the phone doesn't turn its tiles' actions on (§4.26); the
+  user does, on the computer (§4.19). Until the user saves, the first layout is a clock, the player,
   the volume and buttons for media, mute, the microphone, the output, Do Not Disturb,
   Wi-Fi, Bluetooth and locking, those the computer offers; a tile whose action is still
   off for the phone shows as unavailable.
@@ -2091,6 +2095,102 @@ What comes up on a computer comes up on a phone that asked for it. Feature
   the switch isn't shown there.
 - **Core API:** `node.send_computer_notification(id, key, app, title, body, at_ms)`;
   `Event::ComputerNotification`.
+
+### 4.26 Deck: edited on the phone, saved to the computer; custom themes and commands (desktop 0.14.0)
+
+The deck editor lives on the phone (0.3.5). The computer keeps what the phone saves (§4.20),
+decides what the phone may run (§4.19), and offers the user's own commands and themes.
+
+```json
+computer announces feature "deck_layout_save"
+phone → computer {"type":"deck_layout_save","base_version":3,"layouts":{"version":3,"active":"work","layouts":[…]}}
+computer → phone {"type":"deck_layout","layouts":{"version":4,…}}                          saved
+computer → phone {"type":"deck_layout_refused","code":"invalid","reason":"a clock can't be 3 × 3","version":3}
+```
+
+- **When:** only to a computer that announces `deck_layout_save`; until then the phone keeps
+  its edits on the phone (as in 0.3.5) and sends them once the feature is there.
+- **`base_version`** is the `version` of the `deck_layout` the edits were made on (`0` for
+  a computer that never saved: the layout it made up has version 0). The computer saves
+  only when it is the version it has now. Then it keeps the layouts, `version` goes one up
+  and it sends them back as a `deck_layout`: the phone's edits are now the computer's. A
+  save equal to what the computer has changes nothing and is answered with the current
+  `deck_layout`.
+- **`deck_layout_refused`** (nothing saved): `code` is `stale` (the computer's layouts have
+  changed since: its current `deck_layout` follows at once; what to do with the edits is
+  the phone's to ask its user), `invalid` (`reason` names the first thing wrong, by the
+  rules of §4.20: kinds, sizes, grid, overlap, limits, an action this computer doesn't
+  offer, an unknown theme) or `too_big` (the limit of §4.20). `version` is the computer's.
+- **A save never turns an action on.** The computer keeps the tiles as they are; a tile
+  whose action is off for that phone shows as unavailable (§4.20) until the user turns it on
+  on the computer, where a notification asks and the phone's page lists it. What is on by
+  default (§4.19) works at once. So a phone cannot give itself "Shut Down" or a command.
+- A tile may also have `icon`: a name from the phone's own icon set (`[a-z0-9_]`, up to 32
+  characters). The computer keeps what comes and does not interpret it.
+
+**Themes.** The five themes (§4.20) stay as they are. The user may make more on the computer;
+each is the art of one of the five (`base`: the phone's dotted, pixel or line icons, glyph
+letters, bars and covers) with colours, shape and type the user sets. A phone that announces
+`deck_themes` gets them inside `deck_layout`, and a layout names one by its id.
+
+```json
+computer → phone {"type":"deck_layout","layouts":{"version":5,"active":"work",
+   "themes":[{"id":"t:7f3a09","name":"Sunset","base":"dots","screen":"#1b1020","ink":"#ffe9d6",
+              "tile":"#2d1b33","on":"#ff7a59","on_ink":"#1b1020","edge":"#6b3b5c","radius":14,
+              "border":"line","texture":"dots","tint":"base","font":"mono","caps":true,"glow":false}],
+   "layouts":[{"id":"work","name":"Work","theme":{"id":"t:7f3a09","accent":"#ff7a59"},…}]}}
+computer → phone {"type":"deck_theme_draft","theme":{…}}      show this one now, keep nothing
+computer → phone {"type":"deck_theme_draft","theme":null}     back to the layout's
+```
+
+  | Field | Value | Draws |
+  |---|---|---|
+  | `id` | `t:` and 1 to 16 of `a-z0-9` | what `layout.theme.id` names |
+  | `name` | 1 to 40 characters | the phone's theme list |
+  | `base` | `stock`, `dots`, `eink`, `term`, `pixel` | the art: icon style, glyph letters (`dots`, `pixel`), bars, covers, bevels |
+  | `screen`, `ink`, `tile`, `on`, `on_ink` | `#rrggbb` | the deck's background; text and icons; a tile; a tile that is on; text and icons on it |
+  | `edge` | `#rrggbb`, or left out | the outline of a tile, when `border` is `line` or `thick` |
+  | `radius` | 0 to 28 | a tile's corner, in the units the built-in looks use (Stock 14, Dot Matrix 18, Pixel 0) |
+  | `border` | `none`, `line` (1), `thick` (2), `bevel` | `bevel` is Pixel's notched corners, bevels and hard shadow on the play button |
+  | `texture` | `plain`, `dots`, `scan` | behind the tiles: nothing, a dot grid (`ink` at 7 %), scanlines (black at 18 %) |
+  | `tint` | `base`, `none`, `fill`, `icon` | where a tile's own `color` (§4.20) goes: as `base` does, nowhere, its fill, its icon |
+  | `font`, `caps`, `glow` | `sans` or `mono`, bool, bool | letters drawn with a font: the font, upper case, a soft glow of `ink` (55 %, 6); the `dots` and `pixel` bases draw glyphs, where these don't apply |
+
+  The rest is made from those, so every phone and the computer's preview draw it alike: the
+  deck's name and status in `ink`; a bar's track `ink` at 18 %, its fill the layout's
+  `accent`; the play button filled `ink` with its glyph in `screen`; page dots `ink` at
+  28 %, the current one `accent`; `accent` also marks what is picked. A custom id a phone
+  doesn't find in `themes` draws as `stock`. A phone without `deck_themes` never gets
+  `themes`: the computer sends the theme's `base` in place of its id. The phone's own themes
+  (`signal`, `glass`, `midnight`) stay the phone's and are never sent.
+- `deck_theme_draft`: only to a phone with `deck_themes` whose deck shows. The phone draws
+  its active layout in that theme (and the layout's `accent`) until a `null` draft, the
+  deck closing or a new `deck_layout`, and keeps nothing; it takes the place of the theme
+  the user picked on the phone, for as long as it shows.
+- Limits: at most 24 themes; the whole `deck_layout` stays under the size of §4.20. A save's
+  own `themes` are ignored (the computer's library is the one), and one that names a custom
+  theme the computer doesn't have is `invalid`.
+
+**Commands.** The user's commands (§4.19, group `Commands`) may now have their own `group`
+name (as the user typed it: show it as it is, and a group you don't know after the ones you
+do), an `icon` (an entry of `deck_actions` may have `"icon":"terminal"`, a name from the
+phone's icon set; none: the action's own), and be a `toggle` (it reports `on` in
+`deck_state`, found by the command the user gave for that). Nothing else changes for a phone.
+
+- Desktop: the page for a phone's deck is the grouped lists of actions with a switch each,
+  the phone's request for the ones that are off (a notification with Allow), the user's
+  commands, and the themes. The editor of layouts is gone from the computer.
+- Core: `Event::DeckLayoutSave { from, base_version, layouts }` (computer),
+  `Event::DeckLayoutRefused`, `Event::DeckThemeDraft` (phone); `Node::deck_layout_save`
+  (phone, refuses a computer without the feature), `Node::deck_layout_refused`,
+  `Node::deck_theme_draft`; `DeckLayouts::themes`, `linksy_core::DeckThemeDef`
+  (`deck_theme.rs`, which also has the checks and the five as presets).
+- Phone to-do: send the saved layouts when the computer announces `deck_layout_save` and
+  handle the refusals (on `stale`, ask the user whether to keep the edits on top of the
+  computer's layouts or take the computer's); announce `deck_themes` and draw a custom
+  theme by starting from its `base` look and replacing what the fields set (the phone's
+  `DeckLook`); `deck_theme_draft`; keep a tile's `icon`; show `deck_actions`' `icon`, `group`
+  as typed and toggle commands.
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 
@@ -2656,3 +2756,11 @@ robust against any encoder (GPU ones may slice too):
   folders of APKs in an offer, with `apps` describing them, `send_bundle` to send and
   `apps_received` to install; offers that would fill the disk are declined at once with the
   room said. Features `preflight` (computers too) and `apps`. Phone to-do: §4.22.
+- **2026-11-10** — **Deck edited on the phone** (§4.26), desktop 0.14.0: the phone saves its layouts
+  with `deck_layout_save` (`base_version`; answered by the new `deck_layout`, or
+  `deck_layout_refused` with `stale`, `invalid` or `too_big`); a save never turns an action on;
+  tiles may have `icon`; custom deck themes (`DeckLayouts.themes`, a `base` plus colours,
+  shape and type) for phones with `deck_themes`, and `deck_theme_draft` to try one live;
+  the user's commands may have their own `group`, an `icon` and be toggles. Features
+  `deck_layout_save` (computers) and `deck_themes` (phones). The computer's own layout editor
+  is gone. Phone to-do: §4.26.
