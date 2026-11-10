@@ -1,7 +1,8 @@
 //! Phones' decks (docs/protocol.md §4.19): this computer says what each phone may do and
 //! does it. Every action is on or off per phone (media and sound on until the user says
-//! otherwise, locking and the user's own commands off), kept in `deck.json` with the
-//! commands and each phone's layouts (§4.20). Whatever else a phone runs is ignored.
+//! otherwise, restarting, turning off and the user's own commands off), kept in `deck.json`
+//! with the commands, the themes and each phone's layouts, which the phone edits and saves
+//! (§4.20, §4.26). Whatever else a phone runs is ignored.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
@@ -255,8 +256,6 @@ enum Job {
     Run(Fingerprint, Act),
     /// What a phone may do changed (`None`: any phone): its list again, if its deck shows.
     Actions(Option<Fingerprint>),
-    /// A phone's layouts were saved: its list and layouts again, if its deck shows.
-    Layouts(Fingerprint),
     /// The volume changed.
     Sound,
     /// Time to ask the user's toggles what they are now.
@@ -415,7 +414,7 @@ impl<D: Desktop> Deck<D> {
         });
         drop(saved);
         let actions = self.named(phone, offered).into_iter().zip(on).map(|(action, on)| DeckOption { action, on }).collect();
-        DeckPrefs { actions, commands, asked, layout }
+        DeckPrefs { actions, commands, asked, layout, icons: deck_layout::ICONS.iter().map(|i| i.to_string()).collect() }
     }
 
     /// The questions with this computer's name and `phone`'s.
@@ -476,36 +475,6 @@ impl<D: Desktop> Deck<D> {
             Some(layouts) => layouts.clone(),
             None => self.first_layouts(&saved),
         }
-    }
-
-    /// Save `phone`'s layouts, one version on from the last. Placing a tile allows its
-    /// action: each one a tile runs is turned on for that phone.
-    pub fn set_layouts(&self, phone: &Fingerprint, mut layouts: DeckLayouts) -> Result<DeckLayouts, String> {
-        if !layouts.layouts.iter().any(|l| l.id == layouts.active) {
-            layouts.active = layouts.layouts.first().map(|l| l.id.clone()).unwrap_or_default();
-        }
-        let mut saved = self.inner.saved.lock().unwrap();
-        let offered: HashSet<String> = self.offered(&saved).into_iter().map(|a| a.id).collect();
-        // A tile kept from before whose action this computer no longer offers (a tool
-        // removed) doesn't stop the save: the phone shows it as unavailable
-        let before: HashSet<String> = saved.layouts.get(phone).map(|l| runs(l).map(String::from).collect()).unwrap_or_default();
-        layouts.check(|a| offered.contains(a) || before.contains(a))?;
-        layouts.version = saved.layouts.get(phone).map_or(0, |l| l.version) + 1;
-        let size = serde_json::to_vec(&layouts).map_err(|e| e.to_string())?.len();
-        if size > MAX_BYTES {
-            return Err(format!("these layouts are too big to send to the phone ({} KiB, at most {} KiB)", size.div_ceil(1024), MAX_BYTES / 1024));
-        }
-        let mut next = saved.clone();
-        let choices = next.phones.entry(*phone).or_default();
-        for action in runs(&layouts).filter(|a| offered.contains(*a)) {
-            choices.insert(action.into(), true);
-        }
-        next.layouts.insert(*phone, layouts.clone());
-        self.save(&next)?;
-        *saved = next;
-        drop(saved);
-        let _ = self.inner.jobs.send(Job::Layouts(*phone));
-        Ok(layouts)
     }
 
     /// What a phone saved from its own editor (docs/protocol.md §4.26), made on
@@ -742,7 +711,7 @@ impl<D: Desktop> Deck<D> {
                         told.insert(phone);
                         acts.push(act);
                     }
-                    Job::Open(phone) | Job::Layouts(phone) => {
+                    Job::Open(phone) => {
                         told.insert(phone);
                         self.send_actions(&node, phone).await;
                         self.send_layouts(&node, phone).await;
@@ -1395,40 +1364,6 @@ mod tests {
     }
 
     #[test]
-    fn saving_counts_versions_and_allows_what_the_tiles_run() {
-        let dir = tempfile::tempdir().unwrap();
-        let d = deck(&dir);
-        let p = phone(1);
-        d.set_action(&p, "media.next", false).unwrap();
-        assert_eq!(d.act(&p, "system.restart", None), None);
-        let mine = layouts("games", vec![tile("a", "button", (0, 0), (1, 1), Some("system.restart")), tile("b", "music", (0, 1), (4, 2), None)]);
-        let saved = d.set_layouts(&p, mine.clone()).unwrap();
-        assert_eq!((saved.version, saved.active.as_str()), (1, "games"), "the version is counted here");
-        assert_eq!(saved.layouts, mine.layouts);
-        assert_eq!(d.act(&p, "system.restart", None), Some(Act::Restart), "placing the tile allowed it");
-        assert_eq!(d.act(&p, "media.next", None), None, "the rest is as it was");
-        assert_eq!(d.act(&phone(2), "system.restart", None), None);
-        assert_eq!(d.set_layouts(&p, mine).unwrap().version, 2);
-
-        let again = deck(&dir);
-        assert_eq!(again.layouts(&p).version, 2);
-        assert_eq!(again.act(&p, "system.restart", None), Some(Act::Restart));
-        assert_eq!(again.layouts(&phone(2)).version, 0, "another phone still has the first layout");
-
-        // Only a kind that runs its action allows it
-        d.set_action(&p, "system.lock", false).unwrap();
-        d.set_layouts(&p, layouts("work", vec![tile("c", "clock", (0, 0), (2, 1), Some("system.lock"))])).unwrap();
-        assert_eq!(d.act(&p, "system.lock", None), None);
-
-        // A tool gone since: the tile it was for doesn't stop a save; a new one for it does
-        let off = layouts("work", vec![tile("d", "button", (0, 0), (1, 1), Some("system.shutdown"))]);
-        d.set_layouts(&p, off.clone()).unwrap();
-        let later = ready(dir.path().join("deck.json"), Fake { without: &["power_off", "airplane"], ..Default::default() });
-        assert!(later.set_layouts(&p, off).is_ok(), "kept from before");
-        assert!(later.set_layouts(&p, layouts("work", vec![tile("e", "button", (0, 0), (1, 1), Some("network.airplane"))])).is_err());
-    }
-
-    #[test]
     fn a_phone_saves_on_the_version_it_edited_and_never_turns_an_action_on() {
         let dir = tempfile::tempdir().unwrap();
         let d = deck(&dir);
@@ -1529,42 +1464,6 @@ mod tests {
     }
 
     #[test]
-    fn layouts_that_fail_the_check_change_nothing() {
-        let dir = tempfile::tempdir().unwrap();
-        let d = deck(&dir);
-        let p = phone(1);
-        let good = d.set_layouts(&p, layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("media.next"))])).unwrap();
-        let file = std::fs::read(dir.path().join("deck.json")).unwrap();
-        let mut big = layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("media.next"))]);
-        big.layouts[0].portrait.pages[0][0].props.insert("note".into(), "x".repeat(MAX_BYTES));
-        for bad in [
-            layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("system.screen_off"))]),
-            layouts("work", vec![tile("a", "button", (0, 0), (1, 1), Some("command.nope"))]),
-            layouts("work", vec![tile("a", "music", (0, 0), (4, 2), None), tile("b", "clock", (1, 1), (2, 1), None)]),
-            layouts("work", vec![tile("a", "volume", (0, 0), (3, 1), Some("sound.volume"))]),
-            layouts("work", vec![tile("a", "weather", (0, 0), (1, 1), None)]),
-        ] {
-            assert!(d.set_layouts(&p, bad).is_err());
-        }
-        let refused = d.set_layouts(&p, big).unwrap_err();
-        assert!(refused.contains("too big"), "{refused}");
-        assert_eq!(d.layouts(&p), good);
-        assert_eq!(std::fs::read(dir.path().join("deck.json")).unwrap(), file);
-        assert_eq!(d.act(&p, "system.screen_off", None), None);
-    }
-
-    #[test]
-    fn an_empty_or_unknown_active_layout_becomes_the_first() {
-        let dir = tempfile::tempdir().unwrap();
-        let d = deck(&dir);
-        for active in ["", "gone"] {
-            assert_eq!(d.set_layouts(&phone(1), layouts(active, vec![])).unwrap().active, "work");
-        }
-        let none = d.set_layouts(&phone(1), DeckLayouts::default()).unwrap();
-        assert_eq!((none.active.as_str(), none.layouts.len()), ("", 0));
-    }
-
-    #[test]
     fn an_older_deck_json_without_layouts_loads() {
         let dir = tempfile::tempdir().unwrap();
         let old = serde_json::json!({
@@ -1579,7 +1478,7 @@ mod tests {
         let old_command = d.prefs(&phone(1)).actions.into_iter().find(|a| a.action.id == "command.c1").unwrap().action;
         assert_eq!((old_command.kind, old_command.group.as_str(), old_command.icon, old_command.confirm), (DeckKind::Button, COMMANDS, None, None), "a command from before is a plain button");
         assert_eq!(d.layouts(&phone(1)).version, 0);
-        assert_eq!(d.set_layouts(&phone(1), layouts("work", vec![])).unwrap().version, 1);
+        assert_eq!(d.save_from_phone(&phone(1), 0, layouts("work", vec![])).unwrap().version, 1);
         assert_eq!(deck(&dir).prefs(&phone(1)).commands.len(), 1, "kept beside the layouts");
     }
 }

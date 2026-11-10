@@ -428,7 +428,7 @@ impl DevicePage {
         buttons.append(&mic_start);
         buttons.append(&mic_running);
         let (deck_card, buttons, deck_desc, _) = card("view-grid-symbolic", t!("Deck"), "");
-        buttons.append(&start(t!("Choose Actions…"), || Action::Deck));
+        buttons.append(&start(t!("Manage Deck…"), || Action::Deck));
         let cards = gtk::FlowBox::builder()
             .selection_mode(gtk::SelectionMode::None)
             .homogeneous(true)

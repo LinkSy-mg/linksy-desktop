@@ -12,6 +12,11 @@ use crate::deck_theme::DeckThemeDef;
 pub const MAX_LAYOUTS: usize = 20;
 /// Longest a tile's `icon` name is.
 pub const MAX_ICON: usize = 32;
+/// The names in the phone's own icon set (0.3.5), for a command's `icon` or a tile's.
+pub const ICONS: &[&str] = &[
+    "play_pause", "play", "pause", "previous", "next", "speaker", "speaker_off", "microphone", "microphone_off", "lock", "terminal", "lightning", "star", "moon", "sun", "house", "bell", "code", "power", "rocket", "game", "camera", "heart", "coffee",
+    "music", "monitor", "broadcast", "flag", "folder", "globe", "cloud", "timer",
+];
 pub const MAX_PAGES: usize = 8;
 pub const MAX_TILES: usize = 64;
 pub const MAX_LABEL: usize = 60;

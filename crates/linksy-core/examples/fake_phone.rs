@@ -450,12 +450,6 @@ async fn main() {
             if !after {
                 println!("no state after {action}: refused");
             }
-            let until = tokio::time::Instant::now() + Duration::from_secs(deck_wait);
-            while tokio::time::Instant::now() < until {
-                if let Ok(Some(e)) = tokio::time::timeout_at(until, deck_message(&mut events, &pc)).await {
-                    print_deck(&e, "DECK_STATE");
-                }
-            }
             if let Some(path) = &deck_save {
                 let layouts: linksy_core::DeckLayouts = serde_json::from_slice(&std::fs::read(path).expect("--deck-save FILE")).expect("--deck-save FILE is DeckLayouts JSON");
                 let base = deck_save_base.unwrap_or(seen_version);
@@ -469,6 +463,12 @@ async fn main() {
                         Event::DeckLayoutRefused { code, .. } if code != linksy_core::DeckRefusal::Stale => break,
                         _ => {}
                     }
+                }
+            }
+            let until = tokio::time::Instant::now() + Duration::from_secs(deck_wait);
+            while tokio::time::Instant::now() < until {
+                if let Ok(Some(e)) = tokio::time::timeout_at(until, deck_message(&mut events, &pc)).await {
+                    print_deck(&e, "DECK_STATE");
                 }
             }
             let _ = node.deck_open(&pc, false).await;

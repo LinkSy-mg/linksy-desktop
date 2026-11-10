@@ -107,9 +107,9 @@ struct State {
     pictures_checked: std::collections::HashSet<Fingerprint>,
     /// The camera preview on screen: whose camera, and the pipeline reading it.
     preview: Option<(Fingerprint, gstreamer::Element)>,
-    /// Whose deck page shows, and its editor.
+    /// Whose deck page shows, and the page.
     deck: Option<Fingerprint>,
-    deck_editor: Option<Rc<deck::Editor>>,
+    deck_view: Option<Rc<deck::DeckView>>,
     /// Opening Linksy starts its service once, if it isn't running.
     started_service: bool,
     restarted_service: bool,
@@ -428,7 +428,7 @@ impl Window {
         win.camera_back.connect_clicked(move |_| {
             let Some(w) = w.upgrade() else { return };
             if w.state.borrow().deck.is_some() {
-                w.leave_deck();
+                w.back_from_deck();
             } else {
                 w.stop_preview();
                 w.render_page();
@@ -1247,7 +1247,9 @@ impl Window {
             }
             Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } | Event::ClipboardWatch { .. } | Event::ClipboardFile { .. } => {}
             // The service runs decks and asks phones for their history.
-            Event::DeckOpen { .. } | Event::DeckClose { .. } | Event::DeckRun { .. } | Event::DeckActions { .. } | Event::DeckState { .. } | Event::DeckLayout { .. } | Event::DeckLayoutSave { .. } | Event::DeckLayoutRefused { .. } | Event::DeckThemeDraft { .. } => {}
+            Event::DeckOpen { .. } | Event::DeckClose { .. } | Event::DeckRun { .. } | Event::DeckActions { .. } | Event::DeckState { .. } | Event::DeckLayout { .. } | Event::DeckLayoutRefused { .. } | Event::DeckThemeDraft { .. } => {}
+            // The page shows what the phone asked for, so it asks again
+            Event::DeckLayoutSave { from, .. } => self.deck_saved_by(&from.id),
             Event::InboxHistory { .. } | Event::InboxHistoryPage { .. } => {}
             Event::GalleryChanged { from } => self.gallery_changed(&from.id),
             Event::TurnOnRequest { .. } => {}
@@ -1595,10 +1597,6 @@ impl Window {
         }
         let deck = self.state.borrow().deck;
         if deck.is_some() && deck != selected {
-            let editor = self.state.borrow().deck_editor.clone();
-            if let Some(e) = editor.filter(|e| e.dirty()) {
-                self.toast(&t!("The deck for {device} had changes that weren't saved.", device = e.device()));
-            }
             self.close_deck();
         }
         match self.selected_device() {

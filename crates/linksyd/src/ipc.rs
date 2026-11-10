@@ -453,8 +453,6 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             }
             json(serde_json::to_value(crate::deck_cmd::test(&line).await))
         }
-        Request::DeckLayouts { phone } => json(serde_json::to_value(deck().await?.layouts(&paired(node, &phone)?))),
-        Request::SetDeckLayouts { phone, layouts } => json(serde_json::to_value(deck().await?.set_layouts(&paired(node, &phone)?, layouts)?)),
         Request::ForgetScreen => Ok(Value::Bool(sessions.forget_screen())),
         Request::Locate { device } => {
             let id = resolve(node, &device)?;

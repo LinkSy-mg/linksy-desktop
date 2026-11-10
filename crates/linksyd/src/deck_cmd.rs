@@ -37,6 +37,7 @@ pub fn clean(c: DeckCommand) -> Result<DeckCommand, String> {
     if group.chars().count() > MAX_GROUP || group.chars().any(char::is_control) {
         return Err(format!("a group's name is one line of at most {MAX_GROUP} characters"));
     }
+    // The phone's set may grow: any plain name is kept, and one it doesn't have draws as its default
     if icon.len() > MAX_ICON || !icon.chars().all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_') {
         return Err(format!("an icon is up to {MAX_ICON} of a-z, 0-9 and _"));
     }
