@@ -285,8 +285,17 @@ Kirigami.Page {
         ]
     }
 
+    // Ctrl+O: choose files to send, as the Send Files tile says
+    Shortcut {
+        id: openKey
+        sequence: StandardKey.Open
+        enabled: page.trusted && page.visible && !page.deckOpen
+        onActivated: filePicker.open()
+    }
+
     // Files dropped anywhere on the page go to this device
     DropArea {
+        id: drops
         anchors.fill: parent
         enabled: page.trusted
         onDropped: drop => { if (drop.hasUrls) app.sendFiles(page.info.id, drop.urls) }
@@ -512,18 +521,6 @@ Kirigami.Page {
                         }
                     }
 
-                    QQC2.Button {
-                        Layout.alignment: Qt.AlignVCenter
-                        visible: page.trusted
-                        highlighted: true
-                        icon.name: app.sym("document-send")
-                        text: app.t("Send Files")
-                        onClicked: filePicker.open()
-                        QQC2.ToolTip.visible: hovered
-                        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-                        QQC2.ToolTip.text: app.t("Click to choose, or drop them anywhere on this page")
-                    }
-
                     // How long it can still be reached away from home
                     ColumnLayout {
                         Layout.alignment: Qt.AlignVCenter
@@ -556,21 +553,44 @@ Kirigami.Page {
                     }
                 }
 
-                // The everyday actions, one bar of tool buttons
-                Rectangle {
+                // What you do most: Send Files (also where files are dropped), then the rest
+                GridLayout {
+                    id: actionTiles
                     Layout.fillWidth: true
                     visible: page.trusted
-                    implicitHeight: actionBar.implicitHeight + Kirigami.Units.smallSpacing * 2
-                    radius: Kirigami.Units.cornerRadius * 2
-                    color: Qt.alpha(Kirigami.Theme.textColor, 0.04)
+                    columns: page.narrow ? 1 : 2
+                    columnSpacing: Kirigami.Units.largeSpacing * 1.25
+                    rowSpacing: Kirigami.Units.largeSpacing * 1.25
 
-                    RowLayout {
-                        id: actionBar
-                        anchors.fill: parent
-                        anchors.margins: Kirigami.Units.smallSpacing
-                        spacing: Kirigami.Units.smallSpacing
+                    SendTile {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.preferredWidth: 1
+                        Layout.minimumWidth: 0
+                        text: app.t("Send Files")
+                        hint: app.t("Click to choose, or drop them anywhere on this page")
+                        shortcut: openKey.nativeText
+                        dropping: drops.containsDrag
+                        onClicked: filePicker.open()
+                        QQC2.ToolTip.visible: hovered
+                        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        QQC2.ToolTip.text: app.t("Choose files to send (Ctrl+O)")
+                    }
 
-                        BarButton {
+                    GridLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.preferredWidth: 1
+                        Layout.minimumWidth: 0
+                        columns: page.narrow && page.width < Kirigami.Units.gridUnit * 28 ? 1 : 2
+                        columnSpacing: Kirigami.Units.largeSpacing * 1.25
+                        rowSpacing: Kirigami.Units.largeSpacing * 1.25
+
+                        SoftTile {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 0
                             iconName: "edit-paste"
                             text: app.t("Clipboard")
                             hint: app.t("Send what you copied")
@@ -581,13 +601,21 @@ Kirigami.Page {
                                     app.toast(ok ? app.t("Clipboard sent to {name}", { name: page.name }) : err));
                             }
                         }
-                        BarButton {
+                        SoftTile {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 0
                             iconName: "video-display"
                             text: app.t("View Screen")
                             hint: app.t("Watch or take control")
                             onClicked: app.viewScreen(page.info.id)
                         }
-                        BarButton {
+                        SoftTile {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 0
                             visible: page.canRing
                             iconName: "audio-volume-high"
                             tint: Kirigami.Theme.neutralTextColor
@@ -596,25 +624,35 @@ Kirigami.Page {
                             onClicked: app.request("ring", { to: page.info.id, on: true }, (ok, err) =>
                                 app.toast(ok ? app.t("Ringing {name}…", { name: page.name }) : err))
                         }
-                        BarButton {
+                        SoftTile {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 0
                             visible: !page.canRing
                             iconName: "preferences-desktop-notification-bell"
-                            tint: Kirigami.Theme.neutralTextColor
                             text: app.t("Ping")
                             hint: app.t("Show a notification")
                             onClicked: app.request("notify", { to: page.info.id, title: "Ping", body: "" }, (ok, err) =>
                                 app.toast(ok ? app.t("Pinged {name}", { name: page.name }) : err))
                         }
-                        BarButton {
+                        SoftTile {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 0
                             visible: page.trusted && page.info && app.can(page.info, "snap")
                             iconName: "camera-photo"
-                            tint: Kirigami.Theme.neutralTextColor
                             text: app.t("Snap from Phone")
                             hint: app.t("Take a picture, get it here")
                             onClicked: app.request("snap", { to: page.info.id }, (ok, err) =>
                                 app.toast(ok ? app.t("Take the picture on {name}, it arrives here", { name: page.name }) : app.t("Couldn't ask {name}: {reason}", { name: page.name, reason: err.charAt(0).toUpperCase() + err.slice(1) })))
                         }
-                        BarButton {
+                        SoftTile {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.preferredWidth: 1
+                            Layout.minimumWidth: 0
                             visible: page.phone && page.info && app.can(page.info, "locate")
                             iconName: "find-location"
                             tint: Kirigami.Theme.neutralTextColor
@@ -1288,18 +1326,144 @@ Kirigami.Page {
         }
     }
 
-    // One of the everyday actions: its icon in its colour, its name, what it does on hover
-    component BarButton: QQC2.ToolButton {
+    // Send Files, the big one: a dashed outline, the icon, the name, what it does. Files dropped
+    // anywhere on the page light it up (`dropping`).
+    component SendTile: QQC2.AbstractButton {
+        id: send
+        property string hint
+        property string shortcut
+        property bool dropping: false
+        readonly property real round: Kirigami.Units.gridUnit
+        implicitHeight: Kirigami.Units.gridUnit * 8.5
+        padding: Kirigami.Units.gridUnit * 1.2
+        background: Item {
+            Rectangle {
+                anchors.fill: parent
+                radius: send.round
+                color: send.dropping ? Qt.alpha(Kirigami.Theme.highlightColor, 0.14)
+                     : send.down ? Qt.alpha(Kirigami.Theme.highlightColor, 0.12)
+                     : send.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.06) : "transparent"
+            }
+            // The dashed outline. Its corners are bound to the shape's own size: bound to a
+            // property of the path, Qt draws only the first dash.
+            Shape {
+                id: outline
+                anchors.fill: parent
+                ShapePath {
+                    strokeColor: send.visualFocus ? Kirigami.Theme.focusColor : Qt.alpha(Kirigami.Theme.highlightColor, send.dropping ? 1 : 0.55)
+                    strokeWidth: 2
+                    fillColor: "transparent"
+                    strokeStyle: ShapePath.DashLine
+                    dashPattern: [3, 3]
+                    startX: send.round + 1
+                    startY: 1
+                    PathLine { x: outline.width - send.round - 1; y: 1 }
+                    PathArc { x: outline.width - 1; y: send.round + 1; radiusX: send.round; radiusY: send.round }
+                    PathLine { x: outline.width - 1; y: outline.height - send.round - 1 }
+                    PathArc { x: outline.width - send.round - 1; y: outline.height - 1; radiusX: send.round; radiusY: send.round }
+                    PathLine { x: send.round + 1; y: outline.height - 1 }
+                    PathArc { x: 1; y: outline.height - send.round - 1; radiusX: send.round; radiusY: send.round }
+                    PathLine { x: 1; y: send.round + 1 }
+                    PathArc { x: send.round + 1; y: 1; radiusX: send.round; radiusY: send.round }
+                }
+            }
+        }
+        contentItem: ColumnLayout {
+            spacing: Kirigami.Units.largeSpacing
+            RowLayout {
+                Layout.fillWidth: true
+                Rectangle {
+                    implicitWidth: Math.round(Kirigami.Units.gridUnit * 2.6)
+                    implicitHeight: implicitWidth
+                    radius: Kirigami.Units.gridUnit * 0.8
+                    color: Kirigami.Theme.highlightColor
+                    Kirigami.Icon {
+                        anchors.centerIn: parent
+                        width: Kirigami.Units.iconSizes.smallMedium
+                        height: width
+                        source: app.sym("document-send")
+                        fallback: "document-send"
+                        isMask: true
+                        color: Kirigami.Theme.highlightedTextColor
+                    }
+                }
+                Item { Layout.fillWidth: true }
+                QQC2.Label {
+                    Layout.alignment: Qt.AlignTop
+                    visible: send.shortcut !== ""
+                    text: send.shortcut
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.7
+                }
+            }
+            Item { Layout.fillHeight: true }
+            Kirigami.Heading {
+                Layout.fillWidth: true
+                level: 2
+                font.weight: Font.DemiBold
+                textFormat: Text.PlainText
+                text: send.text
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                opacity: 0.7
+                textFormat: Text.PlainText
+                text: send.hint
+            }
+        }
+    }
+
+    // One of the other everyday actions: its icon in its colour, its name, what it does
+    component SoftTile: QQC2.AbstractButton {
+        id: soft
         property string iconName
         property color tint: Kirigami.Theme.linkColor
         property string hint
-        Layout.fillWidth: true
-        display: QQC2.AbstractButton.TextBesideIcon
-        icon.name: app.sym(iconName)
-        icon.color: tint
-        QQC2.ToolTip.visible: hovered && hint !== ""
-        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
-        QQC2.ToolTip.text: hint
+        implicitHeight: Math.max(Kirigami.Units.gridUnit * 3.6, implicitContentHeight + topPadding + bottomPadding)
+        leftPadding: Kirigami.Units.gridUnit * 0.9
+        rightPadding: Kirigami.Units.gridUnit * 0.9
+        topPadding: Kirigami.Units.largeSpacing * 1.25
+        bottomPadding: Kirigami.Units.largeSpacing * 1.25
+        background: Rectangle {
+            radius: Kirigami.Units.gridUnit * 0.9
+            color: Qt.alpha(Kirigami.Theme.textColor, soft.down ? 0.13 : soft.hovered ? 0.09 : 0.05)
+            border.width: soft.visualFocus ? 2 : 0
+            border.color: Kirigami.Theme.focusColor
+        }
+        contentItem: RowLayout {
+            spacing: Kirigami.Units.gridUnit * 0.7
+            Kirigami.Icon {
+                Layout.alignment: Qt.AlignVCenter
+                implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                implicitHeight: implicitWidth
+                source: app.sym(soft.iconName)
+                fallback: soft.iconName
+                isMask: true
+                color: soft.tint
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+                spacing: 2
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    font.weight: Font.DemiBold
+                    wrapMode: Text.Wrap
+                    textFormat: Text.PlainText
+                    text: soft.text
+                }
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    visible: soft.hint !== ""
+                    wrapMode: Text.Wrap
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.7
+                    textFormat: Text.PlainText
+                    text: soft.hint
+                }
+            }
+        }
     }
 
     // A card's actions as a section of its own, under a line across the card
