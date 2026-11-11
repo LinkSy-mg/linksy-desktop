@@ -9,8 +9,11 @@ Kirigami.ScrollablePage {
     id: page
     required property var app
     title: "Linksy"
-    // Kirigami adds a gap above the list on top of the header's own
+    // Kirigami adds a gap around the list on top of the rows' own: the rows keep their inset
+    // (the same as the island's and the buttons' under the list), nothing more
     topPadding: Kirigami.Units.smallSpacing
+    leftPadding: 0
+    rightPadding: 0
 
     // As wide as it's dragged (Main.qml remembers it), never so narrow that the island clips
     // or the title runs into Add Device. Set here, not as bindings: before Kirigami 6.16 these
@@ -107,6 +110,9 @@ Kirigami.ScrollablePage {
             visible: page.paired.length > 0
             topPadding: Kirigami.Units.smallSpacing * 2
             bottomPadding: 0
+            // In line with the rows' avatars and names
+            leftPadding: Kirigami.Units.smallSpacing * 4
+            rightPadding: Kirigami.Units.smallSpacing * 4
             text: app.t("Your Devices")
         }
         Repeater {
@@ -118,6 +124,8 @@ Kirigami.ScrollablePage {
             visible: page.nearby.length > 0
             topPadding: Kirigami.Units.smallSpacing * 2
             bottomPadding: 0
+            leftPadding: Kirigami.Units.smallSpacing * 4
+            rightPadding: Kirigami.Units.smallSpacing * 4
             text: app.t("Nearby, Not Paired")
         }
         Repeater {
