@@ -1326,57 +1326,68 @@ Kirigami.Page {
         }
     }
 
-    // Send Files, the big one: a dashed outline, the icon, the name, what it does. Files dropped
-    // anywhere on the page light it up (`dropping`).
-    component SendTile: QQC2.AbstractButton {
+    // Send Files, the big one, drawn as the other cards are (Kirigami's own card: a thin border,
+    // square-ish corners, a shadow), with a dashed outline inside it to say "drop here". Files
+    // dropped anywhere on the page light it up (`dropping`).
+    component SendTile: Kirigami.AbstractCard {
         id: send
         property string hint
         property string shortcut
         property bool dropping: false
-        readonly property real round: Kirigami.Units.gridUnit
+        readonly property real inset: Kirigami.Units.smallSpacing * 2
+        showClickFeedback: true
+        hoverEnabled: true
         implicitHeight: Kirigami.Units.gridUnit * 8.5
-        padding: Kirigami.Units.gridUnit * 1.2
-        background: Item {
-            Rectangle {
-                anchors.fill: parent
-                radius: send.round
-                color: send.dropping ? Qt.alpha(Kirigami.Theme.highlightColor, 0.14)
-                     : send.down ? Qt.alpha(Kirigami.Theme.highlightColor, 0.12)
-                     : send.hovered ? Qt.alpha(Kirigami.Theme.highlightColor, 0.06) : "transparent"
-            }
-            // The dashed outline. Its corners are bound to the shape's own size: bound to a
-            // property of the path, Qt draws only the first dash.
-            Shape {
-                id: outline
-                anchors.fill: parent
-                ShapePath {
-                    strokeColor: send.visualFocus ? Kirigami.Theme.focusColor : Qt.alpha(Kirigami.Theme.highlightColor, send.dropping ? 1 : 0.55)
-                    strokeWidth: 2
-                    fillColor: "transparent"
-                    strokeStyle: ShapePath.DashLine
-                    dashPattern: [3, 3]
-                    startX: send.round + 1
-                    startY: 1
-                    PathLine { x: outline.width - send.round - 1; y: 1 }
-                    PathArc { x: outline.width - 1; y: send.round + 1; radiusX: send.round; radiusY: send.round }
-                    PathLine { x: outline.width - 1; y: outline.height - send.round - 1 }
-                    PathArc { x: outline.width - send.round - 1; y: outline.height - 1; radiusX: send.round; radiusY: send.round }
-                    PathLine { x: send.round + 1; y: outline.height - 1 }
-                    PathArc { x: 1; y: outline.height - send.round - 1; radiusX: send.round; radiusY: send.round }
-                    PathLine { x: 1; y: send.round + 1 }
-                    PathArc { x: send.round + 1; y: 1; radiusX: send.round; radiusY: send.round }
-                }
+        leftPadding: Kirigami.Units.gridUnit * 1.2
+        rightPadding: Kirigami.Units.gridUnit * 1.2
+        topPadding: Kirigami.Units.gridUnit * 1.1
+        bottomPadding: Kirigami.Units.gridUnit * 1.1
+
+        // The drop zone: lit while files are over the page
+        Rectangle {
+            x: send.inset
+            y: send.inset
+            width: send.width - 2 * send.inset
+            height: send.height - 2 * send.inset
+            radius: Kirigami.Units.cornerRadius
+            color: Qt.alpha(Kirigami.Theme.highlightColor, send.dropping ? 0.14 : 0)
+        }
+        Shape {
+            id: outline
+            x: send.inset
+            y: send.inset
+            width: send.width - 2 * send.inset
+            height: send.height - 2 * send.inset
+            // Its corners are bound to the shape's own size: bound to a property of the path,
+            // Qt draws only the first dash.
+            ShapePath {
+                strokeColor: send.visualFocus ? Kirigami.Theme.focusColor : Qt.alpha(Kirigami.Theme.highlightColor, send.dropping ? 1 : 0.6)
+                strokeWidth: 1.5
+                fillColor: "transparent"
+                strokeStyle: ShapePath.DashLine
+                dashPattern: [4, 3]
+                startX: Kirigami.Units.cornerRadius + 1
+                startY: 1
+                PathLine { x: outline.width - Kirigami.Units.cornerRadius - 1; y: 1 }
+                PathArc { x: outline.width - 1; y: Kirigami.Units.cornerRadius + 1; radiusX: Kirigami.Units.cornerRadius; radiusY: Kirigami.Units.cornerRadius }
+                PathLine { x: outline.width - 1; y: outline.height - Kirigami.Units.cornerRadius - 1 }
+                PathArc { x: outline.width - Kirigami.Units.cornerRadius - 1; y: outline.height - 1; radiusX: Kirigami.Units.cornerRadius; radiusY: Kirigami.Units.cornerRadius }
+                PathLine { x: Kirigami.Units.cornerRadius + 1; y: outline.height - 1 }
+                PathArc { x: 1; y: outline.height - Kirigami.Units.cornerRadius - 1; radiusX: Kirigami.Units.cornerRadius; radiusY: Kirigami.Units.cornerRadius }
+                PathLine { x: 1; y: Kirigami.Units.cornerRadius + 1 }
+                PathArc { x: Kirigami.Units.cornerRadius + 1; y: 1; radiusX: Kirigami.Units.cornerRadius; radiusY: Kirigami.Units.cornerRadius }
             }
         }
+
         contentItem: ColumnLayout {
             spacing: Kirigami.Units.largeSpacing
             RowLayout {
                 Layout.fillWidth: true
                 Rectangle {
-                    implicitWidth: Math.round(Kirigami.Units.gridUnit * 2.6)
+                    implicitWidth: Math.round(Kirigami.Units.gridUnit * 2.4)
                     implicitHeight: implicitWidth
-                    radius: Kirigami.Units.gridUnit * 0.8
-                    color: Kirigami.Theme.highlightColor
+                    radius: width / 2
+                    color: Qt.alpha(Kirigami.Theme.linkColor, 0.14)
                     Kirigami.Icon {
                         anchors.centerIn: parent
                         width: Kirigami.Units.iconSizes.smallMedium
@@ -1384,7 +1395,7 @@ Kirigami.Page {
                         source: app.sym("document-send")
                         fallback: "document-send"
                         isMask: true
-                        color: Kirigami.Theme.highlightedTextColor
+                        color: Kirigami.Theme.linkColor
                     }
                 }
                 Item { Layout.fillWidth: true }
@@ -1399,7 +1410,7 @@ Kirigami.Page {
             Item { Layout.fillHeight: true }
             Kirigami.Heading {
                 Layout.fillWidth: true
-                level: 2
+                level: 3
                 font.weight: Font.DemiBold
                 textFormat: Text.PlainText
                 text: send.text
@@ -1414,33 +1425,33 @@ Kirigami.Page {
         }
     }
 
-    // One of the other everyday actions: its icon in its colour, its name, what it does
-    component SoftTile: QQC2.AbstractButton {
+    // One of the other everyday actions, a card too: its icon in its colour, its name, what it does
+    component SoftTile: Kirigami.AbstractCard {
         id: soft
         property string iconName
         property color tint: Kirigami.Theme.linkColor
         property string hint
-        implicitHeight: Math.max(Kirigami.Units.gridUnit * 3.6, implicitContentHeight + topPadding + bottomPadding)
-        leftPadding: Kirigami.Units.gridUnit * 0.9
-        rightPadding: Kirigami.Units.gridUnit * 0.9
-        topPadding: Kirigami.Units.largeSpacing * 1.25
-        bottomPadding: Kirigami.Units.largeSpacing * 1.25
-        background: Rectangle {
-            radius: Kirigami.Units.gridUnit * 0.9
-            color: Qt.alpha(Kirigami.Theme.textColor, soft.down ? 0.13 : soft.hovered ? 0.09 : 0.05)
-            border.width: soft.visualFocus ? 2 : 0
-            border.color: Kirigami.Theme.focusColor
-        }
+        showClickFeedback: true
+        hoverEnabled: true
+        leftPadding: Kirigami.Units.largeSpacing * 1.5
+        rightPadding: Kirigami.Units.largeSpacing * 1.5
         contentItem: RowLayout {
-            spacing: Kirigami.Units.gridUnit * 0.7
-            Kirigami.Icon {
+            spacing: Kirigami.Units.largeSpacing
+            Rectangle {
                 Layout.alignment: Qt.AlignVCenter
-                implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                implicitWidth: Math.round(Kirigami.Units.gridUnit * 2.2)
                 implicitHeight: implicitWidth
-                source: app.sym(soft.iconName)
-                fallback: soft.iconName
-                isMask: true
-                color: soft.tint
+                radius: width / 2
+                color: Qt.alpha(soft.tint, 0.14)
+                Kirigami.Icon {
+                    anchors.centerIn: parent
+                    width: Kirigami.Units.iconSizes.smallMedium
+                    height: width
+                    source: app.sym(soft.iconName)
+                    fallback: soft.iconName
+                    isMask: true
+                    color: soft.tint
+                }
             }
             ColumnLayout {
                 Layout.fillWidth: true
