@@ -129,74 +129,69 @@ ColumnLayout {
             "sound.volume": "audio-volume-high", "sound.mute": "audio-volume-muted", "sound.mic_mute": "microphone-sensitivity-muted",
             "sound.output": "audio-speakers", "system.lock": "system-lock-screen", "system.dnd": "notifications-disabled",
             "system.restart": "system-reboot", "system.shutdown": "system-shutdown", "network.wifi": "network-wireless",
-            "network.bluetooth": "bluetooth-active", "network.airplane": "airplane-mode", "power.saver": "power-profile-power-saver",
-            "power.balanced": "power-profile-balanced", "power.performance": "power-profile-performance", "power.auto": "battery-level-20"
+            "network.bluetooth": "preferences-system-bluetooth", "network.airplane": "network-flightmode-on", "power.saver": "battery-profile-powersave",
+            "power.balanced": "battery-profile-balanced", "power.performance": "battery-profile-performance", "power.auto": "battery-low"
         };
         const byKey = {
             play_pause: "media-playback-start", play: "media-playback-start", pause: "media-playback-pause", previous: "media-skip-backward",
             next: "media-skip-forward", speaker: "audio-volume-high", speaker_off: "audio-volume-muted", microphone: "audio-input-microphone",
             microphone_off: "microphone-sensitivity-muted", lock: "system-lock-screen", lightning: "weather-storm", star: "starred", heart: "starred",
-            moon: "night-light", sun: "weather-clear", house: "go-home", bell: "preferences-system-notifications", code: "application-x-executable",
-            power: "system-shutdown", rocket: "system-run", game: "input-gaming", camera: "camera-photo", coffee: "emoji-food",
+            moon: "weather-clear-night", sun: "weather-clear", house: "go-home", bell: "notifications", code: "application-x-executable",
+            power: "system-shutdown", rocket: "system-run", game: "input-gaming", camera: "camera-photo", coffee: "appointment-soon",
             music: "audio-headphones", monitor: "video-display", broadcast: "network-wireless-hotspot", flag: "emblem-important",
-            folder: "folder", globe: "network-workgroup", cloud: "weather-overcast", timer: "alarm"
+            folder: "folder", globe: "globe", cloud: "weather-overcast", timer: "alarm"
         };
         return byAction[action.id] ?? byKey[action.icon ?? ""] ?? "utilities-terminal";
     }
 
-    // One action: its icon, its name, a switch. A click anywhere on the tile turns the switch.
-    component ActionTile: Rectangle {
+    // One action: its icon, its name, a switch. A click anywhere on the card turns the switch.
+    component ActionTile: Kirigami.AbstractCard {
         id: tile
         required property var modelData
         // The page: an inline component does not see its ids
         required property var host
         property bool reserve: false
-        readonly property var action: modelData
+        readonly property var what: modelData
 
-        implicitHeight: body.implicitHeight + 2 * Kirigami.Units.largeSpacing
-        radius: Kirigami.Units.smallSpacing * 2
-        color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, tap.containsMouse ? 0.10 : 0.06)
-        border.width: 1
-        border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.10)
-
-        MouseArea {
-            id: tap
-            anchors.fill: parent
-            hoverEnabled: true
-            onClicked: {
-                toggle.checked = !toggle.checked;
-                tile.host.setAction(toggle, tile.action.id, toggle.checked);
-            }
+        showClickFeedback: true
+        onClicked: {
+            toggle.checked = !toggle.checked;
+            tile.host.setAction(toggle, tile.what.id, toggle.checked);
         }
-        ColumnLayout {
-            id: body
-            anchors.fill: parent
-            anchors.margins: Kirigami.Units.largeSpacing
+        contentItem: ColumnLayout {
             spacing: Kirigami.Units.smallSpacing
             RowLayout {
                 Layout.fillWidth: true
-                Kirigami.Icon {
-                    source: tile.host.tileIcon(tile.action)
-                    fallback: "utilities-terminal"
-                    implicitWidth: Kirigami.Units.iconSizes.smallMedium
-                    implicitHeight: Kirigami.Units.iconSizes.smallMedium
+                Rectangle {
+                    implicitWidth: Math.round(Kirigami.Units.gridUnit * 2.2)
+                    implicitHeight: implicitWidth
+                    radius: width / 2
+                    color: Qt.alpha(Kirigami.Theme.linkColor, 0.14)
+                    Kirigami.Icon {
+                        anchors.centerIn: parent
+                        width: Kirigami.Units.iconSizes.smallMedium
+                        height: width
+                        source: tile.host.app.sym(tile.host.tileIcon(tile.what))
+                        fallback: "utilities-terminal"
+                        isMask: true
+                        color: Kirigami.Theme.linkColor
+                    }
                 }
                 Item { Layout.fillWidth: true }
                 QQC2.Switch {
                     id: toggle
-                    checked: tile.action.on
-                    onToggled: tile.host.setAction(toggle, tile.action.id, checked)
-                    QQC2.ToolTip.text: tile.action.name
-                    Accessible.name: tile.action.name
+                    checked: tile.what.on
+                    onToggled: tile.host.setAction(toggle, tile.what.id, checked)
+                    Accessible.name: tile.what.name
                 }
             }
             // Names show as they are, never as markup
             QQC2.Label {
                 Layout.fillWidth: true
-                font.bold: true
+                font.weight: Font.DemiBold
                 wrapMode: Text.Wrap
                 textFormat: Text.PlainText
-                text: tile.action.name
+                text: tile.what.name
             }
             QQC2.Label {
                 Layout.fillWidth: true
@@ -204,13 +199,42 @@ ColumnLayout {
                 opacity: 0.7
                 font: Kirigami.Theme.smallFont
                 textFormat: Text.PlainText
-                text: tile.action.confirm ? tile.host.app.t("Asks first on {device}", { device: tile.host.name }) : " "
+                text: tile.what.confirm ? tile.host.app.t("Asks first on {device}", { device: tile.host.name }) : " "
             }
+        }
+    }
+
+    // A section's title, a line across, and a button at the end
+    component SectionHead: RowLayout {
+        id: head
+        property string title
+        property string button
+        signal pressed()
+        Layout.fillWidth: true
+        spacing: Kirigami.Units.largeSpacing
+        Kirigami.Heading {
+            level: 4
+            font.weight: Font.DemiBold
+            textFormat: Text.PlainText
+            text: head.title
+        }
+        Kirigami.Separator {
+            Layout.fillWidth: true
+            opacity: 0.6
+        }
+        QQC2.ToolButton {
+            visible: head.button !== ""
+            flat: true
+            text: head.button
+            onClicked: head.pressed()
         }
     }
 
     ColumnLayout {
         Layout.fillWidth: true
+        // Roomy, but not stretched across a wide window
+        Layout.maximumWidth: Kirigami.Units.gridUnit * 42
+        Layout.alignment: Qt.AlignHCenter
         spacing: Kirigami.Units.largeSpacing
 
         Kirigami.InlineMessage {
@@ -235,27 +259,30 @@ ColumnLayout {
         }
 
         // What the computer keeps of the phone's layouts
-        ColumnLayout {
+        Kirigami.AbstractCard {
             Layout.fillWidth: true
-            spacing: 0
             visible: page.needle === ""
-            QQC2.Label {
-                Layout.fillWidth: true
-                font.bold: true
-                elide: Text.ElideRight
-                textFormat: Text.PlainText
-                text: page.layout ? page.app.t("Layout: {name}", { name: page.layout.name }) : page.app.t("No layout saved yet")
-            }
-            QQC2.Label {
-                Layout.fillWidth: true
-                wrapMode: Text.Wrap
-                opacity: 0.7
-                textFormat: Text.PlainText
-                text: !page.layout
-                    ? page.app.t("Until {device} saves one, it shows a first layout of what is offered here.", { device: page.name })
-                    : page.app.t("{saved}, version {version}", {
-                        saved: page.layout.saved_at ? page.app.t("Saved from {device} on {when}", { device: page.name, when: page.whenSaved(page.layout.saved_at) }) : page.app.t("Made on this computer"),
-                        version: page.layout.version })
+            contentItem: ColumnLayout {
+                spacing: 0
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    font.weight: Font.DemiBold
+                    elide: Text.ElideRight
+                    textFormat: Text.PlainText
+                    text: page.layout ? page.app.t("Layout: {name}", { name: page.layout.name }) : page.app.t("No layout saved yet")
+                }
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    opacity: 0.7
+                    font: Kirigami.Theme.smallFont
+                    textFormat: Text.PlainText
+                    text: !page.layout
+                        ? page.app.t("Until {device} saves one, it shows a first layout of what is offered here.", { device: page.name })
+                        : page.app.t("{saved}, version {version}", {
+                            saved: page.layout.saved_at ? page.app.t("Saved from {device} on {when}", { device: page.name, when: page.whenSaved(page.layout.saved_at) }) : page.app.t("Made on this computer"),
+                            version: page.layout.version })
+                }
             }
         }
 
@@ -263,21 +290,12 @@ ColumnLayout {
         ColumnLayout {
             Layout.fillWidth: true
             Layout.topMargin: Kirigami.Units.largeSpacing
-            spacing: 0
+            spacing: Kirigami.Units.smallSpacing
             visible: page.needle === "" && page.askedOptions.length > 0
-            RowLayout {
-                Layout.fillWidth: true
-                Kirigami.Heading {
-                    Layout.fillWidth: true
-                    level: 4
-                    elide: Text.ElideRight
-                    text: page.app.t("Asked for by {device}", { device: page.name })
-                }
-                QQC2.ToolButton {
-                    flat: true
-                    text: page.app.t("Allow All")
-                    onClicked: page.setMany(page.askedOptions.map(a => a.id), true)
-                }
+            SectionHead {
+                title: page.app.t("Asked for by {device}", { device: page.name })
+                button: page.app.t("Allow All")
+                onPressed: page.setMany(page.askedOptions.map(a => a.id), true)
             }
             QQC2.Label {
                 Layout.fillWidth: true
@@ -290,7 +308,6 @@ ColumnLayout {
                 // A tile is one column wide, even when it is alone on its line
                 readonly property real cell: Math.max(0, Math.floor((width - spacing * (page.columnsFor(width) - 1)) / page.columnsFor(width)))
                 Layout.fillWidth: true
-                Layout.topMargin: Kirigami.Units.smallSpacing
                 spacing: Kirigami.Units.largeSpacing
                 Repeater {
                     model: page.askedOptions
@@ -310,31 +327,20 @@ ColumnLayout {
                 required property string modelData
                 readonly property var shown: page.shownIn(modelData)
                 readonly property var every: page.plain(modelData)
+                readonly property bool allOn: every.every(a => a.on)
                 visible: shown.length > 0
                 Layout.fillWidth: true
                 Layout.topMargin: Kirigami.Units.largeSpacing
-                spacing: 0
-                RowLayout {
-                    Layout.fillWidth: true
-                    Kirigami.Heading {
-                        Layout.fillWidth: true
-                        level: 4
-                        elide: Text.ElideRight
-                        text: page.groupTitle(group.modelData)
-                    }
-                    QQC2.ToolButton {
-                        readonly property bool allOn: group.every.every(a => a.on)
-                        flat: true
-                        visible: group.every.length > 1
-                        text: allOn ? page.app.t("Turn All Off") : page.app.t("Turn All On")
-                        onClicked: page.setMany(group.every.map(a => a.id), !allOn)
-                    }
+                spacing: Kirigami.Units.smallSpacing
+                SectionHead {
+                    title: page.groupTitle(group.modelData)
+                    button: group.every.length > 1 ? (group.allOn ? page.app.t("Turn All Off") : page.app.t("Turn All On")) : ""
+                    onPressed: page.setMany(group.every.map(a => a.id), !group.allOn)
                 }
                 Flow {
                     id: grid
                     readonly property real cell: Math.max(0, Math.floor((width - spacing * (page.columnsFor(width) - 1)) / page.columnsFor(width)))
                     Layout.fillWidth: true
-                    Layout.topMargin: Kirigami.Units.smallSpacing
                     spacing: Kirigami.Units.largeSpacing
                     Repeater {
                         model: group.shown
@@ -352,20 +358,12 @@ ColumnLayout {
         ColumnLayout {
             Layout.fillWidth: true
             Layout.topMargin: Kirigami.Units.largeSpacing
-            spacing: 0
+            spacing: Kirigami.Units.smallSpacing
             visible: page.needle === ""
-            RowLayout {
-                Layout.fillWidth: true
-                Kirigami.Heading {
-                    Layout.fillWidth: true
-                    level: 4
-                    text: page.app.t("Your Commands")
-                }
-                QQC2.Button {
-                    icon.name: "list-add"
-                    text: page.app.t("Add Command…")
-                    onClicked: form.openFor(-1)
-                }
+            SectionHead {
+                title: page.app.t("Your Commands")
+                button: page.app.t("Add Command…")
+                onPressed: form.openFor(-1)
             }
             QQC2.Label {
                 Layout.fillWidth: true
@@ -376,48 +374,53 @@ ColumnLayout {
             }
             Repeater {
                 model: page.commands
-                delegate: RowLayout {
+                delegate: Kirigami.AbstractCard {
                     id: command
                     required property var modelData
                     required property int index
                     Layout.fillWidth: true
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: 0
-                        QQC2.Label {
+                    contentItem: RowLayout {
+                        spacing: Kirigami.Units.smallSpacing
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: command.modelData.name
-                            textFormat: Text.PlainText
-                            elide: Text.ElideRight
+                            spacing: 0
+                            QQC2.Label {
+                                Layout.fillWidth: true
+                                font.weight: Font.DemiBold
+                                text: command.modelData.name
+                                textFormat: Text.PlainText
+                                elide: Text.ElideRight
+                            }
+                            QQC2.Label {
+                                Layout.fillWidth: true
+                                text: command.modelData.kind === "toggle"
+                                    ? command.modelData.command + " / " + (command.modelData.off ? command.modelData.off : page.app.t("same command"))
+                                    : command.modelData.command
+                                textFormat: Text.PlainText
+                                font.family: "monospace"
+                                font.pointSize: Kirigami.Theme.defaultFont.pointSize * 0.9
+                                wrapMode: Text.WrapAnywhere
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                                opacity: 0.7
+                            }
                         }
-                        QQC2.Label {
-                            Layout.fillWidth: true
-                            text: command.modelData.kind === "toggle"
-                                ? command.modelData.command + " / " + (command.modelData.off ? command.modelData.off : page.app.t("same command"))
-                                : command.modelData.command
-                            textFormat: Text.PlainText
-                            font.family: "monospace"
-                            wrapMode: Text.WrapAnywhere
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
-                            opacity: 0.7
+                        QQC2.ToolButton {
+                            icon.name: page.app.sym("document-edit")
+                            text: page.app.t("Edit Command")
+                            display: QQC2.AbstractButton.IconOnly
+                            QQC2.ToolTip.text: text
+                            QQC2.ToolTip.visible: hovered
+                            onClicked: form.openFor(command.index)
                         }
-                    }
-                    QQC2.ToolButton {
-                        icon.name: "document-edit"
-                        text: page.app.t("Edit Command")
-                        display: QQC2.AbstractButton.IconOnly
-                        QQC2.ToolTip.text: text
-                        QQC2.ToolTip.visible: hovered
-                        onClicked: form.openFor(command.index)
-                    }
-                    QQC2.ToolButton {
-                        icon.name: "user-trash"
-                        text: page.app.t("Remove Command")
-                        display: QQC2.AbstractButton.IconOnly
-                        QQC2.ToolTip.text: text
-                        QQC2.ToolTip.visible: hovered
-                        onClicked: page.saveCommands(page.commands.filter((o, i) => i !== command.index))
+                        QQC2.ToolButton {
+                            icon.name: page.app.sym("user-trash")
+                            text: page.app.t("Remove Command")
+                            display: QQC2.AbstractButton.IconOnly
+                            QQC2.ToolTip.text: text
+                            QQC2.ToolTip.visible: hovered
+                            onClicked: page.saveCommands(page.commands.filter((o, i) => i !== command.index))
+                        }
                     }
                 }
             }
