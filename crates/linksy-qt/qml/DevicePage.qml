@@ -321,9 +321,14 @@ Kirigami.Page {
     }
 
     QQC2.ScrollView {
+        id: scroll
         anchors.fill: parent
         visible: !page.deckOpen
         QQC2.ScrollBar.horizontal.policy: QQC2.ScrollBar.AlwaysOff
+        // The page is laid out as if the scrollbar were always there. KDE's style takes its width
+        // from the view while it shows, so a long tab and a short one would have columns of
+        // different widths, and everything would shift as the tab changes.
+        readonly property real barWidth: QQC2.ScrollBar.vertical.width
 
         Flickable {
             id: flick
@@ -337,9 +342,9 @@ Kirigami.Page {
 
             ColumnLayout {
                 id: column
-                x: (flick.width - width) / 2
+                x: (scroll.width - scroll.barWidth - width) / 2
                 y: Kirigami.Units.largeSpacing * 2
-                width: Math.min(flick.width - Kirigami.Units.gridUnit * 2, Kirigami.Units.gridUnit * 48)
+                width: Math.min(scroll.width - scroll.barWidth - Kirigami.Units.gridUnit * 2, Kirigami.Units.gridUnit * 48)
                 spacing: Kirigami.Units.largeSpacing * 2
                 visible: page.info !== null
 
