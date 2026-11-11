@@ -122,9 +122,7 @@ impl DeckView {
         let (view, ids) = (self.clone(), asked.iter().map(|a| a.action.id.clone()).collect::<Vec<_>>());
         all.connect_clicked(move |_| view.set_many(ids.clone(), true));
         group.set_header_suffix(Some(&all));
-        for option in asked {
-            group.add(&self.action_row(option));
-        }
+        group.add(&self.tiles(&asked));
         Some(group)
     }
 
@@ -154,30 +152,67 @@ impl DeckView {
                 all.connect_clicked(move |_| view.set_many(plain.clone(), !every));
                 group.set_header_suffix(Some(&all));
             }
-            for option in shown {
-                group.add(&self.action_row(option));
-            }
+            group.add(&self.tiles(&shown));
             made.push(group);
         }
         made
     }
 
-    fn action_row(self: &Rc<Self>, option: &DeckOption) -> adw::SwitchRow {
-        let row = adw::SwitchRow::builder().title(glib::markup_escape_text(&option.action.name)).active(option.on).build();
-        if option.action.confirm.is_some() {
-            row.set_subtitle(&t!("Asks first on {device}", device = self.device));
+    /// A grid of tiles, a switch each: the icon, the name, and whether it asks first.
+    fn tiles(self: &Rc<Self>, options: &[&DeckOption]) -> gtk::FlowBox {
+        let flow = gtk::FlowBox::builder()
+            .selection_mode(gtk::SelectionMode::None)
+            .homogeneous(true)
+            .min_children_per_line(2)
+            .max_children_per_line(3)
+            .column_spacing(10)
+            .row_spacing(10)
+            .activate_on_single_click(false)
+            .build();
+        // A line for "asks first" only where one of these does, so a grid of plain tiles stays short
+        let note = options.iter().any(|o| o.action.confirm.is_some());
+        for option in options {
+            let tile = self.action_tile(option, note);
+            let child = gtk::FlowBoxChild::builder().child(&tile).focusable(false).build();
+            flow.append(&child);
         }
+        flow
+    }
+
+    fn action_tile(self: &Rc<Self>, option: &DeckOption, note: bool) -> gtk::Box {
+        let tile = gtk::Box::builder().orientation(gtk::Orientation::Vertical).css_classes(["card", "activatable"]).build();
+        let pad = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(6).margin_top(12).margin_bottom(12).margin_start(12).margin_end(12).build();
+        let icon = gtk::Image::builder().icon_name(format!("{}-symbolic", tile_icon(&option.action.id, option.action.icon.as_deref()))).pixel_size(24).halign(gtk::Align::Start).hexpand(true).build();
+        let switch = gtk::Switch::builder().active(option.on).valign(gtk::Align::Center).build();
+        switch.update_property(&[gtk::accessible::Property::Label(&option.action.name)]);
+        let top = gtk::Box::builder().spacing(8).build();
+        top.append(&icon);
+        top.append(&switch);
+        pad.append(&top);
+        pad.append(&gtk::Label::builder().label(&option.action.name).wrap(true).wrap_mode(gtk::pango::WrapMode::WordChar).xalign(0.0).css_classes(["heading"]).build());
+        if note {
+            let line = if option.action.confirm.is_some() { t!("Asks first on {device}", device = self.device) } else { String::from(" ") };
+            pad.append(&gtk::Label::builder().label(line).wrap(true).xalign(0.0).css_classes(["caption", "dim-label"]).build());
+        }
+        tile.append(&pad);
+
+        // The tile is the target: a click anywhere on it turns the switch
+        let click = gtk::GestureClick::new();
+        let s = switch.clone();
+        click.connect_released(move |_, _, _, _| s.set_active(!s.is_active()));
+        tile.add_controller(click);
+
         let (view, id) = (self.clone(), option.action.id.clone());
-        row.connect_active_notify(move |row| {
+        switch.connect_active_notify(move |switch| {
             if !view.reverting.get() {
-                view.set_action(row, &id, row.is_active());
+                view.set_action(switch, &id, switch.is_active());
             }
         });
-        row
+        tile
     }
 
     /// Saved, or the switch goes back with why.
-    fn set_action(self: &Rc<Self>, row: &adw::SwitchRow, id: &str, on: bool) {
+    fn set_action(self: &Rc<Self>, row: &gtk::Switch, id: &str, on: bool) {
         let Some(win) = self.win.upgrade() else { return };
         let Some(c) = win.client() else { return };
         let (phone, action) = (self.phone.to_string(), id.to_string());
@@ -549,6 +584,63 @@ fn group_title(group: &str) -> String {
         "Power" => t!("Power").into(),
         "Commands" => t!("Commands").into(),
         other => other.into(),
+    }
+}
+
+/// The theme icon (without "-symbolic") for a tile: by action, or for one of the user's own
+/// commands by the phone icon it was given.
+fn tile_icon(id: &str, key: Option<&str>) -> &'static str {
+    match id {
+        "media.play_pause" => "media-playback-start",
+        "media.next" => "media-skip-forward",
+        "media.previous" => "media-skip-backward",
+        "sound.volume" => "audio-volume-high",
+        "sound.mute" => "audio-volume-muted",
+        "sound.mic_mute" => "microphone-sensitivity-muted",
+        "sound.output" => "audio-speakers",
+        "system.lock" => "system-lock-screen",
+        "system.dnd" => "notifications-disabled",
+        "system.restart" => "system-reboot",
+        "system.shutdown" => "system-shutdown",
+        "network.wifi" => "network-wireless",
+        "network.bluetooth" => "bluetooth-active",
+        "network.airplane" => "airplane-mode",
+        "power.saver" => "power-profile-power-saver",
+        "power.balanced" => "power-profile-balanced",
+        "power.performance" => "power-profile-performance",
+        "power.auto" => "battery-level-20",
+        _ => match key.unwrap_or_default() {
+            "play_pause" | "play" => "media-playback-start",
+            "pause" => "media-playback-pause",
+            "previous" => "media-skip-backward",
+            "next" => "media-skip-forward",
+            "speaker" => "audio-volume-high",
+            "speaker_off" => "audio-volume-muted",
+            "microphone" => "audio-input-microphone",
+            "microphone_off" => "microphone-sensitivity-muted",
+            "lock" => "system-lock-screen",
+            "lightning" => "weather-storm",
+            "star" | "heart" => "starred",
+            "moon" => "night-light",
+            "sun" => "weather-clear",
+            "house" => "go-home",
+            "bell" => "preferences-system-notifications",
+            "code" => "application-x-executable",
+            "power" => "system-shutdown",
+            "rocket" => "system-run",
+            "game" => "input-gaming",
+            "camera" => "camera-photo",
+            "coffee" => "emoji-food",
+            "music" => "audio-headphones",
+            "monitor" => "video-display",
+            "broadcast" => "network-wireless-hotspot",
+            "flag" => "emblem-important",
+            "folder" => "folder",
+            "globe" => "network-workgroup",
+            "cloud" => "weather-overcast",
+            "timer" => "alarm",
+            _ => "utilities-terminal",
+        },
     }
 }
 
