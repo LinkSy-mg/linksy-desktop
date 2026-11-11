@@ -656,7 +656,9 @@ impl DevicePage {
         let settings_page = gtk::Box::builder().orientation(gtk::Orientation::Vertical).spacing(22).build();
         settings_page.append(&settings);
         settings_page.append(&forget_button);
-        let tab_stack = gtk::Stack::builder().vhomogeneous(false).hhomogeneous(false).transition_type(gtk::StackTransitionType::Crossfade).transition_duration(120).build();
+        // Every tab asks for the widest one's width, or the clamp around them gives the column a
+        // different width on each tab and the whole page shifts as they change
+        let tab_stack = gtk::Stack::builder().vhomogeneous(false).hhomogeneous(true).transition_type(gtk::StackTransitionType::Crossfade).transition_duration(120).build();
         tab_stack.add_named(&use_page, Some(Tab::Use.name()));
         tab_stack.add_named(&inbox_view, Some(Tab::Inbox.name()));
         tab_stack.add_named(&gallery_view, Some(Tab::Gallery.name()));
