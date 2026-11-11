@@ -117,6 +117,98 @@ ColumnLayout {
         }
     }
 
+    // Tiles in a row: as many as fit, never fewer than two or more than three
+    function columnsFor(width) {
+        return Math.max(2, Math.min(3, Math.floor(width / (Kirigami.Units.gridUnit * 11))));
+    }
+
+    // The theme icon for a tile: by action, or for one of your own commands by the phone icon it has
+    function tileIcon(action) {
+        const byAction = {
+            "media.play_pause": "media-playback-start", "media.next": "media-skip-forward", "media.previous": "media-skip-backward",
+            "sound.volume": "audio-volume-high", "sound.mute": "audio-volume-muted", "sound.mic_mute": "microphone-sensitivity-muted",
+            "sound.output": "audio-speakers", "system.lock": "system-lock-screen", "system.dnd": "notifications-disabled",
+            "system.restart": "system-reboot", "system.shutdown": "system-shutdown", "network.wifi": "network-wireless",
+            "network.bluetooth": "bluetooth-active", "network.airplane": "airplane-mode", "power.saver": "power-profile-power-saver",
+            "power.balanced": "power-profile-balanced", "power.performance": "power-profile-performance", "power.auto": "battery-level-20"
+        };
+        const byKey = {
+            play_pause: "media-playback-start", play: "media-playback-start", pause: "media-playback-pause", previous: "media-skip-backward",
+            next: "media-skip-forward", speaker: "audio-volume-high", speaker_off: "audio-volume-muted", microphone: "audio-input-microphone",
+            microphone_off: "microphone-sensitivity-muted", lock: "system-lock-screen", lightning: "weather-storm", star: "starred", heart: "starred",
+            moon: "night-light", sun: "weather-clear", house: "go-home", bell: "preferences-system-notifications", code: "application-x-executable",
+            power: "system-shutdown", rocket: "system-run", game: "input-gaming", camera: "camera-photo", coffee: "emoji-food",
+            music: "audio-headphones", monitor: "video-display", broadcast: "network-wireless-hotspot", flag: "emblem-important",
+            folder: "folder", globe: "network-workgroup", cloud: "weather-overcast", timer: "alarm"
+        };
+        return byAction[action.id] ?? byKey[action.icon ?? ""] ?? "utilities-terminal";
+    }
+
+    // One action: its icon, its name, a switch. A click anywhere on the tile turns the switch.
+    component ActionTile: Rectangle {
+        id: tile
+        required property var modelData
+        // The page: an inline component does not see its ids
+        required property var host
+        property bool reserve: false
+        readonly property var action: modelData
+
+        implicitHeight: body.implicitHeight + 2 * Kirigami.Units.largeSpacing
+        radius: Kirigami.Units.smallSpacing * 2
+        color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, tap.containsMouse ? 0.10 : 0.06)
+        border.width: 1
+        border.color: Qt.rgba(Kirigami.Theme.textColor.r, Kirigami.Theme.textColor.g, Kirigami.Theme.textColor.b, 0.10)
+
+        MouseArea {
+            id: tap
+            anchors.fill: parent
+            hoverEnabled: true
+            onClicked: {
+                toggle.checked = !toggle.checked;
+                tile.host.setAction(toggle, tile.action.id, toggle.checked);
+            }
+        }
+        ColumnLayout {
+            id: body
+            anchors.fill: parent
+            anchors.margins: Kirigami.Units.largeSpacing
+            spacing: Kirigami.Units.smallSpacing
+            RowLayout {
+                Layout.fillWidth: true
+                Kirigami.Icon {
+                    source: tile.host.tileIcon(tile.action)
+                    fallback: "utilities-terminal"
+                    implicitWidth: Kirigami.Units.iconSizes.smallMedium
+                    implicitHeight: Kirigami.Units.iconSizes.smallMedium
+                }
+                Item { Layout.fillWidth: true }
+                QQC2.Switch {
+                    id: toggle
+                    checked: tile.action.on
+                    onToggled: tile.host.setAction(toggle, tile.action.id, checked)
+                    QQC2.ToolTip.text: tile.action.name
+                    Accessible.name: tile.action.name
+                }
+            }
+            // Names show as they are, never as markup
+            QQC2.Label {
+                Layout.fillWidth: true
+                font.bold: true
+                wrapMode: Text.Wrap
+                textFormat: Text.PlainText
+                text: tile.action.name
+            }
+            QQC2.Label {
+                Layout.fillWidth: true
+                visible: tile.reserve
+                opacity: 0.7
+                font: Kirigami.Theme.smallFont
+                textFormat: Text.PlainText
+                text: tile.action.confirm ? tile.host.app.t("Asks first on {device}", { device: tile.host.name }) : " "
+            }
+        }
+    }
+
     ColumnLayout {
         Layout.fillWidth: true
         spacing: Kirigami.Units.largeSpacing
@@ -193,21 +285,19 @@ ColumnLayout {
                 opacity: 0.7
                 text: page.app.t("Its deck has buttons for these, which stay off until you allow them.")
             }
-            Repeater {
-                model: page.askedOptions
-                delegate: QQC2.SwitchDelegate {
-                    id: askedRow
-                    required property var modelData
-                    Layout.fillWidth: true
-                    text: modelData.name
-                    checked: modelData.on
-                    onToggled: page.setAction(askedRow, modelData.id, checked)
-                    // Names show as they are, never as markup
-                    contentItem: QQC2.Label {
-                        text: askedRow.text
-                        textFormat: Text.PlainText
-                        elide: Text.ElideRight
-                        verticalAlignment: Text.AlignVCenter
+            Flow {
+                id: askedGrid
+                // A tile is one column wide, even when it is alone on its line
+                readonly property real cell: Math.max(0, Math.floor((width - spacing * (page.columnsFor(width) - 1)) / page.columnsFor(width)))
+                Layout.fillWidth: true
+                Layout.topMargin: Kirigami.Units.smallSpacing
+                spacing: Kirigami.Units.largeSpacing
+                Repeater {
+                    model: page.askedOptions
+                    delegate: ActionTile {
+                        width: askedGrid.cell
+                        host: page
+                        reserve: page.askedOptions.some(a => !!a.confirm)
                     }
                 }
             }
@@ -240,32 +330,18 @@ ColumnLayout {
                         onClicked: page.setMany(group.every.map(a => a.id), !allOn)
                     }
                 }
-                Repeater {
-                    model: group.shown
-                    delegate: QQC2.SwitchDelegate {
-                        id: actionRow
-                        required property var modelData
-                        Layout.fillWidth: true
-                        text: modelData.name
-                        checked: modelData.on
-                        onToggled: page.setAction(actionRow, modelData.id, checked)
-                        // Names show as they are, never as markup
-                        contentItem: ColumnLayout {
-                            spacing: 0
-                            QQC2.Label {
-                                Layout.fillWidth: true
-                                text: actionRow.text
-                                textFormat: Text.PlainText
-                                elide: Text.ElideRight
-                            }
-                            QQC2.Label {
-                                Layout.fillWidth: true
-                                visible: !!actionRow.modelData.confirm
-                                opacity: 0.7
-                                font: Kirigami.Theme.smallFont
-                                textFormat: Text.PlainText
-                                text: page.app.t("Asks first on {device}", { device: page.name })
-                            }
+                Flow {
+                    id: grid
+                    readonly property real cell: Math.max(0, Math.floor((width - spacing * (page.columnsFor(width) - 1)) / page.columnsFor(width)))
+                    Layout.fillWidth: true
+                    Layout.topMargin: Kirigami.Units.smallSpacing
+                    spacing: Kirigami.Units.largeSpacing
+                    Repeater {
+                        model: group.shown
+                        delegate: ActionTile {
+                            width: grid.cell
+                            host: page
+                            reserve: group.shown.some(a => !!a.confirm)
                         }
                     }
                 }
