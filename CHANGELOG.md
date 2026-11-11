@@ -2,14 +2,18 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.14.0
 
 ### Changed
 - **The deck is edited on the phone.** The computer's own deck editor is gone (it was in the
-  GTK app only). A phone's deck page on the computer is now what it may do here: a switch
-  for each action, by group, with Turn All On and Off for the ones that don't ask first; what
-  its saved deck asked for; and your own commands. Both apps have it, the same. Layouts you
-  made on the computer before stay, and show on the phone.
+  GTK app only). A phone's deck page on the computer is now what it may do here: a grid of
+  tiles, a switch each, by group, with Turn All On and Off for the ones that don't ask first;
+  what its saved deck asked for; and your own commands. Both apps have it, the same. Layouts
+  you made on the computer before stay, and show on the phone.
+- **The Qt app's device page matches the GTK app's:** Send Files is a big dashed tile (also
+  where files are dropped, and Ctrl+O now chooses them there too), with Clipboard, View
+  Screen, Ring and Locate as cards beside it, in the style of the other cards. The devices
+  column starts narrower, and the list's sides line up with the buttons under it.
 - **A phone can't turn on an action by putting a button for it on its deck.** Restart, Shut
   Down, Airplane Mode and your commands stay off until you allow them on the computer. When a
   saved deck uses one, the page lists it under "Asked for by" the phone, and a notification
@@ -26,6 +30,11 @@ Linksy for Linux. Each version's section becomes its release notes.
 - **Try It Now** beside a command line: runs it once and shows the exit code and what it
   printed.
 - Network, Power and Time group names are translated in the Qt app, like in the GTK app.
+
+### Fixed
+- **A device's page no longer shifts as you change tabs.** In the GTK app the page was
+  narrower on tabs with narrower content (Inbox, Files), and in the Qt app it moved by the
+  width of the scrollbar when a tab was long enough to scroll.
 
 ## 0.13.3
 

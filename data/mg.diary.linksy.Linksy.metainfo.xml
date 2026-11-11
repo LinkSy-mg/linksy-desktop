@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.14.0" date="2026-11-11">
+      <description>
+        <p>The deck is edited on the phone: the computer's page is now a grid of switches by group, what the phone's saved deck asked for, and your own commands, which can have a group, an icon and be switches. A phone can no longer turn an action on by putting it on its deck. The Qt app's device page matches the GTK app's, and a device's page no longer shifts as you change tabs.</p>
+      </description>
+    </release>
     <release version="0.13.3" date="2026-11-10">
       <description>
         <p>Fix: the phone's microphone no longer goes silent after a moment on PipeWire 1.6.</p>
