@@ -17,7 +17,8 @@ Kirigami.ScrollablePage {
         const column = page.Kirigami.ColumnView;
         if (column.interactiveResizeEnabled === undefined) return;
         column.minimumWidth = Qt.binding(() => Math.max(Kirigami.Units.gridUnit * 13, island.implicitWidth + island.Layout.leftMargin + island.Layout.rightMargin + footer.leftPadding + footer.rightPadding));
-        column.preferredWidth = Qt.binding(() => Kirigami.Units.gridUnit * 20);
+        // Small to begin with, as the GTK app's list is (about 270 px); dragged wider, it stays so
+        column.preferredWidth = Qt.binding(() => Math.max(column.minimumWidth, Kirigami.Units.gridUnit * 15));
         column.maximumWidth = Qt.binding(() => Kirigami.Units.gridUnit * 30);
         column.interactiveResizeEnabled = true;
     }
@@ -212,6 +213,9 @@ Kirigami.ScrollablePage {
             }
             QQC2.Button {
                 Layout.fillWidth: true
+                // The island's own margin, so it and the buttons under it are as wide
+                Layout.leftMargin: Kirigami.Units.smallSpacing
+                Layout.rightMargin: Kirigami.Units.smallSpacing
                 // Screenshots (LINKSY_SCREENSHOT) show the app as on a finished setup
                 readonly property int missing: backend.env("LINKSY_SCREENSHOT") ? 0 : (app.setup?.missing ?? 0)
                 visible: missing > 0
@@ -221,6 +225,8 @@ Kirigami.ScrollablePage {
             }
             QQC2.Button {
                 Layout.fillWidth: true
+                Layout.leftMargin: Kirigami.Units.smallSpacing
+                Layout.rightMargin: Kirigami.Units.smallSpacing
                 visible: app.update !== null
                 flat: true
                 icon.name: "update-none"
