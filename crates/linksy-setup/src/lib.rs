@@ -12,6 +12,8 @@ use gio::prelude::*;
 use linksy_i18n::t;
 pub use linksy_host::pkexec::Prompt;
 
+pub mod pieces;
+
 /// Which window asks: they show video with different GStreamer sinks.
 #[derive(Clone, Copy, PartialEq)]
 pub enum Ui {
@@ -553,49 +555,35 @@ pub fn check(ui: Ui) -> Vec<Item> {
     });
     // In a Flatpak, codecs and tools come with the runtime and the app.
     if !flatpak() {
-        // H.264 both ways, and the window's video sink to show it: GTK's (on openSUSE, in
-        // the gstreamer-plugins-rs bundle) or Qt Quick's.
-        let (mut fedora, mut debian, mut arch, mut suse) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        if !(has_element(&["avdec_h264", "vah264dec", "openh264dec"]) && has_element(&["vah264lpenc", "vah264enc", "x264enc", "openh264enc"])) {
-            fedora.extend(["gstreamer1-plugin-openh264", "gstreamer1-plugin-libav"]);
-            debian.extend(["gstreamer1.0-libav", "gstreamer1.0-plugins-ugly"]);
-            arch.extend(["gst-libav", "gst-plugins-ugly"]);
-            suse.extend(["gstreamer-plugin-openh264", "gstreamer-plugins-libav"]);
-        }
-        let codecs = fedora.is_empty();
-        // What the phone's camera is read with and written to its device with: a tarball
-        // installs neither, and the camera closed at once without them (desktop#85)
-        if !has_element(&["h264parse"]) {
-            fedora.push("gstreamer1-plugins-bad-free");
-            debian.push("gstreamer1.0-plugins-bad");
-            arch.push("gst-plugins-bad");
-            suse.push("gstreamer-plugins-bad");
-        }
-        if !has_element(&["v4l2sink"]) {
-            fedora.push("gstreamer1-plugins-good");
-            debian.push("gstreamer1.0-plugins-good");
-            arch.push("gst-plugins-good");
-            suse.push("gstreamer-plugins-good");
-        }
-        let pieces = fedora.len() > if codecs { 0 } else { 2 };
+        // What is missing of some pieces, as the packages that bring it, per family
+        let lacking = |wanted: &[&pieces::Piece]| {
+            let mut lists: [Vec<&'static str>; 4] = Default::default();
+            for p in wanted.iter().filter(|p| !has_element(p.elements)) {
+                for (list, names) in lists.iter_mut().zip([p.fedora, p.debian, p.arch, p.suse]) {
+                    for name in names {
+                        if !list.contains(name) {
+                            list.push(name);
+                        }
+                    }
+                }
+            }
+            lists
+        };
+        let need = |lists: &[Vec<&'static str>; 4], manual: &'static str| if lists[0].is_empty() { Need::Ready } else { pick(&lists[0], &lists[1], &lists[2], &lists[3], manual) };
+        // H.264 both ways, what reads it and writes the camera's device (a tarball installs
+        // neither, and the camera closed at once without them: desktop#85), and the window's
+        // video sink: GTK's (on openSUSE, in the gstreamer-plugins-rs bundle) or Qt Quick's.
+        let mut video = vec![&pieces::BASE, &pieces::H264_DECODER, &pieces::H264_ENCODER, &pieces::H264_PARSE, &pieces::CAMERA_DEVICE];
         match ui {
             // Ubuntu 24.04 has no package for it: the app draws frames itself there
-            Ui::Gtk if !has_element(&["gtk4paintablesink"]) && !(family() == Family::Debian && !apt_has("gstreamer1.0-gtk4")) => {
-                fedora.push("gstreamer1-plugin-gtk4");
-                debian.push("gstreamer1.0-gtk4");
-                arch.push("gst-plugin-gtk4");
-                suse.push("gstreamer-plugins-rs");
-            }
-            Ui::Qt if !has_element(&["qml6glsink"]) => {
-                fedora.push("gstreamer1-plugins-good-qt6");
-                debian.push("gstreamer1.0-qt6");
-                arch.push("gst-plugin-qml6");
-                suse.push("gstreamer-plugins-good-qtqml6");
-            }
+            Ui::Gtk if !(fam == Family::Debian && !apt_has("gstreamer1.0-gtk4")) => video.push(&pieces::GTK_SINK),
+            Ui::Qt => video.push(&pieces::QT_SINK),
             _ => {}
         }
+        let codecs = has_element(pieces::H264_DECODER.elements) && has_element(pieces::H264_ENCODER.elements);
+        let sets = !has_element(pieces::H264_PARSE.elements) || !has_element(pieces::CAMERA_DEVICE.elements);
         let manual = match ui {
-            _ if codecs && pieces => t!("Install GStreamer's good and bad plugin sets (for v4l2sink and h264parse) from your distribution."),
+            _ if codecs && sets => t!("Install GStreamer's good and bad plugin sets (for v4l2sink and h264parse) from your distribution."),
             Ui::Gtk => t!("Install GStreamer's H.264 plugins (openh264 or libav) and its GTK 4 video sink (gtk4paintablesink) from your distribution."),
             Ui::Qt => t!("Install GStreamer's H.264 plugins (openh264 or libav) and its Qt 6 video sink (qml6glsink) from your distribution."),
         };
@@ -603,25 +591,18 @@ pub fn check(ui: Ui) -> Vec<Item> {
             id: "video",
             title: t!("Video for Screens and Cameras"),
             why: t!("To send and show screens, second displays and the phone's camera."),
-            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, &suse, manual) },
+            need: need(&lacking(&video), manual),
         });
-        let (mut fedora, mut debian, mut arch, mut suse) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-        if !has_element(&["pipewiresrc"]) {
-            fedora.push("pipewire-gstreamer");
-            debian.push("gstreamer1.0-pipewire");
-            arch.push("gst-plugin-pipewire");
-            suse.push("gstreamer-plugin-pipewire");
-        }
-        if x11() {
-            // No portal works on X11: Linksy reads the display itself (#67)
-            if !has_element(&["ximagesrc"]) {
-                fedora.push("gstreamer1-plugins-good");
-                debian.push("gstreamer1.0-plugins-good");
-                arch.push("gst-plugins-good");
-                suse.push("gstreamer-plugins-good");
-            }
-        } else if !screencast_portal() {
-            for list in [&mut fedora, &mut debian, &mut arch, &mut suse] {
+        items.push(Item {
+            id: "audio",
+            title: t!("Microphone and Sound"),
+            why: t!("Playing the phone's sound here, and sending this computer's microphone to it."),
+            need: need(&lacking(&[&pieces::BASE, &pieces::SOUND, &pieces::MIC_BUFFERS]), t!("Install GStreamer's good and bad plugin sets from your distribution.")),
+        });
+        // No portal works on X11: Linksy reads the display itself (#67)
+        let mut screen = lacking(&if x11() { vec![&pieces::PIPEWIRE, &pieces::X11_SCREEN] } else { vec![&pieces::PIPEWIRE] });
+        if !x11() && !screencast_portal() {
+            for list in &mut screen {
                 list.push(portal_package());
             }
         }
@@ -629,7 +610,7 @@ pub fn check(ui: Ui) -> Vec<Item> {
             id: "pipewire",
             title: t!("Screen Sharing"),
             why: t!("Reading this computer's screen, and offering the phone's camera to apps."),
-            need: if fedora.is_empty() { Need::Ready } else { pick(&fedora, &debian, &arch, &suse, t!("Install PipeWire's GStreamer plugin and your desktop's screen sharing portal.")) },
+            need: need(&screen, t!("Install PipeWire's GStreamer plugin and your desktop's screen sharing portal.")),
         });
         // Fedora's AMD video driver leaves H.264 encoding out (patents): RPM Fusion's full one
         // lets the GPU encode a second display at up to 60 fps, instead of the CPU at 30
