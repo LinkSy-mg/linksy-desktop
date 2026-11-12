@@ -13,6 +13,7 @@ mod island;
 mod transfers;
 mod invite;
 mod messages;
+mod onboarding;
 mod news;
 mod upgrade;
 mod page;
@@ -83,6 +84,8 @@ struct State {
     download_dir: Option<PathBuf>,
     port: Option<u16>,
     invite_dialog: Option<adw::Dialog>,
+    /// The first run's welcome, while it covers the window.
+    onboarding: Option<Rc<onboarding::Onboarding>>,
     /// The Add Device dialog's nearby list and its empty label, while it's open.
     invite_nearby: Option<(gtk::ListBox, gtk::Label)>,
     /// The session in which this device shares its screen, if any.
@@ -127,6 +130,8 @@ pub struct Window {
     bridge: Bridge,
     state: RefCell<State>,
     toasts: adw::ToastOverlay,
+    /// Over the whole window: the corner's panel, and the first run's welcome.
+    overlay: gtk::Overlay,
     stack: gtk::Stack,
     /// "Studio is watching your screen" with Stop.
     sharing_banner: adw::Banner,
@@ -335,6 +340,7 @@ impl Window {
             bridge: Bridge::new(),
             state: RefCell::default(),
             toasts,
+            overlay,
             stack,
             sharing_banner,
             split,
@@ -485,8 +491,9 @@ impl Window {
             }
         });
         win.refresh_setup();
-        // One thing at a time: Finish Setup when it's needed, otherwise what's new
-        if !win.offer_setup() {
+        // One thing at a time: the welcome on a first run (Finish Setup is one of its
+        // slides), else Finish Setup when it's needed, otherwise what's new
+        if !win.offer_onboarding() && !win.offer_setup() {
             win.offer_news();
         }
         let w = win.clone();
@@ -510,7 +517,8 @@ impl Window {
 
     fn setup_actions(self: &Rc<Self>) {
         type Run = fn(&Rc<Window>);
-        let actions: [(&str, Run); 15] = [
+        let actions: [(&str, Run); 16] = [
+            ("onboarding", |w| w.show_onboarding()),
             ("choose-files", |w| w.choose_files()),
             ("transfers", |w| w.open_transfers()),
             ("toggle-sidebar", |w| w.split.set_show_sidebar(!w.split.shows_sidebar())),
@@ -1129,6 +1137,7 @@ impl Window {
             Event::Paired { device } => {
                 self.close_pair_dialog(&device.id);
                 self.close_invite_dialog();
+                self.onboarding_paired(&device.name);
                 self.toast(&t!("Paired with {name}", name = device.name));
                 // Open the new device's page.
                 self.state.borrow_mut().selected = Some(device.id);

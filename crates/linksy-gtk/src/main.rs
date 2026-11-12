@@ -284,6 +284,7 @@ list.transfers-recent image.open { -gtk-icon-transform: rotate(180deg); }
 }
 .offer-list { padding: 10px 14px; }
 .qr-card { margin-top: 4px; }
+.onboarding-icon { min-width: 40px; min-height: 40px; border-radius: 99px; color: @accent_color; background-color: alpha(@accent_bg_color, 0.12); }
 .numeric { font-feature-settings: "tnum"; }
 .screen-view { background-color: black; }
 .menu-box button { padding: 6px 14px; }
