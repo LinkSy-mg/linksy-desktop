@@ -68,6 +68,12 @@ if command -v linksy-qt >/dev/null; then
   if [ $? -eq 124 ] && ! echo "$out" | grep -q "didn't load"; then echo "  Qt window: loads"; else echo "  Qt window FAILED:"; echo "$out" | grep -v -e UTF-8 -e locale | head -8 | sed "s/^/    /"; fi
 fi
 [ -x /usr/bin/linksy-open ] && echo "  launcher: installed" || echo "  launcher MISSING"
+# What the camera, microphone and screens need, with what the packages brought (desktop#85).
+# H.264 codecs are not held against a distribution: not every one ships them in its own repos.
+media=$(timeout 60 linksy-screen check 2>&1)
+lacking=$(echo "$media" | grep "GStreamer has no" | grep -v -e avdec_h264 -e x264enc | sort -u)
+[ -z "$lacking" ] && echo "  media pieces: ok" || { echo "  media pieces MISSING:"; echo "$lacking" | sed "s/^/    /"; }
+echo "$media" | grep -e "^video:" -e "^audio:" | sed "s/^/  /"
 EOF
 
 run() {   # distro, label, shell commands
@@ -77,6 +83,25 @@ run() {   # distro, label, shell commands
     export DEBIAN_FRONTEND=noninteractive
     ( $3 ) >/tmp/install.log 2>&1 || { echo '  install FAILED:'; tail -8 /tmp/install.log | sed 's/^/    /'; exit 0; }
     $CHECKS" 2>&1 | tee -a "$LOG"
+}
+
+# The phone's microphone on the distribution's own PipeWire, each a different version
+# (scripts/media-live.sh): PipeWire 1.6 went silent after 0.7 s, which no build shows
+# (desktop#89). Told, not held against the run: a container's PipeWire has no sound card
+# and may not start everywhere.
+live() {   # distro, install command
+  local extra
+  case $1 in
+    fedora-*) extra="pipewire wireplumber pipewire-pulseaudio pulseaudio-utils python3 dbus-daemon" ;;
+    opensuse) extra="pipewire wireplumber pipewire-pulseaudio pulseaudio-utils python3 dbus-1-daemon" ;;
+    *) extra="pipewire wireplumber pipewire-pulse pulseaudio-utils python3 dbus-daemon" ;;
+  esac
+  echo "== $1: the phone's microphone on its PipeWire (told only)"
+  podman run --rm -v "$PWD/dist":/pkgs:ro,z -v "$PWD/scripts":/scripts:ro,z "$(image "$1")" bash -c "
+    case $1 in debian-*|ubuntu-*) apt-get update -qq >/dev/null 2>&1;; opensuse) zypper -q refresh >/dev/null 2>&1;; esac
+    export DEBIAN_FRONTEND=noninteractive
+    ( $2 $(files "$1" gtk) $extra ) >/tmp/install.log 2>&1 || { echo '  not run: PipeWire did not install'; exit 0; }
+    timeout 90 /scripts/media-live.sh 2>&1 | sed 's/^/  /'" 2>&1
 }
 
 # What must not install: the Qt app where Qt is too old. distro, command, label
@@ -93,6 +118,7 @@ for d in "${ALL[@]}"; do
   gtk_only=0
   [[ " ${GTK_ONLY[*]} " == *" $d "* ]] && gtk_only=1
   run "$d" "linksy (GTK)" "$in $(files "$d" gtk)"
+  live "$d" "$in"
   if [ $gtk_only = 1 ]; then
     refused "$d" "$in $(files "$d" qt)" "linksy-qt where Qt is too old"
   else
