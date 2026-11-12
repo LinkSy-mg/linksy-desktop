@@ -730,6 +730,15 @@ fn speaker(socket: &std::path::Path, test: bool) -> Result<(), String> {
     result
 }
 
+/// How much louder a phone's microphone is made here. A phone sends what its microphone
+/// hears, without the gain its own recorder adds: measured 13 dB under it (desktop#89).
+/// 12 dB brings a voice level with the recorder's; what would go over is held at full scale.
+const MIC_GAIN_DB: f64 = 12.0;
+
+fn mic_gain() -> String {
+    format!("volume volume={:.3}", 10f64.powf(MIC_GAIN_DB / 20.0))
+}
+
 fn microphone(socket: &std::path::Path, name: &str) -> Result<(), String> {
     let input = UnixStream::connect(socket).map_err(|e| format!("{}: {e}", socket.display()))?;
     let name: String = name.chars().filter(|c| !matches!(c, '"' | '\\' | ',')).collect();
@@ -751,8 +760,9 @@ fn microphone(socket: &std::path::Path, name: &str) -> Result<(), String> {
     };
     let description = format!(
         "fdsrc fd={} ! rawaudioparse use-sink-caps=false format=pcm pcm-format=s16le sample-rate=48000 num-channels=1 \
-         ! queue max-size-time=100000000 max-size-buffers=0 max-size-bytes=0 leaky=downstream ! audioconvert ! {sink}",
-        input.as_raw_fd()
+         ! queue max-size-time=100000000 max-size-buffers=0 max-size-bytes=0 leaky=downstream ! {} ! audioconvert ! {sink}",
+        input.as_raw_fd(),
+        mic_gain()
     );
     let result = play(&description);
     drop(input);
@@ -800,7 +810,7 @@ fn play(description: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{camera_sink, falls_behind};
+    use super::{camera_sink, falls_behind, mic_gain};
     use std::path::Path;
 
     #[test]
@@ -830,6 +840,11 @@ mod tests {
         assert!(camera_sink(None, true, false, "pipewiresink").unwrap_err().contains("PipeWire"));
     }
 
+
+    #[test]
+    fn a_phone_microphone_is_made_12_db_louder() {
+        assert_eq!(mic_gain(), "volume volume=3.981");
+    }
 
     #[test]
     fn an_encoder_that_keeps_up_stays_at_60() {
