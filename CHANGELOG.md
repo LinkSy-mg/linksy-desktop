@@ -2,6 +2,26 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Fixed
+- **The phone's camera no longer closes at once where GStreamer lacks `v4l2sink`** (an
+  install without gst-plugins-good, as from the tarball). It is then offered to PipeWire apps
+  only, and the log says so. The same the other way round: without PipeWire's plugin it stays
+  on the Linksy Camera device.
+- **A session that can't start for a missing piece says so.** A notification on the computer
+  tells that GStreamer lacks something and points to Finish Setup; before, the phone's screen
+  just closed and the reason was only in the log.
+- **Finish Setup checks what the camera needs:** `h264parse` (gst-plugins-bad) and `v4l2sink`
+  (gst-plugins-good) are looked for and installed with the rest. It said everything was ready
+  without them.
+- **The phone's microphone is 12 dB louder.** A phone sends what its microphone hears without
+  the gain its own recorder adds, so voices came in very quiet; they are now level with the
+  phone's recorder. Nothing to set, and it holds between sessions.
+- **The phone's camera doesn't hold the phone's stream back while no app reads it** (computers
+  without the Linksy Camera device): frames nobody takes are dropped, so an app that opens the
+  camera later gets the picture of that moment.
+
 ## 0.14.0
 
 ### Changed
