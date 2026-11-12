@@ -297,6 +297,20 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
                 }
             }
             println!("\nThe firewall is checked by Finish Setup in the app.");
+            // What the camera, microphone and screens need here, tried for real by the helper
+            let helper = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("linksy-screen"))).filter(|p| p.exists()).unwrap_or_else(|| "linksy-screen".into());
+            println!("\nCamera, microphone and screens:");
+            match std::process::Command::new(helper).arg("check").output() {
+                Ok(out) => {
+                    for line in String::from_utf8_lossy(&out.stdout).lines() {
+                        println!("  {line}");
+                    }
+                    if out.status.code() == Some(3) {
+                        println!("  Finish Setup in the app installs what is missing.");
+                    }
+                }
+                Err(e) => println!("  linksy-screen could not be run: {e}"),
+            }
         }
         ("controls", [phone, what]) if what == "sync-dnd" => {
             c.set_dnd_sync(phone.clone(), true).await.map_err(err)?;
