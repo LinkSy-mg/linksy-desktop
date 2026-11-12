@@ -54,3 +54,11 @@ if [ "${1:-}" != "--no-service" ]; then
 else
   echo "Linksy is installed to $BIN (service not started)."
 fi
+
+# A tarball brings no dependencies: say now what the camera, microphone and screens lack
+if lacking=$("$BIN/linksy-screen" check 2>/dev/null); [ $? -eq 3 ]; then
+  echo
+  echo "Some features need more from your distribution:"
+  echo "$lacking" | grep -v -e ': ready$' -e 'went through$' -e 'was encoded' | sed 's/^/  /'
+  echo "Open Linksy and choose Finish Setup: it installs what is missing."
+fi
