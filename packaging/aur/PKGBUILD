@@ -37,10 +37,9 @@ check() {
 
 package_linksy-common() {
   pkgdesc='Your devices, connected: the service and tools both Linksy apps share'
-  depends=('dbus' 'gcc-libs' 'glibc' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugin-pipewire' 'xdg-desktop-portal')
+  depends=('dbus' 'gcc-libs' 'glibc' 'gstreamer' 'gst-plugins-base' 'gst-plugins-good' 'gst-plugins-bad' 'gst-plugin-pipewire' 'xdg-desktop-portal')
   optdepends=('linksy-window: a desktop client to use Linksy, linksy (GTK) or linksy-qt (KDE Plasma)'
               'gst-libav: H.264 decoding, to see screens'
-              'gst-plugins-bad: H.264 encoding on the graphics card (VA-API)'
               'gst-plugins-ugly: H.264 encoding with x264'
               'wl-clipboard: shared clipboard while the window is not focused'
               'v4l2loopback-dkms: the phone as a webcam in every app'

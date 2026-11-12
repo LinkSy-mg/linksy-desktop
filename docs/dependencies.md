@@ -15,12 +15,12 @@ adds.
 |---|---|
 | Pairing, files, notifications from the phone, battery, Ring, media controls, the terminal, opening links | Nothing beyond the service and an app. |
 | The app | GTK 4.14+ and libadwaita 1.5+ (the GTK app), or Qt 6.8+ with Kirigami, Kirigami Addons and qqc2-desktop-style (the Qt app, for KDE Plasma). glibc 2.39+. |
-| Seeing screens and cameras | GStreamer with an H.264 decoder (`avdec_h264` from libav, `openh264dec`, or `vah264dec` on the graphics card), and the window's video sink: `gtk4paintablesink` (GTK) or `qml6glsink` (Qt). |
+| Seeing screens and cameras | GStreamer with `h264parse` (gst-plugins-bad), an H.264 decoder (`avdec_h264` from libav, `openh264dec`, or `vah264dec` on the graphics card), and the window's video sink: `gtk4paintablesink` (GTK) or `qml6glsink` (Qt). |
 | Sending this computer's screen, a second display | An H.264 encoder (`vah264lpenc` or `vah264enc` on the graphics card, `x264enc`, or `openh264enc`), PipeWire's GStreamer plugin (`pipewiresrc`), and the desktop's screen sharing portal on Wayland. On X11, `ximagesrc` (gst-plugins-good) instead of a portal. |
 | A second display | GNOME or KDE Plasma (a virtual monitor from the portal), Hyprland or Sway (a headless output, through `hyprctl` or `swaymsg`). Not on X11 or niri. |
 | Controlling this computer, the phone as a touchpad | GNOME or KDE Plasma (the RemoteDesktop portal), or any X11 desktop (XTest, part of the X server). |
 | The phone as a webcam in OBS and PipeWire apps | PipeWire, with its GStreamer plugin (`pipewiresink`). |
-| The phone as a webcam in browsers, Zoom, Discord | The v4l2loopback driver and its `v4l2loopback-ctl` tool, then the "Linksy Camera" device (below). With Secure Boot on, `mokutil` to approve the driver. |
+| The phone as a webcam in browsers, Zoom, Discord | GStreamer's `v4l2sink` (gst-plugins-good), the v4l2loopback driver and its `v4l2loopback-ctl` tool, then the "Linksy Camera" device (below). With Secure Boot on, `mokutil` to approve the driver. |
 | The phone as a microphone | PipeWire, with its GStreamer plugin, and `pactl` (PipeWire's PulseAudio layer, `pipewire-pulse`), which makes the microphone. Apps see "Linksy Microphone (the phone's name)". Without `pactl` the microphone is a plain PipeWire node, which stops delivering after a moment on PipeWire 1.6. |
 | Text from the phone on the clipboard while Linksy's window is closed | `wl-copy` (wl-clipboard) on Wayland; `xclip` or `xsel` on X11. |
 | Copies on the computer reaching the phone by themselves | `wl-paste` (wl-clipboard) on KDE, Hyprland, Sway; `xclip` or `xsel` on X11. GNOME doesn't let apps watch the clipboard. |
@@ -171,6 +171,10 @@ desktops read `/etc/xdg/autostart/linksyd.desktop`; on Hyprland add
 again (not the compositor line); off, the service runs only once Linksy is opened.
 
 ## How to check
+
+`linksy doctor` does the media part for you: it says what the camera, the microphone and
+screens lack on this computer, then encodes and decodes a test picture and passes a test tone
+for real. By hand:
 
 ```sh
 gst-inspect-1.0 avdec_h264 openh264dec vah264dec      # a decoder: at least one found

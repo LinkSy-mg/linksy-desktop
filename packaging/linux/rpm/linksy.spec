@@ -42,19 +42,20 @@ Recommends:     (linksy = %{version}-%{release} or linksy-qt = %{version}-%{rele
 %if 0%{?linksy_suse}
 Requires:       gstreamer-plugins-good
 Requires:       gstreamer-plugin-pipewire
+# h264parse: no phone camera and no screen sharing without it (desktop#85)
+Requires:       gstreamer-plugins-bad
 Requires:       xdg-desktop-portal
 Recommends:     gstreamer-plugin-openh264
 Recommends:     gstreamer-plugins-libav
-Recommends:     gstreamer-plugins-bad
 Recommends:     wl-clipboard
 # The camera driver (v4l2loopback-kmp-<flavor>) is left to Finish Setup: it picks the
 # running kernel's flavor, where a fixed Recommends could pull in another kernel.
 %else
 Requires:       gstreamer1-plugins-good
 Requires:       pipewire-gstreamer
+Requires:       gstreamer1-plugins-bad-free
 Requires:       xdg-desktop-portal
 Recommends:     gstreamer1-plugin-openh264
-Recommends:     gstreamer1-plugins-bad-free
 Recommends:     wl-clipboard
 # The phone's camera in every app (RPM Fusion); Linksy's Finish Setup offers it too
 Recommends:     v4l2loopback
