@@ -28,6 +28,7 @@ fn main() {
         "qml/KeyedList.qml",
         "qml/Inbox.qml",
         "qml/InboxTab.qml",
+        "qml/OnboardingPage.qml",
     ]))
         .qt_module("Quick")
         .qt_module("QuickControls2")

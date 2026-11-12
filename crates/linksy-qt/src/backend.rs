@@ -246,6 +246,24 @@ pub mod qobject {
         #[cxx_name = "setWatchesOnly"]
         fn set_watches_only(&self, device: &QString, on: bool);
 
+        /// Whether this is the first run here: show the welcome (shared with the GTK app).
+        #[qinvokable]
+        #[cxx_name = "onboardingDue"]
+        fn onboarding_due(&self) -> bool;
+
+        #[qinvokable]
+        #[cxx_name = "setOnboarded"]
+        fn set_onboarded(&self);
+
+        /// Where the phone's app is downloaded.
+        #[qinvokable]
+        #[cxx_name = "phoneApp"]
+        fn phone_app(&self) -> QString;
+
+        /// Linksy's mark as an image source: there whatever the icon theme has.
+        #[qinvokable]
+        fn logo(&self) -> QString;
+
         #[qsignal]
         fn reply(self: Pin<&mut Backend>, id: i32, ok: bool, json: QString);
 
@@ -598,6 +616,23 @@ impl qobject::Backend {
 
     pub fn set_watches_only(&self, device: &QString, on: bool) {
         linksy_setup::set_watches_only(&device.to_string(), on);
+    }
+
+    pub fn onboarding_due(&self) -> bool {
+        linksy_setup::onboarding_due(linksy_news::used_before())
+    }
+
+    pub fn set_onboarded(&self) {
+        linksy_setup::set_onboarded();
+    }
+
+    pub fn phone_app(&self) -> QString {
+        QString::from(linksy_setup::PHONE_APP)
+    }
+
+    pub fn logo(&self) -> QString {
+        let svg = include_str!("../../../data/icons/mg.diary.linksy.Linksy.svg");
+        QString::from(&format!("data:image/svg+xml;utf8,{}", svg.replace('\n', " ").replace('%', "%25").replace('#', "%23")))
     }
 
     pub fn answer_password(&self, text: &QString, given: bool) {

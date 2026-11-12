@@ -83,6 +83,7 @@ Kirigami.ApplicationWindow {
             // Development aid: open a screen for scripts/qt-shot.sh
             const open = backend.env("LINKSY_SCREENSHOT_OPEN");
             if (open === "invite") root.openInvite();
+            if (open === "onboarding") root.openOnboarding();
             if (open === "prefs") pageStack.pushDialogLayer(Qt.resolvedUrl("PrefsPage.qml"), { app: root });
             if (open === "screen") openScreen.start();
             if (open === "setup") root.openSetup();
@@ -253,6 +254,10 @@ Kirigami.ApplicationWindow {
 
     function openSetup() {
         pageStack.pushDialogLayer(Qt.resolvedUrl("SetupPage.qml"), { app: root });
+    }
+
+    function openOnboarding() {
+        pageStack.layers.push(Qt.resolvedUrl("OnboardingPage.qml"), { app: root });
     }
 
     function openInvite(address) {
@@ -928,7 +933,9 @@ Kirigami.ApplicationWindow {
         backend.checkSetup();
         // One thing at a time: Finish Setup when something's missing, otherwise, after an
         // update, what's new
-        if (backend.offerSetup()) root.openSetup();
+        // The welcome on a first run instead: Finish Setup is one of its slides
+        if (backend.onboardingDue()) root.openOnboarding();
+        else if (backend.offerSetup()) root.openSetup();
         else whatsNew.offer();
         // Crashed since last time: offer the logs once
         if (backend.unseenCrash()) showPassiveNotification(t("Linksy Quit Unexpectedly"), "long", t("Save Logs…"), () => root.saveLogs());
