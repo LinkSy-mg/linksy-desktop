@@ -147,9 +147,20 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("linksy-screen: {e}");
-            ExitCode::FAILURE
+            if MISSING.load(Ordering::Relaxed) { ExitCode::from(MISSING_PIECE) } else { ExitCode::FAILURE }
         }
     }
+}
+
+/// The exit code for "GStreamer lacks something here": the service tells the person, who
+/// would otherwise only see the session close (desktop#85).
+const MISSING_PIECE: u8 = 3;
+static MISSING: AtomicBool = AtomicBool::new(false);
+
+/// An error that is a missing piece of GStreamer.
+fn missing(what: impl Into<String>) -> String {
+    MISSING.store(true, Ordering::Relaxed);
+    what.into()
 }
 
 fn run(args: Args) -> Result<(), String> {
@@ -265,7 +276,7 @@ fn run(args: Args) -> Result<(), String> {
     let mut restarts = 0;
     let mut attempt = 0;
     let result = loop {
-        let Some(current) = attempts.get(attempt).cloned() else { break Err("no H.264 encoder here works (install openh264 or x264)".to_string()) };
+        let Some(current) = attempts.get(attempt).cloned() else { break Err(missing("no H.264 encoder here works (install openh264 or x264)")) };
         let (encoder, _, memory) = &current;
         let memory = *memory;
         let name = encoder.split_whitespace().next().unwrap_or("encoder").to_string();
@@ -628,6 +639,34 @@ fn fixed_rate(fps: u32) -> String {
     }
 }
 
+/// Where the camera's frames go. On the V4L2 device for browsers and Zoom, and to PipeWire
+/// too: the device only says it's a camera while something writes to it (what browsers
+/// need), and PipeWire looked at it before that, so PipeWire apps (OBS's camera source)
+/// would list it blank. An install that lacks one of the two elements keeps the other
+/// (desktop#85: no `v4l2sink` ended the camera at once).
+fn camera_sink(device: Option<&std::path::Path>, v4l2sink: bool, pipewiresink: bool, pipewire: &str) -> Result<String, String> {
+    let device = device.map(|d| format!("v4l2sink device={} sync=false", d.display()));
+    // PipeWire takes no frames while no app reads the camera: they are dropped here, or
+    // the phone's stream would back up behind them
+    let pipewire = format!("queue leaky=downstream max-size-buffers=2 ! {pipewire}");
+    match (device, v4l2sink, pipewiresink) {
+        (Some(device), true, true) => Ok(format!(
+            "tee name=cam ! queue leaky=downstream max-size-buffers=2 ! {device} cam. ! {pipewire}"
+        )),
+        (Some(device), true, false) => {
+            eprintln!("linksy-screen: no pipewiresink (PipeWire's GStreamer plugin); the camera is on the Linksy Camera device only");
+            Ok(device)
+        }
+        (Some(_), false, true) => {
+            eprintln!("linksy-screen: no v4l2sink (gst-plugins-good's video4linux2 plugin); the camera is offered to PipeWire apps only, not to browsers or Zoom");
+            Ok(format!("tee ! {pipewire}"))
+        }
+        (None, _, true) => Ok(format!("tee ! {pipewire}")),
+        (Some(_), false, false) => Err(missing("no v4l2sink and no pipewiresink: install gst-plugins-good and PipeWire's GStreamer plugin")),
+        (None, _, false) => Err(missing("no pipewiresink: install PipeWire's GStreamer plugin")),
+    }
+}
+
 /// The receiving end of a camera session: decode and offer it as a camera for as long as
 /// the stream lasts: on the Linksy Camera device when there is one, else to PipeWire apps.
 fn webcam(socket: &std::path::Path, name: &str, fps: u32) -> Result<(), String> {
@@ -635,7 +674,7 @@ fn webcam(socket: &std::path::Path, name: &str, fps: u32) -> Result<(), String> 
     let decoder = ["avdec_h264", "vah264dec", "openh264dec"]
         .into_iter()
         .find(|d| gst::ElementFactory::make(d).build().is_ok())
-        .ok_or("no H.264 decoder: install gstreamer1-plugin-openh264 or gstreamer1-plugin-libav")?;
+        .ok_or_else(|| missing("no H.264 decoder: install GStreamer's openh264 or libav plugin"))?;
     let decoder = low_latency(decoder);
     // Offered the way webcams are, YUY2 at a fixed rate (what the phone sends: 30 or 60):
     // apps like OBS list a camera's formats and rates from this, and skip what they can't
@@ -646,17 +685,8 @@ fn webcam(socket: &std::path::Path, name: &str, fps: u32) -> Result<(), String> 
         "pipewiresink mode=provide sync=false \
          stream-properties=\"props,media.class=Video/Source,media.role=Camera,node.name=linksy-camera,node.description=\\\"{name}\\\"\""
     );
-    // On the V4L2 device for browsers and Zoom, and to PipeWire too: the device only says
-    // it's a camera while something writes to it (what browsers need), and PipeWire looked
-    // at it before that, so PipeWire apps (OBS's camera source) would list it blank.
-    let sink = match camera_device() {
-        Some(dev) => format!(
-            "tee name=cam ! queue leaky=downstream max-size-buffers=2 ! v4l2sink device={} sync=false \
-             cam. ! queue leaky=downstream max-size-buffers=2 ! {pipewire}",
-            dev.display()
-        ),
-        None => pipewire,
-    };
+    let has = |element: &str| gst::ElementFactory::find(element).is_some();
+    let sink = camera_sink(camera_device().as_deref(), has("v4l2sink"), has("pipewiresink"), &pipewire)?;
     let description = format!(
         "fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! video/x-raw,format=YUY2 \
          ! {} ! {sink}",
@@ -745,7 +775,11 @@ fn stop_on_term() {
 
 /// Run a pipeline until it ends or fails.
 fn play(description: &str) -> Result<(), String> {
-    let pipeline = gst::parse::launch(description).map_err(|e| format!("pipeline: {e}"))?;
+    let mut context = gst::ParseContext::new();
+    let pipeline = gst::parse::launch_full(description, Some(&mut context), gst::ParseFlags::empty()).map_err(|e| {
+        let lacking = context.missing_elements();
+        if lacking.is_empty() { format!("pipeline: {e}") } else { missing(format!("GStreamer has no {} here", lacking.join(", "))) }
+    })?;
     pipeline.set_state(gst::State::Playing).map_err(|e| format!("could not start: {e}"))?;
     let bus = pipeline.bus().ok_or("pipeline has no bus")?;
     let result = loop {
@@ -766,7 +800,36 @@ fn play(description: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::falls_behind;
+    use super::{camera_sink, falls_behind};
+    use std::path::Path;
+
+    #[test]
+    fn a_camera_goes_to_the_device_and_to_pipewire() {
+        let sink = camera_sink(Some(Path::new("/dev/video9")), true, true, "pipewiresink").unwrap();
+        assert!(sink.starts_with("tee name=cam"));
+        assert!(sink.contains("v4l2sink device=/dev/video9"));
+        assert!(sink.ends_with("! pipewiresink"));
+    }
+
+    #[test]
+    fn a_camera_without_v4l2sink_is_still_offered_to_pipewire() {
+        let alone = "tee ! queue leaky=downstream max-size-buffers=2 ! pipewiresink";
+        assert_eq!(camera_sink(Some(Path::new("/dev/video9")), false, true, "pipewiresink").unwrap(), alone);
+        assert_eq!(camera_sink(None, false, true, "pipewiresink").unwrap(), alone);
+        assert_eq!(camera_sink(None, true, true, "pipewiresink").unwrap(), alone);
+    }
+
+    #[test]
+    fn a_camera_without_pipewiresink_is_still_on_the_device() {
+        assert_eq!(camera_sink(Some(Path::new("/dev/video9")), true, false, "pipewiresink").unwrap(), "v4l2sink device=/dev/video9 sync=false");
+    }
+
+    #[test]
+    fn a_camera_with_nowhere_to_go_says_what_to_install() {
+        assert!(camera_sink(Some(Path::new("/dev/video9")), false, false, "pipewiresink").unwrap_err().contains("gst-plugins-good"));
+        assert!(camera_sink(None, true, false, "pipewiresink").unwrap_err().contains("PipeWire"));
+    }
+
 
     #[test]
     fn an_encoder_that_keeps_up_stays_at_60() {
