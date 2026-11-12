@@ -136,6 +136,9 @@ fn main() -> ExitCode {
     unsafe {
         libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM);
     }
+    if std::env::args().nth(1).as_deref() == Some("check") {
+        return check();
+    }
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
@@ -161,6 +164,69 @@ static MISSING: AtomicBool = AtomicBool::new(false);
 fn missing(what: impl Into<String>) -> String {
     MISSING.store(true, Ordering::Relaxed);
     what.into()
+}
+
+/// `linksy-screen check`: what each feature lacks here, then the real thing on a test
+/// picture and a test tone, so "it doesn't work" comes with why. Exits 3 if a piece is missing.
+fn check() -> ExitCode {
+    use linksy_setup::pieces::Feature;
+    if let Err(e) = gst::init() {
+        println!("GStreamer doesn't start: {e}");
+        return ExitCode::from(MISSING_PIECE);
+    }
+    let has = |element: &str| gst::ElementFactory::find(element).is_some();
+    let mut ready = true;
+    for feature in Feature::ALL {
+        let lacking = feature.lacking(has);
+        if lacking.is_empty() {
+            println!("{}: ready", feature.name());
+        }
+        for piece in lacking {
+            ready = false;
+            println!("{}: GStreamer has no {} here", feature.name(), piece.elements.join(" or "));
+        }
+    }
+    match (camera_device(), has("v4l2sink"), has("pipewiresink")) {
+        (Some(_), true, _) => println!("phone camera: shown to every app (the Linksy Camera device)"),
+        (Some(_), false, true) => println!("phone camera: PipeWire apps only, GStreamer has no v4l2sink here (browsers and Zoom need it)"),
+        (None, _, true) => println!("phone camera: PipeWire apps only, there is no Linksy Camera device (Finish Setup makes it)"),
+        (_, _, false) => {}
+    }
+    // The picture a phone sends, made and read back here
+    let decoder = ["avdec_h264", "vah264dec", "openh264dec"].into_iter().find(|d| gst::ElementFactory::make(d).build().is_ok());
+    let video = decoder.and_then(|decoder| {
+        encoders(4000).into_iter().find_map(|(encoder, format)| {
+            let name = encoder.split_whitespace().next().unwrap_or_default().to_string();
+            let trial = format!(
+                "videotestsrc num-buffers=30 ! video/x-raw,width=640,height=480,framerate=30/1 ! videoconvert ! video/x-raw,format={format} \
+                 ! {encoder} ! video/x-h264,profile=constrained-baseline ! h264parse ! {} ! videoconvert ! fakesink",
+                low_latency(decoder)
+            );
+            match play(&trial) {
+                Ok(()) => Some(format!("{name} and {decoder}")),
+                Err(e) => {
+                    println!("video: {name} doesn't work here ({e})");
+                    None
+                }
+            }
+        })
+    });
+    match video {
+        Some(with) => println!("video: a test picture was encoded and decoded ({with})"),
+        None => {
+            ready = false;
+            println!("video: no H.264 encoder and decoder work together here");
+        }
+    }
+    let tone = format!("audiotestsrc num-buffers=50 ! audioconvert ! audioresample ! {MIC_CAPS} ! {} ! audioconvert ! fakesink", mic_gain());
+    match play(&tone) {
+        Ok(()) => println!("audio: a test tone went through"),
+        Err(e) => {
+            ready = false;
+            println!("audio: {e}");
+        }
+    }
+    if ready { ExitCode::SUCCESS } else { ExitCode::from(MISSING_PIECE) }
 }
 
 fn run(args: Args) -> Result<(), String> {
