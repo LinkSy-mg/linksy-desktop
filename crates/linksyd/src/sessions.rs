@@ -295,12 +295,15 @@ impl Sessions {
             // The helper gave up (dialog cancelled, no portal): nothing will connect.
             status = child.wait() => {
                 let _ = std::fs::remove_file(&path);
-                return Err(std::io::Error::other(format!("screen capture stopped ({})", status?)));
+                let status = status?;
+                say_missing_piece(status, &session.peer.name);
+                return Err(std::io::Error::other(format!("screen capture stopped ({status})")));
             }
         };
         let _ = std::fs::remove_file(&path);
         let (stream, _) = accepted.map_err(|_| std::io::Error::other("no screen was picked in time"))??;
         relay(&mut session, stream).await;
+        helper_ended(&mut child, &session.peer.name).await;
         stop_helper(&mut child).await;
         Ok(())
     }
@@ -338,7 +341,9 @@ impl Sessions {
                 a = tokio::time::timeout(VIEW_TIMEOUT, listener.accept()) => a,
                 status = child.wait() => {
                     let _ = std::fs::remove_file(&path);
-                    return Err(std::io::Error::other(format!("the webcam stopped ({})", status?)));
+                    let status = status?;
+                    say_missing_piece(status, &session.peer.name);
+                    return Err(std::io::Error::other(format!("the webcam stopped ({status})")));
                 }
             };
             let _ = std::fs::remove_file(&path);
@@ -355,11 +360,19 @@ impl Sessions {
                         }
                         Ok(n) => {
                             if local.write_all(&buf[..n]).await.is_err() {
+                                helper_ended(&mut child, &session.peer.name).await;
                                 let _ = session.send.shutdown().await;
                                 return Ok(());
                             }
                         }
                     },
+                    // The helper gave up by itself: the phone's stream would go nowhere
+                    status = child.wait() => {
+                        let _ = session.send.shutdown().await;
+                        let status = status?;
+                        say_missing_piece(status, &session.peer.name);
+                        return Err(std::io::Error::other(format!("the webcam stopped ({status})")));
+                    }
                     Some(frame) = control.recv() => {
                         if session.send.write_all(&frame).await.is_err() {
                             let _ = child.kill().await;
@@ -797,6 +810,37 @@ fn scopes() -> bool {
                 .status()
                 .is_ok_and(|s| s.success())
     })
+}
+
+/// What `linksy-screen` exits with when GStreamer lacks something it needs.
+const MISSING_PIECE: i32 = 3;
+
+/// A session that ended because this computer lacks a piece is said, not only logged: the
+/// phone's screen just closed otherwise (desktop#85). Once a minute at most.
+fn say_missing_piece(status: std::process::ExitStatus, device: &str) {
+    static SAID: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+    if status.code() != Some(MISSING_PIECE) {
+        return;
+    }
+    let mut said = SAID.lock().unwrap();
+    if said.is_some_and(|at| at.elapsed() < Duration::from_secs(60)) {
+        return;
+    }
+    *said = Some(std::time::Instant::now());
+    #[cfg(target_os = "linux")]
+    crate::notify::show(
+        linksy_i18n::t!("Something Is Missing on This Computer").into(),
+        linksy_i18n::t!("What {device} started ended at once: GStreamer lacks a piece it needs here. Open Linksy, Finish Setup shows what to install.", device = device),
+    );
+    #[cfg(not(target_os = "linux"))]
+    let _ = device;
+}
+
+/// A helper whose socket closed: if it has ended by itself, why is looked at.
+async fn helper_ended(child: &mut tokio::process::Child, device: &str) {
+    if let Ok(Ok(status)) = tokio::time::timeout(Duration::from_millis(150), child.wait()).await {
+        say_missing_piece(status, device);
+    }
 }
 
 /// Ends a helper politely: SIGTERM, and a moment to put back what it made (the microphone's
