@@ -5,6 +5,7 @@
                            language (empty: still to translate), drop the ones gone
   scripts/i18n.py check    list what's untranslated per language; exits 1 if anything is
   scripts/i18n.py todo LANG  print LANG's untranslated strings as JSON (for a translator)
+  scripts/i18n.py fill FILE  take translations from a JSON file: {"fr": {"English": "Français"}, …}
 
 A string missing or empty in a language shows in English.
 """
@@ -76,6 +77,15 @@ def main():
     elif cmd == "todo":
         table = load(sys.argv[2])
         print(json.dumps({k: "" for k in sorted(used) if not table.get(k)}, ensure_ascii=False, indent=2))
+    elif cmd == "fill":
+        answers = json.loads(pathlib.Path(sys.argv[2]).read_text())
+        for lang, translated in answers.items():
+            table = load(lang)
+            unknown = [k for k in translated if k not in table]
+            if unknown:
+                sys.exit(f"{lang}: not a string of the app: {unknown[0]!r}")
+            table.update({k: v for k, v in translated.items() if v})
+            save(lang, table)
     else:
         sys.exit(__doc__)
 
