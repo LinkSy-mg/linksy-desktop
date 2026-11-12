@@ -14,10 +14,10 @@ use linksy_i18n::t;
 use super::Window;
 
 /// Invites are valid five minutes; ask for a fresh one a little before that.
-const RENEW_EVERY: Duration = Duration::from_secs(270);
+pub(super) const RENEW_EVERY: Duration = Duration::from_secs(270);
 
 /// A QR code as its side length in modules and which modules are dark.
-type Modules = (usize, Vec<bool>);
+pub(super) type Modules = (usize, Vec<bool>);
 
 impl Window {
     pub(super) fn show_invite(self: &Rc<Self>) {
@@ -150,7 +150,7 @@ impl Window {
     }
 }
 
-fn encode(link: &str) -> Result<Modules, String> {
+pub(super) fn encode(link: &str) -> Result<Modules, String> {
     let code = qrcode::QrCode::with_error_correction_level(link.as_bytes(), qrcode::EcLevel::M).map_err(|e| e.to_string())?;
     let dark = code.to_colors().into_iter().map(|c| c == qrcode::Color::Dark).collect();
     Ok((code.width(), dark))
@@ -158,7 +158,7 @@ fn encode(link: &str) -> Result<Modules, String> {
 
 /// Black modules on a white card in both light and dark style: scanners expect dark on
 /// light, and a quiet zone of four modules around it.
-fn draw_qr(cr: &cairo::Context, w: i32, h: i32, modules: Option<&Modules>) {
+pub(super) fn draw_qr(cr: &cairo::Context, w: i32, h: i32, modules: Option<&Modules>) {
     let size = w.min(h) as f64;
     let radius = 16.0;
     cr.new_sub_path();

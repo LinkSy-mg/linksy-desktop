@@ -55,15 +55,15 @@ async fn enable_autostart() -> Result<(), Failure> {
 
 /// The parts of the Finish Setup dialog that change as things get set up.
 #[derive(Clone)]
-struct SetupView {
-    dialog: adw::Dialog,
-    list: gtk::ListBox,
-    toasts: adw::ToastOverlay,
-    everything: gtk::Button,
-    progress: gtk::Label,
+pub(super) struct SetupView {
+    pub(super) parent: gtk::Widget,
+    pub(super) list: gtk::ListBox,
+    pub(super) toasts: adw::ToastOverlay,
+    pub(super) everything: gtk::Button,
+    pub(super) progress: gtk::Label,
     /// "Prefer a Terminal?", in its own list.
-    terminal: gtk::ListBox,
-    command: gtk::Label,
+    pub(super) terminal: gtk::ListBox,
+    pub(super) command: gtk::Label,
 }
 
 impl Window {
@@ -123,7 +123,7 @@ impl Window {
         let toasts = adw::ToastOverlay::new();
         toasts.set_child(Some(&view));
         dialog.set_child(Some(&toasts));
-        let v = SetupView { dialog: dialog.clone(), list, toasts, everything: everything.clone(), progress, terminal: terminal_list.clone(), command: command.clone() };
+        let v = SetupView { parent: dialog.clone().upcast(), list, toasts, everything: everything.clone(), progress, terminal: terminal_list.clone(), command: command.clone() };
         let c = command.clone();
         copy.connect_clicked(move |b| {
             b.clipboard().set_text(&c.label());
@@ -137,7 +137,7 @@ impl Window {
         dialog.present(Some(&self.window));
     }
 
-    fn fill_setup(self: &Rc<Self>, v: &SetupView) {
+    pub(super) fn fill_setup(self: &Rc<Self>, v: &SetupView) {
         while let Some(row) = v.list.first_child() {
             v.list.remove(&row);
         }
@@ -182,12 +182,12 @@ impl Window {
 
     /// Set up `items` (everything that needs root in one run, one password; then what the
     /// user's own account does), then show what's left.
-    fn fix(self: Rc<Self>, v: SetupView, items: Vec<Item>) {
+    pub(super) fn fix(self: Rc<Self>, v: SetupView, items: Vec<Item>) {
         v.everything.set_sensitive(false);
         v.everything.set_child(Some(&super::spinner()));
         glib::spawn_future_local(async move {
             let args = root_args(&items);
-            let mut result = if args.is_empty() { Ok(()) } else { run_as_root(&args, &v.progress, v.dialog.upcast_ref()).await };
+            let mut result = if args.is_empty() { Ok(()) } else { run_as_root(&args, &v.progress, &v.parent).await };
             if result.is_ok() && linksy_setup::wants_autostart(&items) {
                 result = enable_autostart().await;
             }
@@ -198,7 +198,7 @@ impl Window {
                 v.progress.set_label(&err);
                 v.progress.set_visible(true);
             }
-                Err(Failure::Restart(code)) => self.ask_restart(&v.dialog, code.as_deref()),
+                Err(Failure::Restart(code)) => self.ask_restart(&v.parent, code.as_deref()),
             }
             self.fill_setup(&v);
             self.refresh_setup();
@@ -207,7 +207,7 @@ impl Window {
 
     /// Secure Boot holds the new camera driver until it's approved at the next restart:
     /// the exact steps, and the code to type.
-    fn ask_restart(&self, parent: &adw::Dialog, code: Option<&str>) {
+    fn ask_restart(&self, parent: &gtk::Widget, code: Option<&str>) {
         let steps = linksy_setup::restart_steps(code);
         let alert = adw::AlertDialog::builder().heading(t!("Restart to Finish")).body(steps).build();
         alert.add_responses(&[("later", t!("Later")), ("restart", t!("Restart Now"))]);
