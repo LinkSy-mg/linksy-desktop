@@ -34,8 +34,10 @@ allowed() {
     gst-libav|gst-plugins-ugly|gst-plugin-gtk4|gst-plugin-qml6|gst-plugin-pipewire) return 0 ;;
     gstreamer-plugin-openh264|gstreamer-plugins-libav|gstreamer-plugins-rs|gstreamer-plugins-good-qtqml6|gstreamer-plugin-pipewire) return 0 ;;
     xdg-desktop-portal-gnome|xdg-desktop-portal-kde|xdg-desktop-portal-wlr|xdg-desktop-portal-hyprland) return 0 ;;
-    # X11 screens (ximagesrc)
+    # X11 screens (ximagesrc) and the camera's device (v4l2sink)
     gstreamer1-plugins-good|gstreamer1.0-plugins-good|gst-plugins-good|gstreamer-plugins-good) return 0 ;;
+    # The phone's video (h264parse)
+    gstreamer1-plugins-bad-free|gstreamer1.0-plugins-bad|gst-plugins-bad|gstreamer-plugins-bad) return 0 ;;
     wl-clipboard|xclip) return 0 ;;
     # A notification daemon where none runs (tiling compositors)
     mako|mako-notifier) return 0 ;;

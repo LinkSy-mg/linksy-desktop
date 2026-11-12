@@ -562,6 +562,22 @@ pub fn check(ui: Ui) -> Vec<Item> {
             arch.extend(["gst-libav", "gst-plugins-ugly"]);
             suse.extend(["gstreamer-plugin-openh264", "gstreamer-plugins-libav"]);
         }
+        let codecs = fedora.is_empty();
+        // What the phone's camera is read with and written to its device with: a tarball
+        // installs neither, and the camera closed at once without them (desktop#85)
+        if !has_element(&["h264parse"]) {
+            fedora.push("gstreamer1-plugins-bad-free");
+            debian.push("gstreamer1.0-plugins-bad");
+            arch.push("gst-plugins-bad");
+            suse.push("gstreamer-plugins-bad");
+        }
+        if !has_element(&["v4l2sink"]) {
+            fedora.push("gstreamer1-plugins-good");
+            debian.push("gstreamer1.0-plugins-good");
+            arch.push("gst-plugins-good");
+            suse.push("gstreamer-plugins-good");
+        }
+        let pieces = fedora.len() > if codecs { 0 } else { 2 };
         match ui {
             // Ubuntu 24.04 has no package for it: the app draws frames itself there
             Ui::Gtk if !has_element(&["gtk4paintablesink"]) && !(family() == Family::Debian && !apt_has("gstreamer1.0-gtk4")) => {
@@ -579,6 +595,7 @@ pub fn check(ui: Ui) -> Vec<Item> {
             _ => {}
         }
         let manual = match ui {
+            _ if codecs && pieces => t!("Install GStreamer's good and bad plugin sets (for v4l2sink and h264parse) from your distribution."),
             Ui::Gtk => t!("Install GStreamer's H.264 plugins (openh264 or libav) and its GTK 4 video sink (gtk4paintablesink) from your distribution."),
             Ui::Qt => t!("Install GStreamer's H.264 plugins (openh264 or libav) and its Qt 6 video sink (qml6glsink) from your distribution."),
         };
