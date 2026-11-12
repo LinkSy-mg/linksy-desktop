@@ -235,7 +235,7 @@ fn seen_file() -> PathBuf {
 
 /// Whether Linksy was used here before this version: the service keeps its paired devices
 /// and history in its data folder.
-fn used_before() -> bool {
+pub fn used_before() -> bool {
     let data = std::env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share"))).unwrap_or_default().join("linksy");
     ["trusted.json", "history.json"].iter().any(|f| std::fs::metadata(data.join(f)).is_ok_and(|m| m.len() > 2))
 }

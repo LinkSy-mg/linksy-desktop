@@ -1002,6 +1002,31 @@ pub fn set_watches_only(device: &str, on: bool) {
     let _ = std::fs::write(&path, ids.join("\n"));
 }
 
+/// Where the phone's app is downloaded: always the newest.
+pub const PHONE_APP: &str = "https://linksy.diary.mg/download/android";
+
+/// Whether to show the welcome: on a computer where Linksy was never used
+/// (`used_before`, the service's data), once. `LINKSY_ONBOARDING=1` shows it anyway, for
+/// trying it; screenshots and development setups never get it otherwise.
+pub fn onboarding_due(used_before: bool) -> bool {
+    if std::env::var_os("LINKSY_ONBOARDING").is_some() {
+        return true;
+    }
+    if std::env::var_os("LINKSY_SCREENSHOT").is_some() || std::env::var_os("LINKSY_SOCKET").is_some() {
+        return false;
+    }
+    !used_before && !config_file("onboarded").exists()
+}
+
+/// The welcome was seen (or skipped): never again.
+pub fn set_onboarded() {
+    let path = config_file("onboarded");
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(path, env!("CARGO_PKG_VERSION"));
+}
+
 /// The first time each `version` starts with something to set up: true once, to offer it.
 pub fn offer_now(ui: Ui, version: &str) -> bool {
     if std::env::var_os("LINKSY_SCREENSHOT").is_some() || std::env::var_os("LINKSY_SOCKET").is_some() {
