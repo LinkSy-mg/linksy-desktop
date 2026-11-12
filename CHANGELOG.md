@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.14.1
 
 ### Fixed
 - **The phone's camera no longer closes at once where GStreamer lacks `v4l2sink`** (an
