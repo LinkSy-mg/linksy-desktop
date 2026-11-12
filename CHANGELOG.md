@@ -2,6 +2,23 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Added
+- **A welcome on the first run,** in both apps: what Linksy does, a QR code to the phone's
+  app, pairing right there (a phone that pairs moves it on), Finish Setup with its buttons,
+  and where things are. Five slides, skippable, shown once, and never to someone who already
+  used Linksy on the computer.
+- **`linksy doctor` checks the camera, microphone and screens:** what each lacks here, then a
+  test picture encoded and decoded and a test tone, for real (`linksy-screen check`). The
+  tarball's installer says the same at the end, since a tarball brings no dependencies.
+
+### Changed
+- **Finish Setup has a Microphone and Sound line:** what plays the phone's sound and sends
+  this computer's microphone was never checked.
+- What each feature needs from GStreamer is now one table that Finish Setup, the check above
+  and a test share: an element a pipeline uses that nothing checks fails the build.
+
 ## 0.14.1
 
 ### Fixed
