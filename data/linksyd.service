@@ -3,9 +3,11 @@ Description=Linksy device connectivity service
 Documentation=https://github.com/LinkSy-mg/linksy-desktop
 After=graphical-session.target network-online.target
 PartOf=graphical-session.target
+ConditionUser=!@system
 
 [Service]
 Type=simple
+ExecCondition=/bin/sh -c 'case "$HOME" in /run/gdm/*) exit 1;; esac'
 ExecStart=@BINDIR@/linksyd
 Restart=on-failure
 RestartSec=3
