@@ -2524,7 +2524,6 @@ impl Node {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_arguments)]
     async fn handle_session(self, from: DeviceInfo, mut send: quinn::SendStream, recv: quinn::RecvStream, id: Uuid, kind: SessionKind, terminal: Option<crate::protocol::TerminalOpen>, choose: bool) {
         let decline = |reason: &str, tries_left: Option<u32>| SessionMsg::SessionDecline { reason: Some(reason.into()), tries_left };
         // From away, screens, control, camera, microphone and terminals need the user's yes
