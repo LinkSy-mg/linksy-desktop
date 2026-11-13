@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.15.0
 
 ### Added
 - **A welcome on the first run,** in both apps: what Linksy does, a QR code to the phone's
