@@ -16,6 +16,9 @@ Linksy for Linux. Each version's section becomes its release notes.
 ### Fixed
 - **The packages bring gst-plugins-bad:** `h264parse` comes from it, and neither the phone's
   camera nor screen sharing runs without it. It was only recommended.
+- **Paired phones reconnect after a restart on GNOME.** The service also started for the
+  login screen, where it took Linksy's port, so yours got another one and phones no longer
+  recognised the computer. It now starts for people only (thanks, Lur1fa).
 - **Arch: `linksy-common` no longer needs a window package,** which made the two depend on
   each other and could fail upgrades with yay (thanks, ichirou2910).
 
