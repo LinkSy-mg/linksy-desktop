@@ -1005,6 +1005,31 @@ pub fn set_watches_only(device: &str, on: bool) {
 /// Where the phone's app is downloaded: always the newest.
 pub const PHONE_APP: &str = "https://linksy.diary.mg/download/android";
 
+/// From this size on, both apps ask before sending through the relay: it is the slow way,
+/// and what it may carry in a month is shared by everyone.
+pub const ASK_THROUGH_RELAY: u64 = 200_000_000;
+
+/// What `paths` weigh together, folders walked. Links aren't followed, and counting stops
+/// at 100,000 entries: past that the answer is "a lot" either way.
+pub fn size_of(paths: &[PathBuf]) -> u64 {
+    let mut left = 100_000u32;
+    let mut pending: Vec<PathBuf> = paths.to_vec();
+    let mut total = 0u64;
+    while let Some(path) = pending.pop() {
+        if left == 0 {
+            break;
+        }
+        left -= 1;
+        let Ok(meta) = std::fs::symlink_metadata(&path) else { continue };
+        if meta.is_dir() {
+            pending.extend(std::fs::read_dir(&path).into_iter().flatten().flatten().map(|e| e.path()));
+        } else if meta.is_file() {
+            total = total.saturating_add(meta.len());
+        }
+    }
+    total
+}
+
 /// Whether to show the welcome: on a computer where Linksy was never used
 /// (`used_before`, the service's data), once. `LINKSY_ONBOARDING=1` shows it anyway, for
 /// trying it; screenshots and development setups never get it otherwise.
@@ -1061,6 +1086,22 @@ mod tests {
     fn arch_headers_without_pkgbase_follow_the_name() {
         assert_eq!(arch_headers("0.0.0-none-lts"), "linux-lts-headers");
         assert_eq!(arch_headers("0.0.0-none"), "linux-headers");
+    }
+
+    #[test]
+    fn a_selection_weighs_its_files_and_what_its_folders_hold() {
+        let dir = std::env::temp_dir().join(format!("linksy-size-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("album/inner")).unwrap();
+        std::fs::write(dir.join("one"), vec![0u8; 1000]).unwrap();
+        std::fs::write(dir.join("album/two"), vec![0u8; 300]).unwrap();
+        std::fs::write(dir.join("album/inner/three"), vec![0u8; 50]).unwrap();
+        // A link to the big file is not counted again
+        std::os::unix::fs::symlink(dir.join("one"), dir.join("album/link")).unwrap();
+        assert_eq!(size_of(&[dir.join("one"), dir.join("album")]), 1350);
+        assert_eq!(size_of(&[dir.join("missing")]), 0);
+        assert_eq!(size_of(&[]), 0);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
