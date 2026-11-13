@@ -13,6 +13,12 @@ Linksy for Linux. Each version's section becomes its release notes.
   test picture encoded and decoded and a test tone, for real (`linksy-screen check`). The
   tarball's installer says the same at the end, since a tarball brings no dependencies.
 
+### Fixed
+- **The packages bring gst-plugins-bad:** `h264parse` comes from it, and neither the phone's
+  camera nor screen sharing runs without it. It was only recommended.
+- **Arch: `linksy-common` no longer needs a window package,** which made the two depend on
+  each other and could fail upgrades with yay (thanks, ichirou2910).
+
 ### Changed
 - **Finish Setup has a Microphone and Sound line:** what plays the phone's sound and sends
   this computer's microphone was never checked.
