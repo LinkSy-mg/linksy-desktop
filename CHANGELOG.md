@@ -2,6 +2,15 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Added
+- **A device's page says how it is reached away from home:** "direct" when the two talk
+  straight to each other, "through the relay" when they can't, which is the slower way. Both
+  apps.
+- **Something large through the relay is asked about first:** from 200 MB on, the apps say
+  how much it is and that it will take a while, with Send and Cancel.
+
 ## 0.15.0
 
 ### Added
