@@ -435,6 +435,10 @@ pub struct DeviceView {
     /// Connected away from home, over the internet (docs/protocol.md §4.13).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub away: bool,
+    /// Away from home: whether its packets go through the relay (slower) or straight
+    /// between the two. None while that isn't known, and when it isn't away.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub away_relay: Option<bool>,
     /// A direct link (Wi-Fi Direct, §4.17) to it is up: big transfers go over it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub direct: bool,
@@ -831,6 +835,7 @@ impl Node {
         let peers = self.inner.peers.lock().unwrap();
         let nearby = self.inner.nearby.lock().unwrap();
         let batteries = self.inner.batteries.lock().unwrap();
+        let bridges = self.inner.away.lock().unwrap().clone();
         let lanes: std::collections::HashSet<Fingerprint> = self.inner.lanes.lock().unwrap().iter().filter(|(_, l)| l.conn.close_reason().is_none()).map(|(id, _)| *id).collect();
         let mut out: Vec<DeviceView> = trust
             .list()
@@ -840,6 +845,7 @@ impl Node {
                 connected: peers.contains_key(&t.device.id),
                 usb: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Usb),
                 away: peers.get(&t.device.id).is_some_and(|p| link_of(p.conn.remote_address()) == Link::Away),
+                away_relay: peers.get(&t.device.id).map(|p| p.conn.remote_address()).filter(|a| link_of(*a) == Link::Away).and_then(|a| bridges.as_ref().and_then(|b| b.relayed(a))),
                 direct: lanes.contains(&t.device.id),
                 away_all: t.away_all,
                 auto_accept: t.auto_accept,
@@ -866,7 +872,7 @@ impl Node {
             .collect();
         for (id, (device, _)) in nearby.iter() {
             if !trust.contains(id) {
-                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, direct: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false, latency_ms: None });
+                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_relay: None, direct: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false, latency_ms: None });
             }
         }
         // Paired and reachable first, then devices to pair, then paired ones that are away.

@@ -64,6 +64,37 @@ pub struct AwayAddr {
 pub(crate) struct Away {
     endpoint: Endpoint,
     relay: Option<RelayUrl>,
+    /// Each bridge's local address, and whether its packets go through the relay now.
+    relayed: Paths,
+}
+
+#[cfg(feature = "away")]
+type Paths = Arc<std::sync::Mutex<std::collections::HashMap<SocketAddr, bool>>>;
+
+/// Whether a connection goes through the relay, from its paths as (in use, a relay path):
+/// the one in use says. None while no path is in use yet.
+#[cfg(any(feature = "away", test))]
+fn through_relay(paths: impl IntoIterator<Item = (bool, bool)>) -> Option<bool> {
+    paths.into_iter().find(|(in_use, _)| *in_use).map(|(_, relay)| relay)
+}
+
+/// Keeps `paths` saying how the bridge at `local` reaches the other device, until `conn`
+/// closes: a connection starts on the relay and moves to a direct path when one works.
+#[cfg(feature = "away")]
+fn follow(paths: Paths, conn: iroh::endpoint::Connection, local: SocketAddr) {
+    tokio::spawn(async move {
+        loop {
+            let now = through_relay(conn.paths().iter().map(|p| (p.is_selected(), p.is_relay())));
+            if let Some(relayed) = now {
+                paths.lock().unwrap().insert(local, relayed);
+            }
+            tokio::select! {
+                _ = conn.closed() => break,
+                _ = tokio::time::sleep(Duration::from_secs(2)) => {}
+            }
+        }
+        paths.lock().unwrap().remove(&local);
+    });
 }
 
 /// Built without away from home: it never starts, so nothing here is ever reached.
@@ -96,6 +127,9 @@ impl Away {
     pub async fn close(&self) {
         match *self {}
     }
+    pub fn relayed(&self, _: SocketAddr) -> Option<bool> {
+        match *self {}
+    }
 }
 
 /// Why away from home can't be turned on in a build without it.
@@ -121,7 +155,7 @@ impl Away {
             .await
             .map_err(|e| Error::Protocol(format!("away endpoint: {e}")))?;
         info!(id = %endpoint.id().fmt_short(), relay = ?relay.as_ref().map(|r| r.to_string()), "away from home ready");
-        Ok(Arc::new(Self { endpoint, relay }))
+        Ok(Arc::new(Self { endpoint, relay, relayed: Paths::default() }))
     }
 
     /// This device's away address, as it is now.
@@ -169,6 +203,7 @@ impl Away {
         let (send, recv) = conn.open_bi().await.map_err(|e| Error::Protocol(format!("away: {e}")))?;
         let udp = UdpSocket::bind((AWAY_IP, 0)).await?;
         let local = udp.local_addr()?;
+        follow(self.relayed.clone(), conn.clone(), local);
         tokio::spawn(async move {
             carry(recv, send, udp, None).await;
             conn.close(0u32.into(), b"done");
@@ -182,6 +217,7 @@ impl Away {
         let allowed = Arc::new(allowed);
         while let Some(incoming) = self.endpoint.accept().await {
             let allowed = allowed.clone();
+            let paths = self.relayed.clone();
             tokio::spawn(async move {
                 let Ok(accepting) = incoming.accept() else { return };
                 let Ok(conn) = accepting.await else { return };
@@ -193,6 +229,9 @@ impl Away {
                 }
                 let Ok((send, recv)) = conn.accept_bi().await else { return };
                 let Ok(udp) = UdpSocket::bind((AWAY_IP, 0)).await else { return };
+                if let Ok(local) = udp.local_addr() {
+                    follow(paths, conn.clone(), local);
+                }
                 carry(recv, send, udp, Some(SocketAddr::from((Ipv4Addr::LOCALHOST, node_port)))).await;
                 conn.close(0u32.into(), b"done");
             });
@@ -201,6 +240,12 @@ impl Away {
 
     pub async fn close(&self) {
         self.endpoint.close().await;
+    }
+
+    /// Whether the bridge at `local` (where a connection to this node comes from) goes
+    /// through the relay: Some(false) once a direct path is in use. None if not known.
+    pub fn relayed(&self, local: SocketAddr) -> Option<bool> {
+        self.relayed.lock().unwrap().get(&local).copied()
     }
 }
 
@@ -261,6 +306,19 @@ mod tests {
     use crate::identity::{DeviceInfo, DeviceKind, Fingerprint};
     use crate::node::{Link, link_of};
     use crate::trust::TrustedDevice;
+
+    #[test]
+    fn the_path_in_use_says_whether_it_is_the_relay() {
+        use super::through_relay;
+        // (in use, a relay path)
+        assert_eq!(through_relay([(true, true)]), Some(true));
+        // A direct path was found and taken; the relay one stays open beside it
+        assert_eq!(through_relay([(false, true), (true, false)]), Some(false));
+        assert_eq!(through_relay([(true, true), (false, false)]), Some(true));
+        // Nothing in use yet: not known
+        assert_eq!(through_relay([(false, true), (false, false)]), None);
+        assert_eq!(through_relay([]), None);
+    }
 
     #[cfg(all(unix, feature = "away"))]
     #[test]
