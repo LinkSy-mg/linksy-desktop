@@ -1721,7 +1721,36 @@ impl Window {
         });
     }
 
+    /// Send `paths` to a device. Through the relay, the slow way, something large is asked
+    /// about first: how much it is, and that it will take a while.
     fn send(self: &Rc<Self>, to: Fingerprint, paths: Vec<PathBuf>) {
+        let device = self.device(&to);
+        if device.as_ref().is_none_or(|d| d.away_relay != Some(true)) {
+            return self.send_now(to, paths);
+        }
+        let name = device.map(|d| d.device.name).unwrap_or_default();
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            let counted = paths.clone();
+            let size = gio::spawn_blocking(move || linksy_setup::size_of(&counted)).await.unwrap_or(0);
+            if size < linksy_setup::ASK_THROUGH_RELAY {
+                return w.send_now(to, paths);
+            }
+            let alert = adw::AlertDialog::builder()
+                .heading(t!("Send {size} Through the Relay?", size = crate::fmt::size(size)))
+                .body(t!("{device} is away from home and reached through the relay, which is slower than a direct connection. This can take a while.", device = name))
+                .build();
+            alert.add_responses(&[("cancel", t!("Cancel")), ("send", t!("Send"))]);
+            alert.set_response_appearance("send", adw::ResponseAppearance::Suggested);
+            alert.set_default_response(Some("send"));
+            alert.set_close_response("cancel");
+            if alert.choose_future(Some(&w.window)).await == "send" {
+                w.send_now(to, paths);
+            }
+        });
+    }
+
+    fn send_now(self: &Rc<Self>, to: Fingerprint, paths: Vec<PathBuf>) {
         let Some(c) = self.client() else { return };
         let w = self.clone();
         let call = self.bridge.call(&c, move |c| async move { c.send(to.to_string(), paths).await });

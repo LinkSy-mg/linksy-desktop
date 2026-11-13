@@ -1059,7 +1059,13 @@ impl DevicePage {
         let available = d.connected || d.nearby;
         let phone = matches!(d.device.kind, DeviceKind::Phone | DeviceKind::Tablet);
         let (icon, what) = if d.connected && d.away {
-            ("network-wireless-hotspot-symbolic", t!("Away from home").to_string())
+            // Through the relay is the slower way: said, so a slow transfer has its reason
+            let how = match d.away_relay {
+                Some(true) => t!("Away from home, through the relay"),
+                Some(false) => t!("Away from home, direct"),
+                None => t!("Away from home"),
+            };
+            ("network-wireless-hotspot-symbolic", how.to_string())
         } else if d.connected && d.usb {
             ("media-removable-symbolic", t!("USB").to_string())
         } else if d.connected && phone {
