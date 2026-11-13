@@ -246,6 +246,16 @@ pub mod qobject {
         #[cxx_name = "setWatchesOnly"]
         fn set_watches_only(&self, device: &QString, on: bool);
 
+        /// What a selection of files and folders weighs, in bytes (`paths`: a JSON list).
+        #[qinvokable]
+        #[cxx_name = "pathsSize"]
+        fn paths_size(&self, paths: &QString) -> f64;
+
+        /// From this size on, sending through the relay is asked about first.
+        #[qinvokable]
+        #[cxx_name = "askThroughRelay"]
+        fn ask_through_relay(&self) -> f64;
+
         /// Whether this is the first run here: show the welcome (shared with the GTK app).
         #[qinvokable]
         #[cxx_name = "onboardingDue"]
@@ -616,6 +626,15 @@ impl qobject::Backend {
 
     pub fn set_watches_only(&self, device: &QString, on: bool) {
         linksy_setup::set_watches_only(&device.to_string(), on);
+    }
+
+    pub fn paths_size(&self, paths: &QString) -> f64 {
+        let paths: Vec<std::path::PathBuf> = serde_json::from_str(&paths.to_string()).unwrap_or_default();
+        linksy_setup::size_of(&paths) as f64
+    }
+
+    pub fn ask_through_relay(&self) -> f64 {
+        linksy_setup::ASK_THROUGH_RELAY as f64
     }
 
     pub fn onboarding_due(&self) -> bool {

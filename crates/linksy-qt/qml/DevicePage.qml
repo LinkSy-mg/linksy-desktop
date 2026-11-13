@@ -192,7 +192,10 @@ Kirigami.Page {
     function linkText(d) {
         if (!d) return "";
         if (!d.connected) return !d.trusted ? app.t("Nearby · Not paired") : d.nearby ? app.t("Nearby") : app.t("Not nearby");
-        const what = d.away ? app.t("Away from home") : d.usb ? app.t("USB") : handheld ? app.t("Wi-Fi") : app.t("Local network");
+        // Through the relay is the slower way: said, so a slow transfer has its reason
+        const away = d.away_relay === true ? app.t("Away from home, through the relay")
+                   : d.away_relay === false ? app.t("Away from home, direct") : app.t("Away from home");
+        const what = d.away ? away : d.usb ? app.t("USB") : handheld ? app.t("Wi-Fi") : app.t("Local network");
         return typeof d.latency_ms === "number" ? app.t("{link} · {ms} ms", { link: what, ms: Math.max(1, d.latency_ms) }) : what;
     }
 

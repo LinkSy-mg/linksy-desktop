@@ -579,9 +579,36 @@ Kirigami.ApplicationWindow {
         sendPaths(id, urls.map(u => decodeURIComponent(u.toString().replace(/^file:\/\//, ""))));
     }
 
+    // Through the relay, the slow way, something large is asked about first
     function sendPaths(id, paths) {
         if (!paths.length) return;
+        const d = devices.find(x => x.device.id === id);
+        if (d?.away_relay === true) {
+            const bytes = backend.pathsSize(JSON.stringify(paths));
+            if (bytes >= backend.askThroughRelay()) { relayDialog.ask(id, paths, bytes, d.device.name); return }
+        }
+        sendNow(id, paths);
+    }
+
+    function sendNow(id, paths) {
         request("send", { to: id, paths: paths }, (ok, err) => { if (!ok) toast(err) });
+    }
+
+    Kirigami.PromptDialog {
+        id: relayDialog
+        property string to
+        property var paths: []
+        function ask(id, what, bytes, name) {
+            to = id; paths = what;
+            title = root.t("Send {size} Through the Relay?", { size: root.size(bytes) });
+            subtitle = root.t("{device} is away from home and reached through the relay, which is slower than a direct connection. This can take a while.", { device: name });
+            open();
+        }
+        standardButtons: Kirigami.Dialog.NoButton
+        customFooterActions: [
+            Kirigami.Action { text: root.t("Cancel"); onTriggered: relayDialog.close() },
+            Kirigami.Action { text: root.t("Send"); icon.name: "document-send"; onTriggered: { relayDialog.close(); root.sendNow(relayDialog.to, relayDialog.paths) } }
+        ]
     }
 
     // Files from the file manager (Send with Linksy, Open With): the island asks where to
