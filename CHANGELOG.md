@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.16.0
 
 ### Added
 - **A device's page says how it is reached away from home:** "direct" when the two talk

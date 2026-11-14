@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.16.0" date="2026-11-14">
+      <description>
+        <p>A device's page now says how it is reached away from home: direct, or through the relay, which is the slower way. Before something of 200 MB or more goes through the relay, the apps say how much it is and ask first. In both apps.</p>
+      </description>
+    </release>
     <release version="0.15.0" date="2026-11-13">
       <description>
         <p>A welcome on the first run, in both apps: what Linksy does, the phone's app, pairing and Finish Setup, in five slides you can skip. linksy doctor now checks what the camera, microphone and screens need, and tries them. Fixes: paired phones reconnect after a restart on GNOME, the packages bring everything the camera and screen sharing need, and Finish Setup checks sound and the microphone.</p>
