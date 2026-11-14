@@ -6,7 +6,7 @@ both sides can work in parallel. Protocol details go into `docs/protocol.md` §4
 
 Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 
-Linksy for Linux is at **0.15.0** and Linksy for Android at **0.3.5** (2026-11-13). They have their
+Linksy for Linux is at **0.16.0** and Linksy for Android at **0.3.6** (2026-11-14). They have their
 own version numbers, and this roadmap has none: a feature ships when it is ready, not with a
 number. It says what is **Done**, what is **Now**, **Next** and **Later**. Which side has which
 feature, feature by feature, is `docs/protocol.md` §2.
@@ -56,7 +56,6 @@ The computer's side of everything below is released. What is left is on the phon
 - **Connections that survive a network change**: a phone drops its links when Android reports a network change, even when the Wi-Fi in use hasn't changed, and a transfer cut that way fails instead of carrying on (seen 2026-11-13, phone to phone, 410 MB).
 
 On the computer, next:
-- **How a device is connected**, on its page: direct, or through the relay (and then slower). Asking before a large file goes through the relay.
 - **Deck themes**: your own looks, made on the computer and tried live on the phone (§4.26).
 
 Not done, and why: datagrams for video and the pointer, BBR over the internet and a bitrate that follows the link while it runs (each needs measuring on a real link first); transfers with no shared network and Bluetooth (the first needs the computer to host a hotspot, which cuts its own Wi-Fi; the second needs a phone); the Wi-Fi Direct speed measurement (needs a phone).
