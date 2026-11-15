@@ -920,6 +920,21 @@ mod tests {
         assert_eq!(super::monitor_size((2800, 1272)), (2376, 1080));
         assert_eq!(super::monitor_size((1280, 800)), (1280, 800));
     }
+
+    #[tokio::test]
+    async fn a_session_socket_is_not_bound_in_a_planted_fallback_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = linksy_ipc::fallback_dir_in(tmp.path());
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let path = dir.join("linksy-view-x.sock");
+        let err = bind(&path).expect_err("bound in a planted folder");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{err}");
+        assert!(!path.exists());
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        bind(&path).unwrap();
+    }
 }
 
 /// Needs a running Sway or Hyprland (SWAYSOCK or HYPRLAND_INSTANCE_SIGNATURE), e.g. a
