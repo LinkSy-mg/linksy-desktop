@@ -65,3 +65,16 @@ jobs:
       - run: rustup toolchain install stable --profile minimal --component clippy && rustup default stable
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - run: cargo clippy -p linksy-app -p linksy-screen -- -D warnings
+
+  # RustSec advisories for the locked dependency tree. Standalone: no other job needs it. It can
+  # also fail on an unchanged Cargo.lock when a new advisory is published, which is the point.
+  audit:
+    name: Dependency advisories (cargo audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit
