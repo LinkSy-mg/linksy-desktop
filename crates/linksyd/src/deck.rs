@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use linksy_core::deck_layout::{self, MAX_BYTES};
-use linksy_core::{DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckRefusal, DeckState, DeckTheme, DeckThemeDef, DeckTile, Event, Fingerprint, Link, MediaCommand, Node, Uuid};
+use linksy_core::{DeckAction, DeckFace, DeckKind, DeckLayout, DeckLayouts, DeckRefusal, DeckState, DeckTheme, DeckThemeDef, DeckTile, Event, Fingerprint, MediaCommand, Node, Uuid};
 use linksy_i18n::t;
 use linksy_ipc::{CommandKind, DeckCommand, DeckLayoutInfo, DeckOption, DeckPrefs};
 use serde::{Deserialize, Serialize};
@@ -227,12 +227,6 @@ impl Saved {
             None => id.starts_with("media.") || id.starts_with("sound."),
         }
     }
-}
-
-/// Whether a deck run over `link` is refused: over the internet, only a phone its user
-/// allowed everything from away for may run anything (docs/protocol.md §4.13).
-fn refused_from_away(link: Option<Link>, away_all: bool) -> bool {
-    link == Some(Link::Away) && !away_all
 }
 
 /// Why a phone's save wasn't kept (docs/protocol.md §4.26), and the version kept now.
@@ -643,7 +637,7 @@ impl<D: Desktop> Deck<D> {
         let _ = self.inner.node.set(node.clone());
         tokio::spawn(self.clone().work(node.clone(), jobs));
         let mut events = node.subscribe();
-        let paired = |id: &Fingerprint| node.trusted().iter().any(|t| t.device.id == *id);
+        let paired = |id: &Fingerprint| node.is_paired(id);
         let mut poll = tokio::time::interval(POLL);
         poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -660,11 +654,6 @@ impl<D: Desktop> Deck<D> {
                     }
                     Ok(Event::DeckRun { from, action, value }) if paired(&from.id) => {
                         self.ready().await;
-                        let away_all = node.trusted().iter().any(|t| t.device.id == from.id && t.away_all);
-                        if refused_from_away(node.link(&from.id), away_all) {
-                            debug!("{} may not run {action} from away", from.name);
-                            continue;
-                        }
                         match self.act(&from.id, &action, value) {
                             Some(act) => {
                                 let _ = self.inner.jobs.send(Job::Run(from.id, act));
@@ -1074,15 +1063,6 @@ mod tests {
         // A user who turned one on keeps it
         d.set_action(&p, "network.wifi", true).unwrap();
         assert_eq!(deck(&dir).act(&p, "network.wifi", None), Some(Act::Wifi));
-    }
-
-    #[test]
-    fn from_away_only_a_phone_allowed_everything_there_runs() {
-        assert!(refused_from_away(Some(Link::Away), false));
-        assert!(!refused_from_away(Some(Link::Away), true));
-        assert!(!refused_from_away(Some(Link::Lan), false));
-        assert!(!refused_from_away(Some(Link::Usb), false));
-        assert!(!refused_from_away(None, false));
     }
 
     #[test]

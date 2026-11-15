@@ -824,6 +824,11 @@ impl Node {
         self.inner.events.subscribe()
     }
 
+    /// Whether `id` is paired (without copying the whole list).
+    pub fn is_paired(&self, id: &Fingerprint) -> bool {
+        self.inner.trust.lock().unwrap().get(id).is_some()
+    }
+
     pub fn trusted(&self) -> Vec<TrustedDevice> {
         self.inner.trust.lock().unwrap().list()
     }
@@ -2197,6 +2202,8 @@ impl Node {
                         }
                         let node = self.clone();
                         let from = device.clone();
+                        // How this very connection reaches the peer, read now, not later from the peer table
+                        let link = link_of(conn.remote_address());
                         tokio::spawn(async move {
                             match read_msg::<Message>(&mut recv).await {
                                 Ok(Message::Notify { title, body }) => node.emit(Event::Notification { from, title, body }),
@@ -2367,6 +2374,7 @@ impl Node {
                                 Ok(Message::GalleryChanged) => node.emit(Event::GalleryChanged { from }),
                                 Ok(Message::TurnOn { feature }) if feature.len() <= 64 => node.emit(Event::TurnOnRequest { from, feature }),
                                 Ok(Message::TurnOn { .. }) => debug!("bad turn_on from {}", from.name),
+                                Ok(Message::DeckOpen | Message::DeckRun { .. }) if !node.deck_allowed(link, &from.id) => debug!("{} may not use the deck from away", from.name),
                                 Ok(Message::DeckOpen) => node.emit(Event::DeckOpen { from }),
                                 Ok(Message::DeckClose) => node.emit(Event::DeckClose { from }),
                                 Ok(Message::DeckRun { action, value }) if action.len() <= MAX_KEY && value.is_none_or(f64::is_finite) => {
@@ -3355,6 +3363,13 @@ impl Node {
     /// if its user allowed everything from away for it.
     fn allowed_from_here(&self, from: &Fingerprint) -> bool {
         self.link(from) != Some(Link::Away) || self.inner.trust.lock().unwrap().get(from).is_some_and(|t| t.away_all)
+    }
+
+    /// Whether a deck message that came in over `link` is let through: away, only from a
+    /// device its user allowed everything from away for. Decided on the connection the
+    /// message arrived on, so it can't be skipped by that connection closing meanwhile.
+    fn deck_allowed(&self, link: Link, from: &Fingerprint) -> bool {
+        link != Link::Away || self.inner.trust.lock().unwrap().get(from).is_some_and(|t| t.away_all)
     }
 
     /// Connect to a paired device away from home: through iroh, then Linksy's own

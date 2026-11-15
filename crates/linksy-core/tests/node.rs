@@ -1691,6 +1691,50 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     assert!(std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { .. })), "not asked from away");
 }
 
+/// A deck run or open over away is dropped in the core unless the user allowed everything from
+/// away for that phone; the same over the local network always arrives.
+#[cfg(feature = "away")]
+#[tokio::test]
+async fn deck_from_away_needs_everything_allowed_there() {
+    let tweak = |c: &mut Config| {
+        c.idle_after = Duration::from_millis(1500);
+        c.away = true;
+    };
+    let (phone, pc) = paired_with(tweak).await;
+    let (phone_id, pc_id) = (phone.node.info().id, pc.node.info().id);
+    if pc.node.info().away.is_none_or(|w| w.addrs.is_empty()) {
+        return eprintln!("no network address: skipped");
+    }
+    let mut on_phone = phone.node.subscribe();
+    wait_for(&mut on_phone, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
+    phone.node.connect_away(&pc_id).await.expect("away connection");
+    assert_eq!(pc.node.link(&phone_id), Some(linksy_core::Link::Away));
+
+    let mut on_pc = pc.node.subscribe();
+    phone.node.deck_open(&pc_id, true).await.unwrap();
+    phone.node.deck_run(&pc_id, "system.lock", None).await.unwrap();
+    // A message sent after them has been handled: none of the deck ones got through
+    phone.node.send_clipboard(&pc_id, "sentinel").await.unwrap();
+    let mut deck_events = 0;
+    wait_for(&mut on_pc, |e| {
+        deck_events += usize::from(matches!(e, Event::DeckRun { .. } | Event::DeckOpen { .. }));
+        matches!(e, Event::Clipboard { .. }).then_some(())
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    deck_events += std::iter::from_fn(|| on_pc.try_recv().ok()).filter(|e| matches!(e, Event::DeckRun { .. } | Event::DeckOpen { .. })).count();
+    assert_eq!(deck_events, 0, "dropped from away");
+
+    pc.node.set_away_all(&phone_id, true).unwrap();
+    phone.node.deck_run(&pc_id, "system.lock", None).await.unwrap();
+    let run = wait_for(&mut on_pc, |e| match e {
+        Event::DeckRun { action, .. } => Some(action.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(run, "system.lock", "delivered once allowed everything from away");
+}
+
 /// With a relay, the away endpoint runs only once a paired device could use it (desktop#26),
 /// and the handshake says how to reach it through the relay meanwhile.
 #[cfg(feature = "away")]
