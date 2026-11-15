@@ -639,11 +639,12 @@ fn active(session: &Session) -> ActiveSession {
 }
 
 fn socket_path(role: &str, id: Uuid) -> PathBuf {
-    let dir = linksy_ipc::runtime_dir().unwrap_or_else(std::env::temp_dir);
+    let dir = linksy_ipc::runtime_dir().unwrap_or_else(linksy_ipc::fallback_dir);
     dir.join(format!("linksy-{role}-{}.sock", id.simple()))
 }
 
 fn bind(path: &Path) -> std::io::Result<UnixListener> {
+    linksy_ipc::prepare_socket_dir(path)?;
     let _ = std::fs::remove_file(path);
     let listener = UnixListener::bind(path)?;
     use std::os::unix::fs::PermissionsExt;

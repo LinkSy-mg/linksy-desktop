@@ -6,6 +6,9 @@
 //! when the activity history gains or updates an entry, and `{"fs_progress": ...}` lines as
 //! copies from and to phones go.
 
+mod private_dir;
+pub use private_dir::{check_socket_dir, ensure_private_dir, fallback_dir, prepare_socket_dir, verify_private_dir};
+
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -736,8 +739,8 @@ fn usual_socket_path() -> PathBuf {
     match runtime_dir() {
         Some(dir) => dir.join("linksyd.sock"),
         None => {
-            let user = std::env::var("USER").unwrap_or_else(|_| "user".into());
-            std::env::temp_dir().join(format!("linksyd-{user}.sock"))
+            // Not the shared temp folder itself: another user could plant the path there
+            fallback_dir().join("linksyd.sock")
         }
     }
 }
@@ -782,6 +785,7 @@ impl Client {
     }
 
     pub async fn connect_to(path: &Path) -> io::Result<Self> {
+        check_socket_dir(path)?;
         let (read, write) = UnixStream::connect(path).await?.into_split();
         let pending: Pending = Arc::default();
         let (events, _) = broadcast::channel(512);

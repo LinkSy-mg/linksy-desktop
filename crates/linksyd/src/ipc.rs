@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 pub async fn serve(node: Node, history: History, sessions: Sessions, mirror: Mirror, away: Away, photos: Photos, socket: PathBuf) -> std::io::Result<()> {
+    linksy_ipc::prepare_socket_dir(&socket)?;
     let listener = UnixListener::bind(&socket)?;
     #[cfg(unix)]
     {
