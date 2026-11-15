@@ -220,12 +220,17 @@ fn already_said(said: &mut HashMap<(Fingerprint, String), Instant>, notice: (Fin
 }
 
 /// A phone's notification with the device it came from added under the text, unless the
-/// text already says it (a Ping's does, which showed the line twice).
+/// text already says it (a Ping's does, which showed the line twice). The phone's text is
+/// cut first, to leave room, so the line saying who it came from is never the part lost.
 fn with_sender(body: &str, device: &str, from: String) -> String {
+    let from = clean(&from, LABEL_MAX, false);
     if body.is_empty() {
-        from
-    } else if body.contains(device) {
-        body.to_string()
+        return from;
+    }
+    let room = BODY_MAX.saturating_sub(from.chars().count() + 1);
+    let body = clean(body, room, true);
+    if body.contains(device) {
+        body
     } else {
         format!("{body}\n{from}")
     }
@@ -233,22 +238,43 @@ fn with_sender(body: &str, device: &str, from: String) -> String {
 
 const SUMMARY_MAX: usize = 200;
 const BODY_MAX: usize = 2000;
+const LABEL_MAX: usize = 80;
 
-/// Text from another device made safe to show: control characters dropped (a body keeps
-/// its line breaks), the markup freedesktop servers may render (& < >) escaped so a phone
-/// can't put links or formatting on this screen, and cut to `max` characters with an ellipsis.
+/// Characters that draw nothing or reorder the text around them, so a phone could use them
+/// to hide or disguise words. The joiners (U+200C, U+200D) stay: Persian, Indic scripts
+/// and emoji sequences need them.
+fn is_invisible(c: char) -> bool {
+    matches!(c,
+        '\u{200b}' | '\u{200e}' | '\u{200f}'
+        | '\u{202a}'..='\u{202e}'
+        | '\u{2066}'..='\u{2069}'
+        | '\u{2028}' | '\u{2029}'
+        | '\u{061c}' | '\u{feff}'
+        | '\u{fff9}'..='\u{fffb}'
+        | '\u{e0000}'..='\u{e007f}')
+}
+
+/// Text from another device made safe to show: control and invisible characters dropped
+/// (a body keeps its line breaks) and cut to `max` characters with an ellipsis. It is
+/// plain text still: `escape_markup` is for servers that render markup.
 fn clean(text: &str, max: usize, keep_lines: bool) -> String {
     let mut kept: Vec<char> = text
         .chars()
         .map(|c| if c == '\t' || (c == '\n' && !keep_lines) { ' ' } else { c })
-        .filter(|c| *c == '\n' || !(c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')))
+        .filter(|c| *c == '\n' || !(c.is_control() || is_invisible(*c)))
         .take(max + 1)
         .collect();
     if kept.len() > max {
-        kept.truncate(max - 1);
+        kept.truncate(max.saturating_sub(1));
         kept.push('…');
     }
-    kept.into_iter().fold(String::new(), |mut out, c| {
+    kept.into_iter().collect()
+}
+
+/// `& < >` escaped, so a server that renders body markup shows a phone's text as text, with
+/// no links or formatting of the phone's choosing.
+fn escape_markup(text: &str) -> String {
+    text.chars().fold(String::new(), |mut out, c| {
         match c {
             '&' => out.push_str("&amp;"),
             '<' => out.push_str("&lt;"),
@@ -259,16 +285,45 @@ fn clean(text: &str, max: usize, keep_lines: bool) -> String {
     })
 }
 
+/// A phone's label (a button, an app's name) as plain text, short enough for a button.
+pub(crate) fn clean_label(text: &str) -> String {
+    clean(text, LABEL_MAX, false)
+}
+
 fn clean_summary(text: &str) -> String {
     clean(text, SUMMARY_MAX, false)
 }
 
-fn clean_body(text: &str) -> String {
-    clean(text, BODY_MAX, true)
+/// The body as the server will show it: escaped only when it renders markup, because one
+/// that doesn't (dunst with markup=no) would show `&amp;` as typed.
+fn clean_body(text: &str, markup: bool) -> String {
+    let body = clean(text, BODY_MAX, true);
+    if markup {
+        escape_markup(&body)
+    } else {
+        body
+    }
+}
+
+/// Whether the notification server renders body markup. Asked once; a server that can't be
+/// asked is treated as not rendering it, and asked again next time.
+fn body_markup() -> bool {
+    static MARKUP: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    if let Some(known) = MARKUP.get() {
+        return *known;
+    }
+    match notify_rust::get_capabilities() {
+        Ok(caps) => *MARKUP.get_or_init(|| caps.iter().any(|c| c == "body-markup")),
+        Err(e) => {
+            debug!("could not ask the notification server what it supports: {e}");
+            false
+        }
+    }
 }
 
 pub fn base(summary: &str, body: &str) -> Notification {
-    let (summary, body) = (clean_summary(summary), clean_body(body));
+    // The summary is never markup, so it is never escaped
+    let (summary, body) = (clean_summary(summary), clean_body(body, body_markup()));
     let mut n = Notification::new();
     n.appname(APP).summary(&summary).body(&body).icon(DESKTOP_ENTRY).hint(Hint::DesktopEntry(DESKTOP_ENTRY.into()));
     n
@@ -465,16 +520,33 @@ mod tests {
     }
 
     #[test]
-    fn peer_text_cannot_carry_markup_or_links() {
-        assert_eq!(clean_body("<b>hi</b> & <a href=\"http://x\">y</a>"), "&lt;b&gt;hi&lt;/b&gt; &amp; &lt;a href=\"http://x\"&gt;y&lt;/a&gt;");
-        assert_eq!(clean_summary("&lt;"), "&amp;lt;");
+    fn markup_is_escaped_only_where_the_server_renders_it() {
+        let text = "<b>hi</b> & <a href=\"http://x\">y</a>";
+        assert_eq!(clean_body(text, true), "&lt;b&gt;hi&lt;/b&gt; &amp; &lt;a href=\"http://x\"&gt;y&lt;/a&gt;");
+        assert_eq!(clean_body("Tom & Jerry", false), "Tom & Jerry");
+        // The summary is plain text on every server
+        assert_eq!(clean_summary("Tom & Jerry <3"), "Tom & Jerry <3");
     }
 
     #[test]
     fn peer_text_loses_control_characters() {
         assert_eq!(clean_summary("a\u{1b}[31mb\nc\u{0}\u{7f}d\te"), "a[31mb cd e");
         // A body keeps its line breaks
-        assert_eq!(clean_body("one\r\ntwo\u{0}\nthree\u{202e}"), "one\ntwo\nthree");
+        assert_eq!(clean_body("one\r\ntwo\u{0}\nthree\u{202e}", false), "one\ntwo\nthree");
+    }
+
+    #[test]
+    fn invisible_characters_go_but_joiners_stay() {
+        for c in ['\u{200b}', '\u{200e}', '\u{202e}', '\u{2066}', '\u{2028}', '\u{2029}', '\u{61c}', '\u{feff}', '\u{fff9}', '\u{e0041}'] {
+            assert!(is_invisible(c), "{c:?}");
+        }
+        for c in ['\u{200c}', '\u{200d}', 'a', 'é', '😀'] {
+            assert!(!is_invisible(c), "{c:?}");
+        }
+        assert_eq!(clean_summary("a\u{200b}b\u{e0041}c"), "abc");
+        // A Persian word and an emoji sequence keep their joiners
+        assert_eq!(clean_summary("می\u{200c}خواهم"), "می\u{200c}خواهم");
+        assert_eq!(clean_summary("👩\u{200d}💻"), "👩\u{200d}💻");
     }
 
     #[test]
@@ -483,21 +555,31 @@ mod tests {
         let s = clean_summary(&long);
         assert_eq!(s.chars().count(), SUMMARY_MAX);
         assert!(s.ends_with('…'));
-        let b = clean_body(&"😀".repeat(BODY_MAX*2));
+        let b = clean_body(&"😀".repeat(BODY_MAX * 2), false);
         assert_eq!(b.chars().count(), BODY_MAX);
         assert!(b.ends_with('…'));
         // Text at the limit is left alone, and a cut never splits an escape
         assert_eq!(clean_summary(&"x".repeat(SUMMARY_MAX)), "x".repeat(SUMMARY_MAX));
-        let amp = clean_body(&"&".repeat(BODY_MAX + 10));
+        let amp = clean_body(&"&".repeat(BODY_MAX + 10), true);
         assert!(amp.trim_end_matches('…').ends_with("&amp;"));
         // A megabyte is cheap to clean
-        assert_eq!(clean_body(&"a".repeat(1 << 20)).chars().count(), BODY_MAX);
+        assert_eq!(clean_body(&"a".repeat(1 << 20), false).chars().count(), BODY_MAX);
+        assert_eq!(clean_label(&"l".repeat(500)).chars().count(), LABEL_MAX);
     }
 
     #[test]
-    fn base_cleans_what_it_shows() {
+    fn a_long_notification_still_says_who_it_is_from() {
+        let from = || "From Pixel".to_string();
+        let body = with_sender(&"x".repeat(1 << 16), "Pixel", from());
+        assert!(body.ends_with("\nFrom Pixel"), "{body:?}");
+        assert!(body.chars().count() <= BODY_MAX);
+        // base cuts nothing more, so the sender survives it too
+        assert_eq!(clean_body(&body, false), body);
+    }
+
+    #[test]
+    fn base_leaves_the_summary_unescaped() {
         let n = base("<i>Jenna</i>", "see <a href=\"x\">this</a>");
-        assert_eq!(n.summary, "&lt;i&gt;Jenna&lt;/i&gt;");
-        assert_eq!(n.body, "see &lt;a href=\"x\"&gt;this&lt;/a&gt;");
+        assert_eq!(n.summary, "<i>Jenna</i>");
     }
 }

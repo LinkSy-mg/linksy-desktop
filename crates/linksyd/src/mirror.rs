@@ -220,9 +220,9 @@ impl Mirror {
                 note.action("reply", t!("Reply"));
             }
             if let Some(b) = n.actions.first().filter(|_| code.is_none() || !n.can_reply) {
-                note.action(&format!("act:{}", b.id), &b.label);
+                note.action(&format!("act:{}", b.id), &crate::notify::clean_label(&b.label));
             }
-            note.action("mute", &t!("Mute {app}", app = n.app_name));
+            note.action("mute", &t!("Mute {app}", app = crate::notify::clean_label(&n.app_name)));
             // The desktop may have dropped the one to update; then it's a new one.
             let shown = note.show().or_else(|e| if previous != 0 { note.id(0).show() } else { Err(e) });
             let handle = match shown {
