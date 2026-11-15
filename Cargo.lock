@@ -2612,9 +2612,11 @@ dependencies = [
 name = "linksy-ipc"
 version = "0.16.0"
 dependencies = [
+ "libc",
  "linksy-core",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

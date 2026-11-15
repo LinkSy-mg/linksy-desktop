@@ -200,6 +200,14 @@ async fn run() -> ExitCode {
         }
     };
 
+    // Before the lock file and the socket: when they go in the private fallback folder (no
+    // XDG_RUNTIME_DIR) it must be ours and 0700, never one somebody else made in /tmp. A
+    // socket elsewhere (`--socket`) leaves the fallback folder alone.
+    let icons = linksy_ipc::runtime_dir().unwrap_or_else(linksy_ipc::fallback_dir).join("linksy-icons");
+    if let Err(e) = linksy_ipc::prepare_socket_dir(&args.socket).and_then(|()| linksy_ipc::prepare_socket_dir(&icons)) {
+        eprintln!("linksyd: {e}");
+        return ExitCode::FAILURE;
+    }
     // One service per user. The lock decides, held until this ends: two started together both
     // find no socket yet. A socket that answers is an older linksyd, which took no lock.
     let _single = match single::take(&args.socket) {
@@ -265,7 +273,6 @@ async fn run() -> ExitCode {
     tokio::spawn(pictures::run(node.clone(), data_dir.clone()));
     let updates = update::UPDATES.get_or_init(|| update::Updates::load(data_dir.join("update.json"), args.notifications)).clone();
     tokio::spawn(updates.run());
-    let icons = linksy_ipc::runtime_dir().unwrap_or_else(std::env::temp_dir).join("linksy-icons");
     #[cfg(target_os = "linux")]
     tokio::spawn(media::run(node.clone(), icons.join("art")));
     #[cfg(target_os = "linux")]
