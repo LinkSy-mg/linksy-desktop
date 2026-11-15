@@ -231,9 +231,46 @@ fn with_sender(body: &str, device: &str, from: String) -> String {
     }
 }
 
+const SUMMARY_MAX: usize = 200;
+const BODY_MAX: usize = 2000;
+
+/// Text from another device made safe to show: control characters dropped (a body keeps
+/// its line breaks), the markup freedesktop servers may render (& < >) escaped so a phone
+/// can't put links or formatting on this screen, and cut to `max` characters with an ellipsis.
+fn clean(text: &str, max: usize, keep_lines: bool) -> String {
+    let mut kept: Vec<char> = text
+        .chars()
+        .map(|c| if c == '\t' || (c == '\n' && !keep_lines) { ' ' } else { c })
+        .filter(|c| *c == '\n' || !(c.is_control() || matches!(c, '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')))
+        .take(max + 1)
+        .collect();
+    if kept.len() > max {
+        kept.truncate(max - 1);
+        kept.push('…');
+    }
+    kept.into_iter().fold(String::new(), |mut out, c| {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            c => out.push(c),
+        }
+        out
+    })
+}
+
+fn clean_summary(text: &str) -> String {
+    clean(text, SUMMARY_MAX, false)
+}
+
+fn clean_body(text: &str) -> String {
+    clean(text, BODY_MAX, true)
+}
+
 pub fn base(summary: &str, body: &str) -> Notification {
+    let (summary, body) = (clean_summary(summary), clean_body(body));
     let mut n = Notification::new();
-    n.appname(APP).summary(summary).body(body).icon(DESKTOP_ENTRY).hint(Hint::DesktopEntry(DESKTOP_ENTRY.into()));
+    n.appname(APP).summary(&summary).body(&body).icon(DESKTOP_ENTRY).hint(Hint::DesktopEntry(DESKTOP_ENTRY.into()));
     n
 }
 
@@ -425,5 +462,42 @@ mod tests {
         assert_eq!(with_sender("Lunch?", "Pixel", from()), "Lunch?\nFrom Pixel");
         assert_eq!(with_sender("From Pixel", "Pixel", from()), "From Pixel");
         assert_eq!(with_sender("Ping from Pixel", "Pixel", from()), "Ping from Pixel");
+    }
+
+    #[test]
+    fn peer_text_cannot_carry_markup_or_links() {
+        assert_eq!(clean_body("<b>hi</b> & <a href=\"http://x\">y</a>"), "&lt;b&gt;hi&lt;/b&gt; &amp; &lt;a href=\"http://x\"&gt;y&lt;/a&gt;");
+        assert_eq!(clean_summary("&lt;"), "&amp;lt;");
+    }
+
+    #[test]
+    fn peer_text_loses_control_characters() {
+        assert_eq!(clean_summary("a\u{1b}[31mb\nc\u{0}\u{7f}d\te"), "a[31mb cd e");
+        // A body keeps its line breaks
+        assert_eq!(clean_body("one\r\ntwo\u{0}\nthree\u{202e}"), "one\ntwo\nthree");
+    }
+
+    #[test]
+    fn peer_text_is_capped_on_character_boundaries() {
+        let long = "é".repeat(5000);
+        let s = clean_summary(&long);
+        assert_eq!(s.chars().count(), SUMMARY_MAX);
+        assert!(s.ends_with('…'));
+        let b = clean_body(&"😀".repeat(BODY_MAX*2));
+        assert_eq!(b.chars().count(), BODY_MAX);
+        assert!(b.ends_with('…'));
+        // Text at the limit is left alone, and a cut never splits an escape
+        assert_eq!(clean_summary(&"x".repeat(SUMMARY_MAX)), "x".repeat(SUMMARY_MAX));
+        let amp = clean_body(&"&".repeat(BODY_MAX + 10));
+        assert!(amp.trim_end_matches('…').ends_with("&amp;"));
+        // A megabyte is cheap to clean
+        assert_eq!(clean_body(&"a".repeat(1 << 20)).chars().count(), BODY_MAX);
+    }
+
+    #[test]
+    fn base_cleans_what_it_shows() {
+        let n = base("<i>Jenna</i>", "see <a href=\"x\">this</a>");
+        assert_eq!(n.summary, "&lt;i&gt;Jenna&lt;/i&gt;");
+        assert_eq!(n.body, "see &lt;a href=\"x\"&gt;this&lt;/a&gt;");
     }
 }
