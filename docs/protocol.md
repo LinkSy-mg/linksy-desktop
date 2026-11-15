@@ -1687,10 +1687,12 @@ phone → computer {"type":"deck_close"}          the deck is gone: stop sending
 
   More may come; show any id with its `name` and `kind`. `group` is in English whatever
   the language (`name` is in the computer's).
-- Desktop: media, sound, power profiles, Do Not Disturb, Lock, Wi-Fi and Bluetooth are on
-  for a phone until the user turns them off; restart, turn off, airplane mode and the
+- Desktop: only media and sound are on for a phone until the user turns them off. Lock,
+  Do Not Disturb, Wi-Fi, Bluetooth, airplane mode, power profiles, restart, turn off and the
   user's commands are off until turned on on the computer (a tile saved for one doesn't turn
-  it on, §4.26). A
+  it on, §4.26); a choice the user already made stays as it was. A deck run that arrives
+  over away from home (§4.13) is ignored unless the user allowed everything from away for
+  that phone, whatever the action. A
   tile kept from before whose action the computer no longer offers stays in its layout;
   the phone shows it as unavailable. A
   `deck_state` comes after every run that was allowed, so a refused run gets no answer.
