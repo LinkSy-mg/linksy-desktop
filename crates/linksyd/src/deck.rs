@@ -222,10 +222,9 @@ impl Saved {
     fn on(&self, phone: &Fingerprint, id: &str) -> bool {
         match self.phones.get(phone).and_then(|choices| choices.get(id)) {
             Some(on) => *on,
-            // Everyday keys on; restarting, turning off and airplane mode once allowed
-            None => {
-                id.starts_with("media.") || id.starts_with("sound.") || id.starts_with("power.") || ["system.dnd", "system.lock", "network.wifi", "network.bluetooth"].contains(&id)
-            }
+            // Only media and sound are on from the start; locking, Do Not Disturb, the radios,
+            // power profiles, restarting and turning off are off until the user allows them
+            None => id.starts_with("media.") || id.starts_with("sound."),
         }
     }
 }
@@ -638,7 +637,7 @@ impl<D: Desktop> Deck<D> {
         let _ = self.inner.node.set(node.clone());
         tokio::spawn(self.clone().work(node.clone(), jobs));
         let mut events = node.subscribe();
-        let paired = |id: &Fingerprint| node.trusted().iter().any(|t| t.device.id == *id);
+        let paired = |id: &Fingerprint| node.is_paired(id);
         let mut poll = tokio::time::interval(POLL);
         poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -1030,7 +1029,7 @@ mod tests {
 
     /// Everything the fake computer offers, and what's on for a phone until changed.
     const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "system.restart", "system.shutdown", "network.wifi", "network.bluetooth", "network.airplane", "power.saver", "power.balanced", "power.performance", "power.auto"];
-    const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "network.wifi", "network.bluetooth", "power.saver", "power.balanced", "power.performance", "power.auto"];
+    const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output"];
 
     #[test]
     fn media_and_sound_on_until_changed_and_kept() {
@@ -1054,13 +1053,28 @@ mod tests {
     }
 
     #[test]
+    fn only_media_and_sound_are_on_by_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = deck(&dir);
+        let p = phone(1);
+        for id in ["system.lock", "system.dnd", "network.wifi", "network.bluetooth", "network.airplane", "power.saver", "power.balanced", "power.performance", "power.auto", "system.restart", "system.shutdown"] {
+            assert_eq!(d.act(&p, id, None), None, "{id}");
+        }
+        // A user who turned one on keeps it
+        d.set_action(&p, "network.wifi", true).unwrap();
+        assert_eq!(deck(&dir).act(&p, "network.wifi", None), Some(Act::Wifi));
+    }
+
+    #[test]
     fn only_what_is_on_runs() {
         let dir = tempfile::tempdir().unwrap();
         let d = deck(&dir);
         let p = phone(1);
         assert_eq!(d.act(&p, "media.play_pause", None), Some(Act::Media(MediaCommand::PlayPause)));
         assert_eq!(d.act(&p, "sound.mute", Some(0.3)), Some(Act::Mute));
-        assert_eq!(d.act(&p, "system.lock", None), Some(Act::Lock), "an everyday key");
+        assert_eq!(d.act(&p, "system.lock", None), None, "off until allowed");
+        d.set_action(&p, "system.lock", true).unwrap();
+        assert_eq!(d.act(&p, "system.lock", None), Some(Act::Lock));
         assert_eq!(d.act(&p, "system.restart", None), None);
         for unknown in ["media.stop", "sound.bass", "command.", "command.nope", "", "system.screen_off"] {
             assert_eq!(d.act(&p, unknown, None), None, "{unknown}");
@@ -1251,6 +1265,8 @@ mod tests {
     async fn do_not_disturb_is_a_toggle_on_like_media() {
         let dir = tempfile::tempdir().unwrap();
         let d = deck(&dir);
+        assert_eq!(d.act(&phone(1), "system.dnd", None), None, "off until allowed");
+        d.set_action(&phone(1), "system.dnd", true).unwrap();
         assert_eq!(d.act(&phone(1), "system.dnd", None), Some(Act::Dnd));
         let dnd = d.enabled(&phone(1)).into_iter().find(|a| a.id == "system.dnd").unwrap();
         assert_eq!((dnd.kind, dnd.group.as_str(), dnd.confirm.as_deref()), (DeckKind::Toggle, SYSTEM, None));
@@ -1266,7 +1282,7 @@ mod tests {
         let d = deck(&dir);
         let p = phone(1);
         let ids = ["network.wifi", "network.bluetooth", "network.airplane"];
-        assert_eq!(ids.map(|id| d.act(&p, id, None).is_some()), [true, true, false]);
+        assert_eq!(ids.map(|id| d.act(&p, id, None).is_some()), [false, false, false], "all off until allowed");
         for id in ids {
             d.set_action(&p, id, true).unwrap();
         }
@@ -1289,7 +1305,8 @@ mod tests {
         let p = phone(1);
         let ids = ["power.saver", "power.balanced", "power.performance", "power.auto"];
         for id in ids {
-            assert!(d.act(&p, id, None).is_some(), "{id} is on from the start");
+            assert!(d.act(&p, id, None).is_none(), "{id} is off until allowed");
+            d.set_action(&p, id, true).unwrap();
         }
         assert_eq!(ids.map(|id| d.act(&p, id, None)), [Some(Act::Profile("power-saver")), Some(Act::Profile("balanced")), Some(Act::Profile("performance")), Some(Act::PowerAuto)]);
         let list: Vec<DeckAction> = d.enabled(&p).into_iter().filter(|a| a.group == POWER).collect();

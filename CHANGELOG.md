@@ -2,6 +2,20 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Changed
+- **Behaviour change: a phone's deck starts with only media and sound.** Lock, Do Not
+  Disturb, Wi-Fi, Bluetooth and power profiles used to be on for every phone from the start.
+  If you never turned these on or off yourself, they will now be off until you enable them
+  for that phone. Anything you had already turned on or off stays as it was.
+
+### Security
+- **A paired phone's deck can no longer be used from away from home unasked.** Opening the
+  deck and running an action over the internet are ignored, at the point the message arrives,
+  unless you allowed everything from away for that phone. Before, a phone could run actions
+  over away regardless.
+
 ## 0.16.0
 
 ### Added
