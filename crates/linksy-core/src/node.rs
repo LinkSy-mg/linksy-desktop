@@ -2205,11 +2205,10 @@ impl Node {
                                 }
                                 Ok(Message::Clipboard { .. }) => debug!("oversized clipboard from {}", from.name),
                                 Ok(Message::Renamed { name }) => node.peer_renamed(from.id, name),
-                                Ok(Message::Features { features }) if features.len() <= crate::settings::MAX_FEATURES && features.iter().all(|f| f.len() <= crate::settings::MAX_FEATURE) => {
-                                    let features = crate::settings::clean_features(features);
-                                    node.peer_changed(from.id, |d| d.features = features)
-                                }
-                                Ok(Message::Features { .. }) => debug!("bad features from {}", from.name),
+                                Ok(Message::Features { features }) => match crate::settings::accept_features(features) {
+                                    Some(features) => node.peer_changed(from.id, |d| d.features = features),
+                                    None => debug!("bad features from {}", from.name),
+                                },
                                 Ok(Message::DiscoveryKey { key }) => node.peer_discovery_key(&from, &key),
                                 Ok(Message::Ping) => {}
                                 Ok(Message::OpenUrl { url }) if is_web_link(&url) => node.emit(Event::OpenUrl { from, url }),

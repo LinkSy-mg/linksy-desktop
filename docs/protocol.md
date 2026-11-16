@@ -856,7 +856,9 @@ deleting `/` itself.
 ### 4.10 Features: what each device can do (`DeviceInfo.features`)
 
 `DeviceInfo` has an optional `features` list (in `hello`/`welcome`), so the other side can
-hide what a device can't do. Names: `files`, `clipboard`, `open_url`, `battery`, `ring`,
+hide what a device can't do. A name is lowercase ASCII letters, digits and `_` only
+(`[a-z0-9_]`, at most 64 bytes); at most 64 names. Receivers drop any other name, and a
+`features` message past either limit is ignored. Names: `files`, `clipboard`, `open_url`, `battery`, `ring`,
 `media_remote` (controls the other's players), `media_state` (shares its own players),
 `volume` (shares its system volume and takes `volume_set`),
 `call_state`, `heartbeat`, `import`, `fs`, `input`, `screen`, `control` (can be
