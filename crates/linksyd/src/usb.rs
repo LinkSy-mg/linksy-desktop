@@ -91,7 +91,7 @@ impl Choices {
 
     fn set(&mut self, key: String, yes: bool) {
         self.phones.insert(key, yes);
-        if let Err(e) = serde_json::to_vec_pretty(&self.phones).map_err(std::io::Error::other).and_then(|b| std::fs::write(&self.path, b)) {
+        if let Err(e) = serde_json::to_vec_pretty(&self.phones).map_err(std::io::Error::other).and_then(|b| linksy_core::identity::write_private(&self.path, &b)) {
             warn!("could not save {}: {e}", self.path.display());
         }
     }
@@ -589,6 +589,18 @@ fn pick(plugged: &[(&str, &str)], on_cable: Option<&str>, name: &str, others: bo
 mod tests {
     use super::*;
     use linksy_core::{Config, Event};
+
+    #[cfg(unix)]
+    #[test]
+    fn the_saved_choices_are_owner_only_even_over_a_looser_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usb-auto.json");
+        std::fs::write(&path, b"{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        Choices::load(path.clone()).set("serial".into(), true);
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
 
     #[test]
     fn the_phone_to_drive_is_never_a_guess_between_phones() {

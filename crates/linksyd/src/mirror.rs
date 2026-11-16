@@ -121,7 +121,7 @@ impl Mirror {
 
     pub fn set_prefs(&self, prefs: NotificationPrefs) -> std::io::Result<()> {
         let json = serde_json::to_vec_pretty(&prefs).map_err(std::io::Error::other)?;
-        std::fs::write(&self.inner.prefs_path, json)?;
+        linksy_core::identity::write_private(&self.inner.prefs_path, &json)?;
         *self.inner.prefs.lock().unwrap() = prefs;
         Ok(())
     }
@@ -330,6 +330,19 @@ fn summary(title: &str, app: &str, device: Option<&str>, copied: bool) -> String
 #[cfg(test)]
 mod tests {
     use super::summary;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_saved_choices_are_owner_only_even_over_a_looser_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notifications.json");
+        std::fs::write(&path, b"{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let m = super::Mirror::load(path.clone(), dir.path().join("icons"), dir.path().join("sock"), false);
+        m.set_prefs(linksy_ipc::NotificationPrefs::default()).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
 
     #[test]
     fn says_where_from_in_the_title() {

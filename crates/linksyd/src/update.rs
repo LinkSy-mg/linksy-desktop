@@ -197,7 +197,7 @@ impl Updates {
     }
 
     fn save(&self, s: &State) {
-        if let Err(e) = serde_json::to_vec_pretty(s).map_err(std::io::Error::other).and_then(|b| std::fs::write(&self.path, b)) {
+        if let Err(e) = serde_json::to_vec_pretty(s).map_err(std::io::Error::other).and_then(|b| linksy_core::identity::write_private(&self.path, &b)) {
             warn!("could not save {}: {e}", self.path.display());
         }
     }
@@ -241,6 +241,19 @@ fn plain(s: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn the_saved_state_is_owner_only_even_over_a_looser_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("update.json");
+        std::fs::write(&path, b"{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        // `check: false` keeps set_prefs from spawning a background check.
+        Updates::load(path.clone(), false).set_prefs(UpdatePrefs { check: false });
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
 
     #[test]
     fn versions_compare_by_number() {

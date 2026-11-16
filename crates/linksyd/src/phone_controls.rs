@@ -56,7 +56,7 @@ impl Controls {
         let changed = if on { inner.sync.insert(phone) } else { inner.sync.remove(&phone) };
         if changed {
             let bytes = serde_json::to_vec(&inner.sync).map_err(|e| e.to_string())?;
-            std::fs::write(&self.path, bytes).map_err(|e| format!("could not save: {e}"))?;
+            linksy_core::identity::write_private(&self.path, &bytes).map_err(|e| format!("could not save: {e}"))?;
         }
         Ok(())
     }
@@ -147,5 +147,21 @@ pub async fn run(node: Node) {
                 }
             }
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod private_tests {
+    use super::*;
+
+    #[test]
+    fn the_saved_choices_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dnd_sync.json");
+        std::fs::write(&path, b"[]").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        Controls::load(path.clone()).set_sync(Fingerprint([3; 32]), true).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
 }

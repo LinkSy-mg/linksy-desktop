@@ -117,7 +117,7 @@ impl Settings {
             relay: (self.relay != d.relay).then(|| self.relay.clone()).flatten(),
         };
         let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(&stored)?)?;
+        crate::identity::write_private(&tmp, &serde_json::to_vec_pretty(&stored)?)?;
         std::fs::rename(tmp, path)?;
         Ok(())
     }
@@ -178,6 +178,27 @@ mod tests {
         let renamed = Config::new(dir.path().into(), dir.path().join("dl"), "New Host");
         let s = Settings::load(&path, &renamed).unwrap();
         assert_eq!((s.name.as_str(), s.auto_accept), ("New Host", true));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saved_settings_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        // A shared folder chosen with --data-dir: the directory itself stays open.
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let config = Config::new(dir.path().into(), dir.path().join("dl"), "Host");
+        let path = dir.path().join("settings.json");
+        let mut s = Settings::defaults(&config);
+        s.auto_accept = true;
+        s.save(&path, &config).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        // A stale temp file from a crash does not leak its looser mode into the real one.
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, b"{}").unwrap();
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644)).unwrap();
+        s.save(&path, &config).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
 
     #[test]
