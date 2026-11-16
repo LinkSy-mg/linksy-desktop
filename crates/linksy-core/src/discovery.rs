@@ -40,7 +40,9 @@ const BROWSE_AFTER_EPOCH: Duration = Duration::from_secs(5);
 const BROWSE_AFTER_LOST: Duration = Duration::from_secs(1);
 /// Records kept at most. Anyone on the network can announce, so the memory (and the
 /// presence checks) must not grow with what they send; the least recently seen records
-/// of devices that aren't paired go first.
+/// go first, except private records a paired device's key makes (legacy records of paired
+/// devices can go too: their plaintext id is forgeable). Bounds our maps only; mdns-sd
+/// keeps its own cache.
 const MAX_RECORDS: usize = 256;
 
 /// A device's discovery key: its tags are made from it.
@@ -290,22 +292,9 @@ fn on_event(ev: ServiceEvent, s: &Mutex<Shared>, tx: &mpsc::UnboundedSender<Disc
             if addrs.is_empty() {
                 return Seen::Other;
             }
-            let (found, evicted) = {
-                let mut s = s.lock().unwrap();
-                let found = if let Some(t) = r.get_property_val_str("t") {
-                    s.tags.insert(r.fullname.clone(), (t.to_string(), addrs.clone()));
-                    recognise(&s.announce.peers, t)
-                } else {
-                    parse_device(&r)
-                };
-                if let Some(device) = &found {
-                    s.names.insert(r.fullname.clone(), device.id);
-                }
-                if s.tags.contains_key(&r.fullname) || s.names.contains_key(&r.fullname) {
-                    s.note_seen(&r.fullname);
-                }
-                (found, evict_over_cap(&mut s, MAX_RECORDS))
-            };
+            let legacy = if r.get_property_val_str("t").is_none() { parse_device(&r) } else { None };
+            let tag = r.get_property_val_str("t").map(str::to_string);
+            let (found, evicted) = ingest_resolved(&mut s.lock().unwrap(), &r.fullname, tag, legacy, addrs.clone(), MAX_RECORDS);
             for id in evicted {
                 if tx.send(DiscoveryEvent::Lost { id }).is_err() {
                     return Seen::Closed;
@@ -319,12 +308,7 @@ fn on_event(ev: ServiceEvent, s: &Mutex<Shared>, tx: &mpsc::UnboundedSender<Disc
             Seen::Other
         }
         ServiceEvent::ServiceRemoved(_, fullname) => {
-            let lost = {
-                let mut s = s.lock().unwrap();
-                s.tags.remove(&fullname);
-                s.seen.remove(&fullname);
-                forget_name(&mut s, &fullname)
-            };
+            let lost = ingest_removed(&mut s.lock().unwrap(), &fullname);
             match lost {
                 Some(id) => match tx.send(DiscoveryEvent::Lost { id }) {
                     Ok(()) => Seen::Lost,
@@ -340,16 +324,49 @@ fn on_event(ev: ServiceEvent, s: &Mutex<Shared>, tx: &mpsc::UnboundedSender<Disc
     }
 }
 
+/// A resolved record, under the lock: remember it, then evict over `cap`. `tag` is the
+/// private record's tag, `legacy` the device a §4.1 record names. Returns the device it
+/// stands for (if recognised) and the devices that went with the evicted records.
+fn ingest_resolved(s: &mut Shared, fullname: &str, tag: Option<String>, legacy: Option<DeviceInfo>, addrs: Vec<SocketAddr>, cap: usize) -> (Option<DeviceInfo>, Vec<Fingerprint>) {
+    let found = match tag {
+        Some(t) => {
+            let found = recognise(&s.announce.peers, &t);
+            s.tags.insert(fullname.to_string(), (t, addrs));
+            found
+        }
+        None => legacy,
+    };
+    if let Some(device) = &found {
+        s.names.insert(fullname.to_string(), device.id);
+    }
+    if s.tags.contains_key(fullname) || s.names.contains_key(fullname) {
+        s.note_seen(fullname);
+    }
+    (found, evict_over_cap(s, cap))
+}
+
+/// A record's goodbye, under the lock: forget it everywhere. Returns the device if that
+/// was the last name it had.
+fn ingest_removed(s: &mut Shared, fullname: &str) -> Option<Fingerprint> {
+    s.tags.remove(fullname);
+    s.seen.remove(fullname);
+    forget_name(s, fullname)
+}
+
 impl Shared {
     fn note_seen(&mut self, fullname: &str) {
-        self.clock += 1;
+        // Saturating: if it ever got there, ties just fall back to name order.
+        self.clock = self.clock.saturating_add(1);
         self.seen.insert(fullname.to_string(), self.clock);
     }
 }
 
-/// Forget the least recently seen records until at most `cap` remain. A record whose tag a
-/// paired device's key makes is never dropped: nobody else can forge one. Returns the
-/// devices that went with the records.
+/// Forget the least recently seen records until at most `cap` remain. A private record
+/// whose tag a paired device's key makes is never dropped: nobody else can forge one. A
+/// legacy §4.1 record (no tag, keyed by a plaintext id anyone can copy) is not protected,
+/// even a paired device's, and can be evicted; it comes back when it is announced again.
+/// The bound is for our own maps: mdns-sd keeps its own cache, so an evicted record may
+/// show up again on the next browse. Returns the devices that went with the records.
 fn evict_over_cap(s: &mut Shared, cap: usize) -> Vec<Fingerprint> {
     let mut all: Vec<String> = s.tags.keys().chain(s.names.keys()).cloned().collect();
     all.sort();
@@ -525,6 +542,59 @@ mod tests {
         see_tag(&mut s, "new", "junk");
         assert_eq!(evict_over_cap(&mut s, 1), vec![id]);
         assert!(s.names.is_empty());
+    }
+
+    fn dev(seed: &[u8]) -> DeviceInfo {
+        DeviceInfo { id: Fingerprint::of(seed), name: "d".into(), kind: DeviceKind::Phone, os: String::new(), features: Vec::new(), away: None }
+    }
+
+    #[test]
+    fn ingest_enforces_the_cap_and_reports_evicted_devices() {
+        let mut s = shared_with(Vec::new());
+        let stranger = dev(b"stranger");
+        ingest_resolved(&mut s, "legacy0", None, Some(stranger.clone()), Vec::new(), 3);
+        for i in 0..2 {
+            ingest_resolved(&mut s, &format!("t{i}"), Some("junk".into()), None, Vec::new(), 3);
+        }
+        assert_eq!(s.tags.len() + s.names.len(), 3);
+        let (found, lost) = ingest_resolved(&mut s, "t2", Some("junk".into()), None, Vec::new(), 3);
+        assert!(found.is_none());
+        assert_eq!(lost, vec![stranger.id]);
+        assert_eq!((s.tags.len(), s.names.len(), s.seen.len()), (3, 0, 3));
+    }
+
+    #[test]
+    fn ingest_keeps_a_paired_private_record_but_may_evict_a_legacy_one() {
+        let key: DiscoveryKey = [7; 32];
+        let phone = dev(b"phone");
+        let mut s = shared_with(vec![(phone.clone(), key)]);
+        let (found, _) = ingest_resolved(&mut s, "paired", Some(tag(&key, epoch_now())), None, Vec::new(), 2);
+        assert_eq!(found.map(|d| d.id), Some(phone.id));
+        ingest_resolved(&mut s, "legacy", None, Some(phone.clone()), Vec::new(), 2);
+        let (_, lost) = ingest_resolved(&mut s, "junk", Some("junk".into()), None, Vec::new(), 2);
+        // The oldest droppable one is the legacy record; the device still has its private name.
+        assert!(lost.is_empty());
+        assert!(s.tags.contains_key("paired") && s.tags.contains_key("junk"));
+        assert!(s.names.contains_key("paired") && !s.names.contains_key("legacy"));
+    }
+
+    #[test]
+    fn a_goodbye_forgets_the_record_everywhere() {
+        let mut s = shared_with(Vec::new());
+        let d = dev(b"x");
+        ingest_resolved(&mut s, "a", None, Some(d.clone()), Vec::new(), 10);
+        ingest_resolved(&mut s, "b", Some("junk".into()), None, Vec::new(), 10);
+        assert_eq!(ingest_removed(&mut s, "a"), Some(d.id));
+        assert_eq!(ingest_removed(&mut s, "b"), None);
+        assert!(s.tags.is_empty() && s.names.is_empty() && s.seen.is_empty());
+    }
+
+    #[test]
+    fn the_seen_counter_saturates() {
+        let mut s = shared_with(Vec::new());
+        s.clock = u64::MAX;
+        s.note_seen("a");
+        assert_eq!(s.clock, u64::MAX);
     }
 
     /// Checked against `openssl dgst -sha256 -mac HMAC`.
