@@ -61,7 +61,7 @@ impl Outbox {
 
     fn save(&self, prefs: &Prefs) -> Result<(), String> {
         let bytes = serde_json::to_vec(prefs).map_err(|e| e.to_string())?;
-        std::fs::write(&self.path, bytes).map_err(|e| format!("could not save: {e}"))
+        linksy_core::identity::write_private(&self.path, &bytes).map_err(|e| format!("could not save: {e}"))
     }
 
     pub fn info(&self, phone: &Fingerprint) -> linksy_ipc::ComputerNotifications {
@@ -240,6 +240,22 @@ mod tests {
         let path = std::env::temp_dir().join(format!("linksy-outbox-{name}-{}.json", std::process::id()));
         let _ = std::fs::remove_file(&path);
         Outbox::load(path)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_saved_file_is_owner_only_even_over_a_looser_one() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        let o = outbox("mode");
+        std::fs::write(&o.path, b"{}").unwrap();
+        std::fs::set_permissions(&o.path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        o.set(Fingerprint([7; 32]), true).unwrap();
+        assert_eq!(mode(&o.path), 0o600);
+        let _ = std::fs::remove_file(&o.path);
+        o.set(Fingerprint([7; 32]), false).unwrap();
+        assert_eq!(mode(&o.path), 0o600);
+        let _ = std::fs::remove_file(&o.path);
     }
 
     #[test]

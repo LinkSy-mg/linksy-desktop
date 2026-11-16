@@ -50,7 +50,7 @@ impl Away {
     pub async fn set_prefs(&self, node: &Node, mut prefs: LockPrefs) -> Result<(), String> {
         prefs.grace_s = prefs.grace_s.clamp(15, 3600);
         let json = serde_json::to_vec_pretty(&prefs).map_err(|e| e.to_string())?;
-        std::fs::write(&self.path, json).map_err(|e| e.to_string())?;
+        linksy_core::identity::write_private(&self.path, &json).map_err(|e| e.to_string())?;
         let before = std::mem::replace(&mut self.inner.lock().unwrap().prefs, prefs.clone());
         for id in &prefs.devices {
             // Ask; a device that's away hears it when it connects again.

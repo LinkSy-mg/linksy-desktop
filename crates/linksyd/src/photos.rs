@@ -32,7 +32,7 @@ impl Photos {
             return Err("the photo folder must be a full path".into());
         }
         let json = serde_json::to_vec_pretty(&prefs).map_err(|e| e.to_string())?;
-        std::fs::write(&self.path, json).map_err(|e| e.to_string())?;
+        linksy_core::identity::write_private(&self.path, &json).map_err(|e| e.to_string())?;
         apply(node, &prefs);
         *self.prefs.lock().unwrap() = prefs;
         Ok(())

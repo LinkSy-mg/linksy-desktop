@@ -121,7 +121,7 @@ impl Mirror {
 
     pub fn set_prefs(&self, prefs: NotificationPrefs) -> std::io::Result<()> {
         let json = serde_json::to_vec_pretty(&prefs).map_err(std::io::Error::other)?;
-        std::fs::write(&self.inner.prefs_path, json)?;
+        linksy_core::identity::write_private(&self.inner.prefs_path, &json)?;
         *self.inner.prefs.lock().unwrap() = prefs;
         Ok(())
     }

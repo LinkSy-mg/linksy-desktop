@@ -197,7 +197,7 @@ impl Updates {
     }
 
     fn save(&self, s: &State) {
-        if let Err(e) = serde_json::to_vec_pretty(s).map_err(std::io::Error::other).and_then(|b| std::fs::write(&self.path, b)) {
+        if let Err(e) = serde_json::to_vec_pretty(s).map_err(std::io::Error::other).and_then(|b| linksy_core::identity::write_private(&self.path, &b)) {
             warn!("could not save {}: {e}", self.path.display());
         }
     }

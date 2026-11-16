@@ -91,7 +91,7 @@ impl Choices {
 
     fn set(&mut self, key: String, yes: bool) {
         self.phones.insert(key, yes);
-        if let Err(e) = serde_json::to_vec_pretty(&self.phones).map_err(std::io::Error::other).and_then(|b| std::fs::write(&self.path, b)) {
+        if let Err(e) = serde_json::to_vec_pretty(&self.phones).map_err(std::io::Error::other).and_then(|b| linksy_core::identity::write_private(&self.path, &b)) {
             warn!("could not save {}: {e}", self.path.display());
         }
     }
