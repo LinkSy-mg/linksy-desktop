@@ -312,11 +312,15 @@ async fn close(id: u32) {
 #[cfg(not(target_os = "linux"))]
 async fn close(_id: u32) {}
 
+const TITLE_MAX: usize = 120;
+
 /// A phone notification's title here, with where it's from ("Jenna · WhatsApp"): desktops
 /// show the body on one line, where a line about the app would read as part of the message.
 /// `device` when there's more than one phone.
 fn summary(title: &str, app: &str, device: Option<&str>, copied: bool) -> String {
-    let title = title.trim();
+    // Cut on its own first, so a long title can't push the app and device off the line
+    let title = crate::notify::cap(title.trim(), TITLE_MAX);
+    let title = title.as_str();
     let mut parts = vec![title];
     if title != app {
         parts.push(app);
@@ -337,5 +341,12 @@ mod tests {
         assert_eq!(summary("Jenna", "WhatsApp", Some("realme 15 Pro 5G"), false), "Jenna · WhatsApp · realme 15 Pro 5G");
         assert_eq!(summary("WhatsApp", "WhatsApp", None, false), "WhatsApp");
         assert_eq!(summary(" ", "Bank", None, true), "Bank · code copied");
+    }
+
+    #[test]
+    fn a_long_title_keeps_the_app_and_device() {
+        let line = summary(&"t".repeat(500), "WhatsApp", Some("Pixel"), false);
+        assert!(line.ends_with(" · WhatsApp · Pixel"), "{line:?}");
+        assert!(line.chars().count() <= 200);
     }
 }
