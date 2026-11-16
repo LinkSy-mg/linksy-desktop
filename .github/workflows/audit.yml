@@ -1,0 +1,30 @@
+name: Audit
+
+# RustSec advisories for the locked dependency tree. A separate workflow so a newly published
+# advisory alerts on the weekly run instead of failing unrelated pull requests in ci.yml; pull
+# requests and pushes only run it when they change the lockfile or manifests.
+on:
+  schedule:
+    - cron: "17 5 * * 1"
+  pull_request:
+    paths: ["Cargo.lock", "**/Cargo.toml", ".github/workflows/audit.yml"]
+  push:
+    branches: [main]
+    paths: ["Cargo.lock", "**/Cargo.toml", ".github/workflows/audit.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Dependency advisories (cargo audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+        with:
+          tool: cargo-audit@0.22.2
+      # The 5 current unmaintained/yanked warnings (paste, zbus_names, zvariant, zvariant_derive,
+      # async-executor) do not fail the run; vulnerabilities do.
+      - run: cargo audit
