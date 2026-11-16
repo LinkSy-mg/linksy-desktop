@@ -331,6 +331,19 @@ fn summary(title: &str, app: &str, device: Option<&str>, copied: bool) -> String
 mod tests {
     use super::summary;
 
+    #[cfg(unix)]
+    #[test]
+    fn the_saved_choices_are_owner_only_even_over_a_looser_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("notifications.json");
+        std::fs::write(&path, b"{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let m = super::Mirror::load(path.clone(), dir.path().join("icons"), dir.path().join("sock"), false);
+        m.set_prefs(linksy_ipc::NotificationPrefs::default()).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
     #[test]
     fn says_where_from_in_the_title() {
         assert_eq!(summary("Jenna", "WhatsApp", None, false), "Jenna · WhatsApp");

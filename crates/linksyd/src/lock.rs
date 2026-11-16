@@ -196,3 +196,22 @@ async fn run_locker(locker: &[&str]) -> bool {
         }
     }
 }
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[tokio::test]
+    async fn the_saved_choices_are_owner_only_even_over_a_looser_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = linksy_core::Config::new(dir.path().join("n"), dir.path().join("dl"), "lock");
+        c.discovery = false;
+        let node = Node::start(c).await.unwrap();
+        let path = dir.path().join("lock.json");
+        std::fs::write(&path, b"{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        Away::load(path.clone()).set_prefs(&node, LockPrefs::default()).await.unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+}

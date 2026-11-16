@@ -132,7 +132,11 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
         let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(path)?;
         // The mode above only applies when the file is new; a leftover one keeps its old mode.
-        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+        // Not fatal: some filesystems (FAT, network mounts) refuse a mode change, and a plain
+        // write would have worked there.
+        if let Err(e) = f.set_permissions(std::fs::Permissions::from_mode(0o600)) {
+            tracing::warn!("could not restrict {}: {e}", path.display());
+        }
         f.write_all(bytes)
     }
     #[cfg(not(unix))]

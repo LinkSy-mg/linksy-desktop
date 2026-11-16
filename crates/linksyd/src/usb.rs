@@ -590,6 +590,18 @@ mod tests {
     use super::*;
     use linksy_core::{Config, Event};
 
+    #[cfg(unix)]
+    #[test]
+    fn the_saved_choices_are_owner_only_even_over_a_looser_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("usb-auto.json");
+        std::fs::write(&path, b"{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        Choices::load(path.clone()).set("serial".into(), true);
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
+
     #[test]
     fn the_phone_to_drive_is_never_a_guess_between_phones() {
         let one = [("k1", "SAMSUNG_Android")];
