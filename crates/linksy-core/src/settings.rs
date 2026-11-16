@@ -27,10 +27,25 @@ pub(crate) fn clean_name(name: &str) -> String {
     visible.collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_NAME).collect::<String>().trim_end().to_string()
 }
 
-/// A peer's handshake device, with its name cleaned (see [`clean_name`]) so a
-/// hostile one can't crowd the pairing code out of a prompt. A name left empty becomes the short id.
+/// Most feature names a peer may list, and the longest one (docs/protocol.md §4.10).
+pub(crate) const MAX_FEATURES: usize = 64;
+pub(crate) const MAX_FEATURE: usize = 64;
+
+/// The feature names a peer sent, kept to what a real one looks like (lowercase letters,
+/// digits and `_`, at most [`MAX_FEATURE`] long); anything else is dropped and at most
+/// [`MAX_FEATURES`] are kept.
+pub(crate) fn clean_features(features: Vec<String>) -> Vec<String> {
+    let ok = |f: &String| !f.is_empty() && f.len() <= MAX_FEATURE && f.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    features.into_iter().filter(ok).take(MAX_FEATURES).collect()
+}
+
+/// A peer's handshake device, with its name, system and features cleaned (see [`clean_name`],
+/// [`clean_features`]) so a hostile one can't crowd the pairing code out of a prompt or fill
+/// the list. A name left empty becomes the short id.
 pub(crate) fn tidy_peer(mut device: DeviceInfo) -> DeviceInfo {
     device.name = clean_name(&device.name);
+    device.os = clean_name(&device.os);
+    device.features = clean_features(device.features);
     if device.name.is_empty() {
         device.name = device.id.short();
     }

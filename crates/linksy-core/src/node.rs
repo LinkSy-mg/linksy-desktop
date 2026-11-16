@@ -2205,7 +2205,8 @@ impl Node {
                                 }
                                 Ok(Message::Clipboard { .. }) => debug!("oversized clipboard from {}", from.name),
                                 Ok(Message::Renamed { name }) => node.peer_renamed(from.id, name),
-                                Ok(Message::Features { features }) if features.len() <= 64 && features.iter().all(|f| f.len() <= 64) => {
+                                Ok(Message::Features { features }) if features.len() <= crate::settings::MAX_FEATURES && features.iter().all(|f| f.len() <= crate::settings::MAX_FEATURE) => {
+                                    let features = crate::settings::clean_features(features);
                                     node.peer_changed(from.id, |d| d.features = features)
                                 }
                                 Ok(Message::Features { .. }) => debug!("bad features from {}", from.name),

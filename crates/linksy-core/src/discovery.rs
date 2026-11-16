@@ -424,6 +424,18 @@ mod tests {
         assert_eq!(fallback.name, fallback.id.short());
     }
 
+    #[test]
+    fn announced_os_and_features_are_cleaned() {
+        let device = |os: &str, features: Vec<String>| DeviceInfo { id: crate::identity::Fingerprint::of(b"x"), name: "Pixel".into(), kind: DeviceKind::Phone, os: os.into(), features, away: None };
+        assert_eq!(crate::settings::tidy_peer(device("android", vec!["files".into(), "deck_layout".into()])).os, "android");
+        assert_eq!(crate::settings::tidy_peer(device("an\ndroid\u{202e}", vec![])).os, "an droid");
+        assert_eq!(crate::settings::tidy_peer(device(&"x".repeat(5000), vec![])).os.chars().count(), crate::MAX_NAME);
+        let many: Vec<String> = (0..500).map(|i| format!("f{i}")).collect();
+        assert_eq!(crate::settings::tidy_peer(device("linux", many)).features.len(), 64);
+        let features = vec!["files".into(), "x".repeat(65), "bad name".into(), "ev\u{202e}il".into(), "<b>".into(), String::new(), "sms".into()];
+        assert_eq!(crate::settings::tidy_peer(device("linux", features)).features, vec!["files", "sms"]);
+    }
+
     /// Checked against `openssl dgst -sha256 -mac HMAC`.
     #[test]
     fn hmac_is_hmac() {
