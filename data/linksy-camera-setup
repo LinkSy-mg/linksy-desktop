@@ -104,10 +104,25 @@ if [ ! -d /sys/module/v4l2loopback ]; then
     esac
   fi
 fi
+# v4l2loopback 0.12 (Ubuntu 24.04, Linux Mint 22) has no `add`: the module makes its device
+# as it loads, from its options. Load it again that way, and keep the options for the next
+# boot. This needs the driver to be idle: someone else's camera in use keeps it from going.
+add_by_loading() {
+  modprobe -r v4l2loopback 2>/dev/null || return 1
+  # Old drivers may lack max_width and max_height
+  modprobe v4l2loopback devices=1 card_label="$NAME" exclusive_caps=1 max_width=1920 max_height=1920 2>/dev/null ||
+    modprobe v4l2loopback devices=1 card_label="$NAME" exclusive_caps=1 || return 1
+  mkdir -p /etc/modules-load.d /etc/modprobe.d
+  echo v4l2loopback > /etc/modules-load.d/linksy-camera.conf
+  echo "options v4l2loopback devices=1 card_label=\"$NAME\" exclusive_caps=1" > /etc/modprobe.d/linksy-camera.conf
+}
+
 if ! have_device; then
   if ! v4l2loopback-ctl add --name "$NAME" --exclusive-caps 1 --max-width 1920 --max-height 1920 >/dev/null; then
-    echo "v4l2loopback-ctl couldn't add the Linksy Camera" >&2
-    exit 1
+    if ! add_by_loading || ! have_device; then
+      echo "v4l2loopback-ctl couldn't add the Linksy Camera, and loading the driver with the camera didn't either (is a camera of another app open?)" >&2
+      exit 1
+    fi
   fi
 fi
 echo "Linksy Camera is ready"
