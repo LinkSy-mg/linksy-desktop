@@ -220,9 +220,9 @@ impl Mirror {
                 note.action("reply", t!("Reply"));
             }
             if let Some(b) = n.actions.first().filter(|_| code.is_none() || !n.can_reply) {
-                note.action(&format!("act:{}", b.id), &b.label);
+                note.action(&format!("act:{}", b.id), &crate::notify::clean_label(&b.label));
             }
-            note.action("mute", &t!("Mute {app}", app = n.app_name));
+            note.action("mute", &t!("Mute {app}", app = crate::notify::clean_label(&n.app_name)));
             // The desktop may have dropped the one to update; then it's a new one.
             let shown = note.show().or_else(|e| if previous != 0 { note.id(0).show() } else { Err(e) });
             let handle = match shown {
@@ -312,11 +312,15 @@ async fn close(id: u32) {
 #[cfg(not(target_os = "linux"))]
 async fn close(_id: u32) {}
 
+const TITLE_MAX: usize = 120;
+
 /// A phone notification's title here, with where it's from ("Jenna · WhatsApp"): desktops
 /// show the body on one line, where a line about the app would read as part of the message.
 /// `device` when there's more than one phone.
 fn summary(title: &str, app: &str, device: Option<&str>, copied: bool) -> String {
-    let title = title.trim();
+    // Cut on its own first, so a long title can't push the app and device off the line
+    let title = crate::notify::cap(title.trim(), TITLE_MAX);
+    let title = title.as_str();
     let mut parts = vec![title];
     if title != app {
         parts.push(app);
@@ -350,5 +354,12 @@ mod tests {
         assert_eq!(summary("Jenna", "WhatsApp", Some("realme 15 Pro 5G"), false), "Jenna · WhatsApp · realme 15 Pro 5G");
         assert_eq!(summary("WhatsApp", "WhatsApp", None, false), "WhatsApp");
         assert_eq!(summary(" ", "Bank", None, true), "Bank · code copied");
+    }
+
+    #[test]
+    fn a_long_title_keeps_the_app_and_device() {
+        let line = summary(&"t".repeat(500), "WhatsApp", Some("Pixel"), false);
+        assert!(line.ends_with(" · WhatsApp · Pixel"), "{line:?}");
+        assert!(line.chars().count() <= 200);
     }
 }

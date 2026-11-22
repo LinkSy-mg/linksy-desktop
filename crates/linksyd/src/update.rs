@@ -167,7 +167,8 @@ impl Updates {
         for n in notices {
             #[cfg(target_os = "linux")]
             if self.notifications {
-                crate::notify::show(plain(&n.title, 120), plain(&n.body, 600));
+                // show() cleans and caps it like any peer text
+                crate::notify::show(n.title, n.body);
             }
         }
     }
@@ -231,11 +232,6 @@ fn fetch(url: &str) -> Result<Service, String> {
 fn newer(a: &str, b: &str) -> bool {
     let parts = |v: &str| v.trim_start_matches('v').split('.').map(|p| p.parse::<u64>().unwrap_or(0)).collect::<Vec<_>>();
     parts(a) > parts(b)
-}
-
-/// Notice text as plain text, cut to `max` characters.
-fn plain(s: &str, max: usize) -> String {
-    s.chars().filter(|c| !c.is_control() || *c == '\n').take(max).collect()
 }
 
 #[cfg(test)]
