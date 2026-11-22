@@ -41,6 +41,10 @@ struct Shown {
     id: u32,
     /// Which showing of the key this is; a newer one supersedes the older's buttons.
     generation: u64,
+    /// Whether a thread is waiting for the user to act on `id`. One is enough for every
+    /// update of the same notification: each held a bus connection and a thread until the
+    /// notification went (releases#12).
+    listening: bool,
 }
 
 impl Mirror {
@@ -195,8 +199,8 @@ impl Mirror {
         let generation = self.inner.next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let previous = {
             let mut shown = self.inner.shown.lock().unwrap();
-            let previous = shown.get(&entry).map(|s| s.id).unwrap_or(0);
-            shown.insert(entry.clone(), Shown { from: from.clone(), notification: n.clone(), id: previous, generation });
+            let (previous, listening) = shown.get(&entry).map(|s| (s.id, s.listening)).unwrap_or((0, false));
+            shown.insert(entry.clone(), Shown { from: from.clone(), notification: n.clone(), id: previous, generation, listening });
             previous
         };
         let icon = n.icon.as_deref().and_then(|b64| crate::inbox::unpack(&self.inner.icons, &n.app, b64));
@@ -234,12 +238,25 @@ impl Mirror {
             };
             let id = handle.id();
             // Superseded or removed while it was being shown: nothing more to do.
-            let current = |m: &Mirror| m.inner.shown.lock().unwrap().get(&entry).is_some_and(|s| s.generation == generation);
-            match mirror.inner.shown.lock().unwrap().get_mut(&entry) {
-                Some(s) if s.generation == generation => s.id = id,
+            let waiting = match mirror.inner.shown.lock().unwrap().get_mut(&entry) {
+                Some(s) if s.generation == generation => {
+                    let waiting = s.listening && id == previous;
+                    s.id = id;
+                    s.listening = true;
+                    waiting
+                }
                 _ => return,
+            };
+            // Shown again in place: the thread that waits on this id still does.
+            if waiting {
+                return;
             }
+            let current = |m: &Mirror| m.inner.shown.lock().unwrap().get(&entry).is_some_and(|s| s.id == id);
             let _ = handle.wait_for_response(|response: &NotificationResponse| {
+                // It ends with its first response: the next showing starts another
+                if let Some(s) = mirror.inner.shown.lock().unwrap().get_mut(&entry).filter(|s| s.id == id) {
+                    s.listening = false;
+                }
                 if !current(&mirror) {
                     return;
                 }
