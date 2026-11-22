@@ -2,6 +2,20 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Fixed
+- **The phone's webcam no longer ends a second after it starts** on setups where the camera
+  device refuses a stream that carries colour information ("not-negotiated"). The phone's
+  stream is now sent without it.
+- **Finish Setup can make the camera on Ubuntu 24.04 and Linux Mint 22,** whose older
+  v4l2loopback cannot add a device ("couldn't add the Linksy Camera"). The driver is loaded
+  with the camera instead, and again at every start.
+- **The session no longer runs out of D-Bus connections.** Each update of a phone
+  notification that was already showing (a chat, a download) kept a thread and a connection
+  open until it was closed, which could fill the session bus after a couple of hours and
+  take the desktop down with it.
+
 ## 0.16.0
 
 ### Added
