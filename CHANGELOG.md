@@ -5,6 +5,9 @@ Linksy for Linux. Each version's section becomes its release notes.
 ## Unreleased
 
 ### Security
+- **Opening or using a phone's deck from away requires permission.** Linksy now ignores
+  deck open and run messages received over Away unless the user allowed everything from
+  away for that phone.
 - **The `url` library is updated for a new advisory** (a crash on certain nested `blob:`
   addresses, which Linksy itself never opens).
 

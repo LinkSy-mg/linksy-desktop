@@ -1669,6 +1669,8 @@ phone → computer {"type":"deck_close"}          the deck is gone: stop sending
   the computer; `deck_state` while the deck is open, when something changes. The list is
   only what's on for that phone: anything else the phone runs is refused (ignored), so a
   tile whose action left the list should show as unavailable, not disappear.
+- The computer ignores `deck_open` and `deck_run` received over away from home (§4.13)
+  unless the user allowed everything from away for that phone. This applies to every action.
 - Ids, each only where this computer can do it (a missing tool means it isn't offered):
 
   | Group | Id | Kind | State | Desktop does it with |

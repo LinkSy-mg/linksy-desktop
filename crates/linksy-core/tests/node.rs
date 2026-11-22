@@ -1691,6 +1691,54 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     assert!(std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { .. })), "not asked from away");
 }
 
+#[cfg(feature = "away")]
+#[tokio::test]
+async fn deck_from_away_needs_everything_allowed_there() {
+    let (phone, pc) = paired_with(|c| {
+        c.idle_after = Duration::from_millis(1500);
+        c.away = true;
+    })
+    .await;
+    let (phone_id, pc_id) = (phone.node.info().id, pc.node.info().id);
+    if pc.node.info().away.is_none_or(|w| w.addrs.is_empty()) {
+        return eprintln!("no network address: skipped");
+    }
+
+    let mut on_phone = phone.node.subscribe();
+    wait_for(&mut on_phone, |e| matches!(e, Event::Disconnected { .. }).then_some(())).await;
+    phone.node.connect_away(&pc_id).await.expect("away connection");
+    assert_eq!(phone.node.link(&pc_id), Some(linksy_core::Link::Away));
+
+    let mut on_pc = pc.node.subscribe();
+    phone.node.send_clipboard(&pc_id, "away connection ready").await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::Clipboard { .. }).then_some(())).await;
+    assert_eq!(pc.node.link(&phone_id), Some(linksy_core::Link::Away));
+
+    phone.node.deck_open(&pc_id, true).await.unwrap();
+    phone.node.deck_run(&pc_id, "system.lock", None).await.unwrap();
+    let denied = tokio::time::timeout(Duration::from_millis(300), async {
+        loop {
+            let event = on_pc.recv().await.expect("event stream closed");
+            if matches!(event, Event::DeckOpen { .. } | Event::DeckRun { .. }) {
+                return event;
+            }
+        }
+    })
+    .await;
+    assert!(denied.is_err(), "deck message delivered without away access: {denied:?}");
+
+    pc.node.set_away_all(&phone_id, true).unwrap();
+    phone.node.deck_open(&pc_id, true).await.unwrap();
+    phone.node.deck_run(&pc_id, "system.lock", None).await.unwrap();
+    let (mut opened, mut ran) = (false, false);
+    wait_for(&mut on_pc, |e| {
+        opened |= matches!(e, Event::DeckOpen { .. });
+        ran |= matches!(e, Event::DeckRun { action, .. } if action == "system.lock");
+        (opened && ran).then_some(())
+    })
+    .await;
+}
+
 /// With a relay, the away endpoint runs only once a paired device could use it (desktop#26),
 /// and the handshake says how to reach it through the relay meanwhile.
 #[cfg(feature = "away")]
