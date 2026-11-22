@@ -2,6 +2,12 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Security
+- **The `url` library is updated for a new advisory** (a crash on certain nested `blob:`
+  addresses, which Linksy itself never opens).
+
 ## 0.16.1
 
 ### Fixed
