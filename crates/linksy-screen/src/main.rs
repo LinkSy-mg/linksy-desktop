@@ -755,13 +755,54 @@ fn webcam(socket: &std::path::Path, name: &str, fps: u32) -> Result<(), String> 
     let sink = camera_sink(camera_device().as_deref(), has("v4l2sink"), has("pipewiresink"), &pipewire)?;
     let description = format!(
         "fdsrc fd={} ! h264parse ! {decoder} ! videoconvert ! video/x-raw,format=YUY2 \
-         ! {} ! {sink}",
+         ! {} ! identity name={NO_COLORIMETRY} ! {sink}",
         input.as_raw_fd(),
         fixed_rate(fps)
     );
-    let result = play(&description);
+    let result = play_with(&description, drop_colorimetry);
     drop(input);
     result
+}
+
+/// The element after which the camera's caps carry no colorimetry.
+const NO_COLORIMETRY: &str = "nocolorimetry";
+
+/// What a phone's H.264 stream says about its colours reaches the caps as `colorimetry`, and
+/// on some stacks (GStreamer 1.24, v4l2loopback 0.15) `v4l2sink` refuses any caps that carry
+/// it, so the camera ended at once (desktop#105, #94). The frames are the same without it.
+fn without_colorimetry(caps: &gst::CapsRef) -> gst::Caps {
+    let mut caps = caps.to_owned();
+    for structure in caps.make_mut().iter_mut() {
+        structure.remove_field("colorimetry");
+    }
+    caps
+}
+
+/// Take `colorimetry` out of the caps every time they are set, after the element that
+/// `webcam` names `NO_COLORIMETRY`.
+fn drop_colorimetry(pipeline: &gst::Element) {
+    let Some(pad) = pipeline
+        .downcast_ref::<gst::Bin>()
+        .and_then(|bin| bin.by_name(NO_COLORIMETRY))
+        .and_then(|element| element.static_pad("src"))
+    else {
+        return;
+    };
+    pad.add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, |_, info| {
+        let cleaned = match &info.data {
+            Some(gst::PadProbeData::Event(event)) => match event.view() {
+                gst::EventView::Caps(c) if c.caps().iter().any(|s| s.has_field("colorimetry")) => {
+                    Some(gst::event::Caps::new(&without_colorimetry(c.caps())))
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some(event) = cleaned {
+            info.data = Some(gst::PadProbeData::Event(event));
+        }
+        gst::PadProbeReturn::Ok
+    });
 }
 
 /// What the microphone sessions carry: raw PCM, as both ends agree (docs/protocol.md §4.8).
@@ -851,11 +892,17 @@ fn stop_on_term() {
 
 /// Run a pipeline until it ends or fails.
 fn play(description: &str) -> Result<(), String> {
+    play_with(description, |_| {})
+}
+
+/// `play`, with a step to take on the pipeline before it starts.
+fn play_with(description: &str, setup: impl FnOnce(&gst::Element)) -> Result<(), String> {
     let mut context = gst::ParseContext::new();
     let pipeline = gst::parse::launch_full(description, Some(&mut context), gst::ParseFlags::empty()).map_err(|e| {
         let lacking = context.missing_elements();
         if lacking.is_empty() { format!("pipeline: {e}") } else { missing(format!("GStreamer has no {} here", lacking.join(", "))) }
     })?;
+    setup(&pipeline);
     pipeline.set_state(gst::State::Playing).map_err(|e| format!("could not start: {e}"))?;
     let bus = pipeline.bus().ok_or("pipeline has no bus")?;
     let result = loop {
@@ -876,7 +923,8 @@ fn play(description: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{camera_sink, falls_behind, mic_gain};
+    use super::{camera_sink, drop_colorimetry, falls_behind, mic_gain, NO_COLORIMETRY};
+    use gstreamer as gst;
     use std::path::Path;
 
     #[test]
@@ -906,6 +954,42 @@ mod tests {
         assert!(camera_sink(None, true, false, "pipewiresink").unwrap_err().contains("PipeWire"));
     }
 
+
+    /// The caps the sink of a test pattern with colorimetry ends up with.
+    fn caps_at_the_end(strip: bool) -> gst::Caps {
+        use gst::prelude::*;
+        gst::init().unwrap();
+        let pipeline = gst::parse::launch(&format!(
+            "videotestsrc num-buffers=3 ! video/x-raw,format=YUY2,width=320,height=240,framerate=30/1,colorimetry=2:4:16:3 \
+             ! identity name={NO_COLORIMETRY} ! fakesink name=end sync=false"
+        ))
+        .unwrap();
+        if strip {
+            drop_colorimetry(&pipeline);
+        }
+        pipeline.set_state(gst::State::Playing).unwrap();
+        let bus = pipeline.bus().unwrap();
+        bus.timed_pop_filtered(gst::ClockTime::from_seconds(10), &[gst::MessageType::Eos, gst::MessageType::Error]).expect("the pattern ends");
+        let end = pipeline.downcast_ref::<gst::Bin>().unwrap().by_name("end").unwrap();
+        let caps = end.static_pad("sink").unwrap().current_caps().unwrap();
+        pipeline.set_state(gst::State::Null).unwrap();
+        caps
+    }
+
+    #[test]
+    fn a_stream_with_colorimetry_reaches_the_sink_with_it_unless_it_is_taken_out() {
+        assert!(caps_at_the_end(false).structure(0).unwrap().has_field("colorimetry"));
+    }
+
+    #[test]
+    fn the_camera_reaches_its_sink_without_colorimetry_and_otherwise_the_same() {
+        let caps = caps_at_the_end(true);
+        let s = caps.structure(0).unwrap();
+        assert!(!s.has_field("colorimetry"));
+        assert_eq!(s.get::<i32>("width").unwrap(), 320);
+        assert_eq!(s.get::<i32>("height").unwrap(), 240);
+        assert_eq!(s.get::<&str>("format").unwrap(), "YUY2");
+    }
 
     #[test]
     fn a_phone_microphone_is_made_12_db_louder() {
