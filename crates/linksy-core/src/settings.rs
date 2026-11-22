@@ -27,10 +27,34 @@ pub(crate) fn clean_name(name: &str) -> String {
     visible.collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_NAME).collect::<String>().trim_end().to_string()
 }
 
-/// A peer's handshake device, with its name cleaned (see [`clean_name`]) so a
-/// hostile one can't crowd the pairing code out of a prompt. A name left empty becomes the short id.
+/// Most feature names a peer may list, and the longest one (docs/protocol.md §4.10).
+pub(crate) const MAX_FEATURES: usize = 64;
+pub(crate) const MAX_FEATURE: usize = 64;
+
+/// The feature names a peer sent, kept to what a real one looks like (lowercase letters,
+/// digits and `_`, at most [`MAX_FEATURE`] long); anything else is dropped and at most
+/// [`MAX_FEATURES`] are kept.
+pub(crate) fn clean_features(features: Vec<String>) -> Vec<String> {
+    let ok = |f: &String| !f.is_empty() && f.len() <= MAX_FEATURE && f.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+    features.into_iter().filter(ok).take(MAX_FEATURES).collect()
+}
+
+/// A live `features` message: dropped whole when it lists too many names or one too long
+/// (a peer that does that is broken or hostile), otherwise cleaned with [`clean_features`].
+pub(crate) fn accept_features(features: Vec<String>) -> Option<Vec<String>> {
+    if features.len() > MAX_FEATURES || features.iter().any(|f| f.len() > MAX_FEATURE) {
+        return None;
+    }
+    Some(clean_features(features))
+}
+
+/// A peer's handshake device, with its name, system and features cleaned (see [`clean_name`],
+/// [`clean_features`]) so a hostile one can't crowd the pairing code out of a prompt or fill
+/// the list. A name left empty becomes the short id.
 pub(crate) fn tidy_peer(mut device: DeviceInfo) -> DeviceInfo {
     device.name = clean_name(&device.name);
+    device.os = clean_name(&device.os);
+    device.features = clean_features(device.features);
     if device.name.is_empty() {
         device.name = device.id.short();
     }
@@ -163,6 +187,66 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn peer(os: &str, features: Vec<String>) -> DeviceInfo {
+        DeviceInfo {
+            id: crate::identity::Fingerprint::of(b"x"),
+            name: "Pixel".into(),
+            kind: crate::identity::DeviceKind::Phone,
+            os: os.into(),
+            features,
+            away: None,
+        }
+    }
+
+    fn names(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn peer_os_is_cleaned() {
+        assert_eq!(tidy_peer(peer("android", vec![])).os, "android");
+        assert_eq!(tidy_peer(peer("an\ndroid\u{202e}", vec![])).os, "an droid");
+        assert_eq!(tidy_peer(peer(&"x".repeat(5000), vec![])).os.chars().count(), MAX_NAME);
+    }
+
+    #[test]
+    fn peer_features_keep_only_well_formed_names() {
+        let kept = |list: Vec<String>| tidy_peer(peer("linux", list)).features;
+        assert_eq!(kept(names(&["files", "deck_layout", "a1_"])), names(&["files", "deck_layout", "a1_"]));
+        // Uppercase, hyphen, dot, space, markup, bidi, empty and non-ASCII are all dropped.
+        let bad = names(&["Files", "a-b", "a.b", "bad name", "ev\u{202e}il", "<b>", "", "caf\u{e9}"]);
+        assert_eq!(kept(bad), Vec::<String>::new());
+        assert_eq!(kept(names(&["files", "Bad-Name", "sms"])), names(&["files", "sms"]));
+    }
+
+    #[test]
+    fn peer_feature_name_length_is_capped_in_bytes() {
+        let kept = |list: Vec<String>| tidy_peer(peer("linux", list)).features;
+        assert_eq!(kept(vec!["x".repeat(64)]).len(), 1);
+        assert!(kept(vec!["x".repeat(65)]).is_empty());
+        // 33 two-byte chars are 66 bytes; none are allowed characters anyway.
+        assert!(kept(vec!["\u{e9}".repeat(33)]).is_empty());
+    }
+
+    #[test]
+    fn peer_feature_count_is_capped() {
+        let many = |n: usize| (0..n).map(|i| format!("f{i}")).collect::<Vec<_>>();
+        assert_eq!(tidy_peer(peer("linux", many(64))).features, many(64));
+        assert_eq!(tidy_peer(peer("linux", many(65))).features, many(64));
+        assert_eq!(tidy_peer(peer("linux", many(500))).features.len(), MAX_FEATURES);
+    }
+
+    #[test]
+    fn a_live_features_message_is_cleaned_or_dropped() {
+        assert_eq!(accept_features(names(&["ok", "Bad-Name"])), Some(names(&["ok"])));
+        assert_eq!(accept_features(vec![]), Some(vec![]));
+        let many = |n: usize| (0..n).map(|i| format!("f{i}")).collect::<Vec<_>>();
+        assert_eq!(accept_features(many(64)), Some(many(64)));
+        assert_eq!(accept_features(many(65)), None);
+        assert_eq!(accept_features(vec!["x".repeat(64)]).map(|v| v.len()), Some(1));
+        assert_eq!(accept_features(vec!["ok".into(), "x".repeat(65)]), None);
+    }
 
     #[test]
     fn stores_only_changes() {

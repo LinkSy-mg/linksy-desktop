@@ -202,6 +202,19 @@ mod tests {
         assert!(name.starts_with("Evil Code 1 xxx") && name.chars().count() == crate::MAX_NAME, "{name:?}");
     }
 
+    #[test]
+    fn stored_os_and_features_are_cleaned_on_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trusted.json");
+        let id = Fingerprint::of(b"x");
+        let device = DeviceInfo { id, name: "Pixel".into(), kind: DeviceKind::Phone, os: format!("an\u{202e}droid{}", "x".repeat(5000)), features: vec!["files".into(), "x".repeat(5000)], away: None };
+        let mut store = TrustStore::load(path.clone()).unwrap();
+        store.add(device, None).unwrap();
+        let loaded = TrustStore::load(path).unwrap().get(&id).unwrap().device.clone();
+        assert!(loaded.os.starts_with("android") && loaded.os.chars().count() == crate::MAX_NAME, "{:?}", loaded.os);
+        assert_eq!(loaded.features, vec!["files"]);
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_paired_list_is_saved_owner_only() {
