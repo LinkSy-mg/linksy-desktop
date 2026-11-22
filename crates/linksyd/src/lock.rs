@@ -50,7 +50,7 @@ impl Away {
     pub async fn set_prefs(&self, node: &Node, mut prefs: LockPrefs) -> Result<(), String> {
         prefs.grace_s = prefs.grace_s.clamp(15, 3600);
         let json = serde_json::to_vec_pretty(&prefs).map_err(|e| e.to_string())?;
-        std::fs::write(&self.path, json).map_err(|e| e.to_string())?;
+        linksy_core::identity::write_private(&self.path, &json).map_err(|e| e.to_string())?;
         let before = std::mem::replace(&mut self.inner.lock().unwrap().prefs, prefs.clone());
         for id in &prefs.devices {
             // Ask; a device that's away hears it when it connects again.
@@ -194,5 +194,24 @@ async fn run_locker(locker: &[&str]) -> bool {
             });
             true
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[tokio::test]
+    async fn the_saved_choices_are_owner_only_even_over_a_looser_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = linksy_core::Config::new(dir.path().join("n"), dir.path().join("dl"), "lock");
+        c.discovery = false;
+        let node = Node::start(c).await.unwrap();
+        let path = dir.path().join("lock.json");
+        std::fs::write(&path, b"{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        Away::load(path.clone()).set_prefs(&node, LockPrefs::default()).await.unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
     }
 }

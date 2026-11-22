@@ -140,7 +140,7 @@ pub fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 }
 
 /// State files that hold keys, tokens, paired devices or history; made private on start.
-const PRIVATE_FILES: [&str; 12] = [
+const PRIVATE_FILES: [&str; 16] = [
     "key.der",
     "discovery.key",
     "away.key",
@@ -153,6 +153,10 @@ const PRIVATE_FILES: [&str; 12] = [
     "lock.json",
     "usb-auto.json",
     "update.json",
+    "settings.json",
+    "outbox.json",
+    "dnd_sync.json",
+    "deck.json",
 ];
 
 /// Create the data directory private to this user (0700), and tighten the state files in
@@ -249,6 +253,18 @@ mod tests {
         let made = root.path().join("made");
         create_private_dir(&made, true).unwrap();
         assert_eq!(mode(&made), 0o700);
+
+        // The settings and the daemon's preference files are named, not just counted.
+        let prefs = root.path().join("prefs");
+        std::fs::create_dir(&prefs).unwrap();
+        for name in ["settings.json", "outbox.json", "dnd_sync.json", "deck.json", "lock.json", "photos.json", "notifications.json"] {
+            std::fs::write(prefs.join(name), b"x").unwrap();
+            std::fs::set_permissions(prefs.join(name), std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        create_private_dir(&prefs, true).unwrap();
+        for name in ["settings.json", "outbox.json", "dnd_sync.json", "deck.json", "lock.json", "photos.json", "notifications.json"] {
+            assert_eq!(mode(&prefs.join(name)), 0o600, "{name}");
+        }
 
         // A stale temp file from a crash does not keep its old mode.
         let stale = root.path().join("trusted.json.tmp");

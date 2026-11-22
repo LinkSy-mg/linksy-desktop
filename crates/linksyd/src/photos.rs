@@ -32,7 +32,7 @@ impl Photos {
             return Err("the photo folder must be a full path".into());
         }
         let json = serde_json::to_vec_pretty(&prefs).map_err(|e| e.to_string())?;
-        std::fs::write(&self.path, json).map_err(|e| e.to_string())?;
+        linksy_core::identity::write_private(&self.path, &json).map_err(|e| e.to_string())?;
         apply(node, &prefs);
         *self.prefs.lock().unwrap() = prefs;
         Ok(())
@@ -41,4 +41,24 @@ impl Photos {
 
 fn apply(node: &Node, prefs: &PhotoPrefs) {
     node.set_import_dir(prefs.import.then(|| prefs.folder.clone()));
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[tokio::test]
+    async fn the_saved_choice_is_owner_only_even_over_a_looser_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = linksy_core::Config::new(dir.path().join("n"), dir.path().join("dl"), "photos");
+        c.discovery = false;
+        let node = Node::start(c).await.unwrap();
+        let path = dir.path().join("photos.json");
+        std::fs::write(&path, b"{}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let photos = Photos::load(path.clone(), &node);
+        photos.set_prefs(&node, PhotoPrefs { import: false, folder: dir.path().join("pics") }).unwrap();
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    }
 }
