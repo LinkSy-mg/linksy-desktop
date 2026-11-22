@@ -639,11 +639,12 @@ fn active(session: &Session) -> ActiveSession {
 }
 
 fn socket_path(role: &str, id: Uuid) -> PathBuf {
-    let dir = linksy_ipc::runtime_dir().unwrap_or_else(std::env::temp_dir);
+    let dir = linksy_ipc::runtime_dir().unwrap_or_else(linksy_ipc::fallback_dir);
     dir.join(format!("linksy-{role}-{}.sock", id.simple()))
 }
 
 fn bind(path: &Path) -> std::io::Result<UnixListener> {
+    linksy_ipc::prepare_socket_dir(path)?;
     let _ = std::fs::remove_file(path);
     let listener = UnixListener::bind(path)?;
     use std::os::unix::fs::PermissionsExt;
@@ -918,6 +919,21 @@ mod tests {
         assert_eq!(super::monitor_size((2400, 1080)), (2400, 1080));
         assert_eq!(super::monitor_size((2800, 1272)), (2376, 1080));
         assert_eq!(super::monitor_size((1280, 800)), (1280, 800));
+    }
+
+    #[tokio::test]
+    async fn a_session_socket_is_not_bound_in_a_planted_fallback_folder() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = linksy_ipc::fallback_dir_in(tmp.path());
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let path = dir.join("linksy-view-x.sock");
+        let err = bind(&path).expect_err("bound in a planted folder");
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied, "{err}");
+        assert!(!path.exists());
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        bind(&path).unwrap();
     }
 }
 

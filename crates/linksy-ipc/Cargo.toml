@@ -8,4 +8,8 @@ license.workspace = true
 linksy-core = { path = "../linksy-core", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+libc = "0.2.191"
 tokio = { version = "1.53.3", features = ["net", "io-util", "sync", "rt", "macros"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
