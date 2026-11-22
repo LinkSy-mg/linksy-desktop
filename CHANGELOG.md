@@ -2,19 +2,33 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.16.1
 
 ### Fixed
 - **The phone's webcam no longer ends a second after it starts** on setups where the camera
   device refuses a stream that carries colour information ("not-negotiated"). The phone's
-  stream is now sent without it.
+  stream is now sent without it (thanks, @zedocrob).
 - **Finish Setup can make the camera on Ubuntu 24.04 and Linux Mint 22,** whose older
   v4l2loopback cannot add a device ("couldn't add the Linksy Camera"). The driver is loaded
-  with the camera instead, and again at every start.
+  with the camera instead, and again at every start (thanks, @philippegm).
 - **The session no longer runs out of D-Bus connections.** Each update of a phone
   notification that was already showing (a chat, a download) kept a thread and a connection
   open until it was closed, which could fill the session bus after a couple of hours and
-  take the desktop down with it.
+  take the desktop down with it (thanks, @tvs-dr).
+
+### Security
+- **A phone's text is cleaned before a notification shows it:** hidden and control
+  characters are dropped, it is cut to a sensible length, and on desktops that draw markup
+  in notifications, tags in it are shown as text (thanks, @bearyjd).
+- **Without a runtime folder, Linksy's sockets go in a private folder** that is checked
+  before it is used, so another user of the computer cannot plant one (thanks, @bearyjd).
+- **Discovery keeps at most 256 records,** so a device on the network cannot make Linksy use
+  more and more memory by announcing many (thanks, @bearyjd).
+- **A device's system name and feature list are cleaned and capped** (thanks, @bearyjd).
+- **Every saved file is private,** also when the data folder is chosen with `--data-dir`
+  (thanks, @bearyjd).
+- **Three dependencies are updated for security advisories,** and a weekly check keeps
+  watching for new ones (thanks, @bearyjd).
 
 ## 0.16.0
 

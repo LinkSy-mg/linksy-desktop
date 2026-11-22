@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.16.1" date="2026-11-22">
+      <description>
+        <p>Fixes: the phone's webcam no longer ends at once on some setups, Finish Setup can make the camera on Ubuntu 24.04 and Linux Mint 22, and a phone's notifications no longer pile up connections until the desktop session runs out of them. Security: what a phone sends to the notifications and to the device list is cleaned and capped, Linksy's files and sockets are kept private in more places, and three dependencies are updated.</p>
+      </description>
+    </release>
     <release version="0.16.0" date="2026-11-14">
       <description>
         <p>A device's page now says how it is reached away from home: direct, or through the relay, which is the slower way. Before something of 200 MB or more goes through the relay, the apps say how much it is and ask first. In both apps.</p>
