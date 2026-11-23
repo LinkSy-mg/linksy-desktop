@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.18.0
 
 ### Added
 - **Gauges on the phone's deck:** a tile for the computer's CPU, memory, swap, disk, battery,

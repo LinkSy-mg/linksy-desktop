@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.18.0" date="2026-11-23">
+      <description>
+        <p>Gauges on the phone's deck: the computer's CPU, memory, swap, disk, battery, temperature, network speed and uptime as tiles, kept fresh while the deck is open. The computer reads them only while a deck that shows one is open. A phone needs its next version to draw them.</p>
+      </description>
+    </release>
     <release version="0.17.1" date="2026-11-23">
       <description>
         <p>Fixes: the phone's webcam no longer stops when the phone changes its resolution while an app has the camera open. Security: opening or using a phone's deck from away needs the permission to allow everything from away.</p>
