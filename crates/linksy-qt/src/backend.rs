@@ -534,7 +534,7 @@ impl qobject::Backend {
         let ids: Vec<String> = serde_json::from_str(&ids.to_string()).unwrap_or_default();
         let ask = asker(thread.clone(), self.rust().password.clone());
         self.rust().rt.spawn_blocking(move || {
-            let items: Vec<_> = linksy_setup::actionable(&linksy_setup::check(Ui::Qt)).into_iter().filter(|i| ids.is_empty() || ids.iter().any(|id| id == i.id)).collect();
+            let items = linksy_setup::actionable_asked(&linksy_setup::check(Ui::Qt), &ids);
             let args = linksy_setup::root_args(&items);
             let step = |text: String| {
                 let _ = thread.queue(move |b| b.setup_step(QString::from(&text)));

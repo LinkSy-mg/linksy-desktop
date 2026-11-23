@@ -92,8 +92,8 @@ install -Dm644 -t "$ROOT/usr/share/licenses/linksy" LICENSE THIRD-PARTY-NOTICES
 for s in linksy-camera-setup linksy-usb-setup linksy-handover-setup linksy-system-setup; do install -Dm755 "data/$s" "$ROOT/usr/libexec/linksy/$s"; done
 install -Dm644 data/linksy.firewalld.xml "$ROOT/usr/lib/firewalld/services/linksy.xml"
 install -Dm644 data/70-linksy-usb.rules "$ROOT/usr/lib/udev/rules.d/70-linksy-usb.rules"
-install -Dm644 data/70-linksy-handover.rules "$ROOT/usr/lib/udev/rules.d/70-linksy-handover.rules"
-echo uinput | install -Dm644 /dev/stdin "$ROOT/usr/lib/modules-load.d/linksy-handover.conf"
+# Handover's udev rule (and uinput at boot) are not here: they are only installed when the
+# person asks, by linksy-handover-setup, from Finish Setup.
 
 # A .deb holds one package: each gets its own tree, cut from the shared one.
 deb() {

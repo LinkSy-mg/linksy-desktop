@@ -561,7 +561,7 @@ pub fn check(ui: Ui) -> Vec<Item> {
     items.push(Item {
         id: "handover",
         title: t!("Keyboard and Mouse From Another Computer"),
-        why: t!("So another computer of yours can hand its keyboard and mouse over to this one."),
+        why: t!("Optional. Lets another computer of yours hand its keyboard and mouse over to this one. It lets the person at this computer create virtual keyboards and mice, so it stays off until you turn it on."),
         need: if handover_rule() { Need::Ready } else { Need::SetUp },
     });
     // In a Flatpak, codecs and tools come with the runtime and the app.
@@ -674,13 +674,32 @@ pub fn check(ui: Ui) -> Vec<Item> {
 /// What "Set Up Everything" can do from here (not the things to do by hand). On Fedora
 /// Atomic and openSUSE's transactional systems, packages are for a terminal.
 pub fn actionable(items: &[Item]) -> Vec<Item> {
+    actionable_asked(items, &[])
+}
+
+/// What only runs when its own button is pressed: it changes something for everyone at this
+/// computer, so it is not part of Set Up Everything, the count or the first-run offer.
+const OPTIONAL: &[&str] = &["handover"];
+
+fn optional(item: &Item) -> bool {
+    OPTIONAL.contains(&item.id)
+}
+
+/// [`actionable`], with the optional items the person asked for by id (none: all that is not
+/// optional).
+pub fn actionable_asked(items: &[Item], ids: &[String]) -> Vec<Item> {
     let layered = atomic() || transactional();
-    items.iter().filter(|i| matches!(i.need, Need::SetUp) || (matches!(i.need, Need::Install(_)) && !layered)).cloned().collect()
+    items
+        .iter()
+        .filter(|i| matches!(i.need, Need::SetUp) || (matches!(i.need, Need::Install(_)) && !layered))
+        .filter(|i| if ids.is_empty() { !optional(i) } else { ids.iter().any(|id| id == i.id) })
+        .cloned()
+        .collect()
 }
 
 /// How many things are missing (what the sidebar's Finish Setup shows).
 pub fn missing(items: &[Item]) -> usize {
-    items.iter().filter(|i| i.need != Need::Ready).count()
+    items.iter().filter(|i| i.need != Need::Ready && !optional(i)).count()
 }
 
 /// What a row tells about an item installed by hand on Fedora Atomic or openSUSE's
@@ -1110,6 +1129,25 @@ pub fn offer_now(ui: Ui, version: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn item(id: &'static str, need: Need) -> Item {
+        Item { id, title: "", why: "", need }
+    }
+
+    #[test]
+    fn an_optional_item_waits_for_its_own_button() {
+        let items = [item("usb", Need::SetUp), item("handover", Need::SetUp), item("video", Need::Ready)];
+        let ids = |list: Vec<Item>| list.iter().map(|i| i.id).collect::<Vec<_>>();
+        // Not in Set Up Everything, not counted, so never offered by itself on the first run
+        assert_eq!(ids(actionable(&items)), ["usb"]);
+        assert_eq!(missing(&items), 1);
+        // Its own button runs it
+        assert_eq!(ids(actionable_asked(&items, &["handover".to_string()])), ["handover"]);
+        // Asking for one item runs only that one
+        assert_eq!(ids(actionable_asked(&items, &["usb".to_string()])), ["usb"]);
+        // Once it is ready nothing is left to run
+        assert!(actionable_asked(&[item("handover", Need::Ready)], &["handover".to_string()]).is_empty());
+    }
 
     #[test]
     fn distributions_that_hide_their_base_go_by_their_package_tool() {

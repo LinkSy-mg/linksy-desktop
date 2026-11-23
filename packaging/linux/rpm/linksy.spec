@@ -103,9 +103,6 @@ if [ $1 -eq 1 ]; then systemctl --global enable linksyd.service >/dev/null 2>&1 
 # Phones by USB cable: apply the udev rule to what's plugged in now.
 udevadm control --reload-rules >/dev/null 2>&1 || :
 udevadm trigger --subsystem-match=usb --action=change >/dev/null 2>&1 || :
-# Handover: the virtual keyboard and mouse's device, for the person at the screen.
-modprobe uinput >/dev/null 2>&1 || :
-udevadm trigger --subsystem-match=misc --sysname-match=uinput --action=change >/dev/null 2>&1 || :
 # Let nearby devices find this computer (firewalld or ufw, when one is on).
 if [ $1 -eq 1 ]; then /usr/libexec/linksy/linksy-system-setup firewall >/dev/null 2>&1 || :; fi
 
@@ -134,8 +131,6 @@ fi
 /usr/libexec/linksy/linksy-system-setup
 /usr/lib/firewalld/services/linksy.xml
 /usr/lib/udev/rules.d/70-linksy-usb.rules
-/usr/lib/udev/rules.d/70-linksy-handover.rules
-/usr/lib/modules-load.d/linksy-handover.conf
 /usr/lib/systemd/user/linksyd.service
 %config(noreplace) /etc/xdg/autostart/linksyd.desktop
 /usr/share/applications/mg.diary.linksy.Linksy.desktop

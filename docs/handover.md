@@ -41,8 +41,11 @@ program that reads every key could log them, so the part that touches the device
 program of its own, `linksy-handover`, not the service.
 
 - **Receiving:** a udev rule (`70-linksy-handover.rules`) lets the person at the screen
-  open `/dev/uinput`. The .deb, .rpm and Arch packages ship it; elsewhere it is Finish
-  Setup's "Keyboard and Mouse From Another Computer" (`linksy-system-setup handover`).
+  open `/dev/uinput`, which also lets any program they run make virtual keyboards. So no
+  package installs it: it is Finish Setup's "Keyboard and Mouse From Another Computer"
+  (`linksy-system-setup handover`), on its own button, outside Set Up Everything, the count
+  and the first-run offer. The program and the setup script are in the packages; the rule is
+  only written when the person asks, from `linksy-handover-setup`.
 - **Sending:** only when the person starts it. If they cannot read the devices, the root
   helper starts the program for them (`linksy-system-setup handover-send:SOCKET`) after the
   password prompt Finish Setup uses, and only for a socket that belongs to them.

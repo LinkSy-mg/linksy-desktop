@@ -10,10 +10,11 @@ Linksy for Linux. Each version's section becomes its release notes.
   unplugged. The other computer gets a virtual keyboard and mouse, so its own layout applies.
   Start it from the other computer's page (the Handover card, in both apps) or with
   `linksy handover <computer>`; the other computer is asked first, and Always Allow works as
-  for screens. It needs a one-time step on the computer that receives (Finish Setup; the
-  .deb, .rpm and Arch packages already do it) and permission to read the keyboard and mouse on
-  the one that sends (asked when you start it). Never from away from home unless you allowed
-  everything there. Linux computers only.
+  for screens. It is off until you turn it on: the computer that receives needs a one-time
+  step in Finish Setup ("Keyboard and Mouse From Another Computer", with a button of its own;
+  it is not part of Set Up Everything and nothing is installed for you), and the one that
+  sends asks for your password when you start it. Never from away from home unless you
+  allowed everything there. Linux computers only.
 
 ### Security
 - **The `url` library is updated for a new advisory** (a crash on certain nested `blob:`
