@@ -6,7 +6,7 @@ both sides can work in parallel. Protocol details go into `docs/protocol.md` §4
 
 Effort: **S** = a day or two, **M** = a few days, **L** = a week or more.
 
-Linksy for Linux is at **0.16.0** and Linksy for Android at **0.3.6** (2026-11-14). They have their
+Linksy for Linux is at **0.17.1** and Linksy for Android at **0.3.11** (2026-11-19). They have their
 own version numbers, and this roadmap has none: a feature ships when it is ready, not with a
 number. It says what is **Done**, what is **Now**, **Next** and **Later**. Which side has which
 feature, feature by feature, is `docs/protocol.md` §2.
@@ -38,22 +38,24 @@ feature, feature by feature, is `docs/protocol.md` §2.
 | **The Inbox**: other notifications, earlier messages, replies after the notification | 0.12.1 | 0.3.3 |
 | **The Gallery**: the phone's photos and videos, page by page | 0.12.1 | 0.3.3 |
 | **The Deck**: the phone as buttons for the computer; the computer decides what it may run (0.12.1), your own commands with groups, icons and switches, and layouts saved from the phone's own editor (0.14.0) | 0.14.0 | 0.3.5, saving to do |
-| Snap from Phone, the Connection Doctor ("Why Can't I See My Phone?"), a phone's volumes, ringer, Do Not Disturb and flashlight on its page | 0.13.0 | its half built, see Now |
-| This computer's notifications on the phone, the phone's sound with its screen, screens at up to 60 fps, the Inbox and Gallery turned on from the computer | 0.13.0 | see Now |
-| Phone to phone: the route a transfer takes, a check before sending, sending apps | 0.13.0 | in progress |
+| Snap from Phone, the Connection Doctor ("Why Can't I See My Phone?"), a phone's volumes, ringer, Do Not Disturb and flashlight on its page | 0.13.0 | 0.3.5 |
+| This computer's notifications on the phone, the phone's sound with its screen, screens at up to 60 fps, the Inbox and Gallery turned on from the computer | 0.13.0 | 0.3.5 |
+| Phone to phone: the route a transfer takes, a check before sending, sending apps | 0.13.0 | 0.3.5 |
 | **A welcome on the first run**, in both apps: the phone's app, pairing and Finish Setup in five slides | 0.15.0 | |
 | `linksy doctor` checks what the camera, microphone and screens need and tries them; Finish Setup checks every piece they use | 0.14.1, 0.15.0 | |
 | Away from home carries files through the relay when there is no direct path, at a speed shared between the devices sending | the relay, November 2026 | nothing to do |
+| **Handover**: one keyboard and mouse for two computers, switched with both Ctrl keys | 0.17.0 | |
+| **Snap to Computer**, **Copy to Computer**, a USB button (Connect by USB Cable), and the phone's half of the Connection Doctor | | 0.3.5 |
+| Transfers cut by a network change carry on for up to 2 minutes, and a change that takes nothing away no longer drops links | | 0.3.6 |
+| Remote Input: key rows, a Browser tab, middle click, a scroll strip, swipe typing and Write; a Remote page in the deck, a grid setting; the deck and phone fit tablets and landscape | | 0.3.6 to 0.3.11 |
 
 ## Now
 
 The computer's side of everything below is released. What is left is on the phone
 (as the phone's side last reported it; the computer has not seen all of its messages yet):
 - **Saving a deck to the computer** and **custom themes** (§4.26): the editor is in 0.3.5, saving and themes are to do.
-- **Phone to phone** (§4.22): in progress.
-- **Snap to Computer** and **Copy to Computer**, the phone's half of the **Connection Doctor**, and a **USB button**: built, not published.
-- **The phone's controls**, **this computer's notifications on the phone**, **the phone's sound with its screen** and **60 fps** decoding: to do.
-- **Connections that survive a network change**: a phone drops its links when Android reports a network change, even when the Wi-Fi in use hasn't changed, and a transfer cut that way fails instead of carrying on (seen 2026-11-13, phone to phone, 410 MB).
+- **Phone to phone** (§4.22): the page, the check before sending and apps are in 0.3.5. Reconnection after a network change is in 0.3.6; whether it holds for a large transfer between phones (the 410 MB case of 2026-11-13) is not yet measured on a real pair.
+- **60 fps** screens: decoding and display are in 0.3.5; the first measurements on phones are not in yet.
 
 On the computer, next:
 - **Deck themes**: your own looks, made on the computer and tried live on the phone (§4.26).
@@ -65,7 +67,7 @@ Not done, and why: datagrams for video and the pointer, BBR over the internet an
 
 ### Snap to computer — S
 Take a photo or a page with the phone, and it's on the computer straight away.
-- **Phone (built, not published yet):** a "Snap to Computer" action (in the app and as a Quick Settings tile) that
+- **Phone (done, 0.3.5):** a "Snap to Computer" action (in the app and as a Quick Settings tile) that
   opens the camera and sends the picture the moment it's taken; for a page, its edges are
   found and it's straightened on the phone, with no Google services.
 - **Desktop (done, 0.13.0):** the picture lands on the clipboard and in Downloads/Linksy, with a
@@ -82,14 +84,14 @@ One button finds which, says it in a sentence, and fixes what it can.
   router that keeps devices apart (their announcements never arrive, the phone's last
   address doesn't answer); the cable's state. Each finding with a button where Linksy can
   act: open the firewall, connect by address, use the cable.
-- **Phone (built, not published yet):** the same from its side: Wi-Fi on and the same network, battery restrictions
+- **Phone (done, 0.3.5):** the same from its side: Wi-Fi on and the same network, battery restrictions
   on Linksy (with the steps for the phone's brand), and whether it hears the computer's
   announcements.
 - **Done when:** a guest network that isolates devices, a VPN, a closed firewall and a
   phone with battery saving on are each named correctly, with the right fix.
 
 ### The phone's controls on the computer — S
-- **Phone:** its volumes (media, ringtone, alarm), ringer mode, Do Not Disturb (with
+- **Phone (done, 0.3.5):** its volumes (media, ringtone, alarm), ringer mode, Do Not Disturb (with
   Android's Do Not Disturb access) and the flashlight, set when the computer asks and
   reported when they change.
 - **Desktop (done, 0.13.0):** sliders and switches for them on the phone's page; "Keep Do Not Disturb in
@@ -105,7 +107,7 @@ was on, and about 17 MB/s when it picked another (5220 MHz against 5240): the co
 one Wi-Fi chip keeps hopping between the two.
 - **Desktop (done on branch `phone-work`, not measured):** says which channel its Wi-Fi is on when it
   asks for a link (`ask` carries `frequency`, §4.17).
-- **Phone:** create the group on that channel (`setGroupOperatingFrequency`) and let the
+- **Phone (shipped in 0.3.5, not measured):** create the group on that channel (`setGroupOperatingFrequency`) and let the
   computer join it, instead of choosing during negotiation. First check that
   NetworkManager can join a group that already exists.
 - **Done when:** a big transfer runs at full speed whatever channel the router uses.
@@ -209,12 +211,12 @@ offices): the phone and the computer make their own link.
 ### The computer's notifications on the phone — S
 - **Desktop (done, 0.13.0):** the computer's own notifications, chosen per app and off by default, sent
   to the phone; never the ones Linksy shows for the phone itself.
-- **Phone:** shown as Android notifications, grouped per computer, with their buttons.
+- **Phone (done, 0.3.5):** shown as Android notifications, grouped per computer, with their buttons.
 - **Done when:** a "build finished" or new-mail notification on the computer shows on the
   phone within a second.
 
 ### The phone's sound with its screen — M
-- **Phone:** while it shares its screen, it also captures what its apps play (Android 10+,
+- **Phone (done, 0.3.5):** while it shares its screen, it also captures what its apps play (Android 10+,
   for apps that allow it) and sends it with the picture.
 - **Desktop (done, 0.13.0):** played in step with the picture, with a mute button in the viewer. Both
   apps.
