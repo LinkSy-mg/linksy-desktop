@@ -16,6 +16,9 @@ use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
 use tracing::{debug, info, warn};
 
+#[cfg(target_os = "linux")]
+pub mod handover;
+
 /// How long the sharer has to pick a screen in the desktop's dialog.
 const PICK_TIMEOUT: Duration = Duration::from_secs(120);
 /// How long the app has to open the viewer.
@@ -151,7 +154,10 @@ impl Sessions {
     pub async fn run(self, node: Node) {
         let Some(mut incoming) = node.incoming_sessions() else { return };
         while let Some(session) = incoming.recv().await {
-            if session.kind == SessionKind::Terminal {
+            if session.kind == SessionKind::Handover {
+                #[cfg(target_os = "linux")]
+                self.handover_receive(session);
+            } else if session.kind == SessionKind::Terminal {
                 #[cfg(target_os = "linux")]
                 if let Some(t) = crate::terminal::TERMINALS.get() {
                     t.attach(session);
@@ -274,6 +280,8 @@ impl Sessions {
             }
             // Run by the terminal module, never here.
             SessionKind::Terminal => return Err(std::io::Error::other("not a media session")),
+            // Run by the handover module, never here.
+            SessionKind::Handover => return Err(std::io::Error::other("not a media session")),
         }
         // Each kind remembers its own answer to the desktop's dialog.
         let kind = format!("{:?}", session.kind).to_lowercase();

@@ -190,7 +190,7 @@ impl History {
                         what: match kind {
                             SessionKind::Camera => Shared::Camera { seconds: 0 },
                             SessionKind::Microphone => Shared::Microphone { seconds: 0 },
-                            SessionKind::Input => Shared::Remote { seconds: 0 },
+                            SessionKind::Input | SessionKind::Handover => Shared::Remote { seconds: 0 },
                             SessionKind::Terminal => Shared::Terminal { seconds: 0 },
                             _ => Shared::Screen { seconds: 0, display: kind == SessionKind::Display },
                         },

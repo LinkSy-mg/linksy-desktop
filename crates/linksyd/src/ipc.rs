@@ -563,6 +563,15 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
                 sessions.play_sound_with(node, id, session_id);
                 return json(serde_json::to_value(SessionInfo { session: session_id, socket: Some(socket) }));
             }
+            // This computer's keyboard and mouse go to the other: the caller starts the
+            // program that reads them and connects it to the socket given back
+            #[cfg(target_os = "linux")]
+            if kind == linksy_core::SessionKind::Handover {
+                let session = node.request_session(&id, kind).await.map_err(|e| e.to_string())?;
+                let session_id = session.id;
+                let socket = sessions.handover_send(session).map_err(|e| e.to_string())?;
+                return json(serde_json::to_value(SessionInfo { session: session_id, socket: Some(socket) }));
+            }
             let phone_id = id;
             let session = node.request_session(&id, kind).await.map_err(|e| e.to_string())?;
             let id = session.id;

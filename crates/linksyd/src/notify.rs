@@ -119,6 +119,10 @@ pub async fn run(node: Node) {
                         t!("{device} wants to see your screen", device = from.name),
                         t!("{device} will see everything on your screen until you stop sharing.", device = from.name),
                     ),
+                    SessionKind::Handover => (
+                        t!("{device} wants to hand over its keyboard and mouse", device = from.name),
+                        t!("When {device} switches them over, you can use its keyboard and mouse on this computer, until you stop.", device = from.name),
+                    ),
                     // Never asked of a computer: the core answers that this one can't
                     SessionKind::Sound => continue,
                     SessionKind::Terminal => (
@@ -154,6 +158,7 @@ pub async fn run(node: Node) {
                     let summary = match kind {
                         SessionKind::Control => t!("{name} is controlling your screen", name = peer.name),
                         SessionKind::Input => t!("{name} is your touchpad and keyboard", name = peer.name),
+                        SessionKind::Handover => t!("{name} can hand its keyboard and mouse over to you", name = peer.name),
                         _ => t!("{name} is watching your screen", name = peer.name),
                     };
                     if !already_said(&mut said, (peer.id, summary.clone()), Instant::now()) {

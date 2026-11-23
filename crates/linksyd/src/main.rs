@@ -270,6 +270,8 @@ async fn run() -> ExitCode {
     let sessions = sessions::Sessions::new(data_dir.clone(), socket.clone());
     tokio::spawn(sessions.clone().run(node.clone()));
     tokio::spawn(sessions.clone().watch_cameras(node.clone()));
+    #[cfg(target_os = "linux")]
+    tokio::spawn(sessions::handover::announce(node.clone()));
     tokio::spawn(pictures::run(node.clone(), data_dir.clone()));
     let updates = update::UPDATES.get_or_init(|| update::Updates::load(data_dir.join("update.json"), args.notifications)).clone();
     tokio::spawn(updates.run());

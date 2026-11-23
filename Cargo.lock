@@ -2720,6 +2720,7 @@ dependencies = [
  "ksni",
  "libc",
  "linksy-core",
+ "linksy-handover",
  "linksy-host",
  "linksy-i18n",
  "linksy-ipc",

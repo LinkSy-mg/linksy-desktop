@@ -8,6 +8,7 @@ license.workspace = true
 linksy-logs = { path = "../linksy-logs" }
 linksy-core = { path = "../linksy-core", default-features = false }
 linksy-ipc = { path = "../linksy-ipc" }
+linksy-handover = { path = "../linksy-handover" }
 linksy-i18n = { path = "../linksy-i18n" }
 linksy-host = { path = "../linksy-host" }
 # X11: hearing when the clipboard changes (XFixes)

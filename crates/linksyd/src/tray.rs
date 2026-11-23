@@ -258,6 +258,8 @@ fn session_title(s: &ActiveSession) -> String {
         SessionKind::Input => t!("{name} is your touchpad and keyboard", name),
         SessionKind::Screen => t!("{name} is watching your screen", name),
         SessionKind::Terminal => t!("{name} has a terminal open here", name),
+        SessionKind::Handover if s.sharing => t!("{name} can hand its keyboard and mouse over to you", name),
+        SessionKind::Handover => t!("Your keyboard and mouse can go to {name}", name),
     }
 }
 
