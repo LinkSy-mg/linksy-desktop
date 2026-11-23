@@ -41,6 +41,19 @@ pub(super) async fn allow_usb(parent: &gtk::Widget) -> Result<(), String> {
     }
 }
 
+/// Start the program that hands this computer's keyboard and mouse over, connected to
+/// `socket`: as the person when they can read the devices, else as root, with Linksy's
+/// password prompt over `parent`.
+pub(super) async fn start_handover(socket: std::path::PathBuf, parent: &gtk::Widget) -> Result<(), String> {
+    let ask = super::password::asker(parent);
+    match gio::spawn_blocking(move || linksy_setup::start_handover(&socket, None, ask, |_| {})).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(Failure::Message(m))) => Err(m),
+        Ok(Err(Failure::Restart(_))) => Err(t!("Restart your computer, then try again.").into()),
+        Err(_) => Err(t!("Handover didn't start (status {code}).", code = -1)),
+    }
+}
+
 /// Turn on the background service at every login (no password: it's the user's own).
 async fn enable_autostart() -> Result<(), Failure> {
     let failed = || Failure::Message(t!("Couldn't turn on starting with your computer.").into());

@@ -87,6 +87,33 @@ impl Window {
         });
     }
 
+    /// Hand this computer's keyboard and mouse over to `id`: it is asked, then the program
+    /// that reads them starts (with the password prompt when it needs permission). The
+    /// hotkey switches them; the banner's Stop ends it.
+    pub(super) fn hand_over(self: &Rc<Self>, id: Fingerprint) {
+        let Some(c) = self.client() else { return };
+        let name = self.device(&id).map(|d| d.device.name).unwrap_or_default();
+        self.toast(&t!("Asking {name} to take your keyboard and mouse…", name));
+        let call = self.bridge.call(&c, move |c| async move { c.start_session(id.to_string(), SessionKind::Handover).await });
+        let w = self.clone();
+        glib::spawn_future_local(async move {
+            let info = match call.await {
+                Ok(info) => info,
+                Err(e) if e.contains("can't do this yet") => return w.toast(&t!("{name} can't take a keyboard and mouse yet", name)),
+                Err(e) if e.contains("declined") => return w.toast(&t!("{name} didn't allow it", name)),
+                Err(e) => return w.toast_error(&e, Some(id)),
+            };
+            let Some(socket) = info.socket else { return };
+            match super::setup::start_handover(socket, w.window.upcast_ref()).await {
+                Ok(()) => w.toast(&t!("Press both Ctrl keys to switch to {name}, and again to come back", name)),
+                Err(why) => {
+                    w.toast(&why);
+                    w.end_session(info.session);
+                }
+            }
+        });
+    }
+
     /// A window opened mid-session: bring back the banner and camera card.
     pub(super) fn restore_sessions(self: &Rc<Self>) {
         let Some(c) = self.client() else { return };

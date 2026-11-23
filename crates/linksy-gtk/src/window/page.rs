@@ -26,6 +26,8 @@ pub enum Action {
     Ping,
     ViewScreen,
     Extend,
+    /// Hand this computer's keyboard and mouse over to that computer.
+    Handover,
     Webcam,
     Microphone,
     CameraPreview,
@@ -149,6 +151,7 @@ pub struct DevicePage {
     use_as_hint: gtk::Button,
     use_as_hint_content: adw::ButtonContent,
     display_card: gtk::Box,
+    handover_card: gtk::Box,
     webcam_card: gtk::Box,
     mic_card: gtk::Box,
     deck_card: gtk::Box,
@@ -402,6 +405,8 @@ impl DevicePage {
         };
         let (display_card, buttons, _, _) = card("video-joined-displays-symbolic", t!("Second Display"), t!("Extend this computer's desktop onto it"));
         buttons.append(&start(t!("Extend Desktop"), || Action::Extend));
+        let (handover_card, buttons, _, _) = card("input-keyboard-symbolic", t!("Handover"), t!("Use this computer's keyboard and mouse on it"));
+        buttons.append(&start(t!("Hand Over"), || Action::Handover));
         let (webcam_card, buttons, webcam_desc, webcam_live) = card("camera-web-symbolic", t!("Webcam"), &t!("“{camera}” in your apps", camera = "Linksy Camera"));
         let webcam_start = start(t!("Start Webcam"), || Action::Webcam);
         let preview = gtk::Button::builder().label(t!("Preview")).hexpand(true).build();
@@ -439,7 +444,7 @@ impl DevicePage {
             .vexpand(false)
             .css_classes(["tiles"])
             .build();
-        for card in [&display_card, &webcam_card, &mic_card, &deck_card] {
+        for card in [&display_card, &handover_card, &webcam_card, &mic_card, &deck_card] {
             let child = gtk::FlowBoxChild::builder().child(card).focusable(false).build();
             // A hidden card leaves no gap
             card.bind_property("visible", &child, "visible").sync_create().build();
@@ -888,6 +893,7 @@ impl DevicePage {
             use_as_hint,
             use_as_hint_content,
             display_card,
+            handover_card,
             webcam_card,
             mic_card,
             deck_card,
@@ -1003,7 +1009,7 @@ impl DevicePage {
     }
 
     fn any_card(&self) -> bool {
-        [&self.display_card, &self.webcam_card, &self.mic_card, &self.deck_card].iter().any(|c| c.is_visible())
+        [&self.display_card, &self.handover_card, &self.webcam_card, &self.mic_card, &self.deck_card].iter().any(|c| c.is_visible())
     }
 
     /// Show the tabs this device has, and one of them.
@@ -1236,6 +1242,8 @@ impl DevicePage {
         self.ping_tile.set_visible(!ring);
 
         self.display_card.set_visible(super::can(&d.device, "display"));
+        // Only a computer that says it can take them: the phone never does
+        self.handover_card.set_visible(d.device.kind != DeviceKind::Phone && d.device.features.iter().any(|f| f == "handover"));
         self.webcam_card.set_visible(super::can(&d.device, "camera"));
         self.mic_card.set_visible(super::can(&d.device, "microphone"));
         // Whatever the phone says it can do: the deck is this computer's side

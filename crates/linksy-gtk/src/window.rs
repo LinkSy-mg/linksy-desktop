@@ -626,6 +626,7 @@ impl Window {
                 page::Action::TurnOn(feature) => w.ask_turn_on(id, feature),
                 page::Action::ViewScreen => w.view_screen(id),
                 page::Action::Extend => w.extend_to(id),
+                page::Action::Handover => w.hand_over(id),
                 page::Action::Webcam => w.use_camera(id),
                 page::Action::Microphone => w.use_microphone(id),
                 page::Action::CameraPreview => {
