@@ -21,6 +21,9 @@ Usage:
   linksy mic <device>                use another device's microphone as a microphone here
   linksy screen <device> --record FILE [--seconds N]
                                      save another device's screen as H.264
+  linksy handover <computer> [--hotkey KEYS]
+                                     hand this computer's keyboard and mouse over to another
+                                     computer, switched by a hotkey (both Ctrl keys by default)
   linksy send <device> <files…>      send files or folders
   linksy notify <device> <title> [body]
   linksy clip <device> [text]        share text to its clipboard (default: stdin)
@@ -599,9 +602,50 @@ async fn run(c: &Client, cmd: &str, rest: &[String]) -> Result<(), String> {
             }
         }
         ("watch", []) => watch(c).await?,
+        ("handover", [target, rest @ ..]) => handover(c, target, rest).await?,
         _ => return Err("Unknown command. Run `linksy help`.".to_string()),
     }
     Ok(())
+}
+
+/// Where `linksy-handover` is: next to this program, or where the packages put helpers.
+fn handover_program() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    [dir.join("linksy-handover"), PathBuf::from("/usr/libexec/linksy/linksy-handover"), PathBuf::from("/usr/lib/linksy/linksy-handover"), PathBuf::from("/usr/bin/linksy-handover")].into_iter().find(|p| p.is_file())
+}
+
+/// Hand this computer's keyboard and mouse to `target`: the other computer is asked, then
+/// the program that reads them runs here (with pkexec when it needs permission) until it
+/// is stopped with Ctrl+C.
+async fn handover(c: &Client, target: &str, rest: &[String]) -> Result<(), String> {
+    let mut extra: Vec<String> = Vec::new();
+    let mut it = rest.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--hotkey" => extra.extend(["--hotkey".to_string(), it.next().cloned().ok_or("--hotkey needs the keys, like ctrl+alt+f12")?]),
+            "--demo" => extra.push("--demo".into()),
+            other => return Err(format!("Unknown option {other}. Run `linksy help`.")),
+        }
+    }
+    let program = handover_program().ok_or("linksy-handover isn't installed next to Linksy")?;
+    println!("Asking {target} to take this computer's keyboard and mouse…");
+    let info = c.start_session(target.to_string(), linksy_ipc::linksy_core::SessionKind::Handover).await.map_err(|e| e.to_string())?;
+    let socket = info.socket.ok_or("the service gave no socket")?;
+    let hotkey = extra.iter().position(|a| a == "--hotkey").and_then(|i| extra.get(i + 1)).cloned().unwrap_or_else(|| "both Ctrl keys".into());
+    println!("{target} agreed. Press {hotkey} to switch to it, and again to come back. Ctrl+C ends it.");
+    let args: Vec<std::ffi::OsString> = ["send".into(), "--socket".into(), socket.into_os_string()].into_iter().chain(extra.iter().map(Into::into)).collect();
+    let mut status = std::process::Command::new(&program).args(&args).status().map_err(|e| format!("{}: {e}", program.display()))?;
+    if status.code() == Some(77) {
+        println!("Reading the keyboard and mouse needs permission: asking for your password.");
+        status = std::process::Command::new("pkexec").arg(&program).args(&args).status().map_err(|e| format!("pkexec: {e}"))?;
+    }
+    let _ = c.end_session(info.session).await;
+    match status.code() {
+        Some(0) | None => Ok(()),
+        Some(126) | Some(127) => Err("Not started: the password wasn't given.".into()),
+        Some(code) => Err(format!("linksy-handover stopped with status {code}")),
+    }
 }
 
 async fn watch(c: &Client) -> Result<(), String> {
@@ -672,12 +716,14 @@ async fn watch(c: &Client) -> Result<(), String> {
                     // A computer doesn't share its sound: the core answers that itself
                     linksy_ipc::linksy_core::SessionKind::Sound => {}
                     linksy_ipc::linksy_core::SessionKind::Terminal => println!("{} wants a terminal on this computer (the right code was typed).", from.name),
+                    linksy_ipc::linksy_core::SessionKind::Handover => println!("{} wants to hand its keyboard and mouse over to this computer.", from.name),
                 }
                 let ok = ask("Allow?").await;
                 let _ = c.respond(request, ok).await;
             }
             Event::SessionStarted { peer, kind: linksy_ipc::linksy_core::SessionKind::Input, .. } => println!("{} is your touchpad and keyboard", peer.name),
             Event::SessionStarted { peer, kind: linksy_ipc::linksy_core::SessionKind::Terminal, .. } => println!("{} has a terminal open here", peer.name),
+            Event::SessionStarted { peer, kind: linksy_ipc::linksy_core::SessionKind::Handover, sharing: true, .. } => println!("{} can hand its keyboard and mouse over to you", peer.name),
             Event::SessionStarted { peer, sharing: true, .. } => println!("Sharing your screen with {}", peer.name),
             Event::SessionEnded { .. } => println!("Session ended"),
             _ => {}
