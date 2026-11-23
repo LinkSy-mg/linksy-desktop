@@ -2,7 +2,7 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
-## Unreleased
+## 0.17.0
 
 ### Added
 - **Handover: one keyboard and mouse for two computers.** Plug them into one computer, press

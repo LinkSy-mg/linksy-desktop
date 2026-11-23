@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.17.0" date="2026-11-23">
+      <description>
+        <p>Handover: use the keyboard and mouse of one computer on another, switched by a hotkey, with nothing to unplug. It is on a computer's page next to Second Display, in both apps, and as linksy handover. The computer that receives is set up once in Finish Setup; the one that sends asks for your password when you start it. Also, the url library is updated for a security advisory.</p>
+      </description>
+    </release>
     <release version="0.16.1" date="2026-11-22">
       <description>
         <p>Fixes: the phone's webcam no longer ends at once on some setups, Finish Setup can make the camera on Ubuntu 24.04 and Linux Mint 22, and a phone's notifications no longer pile up connections until the desktop session runs out of them. Security: what a phone sends to the notifications and to the device list is cleaned and capped, Linksy's files and sockets are kept private in more places, and three dependencies are updated.</p>
