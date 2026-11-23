@@ -2196,6 +2196,8 @@ impl Node {
                             a.touch();
                         }
                         let node = self.clone();
+                        // Use the connection carrying this message even if the peer reconnects.
+                        let link = link_of(conn.remote_address());
                         let from = device.clone();
                         tokio::spawn(async move {
                             match read_msg::<Message>(&mut recv).await {
@@ -2367,6 +2369,7 @@ impl Node {
                                 Ok(Message::GalleryChanged) => node.emit(Event::GalleryChanged { from }),
                                 Ok(Message::TurnOn { feature }) if feature.len() <= 64 => node.emit(Event::TurnOnRequest { from, feature }),
                                 Ok(Message::TurnOn { .. }) => debug!("bad turn_on from {}", from.name),
+                                Ok(Message::DeckOpen | Message::DeckRun { .. }) if !node.deck_allowed(link, &from.id) => debug!("{} may not use the deck from away", from.name),
                                 Ok(Message::DeckOpen) => node.emit(Event::DeckOpen { from }),
                                 Ok(Message::DeckClose) => node.emit(Event::DeckClose { from }),
                                 Ok(Message::DeckRun { action, value }) if action.len() <= MAX_KEY && value.is_none_or(f64::is_finite) => {
@@ -3361,6 +3364,11 @@ impl Node {
     /// if its user allowed everything from away for it.
     fn allowed_from_here(&self, from: &Fingerprint) -> bool {
         self.link(from) != Some(Link::Away) || self.inner.trust.lock().unwrap().get(from).is_some_and(|t| t.away_all)
+    }
+
+    /// Check the link that carried the deck message, even if that connection has closed.
+    fn deck_allowed(&self, link: Link, from: &Fingerprint) -> bool {
+        link != Link::Away || self.inner.trust.lock().unwrap().get(from).is_some_and(|t| t.away_all)
     }
 
     /// Connect to a paired device away from home: through iroh, then Linksy's own
