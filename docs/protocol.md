@@ -2194,6 +2194,29 @@ phone's icon set; none: the action's own), and be a `toggle` (it reports `on` in
   `DeckLook`); `deck_theme_draft`; keep a tile's `icon`; show `deck_actions`' `icon`, `group`
   as typed and toggle commands.
 
+### 4.27 Handover: one keyboard and mouse for two computers (desktop 0.17)
+
+Between computers only: the keyboard and mouse of one are used on another, switched by a
+hotkey on the first. A phone never takes part and never announces it.
+
+- **Feature `handover`,** announced by a computer that can make a virtual keyboard and
+  mouse (changes live, §4.10). A computer without it answers a request `unsupported`.
+- **Session kind `handover`** (§4.8). The requester is the computer whose keyboard and mouse
+  are handed over; the receiver asks its user (Allow / Always Allow, the same switch as screen
+  and control). From away only with Allow Everything From Away (§4.13), like every session.
+  A session stays open for as long as the sharing is on, with no traffic while the devices
+  are in use on the requester: it is never closed as idle.
+- **The stream** after the accept goes from the requester to the receiver only: Linux input
+  events of 8 bytes, all little-endian: `u16 type`, `u16 code`, `i32 value`. Carried: `EV_KEY`
+  (1) with value 1 or 0 (no auto-repeat; key and button codes up to 0x2ff), `EV_REL` (2) with
+  `REL_X` 0, `REL_Y` 1, `REL_HWHEEL` 6, `REL_WHEEL` 8, `REL_WHEEL_HI_RES` 11, `REL_HWHEEL_HI_RES`
+  12, and `EV_SYN` (0) `SYN_REPORT` ending each batch. Codes are key positions, so the
+  receiver's own layout applies. The receiver ignores anything else, limits a pointer or
+  wheel step, and lifts every key still down when the stream ends.
+- **Safeguards:** the requester only sends while its hotkey has handed the devices over,
+  and takes them back at once when the link goes. The receiver ends the session by closing
+  its end; its own keyboard and mouse keep working throughout.
+
 ## 5. Core API the app would call (`linksy_core::Node`)
 
 ```text
@@ -2766,3 +2789,8 @@ robust against any encoder (GPU ones may slice too):
   the user's commands may have their own `group`, an `icon` and be toggles. Features
   `deck_layout_save` (computers) and `deck_themes` (phones). The computer's own layout editor
   is gone. Phone to-do: §4.26.
+- **2026-11-23** — **Handover** (§4.27), desktop 0.17: a computer hands its keyboard and mouse
+  to another with a hotkey. New session kind `handover` and feature `handover`; the stream is
+  raw 8-byte input events. Computers only: a phone never asks for it, never announces it,
+  and has nothing to do. If the phone's code matches on `SessionKind` exhaustively, add the
+  variant and decline it.

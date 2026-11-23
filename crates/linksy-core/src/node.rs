@@ -2545,6 +2545,12 @@ impl Node {
             let _ = send.finish();
             return;
         }
+        // A keyboard and mouse are handed over only to a computer that says it can take them
+        if kind == SessionKind::Handover && !self.info().features.iter().any(|f| f == "handover") {
+            let _ = write_msg(&mut send, &decline("unsupported", None)).await;
+            let _ = send.finish();
+            return;
+        }
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
         // A terminal: whoever runs them judges the code first.
         let mut terminal_id = None;

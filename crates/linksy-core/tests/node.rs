@@ -1560,6 +1560,29 @@ async fn input_session_carries_touchpad_and_text_to_the_receiver() {
 }
 
 #[tokio::test]
+async fn handover_session_carries_the_keyboard_and_mouse_events_to_the_receiver() {
+    let (giver, taker) = paired_with(|c| c.features.push("handover".into())).await;
+    let mut incoming = taker.node.incoming_sessions().unwrap();
+    let mut handing = giver.node.request_session(&taker.node.info().id, SessionKind::Handover).await.unwrap();
+    let mut receiving = incoming.recv().await.unwrap();
+    assert_eq!(receiving.kind, SessionKind::Handover);
+    assert!(!handing.sharing, "the side with the devices only sends events");
+    let events: Vec<u8> = (0..64u8).collect();
+    handing.send.write_all(&events).await.unwrap();
+    handing.send.finish().unwrap();
+    let mut got = Vec::new();
+    AsyncReadExt::read_to_end(&mut receiving.recv, &mut got).await.unwrap();
+    assert_eq!(got, events);
+}
+
+#[tokio::test]
+async fn a_computer_that_cannot_take_a_keyboard_and_mouse_says_so() {
+    let (giver, taker) = paired().await;
+    let err = giver.node.request_session(&taker.node.info().id, SessionKind::Handover).await.unwrap_err();
+    assert!(matches!(err, Error::Unsupported), "{err:?}");
+}
+
+#[tokio::test]
 async fn declined_screen_session_starts_nothing() {
     let a = dev("Alpha").await;
     let b = dev("Beta").await;

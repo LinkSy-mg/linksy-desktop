@@ -133,6 +133,9 @@ pub enum SessionKind {
     /// A shell on the receiver (a computer), shown on the requester (a phone): raw
     /// terminal output one way, `term_*` control messages the other (docs/protocol.md §4.15).
     Terminal,
+    /// The requester (a computer) hands its keyboard and mouse over to the receiver (another
+    /// computer): input events one way, nothing back (docs/protocol.md §4.27).
+    Handover,
 }
 
 impl SessionKind {
@@ -153,10 +156,10 @@ impl SessionKind {
     }
 
     /// Whether a paired device may be allowed it for good, so it starts without asking:
-    /// seeing or controlling the screen, or using the mouse and keyboard. Never the
-    /// camera, the microphone or a terminal.
+    /// seeing or controlling the screen, or using the mouse and keyboard (a phone's touchpad,
+    /// another computer's handed over). Never the camera, the microphone or a terminal.
     pub fn may_always_allow(self) -> bool {
-        matches!(self, Self::Screen | Self::Control | Self::Input)
+        matches!(self, Self::Screen | Self::Control | Self::Input | Self::Handover)
     }
 }
 
