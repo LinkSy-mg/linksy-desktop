@@ -4,6 +4,17 @@ Linksy for Linux. Each version's section becomes its release notes.
 
 ## Unreleased
 
+### Added
+- **Handover: one keyboard and mouse for two computers.** Plug them into one computer, press
+  both Ctrl keys, and keep working on the other; press them again to come back. Nothing is
+  unplugged. The other computer gets a virtual keyboard and mouse, so its own layout applies.
+  Start it from the other computer's page (the Handover card, in both apps) or with
+  `linksy handover <computer>`; the other computer is asked first, and Always Allow works as
+  for screens. It needs a one-time step on the computer that receives (Finish Setup; the
+  .deb, .rpm and Arch packages already do it) and permission to read the keyboard and mouse on
+  the one that sends (asked when you start it). Never from away from home unless you allowed
+  everything there. Linux computers only.
+
 ### Security
 - **The `url` library is updated for a new advisory** (a crash on certain nested `blob:`
   addresses, which Linksy itself never opens).
