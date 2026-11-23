@@ -34,14 +34,14 @@ impl Sampler {
             }
             self.cpu = now.or(self.cpu);
         }
-        if has("ram") || has("swap") {
-            if let Some(mem) = std::fs::read_to_string("/proc/meminfo").ok().and_then(|s| Memory::parse(&s)) {
-                if has("ram") {
-                    put("ram", Some(mem.ram_used()), format!("{} / {}", gigabytes(mem.ram_used_kb()), gigabytes(mem.total_kb)));
-                }
-                if has("swap") && mem.swap_total_kb > 0 {
-                    put("swap", Some(mem.swap_used()), format!("{} / {}", gigabytes(mem.swap_used_kb()), gigabytes(mem.swap_total_kb)));
-                }
+        if (has("ram") || has("swap"))
+            && let Some(mem) = std::fs::read_to_string("/proc/meminfo").ok().and_then(|s| Memory::parse(&s))
+        {
+            if has("ram") {
+                put("ram", Some(mem.ram_used()), format!("{} / {}", gigabytes(mem.ram_used_kb()), gigabytes(mem.total_kb)));
+            }
+            if has("swap") && mem.swap_total_kb > 0 {
+                put("swap", Some(mem.swap_used()), format!("{} / {}", gigabytes(mem.swap_used_kb()), gigabytes(mem.swap_total_kb)));
             }
         }
         if has("disk")
@@ -174,6 +174,8 @@ pub fn duration(secs: u64) -> String {
 }
 
 /// Used and total bytes of the filesystem at `path`.
+// statvfs's fields are u64 on x86_64 and narrower on 32-bit targets: the casts are needed there.
+#[allow(clippy::unnecessary_cast)]
 fn disk(path: &str) -> Option<(u64, u64)> {
     let path = std::ffi::CString::new(path).ok()?;
     let mut s = std::mem::MaybeUninit::<libc::statvfs>::uninit();
