@@ -2,6 +2,18 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.17.1
+
+### Fixed
+- **The phone's webcam keeps running when the phone changes its resolution,** for instance
+  from 720p to 1080p, while an app already has the camera open. Before, the camera stopped
+  with "not-negotiated" (thanks, @bearyjd).
+
+### Security
+- **Opening or using a phone's deck from away requires permission.** Linksy now ignores
+  deck open and run messages received over Away unless the user allowed everything from
+  away for that phone.
+
 ## 0.17.0
 
 ### Added
@@ -17,9 +29,6 @@ Linksy for Linux. Each version's section becomes its release notes.
   allowed everything there. Linux computers only.
 
 ### Security
-- **Opening or using a phone's deck from away requires permission.** Linksy now ignores
-  deck open and run messages received over Away unless the user allowed everything from
-  away for that phone.
 - **The `url` library is updated for a new advisory** (a crash on certain nested `blob:`
   addresses, which Linksy itself never opens).
 

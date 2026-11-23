@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.17.1" date="2026-11-23">
+      <description>
+        <p>Fixes: the phone's webcam no longer stops when the phone changes its resolution while an app has the camera open. Security: opening or using a phone's deck from away needs the permission to allow everything from away.</p>
+      </description>
+    </release>
     <release version="0.17.0" date="2026-11-23">
       <description>
         <p>Handover: use the keyboard and mouse of one computer on another, switched by a hotkey, with nothing to unplug. It is on a computer's page next to Second Display, in both apps, and as linksy handover. The computer that receives is set up once in Finish Setup; the one that sends asks for your password when you start it. Also, the url library is updated for a security advisory.</p>
