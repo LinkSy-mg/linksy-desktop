@@ -1,0 +1,5 @@
+# Linksy Handover: let the person at this computer receive another computer's keyboard and
+# mouse. They appear as a virtual keyboard and mouse made through /dev/uinput, which only
+# root can open by default. This gives the person at the screen that, and nobody else.
+# Rule version 1.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"

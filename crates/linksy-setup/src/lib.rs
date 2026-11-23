@@ -456,6 +456,11 @@ fn usb_rule() -> bool {
         .any(|p| linksy_host::read(Path::new(p)).is_some_and(|rule| rule.contains("Rule version 2")))
 }
 
+/// Linksy's udev rule that lets this computer take another's keyboard and mouse.
+fn handover_rule() -> bool {
+    ["/usr/lib/udev/rules.d/70-linksy-handover.rules", "/etc/udev/rules.d/70-linksy-handover.rules"].iter().any(|p| linksy_host::exists(Path::new(p)))
+}
+
 /// The Flatpak's autostart entry, in the computer's own config folder.
 fn flatpak_autostart() -> PathBuf {
     linksy_host::config_dir().join("autostart/mg.diary.linksy.Linksy.service.desktop")
@@ -552,6 +557,12 @@ pub fn check(ui: Ui) -> Vec<Item> {
         title: t!("Phones by USB Cable"),
         why: t!("Plug a phone in for a faster webcam and microphone, with no Wi-Fi needed."),
         need: if usb_rule() { Need::Ready } else { Need::SetUp },
+    });
+    items.push(Item {
+        id: "handover",
+        title: t!("Keyboard and Mouse From Another Computer"),
+        why: t!("So another computer of yours can hand its keyboard and mouse over to this one."),
+        need: if handover_rule() { Need::Ready } else { Need::SetUp },
     });
     // In a Flatpak, codecs and tools come with the runtime and the app.
     if !flatpak() {
@@ -705,8 +716,37 @@ pub fn root_args(items: &[Item]) -> Vec<String> {
         args.push("rpmfusion".to_string());
     }
     args.extend(packages.iter().map(|p| format!("pkg:{p}")));
-    args.extend(items.iter().filter(|i| matches!(i.id, "camera" | "usb" | "firewall")).map(|i| i.id.to_string()));
+    args.extend(items.iter().filter(|i| matches!(i.id, "camera" | "usb" | "firewall" | "handover")).map(|i| i.id.to_string()));
     args
+}
+
+/// Start the program that hands this computer's keyboard and mouse over, connected to
+/// `socket` (the one the service gave for the session). It runs as the person when they can
+/// read the devices; otherwise as root, apart from the window, through the same password
+/// prompt as Finish Setup. For a thread of its own.
+pub fn start_handover(socket: &Path, hotkey: Option<&str>, ask: impl FnMut(&Prompt) -> Option<String>, step: impl FnMut(String)) -> Result<(), Failure> {
+    let program = setup_script("linksy-handover").ok_or_else(|| Failure::Message(t!("Linksy's Handover program is missing; reinstall Linksy.").into()))?;
+    let mut cmd = std::process::Command::new(&program);
+    cmd.arg("send").arg("--socket").arg(socket);
+    if let Some(keys) = hotkey {
+        cmd.arg("--hotkey").arg(keys);
+    }
+    let mut child = cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().map_err(|e| Failure::Message(e.to_string()))?;
+    // Without permission it says so at once; running on after that means it started
+    for _ in 0..15 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        match child.try_wait() {
+            Ok(Some(status)) if status.code() == Some(77) => {
+                let mut args = vec![format!("handover-send:{}", socket.display())];
+                args.extend(hotkey.map(|keys| format!("handover-hotkey:{keys}")));
+                return run_as_root(&args, ask, step);
+            }
+            Ok(Some(status)) => return Err(Failure::Message(t!("Handover didn't start (status {code}).", code = status.code().unwrap_or(-1)))),
+            Ok(None) => {}
+            Err(e) => return Err(Failure::Message(e.to_string())),
+        }
+    }
+    Ok(())
 }
 
 /// Whether setting up `items` turns on starting with the computer (the user's own

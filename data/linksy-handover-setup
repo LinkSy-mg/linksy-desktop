@@ -1,0 +1,20 @@
+#!/bin/sh
+# Let this computer receive another computer's keyboard and mouse (Linksy's Handover): load
+# the uinput driver now and at every start, and install Linksy's udev rule (the .deb and
+# .rpm ship it already). Run as root: Linksy starts it with pkexec from its Finish Setup
+# dialog.
+set -eu
+RULE=/etc/udev/rules.d/70-linksy-handover.rules
+cat > "$RULE" <<'RULES'
+# Linksy Handover: let the person at this computer receive another computer's keyboard and
+# mouse. They appear as a virtual keyboard and mouse made through /dev/uinput, which only
+# root can open by default. This gives the person at the screen that, and nobody else.
+# Rule version 1.
+KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"
+RULES
+mkdir -p /etc/modules-load.d
+echo uinput > /etc/modules-load.d/linksy-handover.conf
+modprobe uinput 2>/dev/null || true
+udevadm control --reload-rules
+udevadm trigger --subsystem-match=misc --sysname-match=uinput --action=change 2>/dev/null || true
+echo "This computer can now take another computer's keyboard and mouse"

@@ -6,7 +6,9 @@
 #   rpmfusion      Fedora: turn on RPM Fusion (free), where the camera driver comes from
 #   pkg:NAME ...   install these packages with the system's own tool (dnf, apt, zypper, pacman);
 #                  only the ones Finish Setup asks for (the list below)
-#   camera usb firewall
+#   camera usb firewall handover
+#   handover-send:SOCKET [handover-hotkey:KEYS]
+#                  start Handover's sending program for the person who asked (see handover_send)
 #   upgrade:PATH ...  install these downloaded Linksy packages (linksy upgrade, Update Now;
 #                  only files named like Linksy's own .rpm or .deb, already checked against
 #                  the release's checksums)
@@ -144,9 +146,34 @@ upgrade() {
   fi
 }
 
-fusion=0 camera=0 usb=0 fw=0 packages="" upgrades=""
+# Start Handover's sending program as root, apart from the window (a transient service that
+# ends with its socket). Only for a socket that belongs to the person who asked: it sends
+# every key typed here to whoever listens on it.
+handover_send() {
+  case "$1" in
+    /run/user/*/linksy-handover-*.sock|/tmp/linksy-[0-9]*/linksy-handover-*.sock) ;;
+    *) echo "not a Handover socket: $1" >&2; return 1 ;;
+  esac
+  if [ ! -S "$1" ]; then echo "no Handover socket at $1" >&2; return 1; fi
+  if [ "$(stat -c %u "$1")" != "${PKEXEC_UID:-none}" ]; then echo "that socket isn't yours" >&2; return 1; fi
+  prog="$HERE/linksy-handover"
+  [ -x "$prog" ] || prog="$HERE/../../bin/linksy-handover"
+  [ -x "$prog" ] || prog=$(command -v linksy-handover || true)
+  if [ -z "$prog" ] || [ ! -x "$prog" ]; then echo "linksy-handover is missing; reinstall Linksy" >&2; return 1; fi
+  echo "STEP Starting Handover"
+  if [ -n "${2:-}" ]; then
+    systemd-run --quiet --collect --unit "linksy-handover-$PKEXEC_UID-$$" -- "$prog" send --socket "$1" --hotkey "$2"
+  else
+    systemd-run --quiet --collect --unit "linksy-handover-$PKEXEC_UID-$$" -- "$prog" send --socket "$1"
+  fi
+}
+
+fusion=0 camera=0 usb=0 fw=0 handover=0 hsock="" hkey="" packages="" upgrades=""
 for arg in "$@"; do
   case "$arg" in
+    handover) handover=1 ;;
+    handover-send:*) hsock=${arg#handover-send:} ;;
+    handover-hotkey:*) hkey=${arg#handover-hotkey:} ;;
     rpmfusion) fusion=1 ;;
     pkg:*)
       name=${arg#pkg:}
@@ -176,4 +203,9 @@ if [ "$usb" -eq 1 ]; then
   "$HERE/linksy-usb-setup" >/dev/null || fail 1
 fi
 if [ "$fw" -eq 1 ]; then firewall || fail 1; fi
+if [ "$handover" -eq 1 ]; then
+  echo "STEP Letting this computer take another computer's keyboard and mouse"
+  "$HERE/linksy-handover-setup" >/dev/null || fail 1
+fi
+if [ -n "$hsock" ]; then handover_send "$hsock" "$hkey" || fail 1; fi
 exit "$status"
