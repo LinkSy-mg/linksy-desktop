@@ -2,6 +2,14 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Added
+- **Gauges on the phone's deck:** a tile for the computer's CPU, memory, swap, disk, battery,
+  temperature, network speed (down and up) and uptime, kept fresh while the deck is open.
+  The computer reads them only while a deck that shows one is open. A phone needs its next
+  version to draw them; until then the tile is a plain one.
+
 ## 0.17.1
 
 ### Fixed

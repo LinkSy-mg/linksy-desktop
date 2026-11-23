@@ -180,6 +180,17 @@ phone side remains.*
 - **Done when:** with Away off, Linksy makes no connection beyond the local network; with a
   self-hosted relay, Away from home works through it.
 
+### Gauges on the deck — S
+The computer's CPU, memory, swap, disk, battery, temperature, network speed and uptime as
+tiles on the phone's deck (§4.28).
+- **Desktop (done, unreleased):** reads each gauge only while a deck that shows it is open,
+  every 2 seconds, and sends `deck_stats`; a `stat` tile kind with a `metric`.
+- **Phone:** announce `deck_stats`, offer the tile in the editor's Add, draw it from
+  `deck_stats` (a ring or bar from `value`, `text` beside it), unavailable when the metric
+  is missing.
+- **Done when:** a deck with a CPU, a memory and a battery tile shows them moving within
+  two seconds of the computer changing, and a deck with none makes the computer read nothing.
+
 ## Later
 
 ### Transfers with no shared network — M

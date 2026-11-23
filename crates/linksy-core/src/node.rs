@@ -346,6 +346,8 @@ pub enum Event {
     DeckRun { from: DeviceInfo, action: String, value: Option<f64> },
     DeckActions { from: DeviceInfo, actions: Vec<DeckAction> },
     DeckState { from: DeviceInfo, states: Vec<DeckState> },
+    /// What a computer's gauges say (§4.28).
+    DeckStats { from: DeviceInfo, stats: Vec<DeckState> },
     /// The layouts a computer keeps for this phone's deck (§4.20).
     DeckLayout { from: DeviceInfo, layouts: DeckLayouts },
     /// A phone saves the layouts it edited, made on `base_version` (§4.26).
@@ -1155,6 +1157,15 @@ impl Node {
 
     pub async fn deck_state(&self, to: &Fingerprint, states: Vec<DeckState>) -> Result<()> {
         self.send_message(to, &Message::DeckState { states }).await
+    }
+
+    /// This computer's gauges (§4.28), to a connected phone that announces `deck_stats`
+    /// ([`Error::Unsupported`] otherwise: an older phone never gets them).
+    pub async fn deck_stats(&self, to: &Fingerprint, stats: Vec<DeckState>) -> Result<()> {
+        if !self.peer_has(to, "deck_stats") {
+            return Err(Error::Unsupported);
+        }
+        self.send_message(to, &Message::DeckStats { stats }).await
     }
 
     /// The phone's deck layouts (§4.20), to a connected phone that announces `deck_layout`
@@ -2377,7 +2388,8 @@ impl Node {
                                 }
                                 Ok(Message::DeckActions { actions }) if actions.len() <= MAX_DECK => node.emit(Event::DeckActions { from, actions }),
                                 Ok(Message::DeckState { states }) if states.len() <= MAX_DECK => node.emit(Event::DeckState { from, states }),
-                                Ok(Message::DeckRun { .. } | Message::DeckActions { .. } | Message::DeckState { .. }) => debug!("bad deck message from {}", from.name),
+                                Ok(Message::DeckStats { stats }) if stats.len() <= MAX_DECK => node.emit(Event::DeckStats { from, stats }),
+                                Ok(Message::DeckRun { .. } | Message::DeckActions { .. } | Message::DeckState { .. } | Message::DeckStats { .. }) => debug!("bad deck message from {}", from.name),
                                 Ok(Message::DeckLayout { layouts }) => node.emit(Event::DeckLayout { from, layouts }),
                                 Ok(Message::DeckLayoutSave { base_version, layouts }) => node.emit(Event::DeckLayoutSave { from, base_version, layouts }),
                                 Ok(Message::DeckLayoutRefused { code, reason, version }) if reason.len() <= MAX_KEY => node.emit(Event::DeckLayoutRefused { from, code, reason, version }),
