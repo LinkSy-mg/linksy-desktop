@@ -60,7 +60,7 @@ old_files() {   # the previous release's GTK app: one linksy package with everyt
 
 # What each run checks, inside the container
 read -r -d '' CHECKS <<'EOF'
-missing=$(for b in linksyd linksy linksy-screen linksy-app linksy-qt; do p=$(command -v $b) && ldd $p | grep "not found" | sed "s|^|$b: |"; done)
+missing=$(for b in linksyd linksy linksy-handover linksy-screen linksy-app linksy-qt; do p=$(command -v $b) && ldd $p | grep "not found" | sed "s|^|$b: |"; done)
 [ -z "$missing" ] && echo "  libraries: ok" || echo "  libraries MISSING: $missing"
 echo "  desktop entry: $(grep -h ^Exec= /usr/share/applications/mg.diary.linksy.Linksy.desktop)"
 if command -v linksy-qt >/dev/null; then

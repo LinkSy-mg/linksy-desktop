@@ -23,13 +23,16 @@ STAGE="$DIST/$NAME"
 # linksy-usb-setup carries a copy of the udev rule (for the tarball): they must match.
 sed -n "/<<'RULES'/,/^RULES\$/p" data/linksy-usb-setup | sed '1d;$d' | diff -q - data/70-linksy-usb.rules >/dev/null \
   || { echo "data/linksy-usb-setup is out of date with data/70-linksy-usb.rules"; exit 1; }
+# Likewise linksy-handover-setup and its rule.
+sed -n "/<<'RULES'/,/^RULES\$/p" data/linksy-handover-setup | sed '1d;$d' | diff -q - data/70-linksy-handover.rules >/dev/null \
+  || { echo "data/linksy-handover-setup is out of date with data/70-linksy-handover.rules"; exit 1; }
 PREBUILT=${LINKSY_PREBUILT:-}
 if [ -n "$PREBUILT" ]; then
-  for b in linksyd linksy linksy-app linksy-screen linksy-qt; do
+  for b in linksyd linksy linksy-handover linksy-app linksy-screen linksy-qt; do
     [ -x "target/release/$b" ] || { echo "LINKSY_PREBUILT: target/release/$b is missing"; exit 1; }
   done
 else
-  cargo build --release -p linksyd -p linksy
+  cargo build --release -p linksyd -p linksy -p linksy-handover
   if pkg-config --exists gtk4 libadwaita-1 gstreamer-1.0 2>/dev/null; then
     cargo build --release -p linksy-app -p linksy-screen
   elif command -v toolbox >/dev/null; then
@@ -41,8 +44,8 @@ else
 fi
 
 rm -rf "$STAGE"; mkdir -p "$STAGE/bin" "$STAGE/share/icons"
-for b in linksyd linksy linksy-app linksy-screen; do install -m755 "target/release/$b" "$STAGE/bin/$b"; done
-install -m755 data/linksy-camera-setup data/linksy-usb-setup data/linksy-system-setup "$STAGE/bin/"
+for b in linksyd linksy linksy-handover linksy-app linksy-screen; do install -m755 "target/release/$b" "$STAGE/bin/$b"; done
+install -m755 data/linksy-camera-setup data/linksy-usb-setup data/linksy-handover-setup data/linksy-system-setup "$STAGE/bin/"
 cp data/mg.diary.linksy.Linksy.desktop data/linksyd.service data/linksyd-autostart.desktop "data/nautilus/Send with Linksy" data/linksy-send.desktop data/linksy-thunar.desktop "$STAGE/share/"
 cp data/icons/*.svg "$STAGE/share/icons/"
 install -m755 packaging/linux/install.sh packaging/linux/uninstall.sh "$STAGE/"
@@ -71,7 +74,7 @@ fi
 # command, opens the Qt window on Plasma when it's installed.
 ROOT="$DIST/root"
 rm -rf "$ROOT"
-for b in linksyd linksy linksy-app linksy-screen; do install -Dm755 "target/release/$b" "$ROOT/usr/bin/$b"; done
+for b in linksyd linksy linksy-handover linksy-app linksy-screen; do install -Dm755 "target/release/$b" "$ROOT/usr/bin/$b"; done
 install -Dm755 "$QT_BIN" "$ROOT/usr/bin/linksy-qt"
 install -Dm755 data/linksy-open "$ROOT/usr/bin/linksy-open"
 sed "s|@BINDIR@|/usr/bin|" data/linksyd.service | install -Dm644 /dev/stdin "$ROOT/usr/lib/systemd/user/linksyd.service"
@@ -86,9 +89,11 @@ install -Dm644 data/icons/mg.diary.linksy.Linksy-symbolic.svg "$ROOT/usr/share/i
 install -Dm644 data/icons/mg.diary.linksy.Linksy-tray-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-symbolic.svg"
 install -Dm644 data/icons/mg.diary.linksy.Linksy-tray-idle-symbolic.svg "$ROOT/usr/share/icons/hicolor/symbolic/apps/mg.diary.linksy.Linksy-tray-idle-symbolic.svg"
 install -Dm644 -t "$ROOT/usr/share/licenses/linksy" LICENSE THIRD-PARTY-NOTICES
-for s in linksy-camera-setup linksy-usb-setup linksy-system-setup; do install -Dm755 "data/$s" "$ROOT/usr/libexec/linksy/$s"; done
+for s in linksy-camera-setup linksy-usb-setup linksy-handover-setup linksy-system-setup; do install -Dm755 "data/$s" "$ROOT/usr/libexec/linksy/$s"; done
 install -Dm644 data/linksy.firewalld.xml "$ROOT/usr/lib/firewalld/services/linksy.xml"
 install -Dm644 data/70-linksy-usb.rules "$ROOT/usr/lib/udev/rules.d/70-linksy-usb.rules"
+install -Dm644 data/70-linksy-handover.rules "$ROOT/usr/lib/udev/rules.d/70-linksy-handover.rules"
+echo uinput | install -Dm644 /dev/stdin "$ROOT/usr/lib/modules-load.d/linksy-handover.conf"
 
 # A .deb holds one package: each gets its own tree, cut from the shared one.
 deb() {

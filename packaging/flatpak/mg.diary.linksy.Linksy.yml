@@ -79,10 +79,10 @@ modules:
         CARGO_HOME: /run/build/linksy/cargo
         CARGO_NET_OFFLINE: 'true'
     build-commands:
-      - cargo build --release --offline -p linksyd -p linksy -p linksy-app -p linksy-screen
-      - install -Dm755 -t /app/bin target/release/linksyd target/release/linksy target/release/linksy-app target/release/linksy-screen
+      - cargo build --release --offline -p linksyd -p linksy -p linksy-handover -p linksy-app -p linksy-screen
+      - install -Dm755 -t /app/bin target/release/linksyd target/release/linksy target/release/linksy-handover target/release/linksy-app target/release/linksy-screen
       # Finish Setup's root helpers, run on the computer with its own pkexec
-      - install -Dm755 -t /app/libexec/linksy data/linksy-system-setup data/linksy-camera-setup data/linksy-usb-setup
+      - install -Dm755 -t /app/libexec/linksy data/linksy-system-setup data/linksy-camera-setup data/linksy-usb-setup data/linksy-handover-setup
       - install -Dm644 data/mg.diary.linksy.Linksy.desktop /app/share/applications/mg.diary.linksy.Linksy.desktop
       - install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml /app/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml
       - install -Dm644 data/icons/mg.diary.linksy.Linksy.svg /app/share/icons/hicolor/scalable/apps/mg.diary.linksy.Linksy.svg

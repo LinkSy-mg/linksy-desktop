@@ -26,7 +26,7 @@ prepare() {
 build() {
   cd linksy-desktop
   export RUSTUP_TOOLCHAIN=stable CARGO_TARGET_DIR=target QMAKE=/usr/bin/qmake6
-  cargo build --frozen --release -p linksyd -p linksy -p linksy-app -p linksy-screen -p linksy-qt
+  cargo build --frozen --release -p linksyd -p linksy -p linksy-handover -p linksy-app -p linksy-screen -p linksy-qt
 }
 
 check() {
@@ -49,16 +49,18 @@ package_linksy-common() {
   # Before 0.8.4, one linksy package held everything
   conflicts=('linksy<0.8.4')
   cd linksy-desktop
-  for b in linksyd linksy linksy-screen; do
+  for b in linksyd linksy linksy-screen linksy-handover; do
     install -Dm755 "target/release/$b" "$pkgdir/usr/bin/$b"
   done
   install -Dm755 data/linksy-open "$pkgdir/usr/bin/linksy-open"
-  for s in linksy-camera-setup linksy-usb-setup linksy-system-setup; do
+  for s in linksy-camera-setup linksy-usb-setup linksy-handover-setup linksy-system-setup; do
     install -Dm755 "data/$s" "$pkgdir/usr/lib/linksy/$s"
   done
   sed 's|@BINDIR@|/usr/bin|' data/linksyd.service | install -Dm644 /dev/stdin "$pkgdir/usr/lib/systemd/user/linksyd.service"
   install -Dm644 data/linksyd-autostart.desktop "$pkgdir/etc/xdg/autostart/linksyd.desktop"
   install -Dm644 data/70-linksy-usb.rules "$pkgdir/usr/lib/udev/rules.d/70-linksy-usb.rules"
+  install -Dm644 data/70-linksy-handover.rules "$pkgdir/usr/lib/udev/rules.d/70-linksy-handover.rules"
+  echo uinput | install -Dm644 /dev/stdin "$pkgdir/usr/lib/modules-load.d/linksy-handover.conf"
   install -Dm644 data/linksy.firewalld.xml "$pkgdir/usr/lib/firewalld/services/linksy.xml"
   sed 's|^Exec=linksy-app|Exec=linksy-open|' data/mg.diary.linksy.Linksy.desktop | install -Dm644 /dev/stdin "$pkgdir/usr/share/applications/mg.diary.linksy.Linksy.desktop"
   install -Dm644 data/mg.diary.linksy.Linksy.metainfo.xml "$pkgdir/usr/share/metainfo/mg.diary.linksy.Linksy.metainfo.xml"

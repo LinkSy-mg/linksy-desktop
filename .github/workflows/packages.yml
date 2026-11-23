@@ -58,13 +58,14 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: release-ubuntu-24.04
-      - run: cargo build --release --locked -p linksyd -p linksy -p linksy-app -p linksy-screen
+      - run: cargo build --release --locked -p linksyd -p linksy -p linksy-handover -p linksy-app -p linksy-screen
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: programs-gtk
           path: |
             target/release/linksyd
             target/release/linksy
+            target/release/linksy-handover
             target/release/linksy-app
             target/release/linksy-screen
           retention-days: 3
