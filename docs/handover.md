@@ -1,4 +1,4 @@
-# Continuous Keys (working name)
+# Handover
 
 One keyboard and mouse for two computers. Plug them into the first, press a hotkey, and
 keep working on the second; press it again to come back. Nothing is unplugged.
@@ -31,17 +31,17 @@ keep working on the second; press it again to come back. Nothing is unplugged.
 
 Reading `/dev/input` and writing `/dev/uinput` need more than a normal user has (here both
 are root only), and a program that reads every key could log them. So the part that touches
-the devices is this small program, `linksy-keys`, and not the service. It is meant to be
+the devices is this small program, `linksy-handover`, and not the service. It is meant to be
 started only while the feature is on, through pkexec with Linksy's own password prompt, and
 to stop when it is turned off.
 
 ## Built so far (branch `continuous-keys`)
 
-- `crates/linksy-keys`: events, the hotkey, the router (the rules above, with tests),
+- `crates/linksy-handover`: events, the hotkey, the router (the rules above, with tests),
   reading and grabbing real devices, and the virtual device. The ioctl numbers and struct
   sizes are checked against the kernel headers.
-- `linksy-keys devices` lists what can be shared.
-- `linksy-keys loopback` tests both halves on one computer.
+- `linksy-handover devices` lists what can be shared.
+- `linksy-handover loopback` tests both halves on one computer.
 
 Not built yet: carrying the events between computers (a session over the paired link),
 starting the helper through pkexec, the setting and hotkey choice and the switch in both
@@ -52,9 +52,9 @@ apps, Finish Setup, the packages, and its name.
 On the computer with the keyboard and mouse, from a terminal:
 
 ```
-cargo build -p linksy-keys
-sudo target/debug/linksy-keys devices
-sudo target/debug/linksy-keys loopback --seconds 60
+cargo build -p linksy-handover
+sudo target/debug/linksy-handover devices
+sudo target/debug/linksy-handover loopback --seconds 60
 ```
 
 Press both Ctrl keys, release them: it says "now on the virtual keyboard and mouse", and

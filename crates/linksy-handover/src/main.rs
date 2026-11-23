@@ -2,13 +2,13 @@ use std::io;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use linksy_keys::chord::{self, Chord};
-use linksy_keys::evdev::{self, Capture};
-use linksy_keys::router::{Action, Router, State};
-use linksy_keys::uinput::VirtualDevice;
+use linksy_handover::chord::{self, Chord};
+use linksy_handover::evdev::{self, Capture};
+use linksy_handover::router::{Action, Router, State};
+use linksy_handover::uinput::VirtualDevice;
 
-const USAGE: &str = "Usage: linksy-keys devices
-       linksy-keys loopback [--hotkey KEYS] [--seconds N]
+const USAGE: &str = "Usage: linksy-handover devices
+       linksy-handover loopback [--hotkey KEYS] [--seconds N]
 
 devices   lists the keyboards and mice that can be shared.
 loopback  a test on this computer alone: the hotkey (both Ctrl keys by default) takes
@@ -30,7 +30,7 @@ fn main() -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("linksy-keys: {e}");
+            eprintln!("linksy-handover: {e}");
             ExitCode::FAILURE
         }
     }

@@ -1,4 +1,4 @@
-//! Continuous Keys: one keyboard and mouse for two computers. A hotkey takes the real
+//! Handover: one keyboard and mouse for two computers. A hotkey takes the real
 //! devices of one computer over and its events appear on the other as virtual ones.
 //!
 //! This crate is the part that touches the devices. It needs permission to read

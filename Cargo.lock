@@ -2595,6 +2595,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "linksy-handover"
+version = "0.16.1"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "linksy-host"
 version = "0.16.1"
 dependencies = [
@@ -2618,13 +2625,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
-]
-
-[[package]]
-name = "linksy-keys"
-version = "0.16.1"
-dependencies = [
- "libc",
 ]
 
 [[package]]

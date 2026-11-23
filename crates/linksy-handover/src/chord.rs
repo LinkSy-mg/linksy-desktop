@@ -1,4 +1,4 @@
-//! The keys that, held together, switch Continuous Keys on and off.
+//! The keys that, held together, switch Handover on and off.
 
 use std::collections::BTreeSet;
 

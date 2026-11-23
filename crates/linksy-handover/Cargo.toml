@@ -1,5 +1,5 @@
 [package]
-name = "linksy-keys"
+name = "linksy-handover"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

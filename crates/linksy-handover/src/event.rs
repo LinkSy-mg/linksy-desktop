@@ -1,4 +1,4 @@
-//! An input event as the kernel names it, without its timestamp: what Continuous Keys
+//! An input event as the kernel names it, without its timestamp: what Handover
 //! carries from the keyboard and mouse of one computer to the virtual ones of another.
 
 pub const EV_SYN: u16 = 0x00;
