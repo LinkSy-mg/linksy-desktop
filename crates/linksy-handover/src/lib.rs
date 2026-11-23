@@ -8,6 +8,7 @@
 pub mod chord;
 pub mod evdev;
 pub mod event;
+pub mod link;
 pub mod router;
 pub mod sys;
 pub mod uinput;

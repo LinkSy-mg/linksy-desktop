@@ -1,9 +1,9 @@
-//! The real keyboards and mice of this computer: found, read and, while Continuous Keys is
+//! The real keyboards and mice of this computer: found, read and, while Handover is
 //! on the other computer, grabbed so that nothing here sees them.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::PathBuf;
 
@@ -123,16 +123,23 @@ impl Capture {
         Ok(())
     }
 
-    /// What arrived within `timeout_ms`, from every device. A device that was unplugged is
-    /// dropped from the list.
     pub fn poll(&mut self, timeout_ms: i32) -> io::Result<Vec<Event>> {
+        Ok(self.poll_with(-1, timeout_ms)?.0)
+    }
+
+    /// What arrived within `timeout_ms`, from every device, and whether `extra` (another
+    /// descriptor to watch, or -1) became readable or hung up. A device that was unplugged
+    /// is dropped from the list.
+    pub fn poll_with(&mut self, extra: RawFd, timeout_ms: i32) -> io::Result<(Vec<Event>, bool)> {
         let mut fds: Vec<libc::pollfd> = self.devices.iter().map(|d| libc::pollfd { fd: d.file.as_raw_fd(), events: libc::POLLIN, revents: 0 }).collect();
+        fds.push(libc::pollfd { fd: extra, events: libc::POLLIN, revents: 0 });
         // SAFETY: `fds` is a valid array of `fds.len()` pollfd
         let rc = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, timeout_ms) };
         if rc < 0 {
             let e = io::Error::last_os_error();
-            return if e.kind() == io::ErrorKind::Interrupted { Ok(Vec::new()) } else { Err(e) };
+            return if e.kind() == io::ErrorKind::Interrupted { Ok((Vec::new(), false)) } else { Err(e) };
         }
+        let extra_ready = fds.pop().is_some_and(|f| f.revents != 0);
         let mut out = Vec::new();
         let mut gone = Vec::new();
         for (i, fd) in fds.iter().enumerate() {
@@ -149,7 +156,7 @@ impl Capture {
         for i in gone.into_iter().rev() {
             self.devices.remove(i);
         }
-        Ok(out)
+        Ok((out, extra_ready))
     }
 }
 
