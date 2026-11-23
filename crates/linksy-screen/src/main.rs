@@ -711,7 +711,9 @@ fn fixed_rate(fps: u32) -> String {
 /// would list it blank. An install that lacks one of the two elements keeps the other
 /// (desktop#85: no `v4l2sink` ended the camera at once).
 fn camera_sink(device: Option<&std::path::Path>, v4l2sink: bool, pipewiresink: bool, pipewire: &str) -> Result<String, String> {
-    let device = device.map(|d| format!("v4l2sink device={} sync=false", d.display()));
+    // An open V4L2 reader can keep its old dimensions across a camera restart.
+    // Negotiate those dimensions on this branch while PipeWire keeps the phone's size.
+    let device = device.map(|d| format!("videoscale ! v4l2sink device={} sync=false", d.display()));
     // PipeWire takes no frames while no app reads the camera: they are dropped here, or
     // the phone's stream would back up behind them
     let pipewire = format!("queue leaky=downstream max-size-buffers=2 ! {pipewire}");
@@ -931,7 +933,7 @@ mod tests {
     fn a_camera_goes_to_the_device_and_to_pipewire() {
         let sink = camera_sink(Some(Path::new("/dev/video9")), true, true, "pipewiresink").unwrap();
         assert!(sink.starts_with("tee name=cam"));
-        assert!(sink.contains("v4l2sink device=/dev/video9"));
+        assert!(sink.contains("! videoscale ! v4l2sink device=/dev/video9"));
         assert!(sink.ends_with("! pipewiresink"));
     }
 
@@ -945,7 +947,7 @@ mod tests {
 
     #[test]
     fn a_camera_without_pipewiresink_is_still_on_the_device() {
-        assert_eq!(camera_sink(Some(Path::new("/dev/video9")), true, false, "pipewiresink").unwrap(), "v4l2sink device=/dev/video9 sync=false");
+        assert_eq!(camera_sink(Some(Path::new("/dev/video9")), true, false, "pipewiresink").unwrap(), "videoscale ! v4l2sink device=/dev/video9 sync=false");
     }
 
     #[test]
