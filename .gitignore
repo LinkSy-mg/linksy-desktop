@@ -1,3 +1,4 @@
 target/
 *.part
 dist/
+__pycache__/
