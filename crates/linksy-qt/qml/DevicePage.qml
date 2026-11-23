@@ -18,6 +18,8 @@ Kirigami.Page {
     readonly property bool trusted: view?.trusted ?? false
     readonly property bool phone: info?.kind === "phone"
     readonly property bool handheld: phone || info?.kind === "tablet"
+    // The session whose keyboard-and-mouse program is being started, to end it if that fails
+    property string handoverSession: ""
     readonly property bool canRing: phone && app.can(info, "ring")
     readonly property string name: info?.name ?? ""
     // The device asked again every few seconds while its page shows: how it's connected, how fast
@@ -220,6 +222,20 @@ Kirigami.Page {
         target: page.app
         property: "transfersOpen"
         value: page.visible && page.trusted && page.tab === "transfers"
+    }
+
+    Connections {
+        target: backend
+        function onHandoverStarted(json) {
+            const result = JSON.parse(json)
+            if (result.error) {
+                app.toast(result.error)
+                if (page.handoverSession) app.request("end_session", { session: page.handoverSession })
+            } else {
+                app.toast(app.t("Press both Ctrl keys to switch to {name}, and again to come back", { name: page.name }))
+            }
+            page.handoverSession = ""
+        }
     }
 
     Connections {
@@ -739,7 +755,7 @@ Kirigami.Page {
                 columnSpacing: Kirigami.Units.largeSpacing
                 rowSpacing: Kirigami.Units.largeSpacing
                 // Not the cards' own visible: it goes false while a layer covers the page, and stays false
-                visible: page.info !== null && (page.handheld || ["display", "camera", "microphone"].some(f => app.can(page.info, f)))
+                visible: page.info !== null && (page.handheld || ["display", "handover", "camera", "microphone"].some(f => app.can(page.info, f)))
 
                 UseCard {
                     visible: page.info !== null && app.can(page.info, "display")
@@ -748,6 +764,15 @@ Kirigami.Page {
                     subtitle: app.t("Extend this computer's desktop onto it")
                     button: app.t("Extend Desktop")
                     kind: "display"
+                }
+                // Only a computer that says it can take them: the phone never does
+                UseCard {
+                    visible: page.info !== null && app.can(page.info, "handover")
+                    iconName: "input-keyboard"
+                    title: app.t("Handover")
+                    subtitle: app.t("Use this computer's keyboard and mouse on it")
+                    button: app.t("Hand Over")
+                    kind: "handover"
                 }
                 UseCard {
                     visible: page.info !== null && app.can(page.info, "camera")
@@ -1543,11 +1568,19 @@ Kirigami.Page {
                 onTriggered: {
                     if (card.running) return app.request("end_session", { session: card.running.session });
                     app.request("start_session", { with: page.info.id, kind: card.kind }, (ok, err) => {
-                        if (ok) return;
+                        if (ok) {
+                            // The keyboard and mouse are read by a program started here, which may ask for a password
+                            if (card.kind === "handover" && err?.socket) {
+                                page.handoverSession = err.session;
+                                backend.startHandover(String(err.socket));
+                            }
+                            return;
+                        }
                         if (err.includes("can't do this yet")) app.toast(app.t({
                             display: "{name} can't be a second display yet",
                             camera: "{name} can't share its camera yet",
-                            microphone: "{name} can't share its microphone yet"
+                            microphone: "{name} can't share its microphone yet",
+                            handover: "{name} can't take a keyboard and mouse yet"
                         }[card.kind], { name: page.name }));
                         else if (err.includes("declined")) app.toast(app.t("{name} didn't allow it", { name: page.name }));
                         else app.toast(err);

@@ -97,6 +97,12 @@ pub mod qobject {
         #[cxx_name = "runSetup"]
         fn run_setup(self: Pin<&mut Self>, ids: &QString);
 
+        /// Start the program that hands this computer's keyboard and mouse over, connected
+        /// to `socket` (from the started session); `handoverStarted` says how it went.
+        #[qinvokable]
+        #[cxx_name = "startHandover"]
+        fn start_handover(self: Pin<&mut Self>, socket: &QString);
+
         /// True once per version when something can be set up: open Finish Setup.
         #[qinvokable]
         #[cxx_name = "offerSetup"]
@@ -223,6 +229,11 @@ pub mod qobject {
         #[qsignal]
         #[cxx_name = "setupFinished"]
         fn setup_finished(self: Pin<&mut Backend>, json: QString);
+
+        /// {"ok": true} | {"error": "…"}
+        #[qsignal]
+        #[cxx_name = "handoverStarted"]
+        fn handover_started(self: Pin<&mut Backend>, json: QString);
 
         /// Linksy's own password prompt, where no polkit agent runs: whose password (as
         /// polkit names them, maybe empty), and whether the last one didn't work. Answer
@@ -539,6 +550,21 @@ impl qobject::Backend {
             }
             .to_string();
             let _ = thread.queue(move |b| b.setup_finished(QString::from(&json)));
+        });
+    }
+
+    pub fn start_handover(self: Pin<&mut Self>, socket: &QString) {
+        let thread = self.qt_thread();
+        let socket = std::path::PathBuf::from(socket.to_string());
+        let ask = asker(thread.clone(), self.rust().password.clone());
+        self.rust().rt.spawn_blocking(move || {
+            let json = match linksy_setup::start_handover(&socket, None, ask, |_| {}) {
+                Ok(()) => serde_json::json!({ "ok": true }),
+                Err(Failure::Message(m)) => serde_json::json!({ "error": m }),
+                Err(Failure::Restart(_)) => serde_json::json!({ "error": "Restart your computer, then try again." }),
+            }
+            .to_string();
+            let _ = thread.queue(move |b| b.handover_started(QString::from(&json)));
         });
     }
 
