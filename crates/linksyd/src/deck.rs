@@ -20,6 +20,7 @@ use tokio::sync::mpsc;
 use tracing::{debug, warn};
 
 use crate::deck_cmd::{self, MAX_COMMANDS};
+use crate::stats::Sampler;
 
 pub static DECK: OnceLock<Deck> = OnceLock::new();
 
@@ -27,6 +28,8 @@ pub static DECK: OnceLock<Deck> = OnceLock::new();
 const ACT_WAIT: Duration = Duration::from_secs(5);
 /// How often the user's toggles are asked while a deck shows what they are.
 const POLL: Duration = Duration::from_secs(3);
+/// How often the gauges of a deck's `stat` tiles are read and sent (§4.28).
+const STATS_EVERY: Duration = Duration::from_secs(2);
 /// At most this many of a toggle's checks run at once.
 const CHECKS_AT_ONCE: usize = 4;
 
@@ -641,6 +644,9 @@ impl<D: Desktop> Deck<D> {
         let paired = |id: &Fingerprint| node.trusted().iter().any(|t| t.device.id == *id);
         let mut poll = tokio::time::interval(POLL);
         poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut gauges = tokio::time::interval(STATS_EVERY);
+        gauges.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut sampler = Sampler::default();
         loop {
             tokio::select! {
                 _ = poll.tick() => {
@@ -648,6 +654,7 @@ impl<D: Desktop> Deck<D> {
                         let _ = self.inner.jobs.send(Job::Poll);
                     }
                 }
+                _ = gauges.tick() => self.send_stats(&node, &mut sampler).await,
                 event = events.recv() => match event {
                     Ok(Event::DeckOpen { from }) if paired(&from.id) => {
                         self.inner.open.lock().unwrap().insert(from.id, None);
@@ -816,6 +823,34 @@ impl<D: Desktop> Deck<D> {
     }
 
     /// Whether a deck that shows now has one of the user's toggles on it, so it's worth asking.
+    /// The gauges (§4.28) to the open decks that show some and take them. Nothing is read
+    /// while no deck wants one, and a gauge that is a difference over time starts over then.
+    async fn send_stats(&self, node: &Node, sampler: &mut Sampler) {
+        let phones: Vec<Fingerprint> = self.inner.open.lock().unwrap().keys().copied().collect();
+        let wanted: Vec<(Fingerprint, HashSet<String>)> = phones
+            .into_iter()
+            .filter(|p| node.peer_has(p, "deck_stats"))
+            .map(|p| (p, stat_metrics(&self.layouts(&p))))
+            .filter(|(_, m)| !m.is_empty())
+            .collect();
+        if wanted.is_empty() {
+            *sampler = Sampler::default();
+            return;
+        }
+        let all: HashSet<String> = wanted.iter().flat_map(|(_, m)| m.iter().cloned()).collect();
+        let now = sampler.sample(&all);
+        for (phone, metrics) in wanted {
+            let mine: Vec<DeckState> = now.iter().filter(|s| s.id.strip_prefix("stat.").is_some_and(|m| metrics.contains(m))).cloned().collect();
+            if mine.is_empty() || !self.reachable(node, &phone) {
+                continue;
+            }
+            if let Err(e) = node.deck_stats(&phone, mine).await {
+                debug!("deck stats: {e}");
+                self.inner.open.lock().unwrap().remove(&phone);
+            }
+        }
+    }
+
     fn shows_toggles(&self) -> bool {
         let open = self.inner.open.lock().unwrap();
         if open.is_empty() {
@@ -901,6 +936,19 @@ fn fill_in(mut actions: Vec<DeckAction>, computer: &str, phone: &str) -> Vec<Dec
         *question = question.replace("{computer}", computer).replace("{phone}", phone);
     }
     actions
+}
+
+/// The gauges the active layout's `stat` tiles show, on either side up.
+fn stat_metrics(layouts: &DeckLayouts) -> HashSet<String> {
+    layouts
+        .layouts
+        .iter()
+        .filter(|l| l.id == layouts.active)
+        .flat_map(|l| [&l.portrait, &l.landscape])
+        .flat_map(|face| face.pages.iter().flatten())
+        .filter(|t| t.kind == "stat")
+        .filter_map(|t| t.props.get("metric").cloned())
+        .collect()
 }
 
 /// The actions `layouts`' tiles run: only kinds that run one (a clock's action is ignored).
@@ -1335,6 +1383,24 @@ mod tests {
 
     fn kinds(face: &DeckFace) -> Vec<(&str, Option<&str>)> {
         face.pages.iter().flatten().map(|t| (t.kind.as_str(), t.action.as_deref())).collect()
+    }
+
+    #[test]
+    fn the_gauges_asked_for_are_the_active_layouts_stat_tiles() {
+        let stat = |id: &str, metric: &str, x: u8| {
+            let mut t = tile(id, "stat", (x, 0), (1, 1), None);
+            t.props.insert("metric".into(), metric.into());
+            t
+        };
+        let mut l = layouts("work", vec![stat("c", "cpu", 0), stat("r", "ram", 1), stat("c2", "cpu", 2), tile("k", "clock", (0, 1), (2, 1), None)]);
+        assert_eq!(stat_metrics(&l), ["cpu", "ram"].map(String::from).into());
+        // Another layout's gauges aren't read while it isn't the one shown
+        l.layouts[1].portrait.pages[0] = vec![stat("b", "battery", 0)];
+        assert_eq!(stat_metrics(&l), ["cpu", "ram"].map(String::from).into());
+        l.active = "games".into();
+        assert_eq!(stat_metrics(&l), ["battery"].map(String::from).into());
+        l.active = "nothing".into();
+        assert!(stat_metrics(&l).is_empty());
     }
 
     #[test]

@@ -149,7 +149,12 @@ pub const KINDS: &[TileKind] = &[
     TileKind { id: "music", sizes: &[(4, 2), (2, 2)], runs: false },
     // The phone's own time
     TileKind { id: "clock", sizes: &[(2, 1), (2, 2), (1, 1)], runs: false },
+    // One of this computer's gauges (§4.28): `props.metric` is one of [`METRICS`]
+    TileKind { id: "stat", sizes: &[(1, 1), (2, 1), (2, 2)], runs: false },
 ];
+
+/// What a `stat` tile can show, by its `props.metric` (§4.28).
+pub const METRICS: &[&str] = &["cpu", "ram", "swap", "disk", "battery", "temp", "net_down", "net_up", "uptime"];
 
 pub fn kind(id: &str) -> Option<&'static TileKind> {
     KINDS.iter().find(|k| k.id == id)
@@ -242,6 +247,9 @@ fn check_face(face: &DeckFace, offered: &impl Fn(&str) -> bool) -> Result<(), St
             if t.icon.len() > MAX_ICON || !t.icon.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
                 return Err(format!("tile \"{}\": an icon is up to {MAX_ICON} of a-z, 0-9 and _", t.id));
             }
+            if t.kind == "stat" && !t.props.get("metric").is_some_and(|m| METRICS.contains(&m.as_str())) {
+                return Err(format!("tile \"{}\": a stat needs a metric ({})", t.id, METRICS.join(", ")));
+            }
             match (&t.action, k.runs) {
                 (Some(a), true) if offered(a) => {}
                 (Some(a), true) => return Err(format!("this computer doesn't offer \"{a}\"")),
@@ -281,6 +289,23 @@ mod tests {
         assert!(!face.fits(0, 3, 7, 2, 1, None), "past the right edge");
         assert_eq!(face.free_spot(0, 2, 1), Some((0, 2)));
         assert_eq!(face.free_spot(0, 5, 1), None);
+    }
+
+    #[test]
+    fn a_stat_tile_needs_a_known_metric() {
+        let stat = |metric: Option<&str>, w, h| {
+            let mut t = tile("s", "stat", 0, 0, w, h, None);
+            if let Some(m) = metric {
+                t.props.insert("metric".into(), m.into());
+            }
+            t
+        };
+        let offered = |_: &str| false;
+        assert_eq!(one(vec![stat(Some("cpu"), 1, 1)]).check(offered), Ok(()));
+        assert_eq!(one(vec![stat(Some("net_down"), 2, 2)]).check(offered), Ok(()));
+        assert!(one(vec![stat(None, 1, 1)]).check(offered).is_err(), "no metric");
+        assert!(one(vec![stat(Some("gpu"), 1, 1)]).check(offered).is_err(), "unknown metric");
+        assert!(one(vec![stat(Some("cpu"), 4, 1)]).check(offered).is_err(), "a size a stat doesn't take");
     }
 
     #[test]

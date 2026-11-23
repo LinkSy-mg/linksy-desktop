@@ -66,6 +66,7 @@ release yet says so in its row. What's still ahead, in order, is in `ROADMAP.md`
 | Deck: the phone as buttons for the computer | Done (0.12.1) | Done (0.3.3) | `deck_open`, `deck_actions`, `deck_run` (§4.19) |
 | Deck layouts made on the computer | Done (0.12.1) | Done (0.3.3) | `deck_layout`, feature `deck_layout` (§4.20) |
 | Deck edited on the phone, saved to the computer; custom themes and commands | Building (0.14.0) | Editor done (0.3.5), saving and themes to do | `deck_layout_save`, `deck_layout_refused`, `deck_theme_draft`, features `deck_layout_save`, `deck_themes` (§4.26) |
+| Deck gauges: CPU, memory, disk, battery, temperature, network, uptime | Done (unreleased) | To do | `deck_stats`, tile kind `stat`, feature `deck_stats` (§4.28) |
 | Images/files on the clipboard | Done | Done | offer with `"clipboard":true` (§4.5) |
 | Automatic clipboard sync, computer → phone | Done (not on GNOME) | Done (phone asks) | `clipboard_watch` (§4.5) |
 | Phone as microphone | Done | Done | session `microphone`, raw PCM (§4.8) |
@@ -1743,6 +1744,7 @@ computer → phone {"type":"deck_state",…}         as in §4.19
   | `volume` | 4 × 1, 2 × 1, 1 × 3 | a slider for `sound.volume` |
   | `music` | 4 × 2, 2 × 2 | the computer's player (`media_state`, §4.5): cover, title, progress, its buttons |
   | `clock` | 2 × 1, 2 × 2, 1 × 1 | the phone's own time |
+  | `stat` | 1 × 1, 2 × 1, 2 × 2 | one of the computer's gauges, `props.metric`: CPU, memory, disk, battery, temperature, network speed, uptime (§4.28) |
 
   A kind the phone doesn't know draws as a plain tile with its `label`. A tile whose
   action isn't in `deck_actions` shows as unavailable.
@@ -2218,6 +2220,52 @@ hotkey on the first. A phone never takes part and never announces it.
 - **Safeguards:** the requester only sends while its hotkey has handed the devices over,
   and takes them back at once when the link goes. The receiver ends the session by closing
   its end; its own keyboard and mouse keep working throughout.
+
+### 4.28 Deck gauges: the computer's CPU, memory, battery and more on the deck (desktop, unreleased)
+
+A `stat` tile (§4.20) shows one number about the computer the deck belongs to, kept fresh
+while the deck is open. The computer reads it and sends it; the phone only draws it.
+
+```json
+computer → phone {"type":"deck_stats","stats":[
+                    {"id":"stat.cpu","value":0.23,"text":"23%"},
+                    {"id":"stat.ram","value":0.61,"text":"9.8 GB / 16.0 GB"},
+                    {"id":"stat.net_down","text":"1.4 MB/s"}]}
+```
+
+- **Features.** A computer that sends gauges announces `deck_stats`; a phone that draws
+  them announces it too. The computer sends `deck_stats` only to a phone that announced it
+  (`Node::deck_stats` returns `Unsupported` otherwise), and a phone offers the `stat` tile in
+  its editor's Add only for a computer that announced it. A phone without it draws a `stat`
+  tile as a plain tile with its `label` (§4.20).
+- **The tile.** `kind` `stat`, sizes 1 × 1, 2 × 1 and 2 × 2, `props.metric` one of the
+  metrics below; a layout with a `stat` that has no known metric is refused on save (§4.26).
+- **Metrics** (`stat.<metric>` in the message):
+
+  | `metric` | `value` (0 to 1) | `text` | Read from |
+  |---|---|---|---|
+  | `cpu` | the share of processor time in use since the last message | `23%` | `/proc/stat` |
+  | `ram` | memory in use (total less available) | `9.8 GB / 16.0 GB` | `/proc/meminfo` |
+  | `swap` | swap in use; only where there is swap | `0.4 GB / 4.0 GB` | `/proc/meminfo` |
+  | `disk` | the root filesystem in use | `212.0 GB / 476.0 GB` | `statvfs("/")` |
+  | `battery` | the first battery's charge; only where there is one | `82%`, with ` ⚡` while charging | `/sys/class/power_supply` |
+  | `temp` | the processor's temperature on a scale of 0 to 100 °C | `54 °C` | hwmon (coretemp, k10temp, zenpower), else the first thermal zone |
+  | `net_down`, `net_up` | none | `1.4 MB/s`, `42 KB/s`: the speed since the last message, over every real interface (not loopback, containers or virtual machines) | `/proc/net/dev` |
+  | `uptime` | none | `3h 5m`, `2d 4h` | `/proc/uptime` |
+
+  A metric this computer can't read (no battery on a desktop, no sensor) is left out of
+  the message, and its tile should show as unavailable, like a tile whose action is gone.
+  `text` is plain digits and units, not translated; a phone may draw `value` its own way
+  (a ring, a bar) and show `text` beside it.
+- **When.** While a deck is open, every 2 seconds, and only the metrics that the *active*
+  layout's `stat` tiles of that phone ask for (either way up). A deck with no `stat` tile
+  gets nothing, and nothing is read on the computer while no open deck wants a gauge.
+  A gauge that is a difference (`cpu`, `net_down`, `net_up`) starts over when none is wanted,
+  so the first message after a deck shows one has the others but not that one yet.
+- **Away.** From away from home the message follows the same rule as every deck message
+  (§4.19): the deck has to be allowed there.
+- Core: `Node::deck_stats(to, stats)`, `Event::DeckStats`, `deck_layout::METRICS`.
+  Desktop: `linksyd/src/stats.rs`.
 
 ## 5. Core API the app would call (`linksy_core::Node`)
 
@@ -2796,3 +2844,9 @@ robust against any encoder (GPU ones may slice too):
   raw 8-byte input events. Computers only: a phone never asks for it, never announces it,
   and has nothing to do. If the phone's code matches on `SessionKind` exhaustively, add the
   variant and decline it.
+- **2026-11-23** — **Deck gauges** (§4.28), desktop, unreleased: a `stat` tile kind (`props.metric`:
+  `cpu`, `ram`, `swap`, `disk`, `battery`, `temp`, `net_down`, `net_up`, `uptime`) and a
+  computer → phone `deck_stats` message, every 2 s while a deck that shows one is open. Feature
+  `deck_stats`, announced by both sides. Phone to-do: announce `deck_stats`, offer the tile in
+  Add for a computer that announces it, draw it from `deck_stats` (`value` 0 to 1, `text`), and
+  show a tile whose metric is missing from the message as unavailable.

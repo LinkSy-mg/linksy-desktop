@@ -1257,7 +1257,7 @@ impl Window {
             }
             Event::Heartbeat { .. } | Event::HeartbeatWatch { .. } | Event::ClipboardWatch { .. } | Event::ClipboardFile { .. } => {}
             // The service runs decks and asks phones for their history.
-            Event::DeckOpen { .. } | Event::DeckClose { .. } | Event::DeckRun { .. } | Event::DeckActions { .. } | Event::DeckState { .. } | Event::DeckLayout { .. } | Event::DeckLayoutRefused { .. } | Event::DeckThemeDraft { .. } => {}
+            Event::DeckOpen { .. } | Event::DeckClose { .. } | Event::DeckRun { .. } | Event::DeckActions { .. } | Event::DeckState { .. } | Event::DeckStats { .. } | Event::DeckLayout { .. } | Event::DeckLayoutRefused { .. } | Event::DeckThemeDraft { .. } => {}
             // The page shows what the phone asked for, so it asks again
             Event::DeckLayoutSave { from, .. } => self.deck_saved_by(&from.id),
             Event::InboxHistory { .. } | Event::InboxHistoryPage { .. } => {}

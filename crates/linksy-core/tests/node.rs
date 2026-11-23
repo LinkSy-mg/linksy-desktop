@@ -702,6 +702,36 @@ async fn deck_layouts_reach_only_a_phone_that_takes_them() {
 }
 
 #[tokio::test]
+async fn deck_stats_reach_only_a_phone_that_takes_them() {
+    let (phone, pc) = paired_with(|c| {
+        if c.name == "Alpha" {
+            c.features = vec!["deck_stats".into()];
+        }
+    })
+    .await;
+    let (phone_id, pc_id) = (phone.node.info().id, pc.node.info().id);
+    let (mut on_pc, mut on_phone) = (pc.node.subscribe(), phone.node.subscribe());
+    phone.node.deck_open(&pc_id, true).await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::DeckOpen { .. }).then_some(())).await;
+    let cpu = linksy_core::DeckState { id: "stat.cpu".into(), on: None, value: Some(0.25), text: Some("25%".into()) };
+    pc.node.deck_stats(&phone_id, vec![cpu.clone()]).await.unwrap();
+    let got = wait_for(&mut on_phone, |e| match e {
+        Event::DeckStats { from, stats } if from.id == pc_id => Some(stats.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(got, vec![cpu.clone()]);
+
+    // An older phone, which doesn't say it draws gauges, never gets them
+    let (old, pc2) = paired().await;
+    let (old_id, pc2_id) = (old.node.info().id, pc2.node.info().id);
+    let mut on_pc2 = pc2.node.subscribe();
+    old.node.deck_open(&pc2_id, true).await.unwrap();
+    wait_for(&mut on_pc2, |e| matches!(e, Event::DeckOpen { .. }).then_some(())).await;
+    assert!(matches!(pc2.node.deck_stats(&old_id, vec![cpu]).await, Err(Error::Unsupported)));
+}
+
+#[tokio::test]
 async fn notifications_arrive() {
     let (a, b) = paired().await;
     let mut rb = b.node.subscribe();

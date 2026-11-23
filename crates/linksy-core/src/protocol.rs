@@ -490,6 +490,9 @@ pub enum Message {
     },
     DeckActions { actions: Vec<DeckAction> },
     DeckState { states: Vec<DeckState> },
+    /// What this computer's gauges say now (§4.28), computer → phone, only to a phone with
+    /// `deck_stats`: `id` is `stat.<metric>`.
+    DeckStats { stats: Vec<DeckState> },
     /// The deck's layouts (§4.20), computer → phone, only to a phone with `deck_layout`.
     DeckLayout { layouts: DeckLayouts },
     /// The layouts a phone edited (§4.26), phone → computer, only to a computer with
@@ -1174,6 +1177,8 @@ mod tests {
         let json = serde_json::to_string(&Message::DeckActions { actions: vec![restart.clone()] }).unwrap();
         assert!(json.contains(r#""confirm":"Restart Office PC?""#), "{json}");
         let state = DeckState { id: "sound.output".into(), on: None, value: None, text: Some("Speakers".into()) };
+        let stats = Message::DeckStats { stats: vec![DeckState { id: "stat.cpu".into(), on: None, value: Some(0.25), text: Some("25%".into()) }] };
+        assert_eq!(serde_json::to_string(&stats).unwrap(), r#"{"type":"deck_stats","stats":[{"id":"stat.cpu","value":0.25,"text":"25%"}]}"#);
         assert_eq!(serde_json::to_string(&state).unwrap(), r#"{"id":"sound.output","text":"Speakers"}"#);
         // What a phone built before these fields does: they're ignored
         #[derive(Deserialize)]
