@@ -702,6 +702,12 @@ mod tests {
     impl Setup {
         /// `slow`: the phone waits that long before each answer.
         async fn new(slow: Duration) -> Self {
+            let setup = Self::unserved().await;
+            serve(&setup.phone, setup.storage.clone(), slow);
+            setup
+        }
+
+        async fn unserved() -> Self {
             let dir = tempfile::tempdir().unwrap();
             let phone = node(&dir.path().join("phone"), "Pixel").await;
             let pc = node(&dir.path().join("pc"), "Desk").await;
@@ -714,7 +720,6 @@ mod tests {
             .unwrap();
             let storage = dir.path().join("storage");
             std::fs::create_dir_all(&storage).unwrap();
-            serve(&phone, storage.clone(), slow);
             let history = History::load(dir.path().join("history.json"));
             let out = dir.path().join("pc/downloads/Pixel");
             Self { phone_id: phone.info().id, phone, storage, out, files: PhoneFiles::new(pc, history.clone()), history, dir }
@@ -1005,11 +1010,32 @@ mod tests {
 
     #[tokio::test]
     async fn a_phone_going_away_mid_copy_fails_cleanly() {
-        let t = Setup::new(Duration::from_millis(40)).await;
-        std::fs::write(t.storage.join("big.bin"), bytes(12 * CHUNK as usize)).unwrap();
-        let phone = t.phone_id;
-        let p = t.stop_halfway(|f| f.copy(phone, vec!["/big.bin".into()]).unwrap(), async || t.phone.shutdown().await).await;
-        let error = p.error.unwrap();
+        let t = Setup::unserved().await;
+        let refill_offset = AHEAD as u64 * CHUNK;
+        let size = refill_offset + CHUNK;
+        std::fs::write(t.storage.join("big.bin"), bytes(size as usize)).unwrap();
+
+        let mut calls = t.phone.incoming_fs().unwrap();
+        let mut progress = t.files.subscribe();
+        let op = t.files.copy(t.phone_id, vec!["/big.bin".into()]).unwrap();
+        // The first refill is requested only after a chunk has reached the part file.
+        let held = tokio::time::timeout(Duration::from_secs(20), async {
+            loop {
+                let call = calls.recv().await.expect("phone stopped serving files");
+                if matches!(call.request, FsRequest::Read { offset, .. } if offset >= refill_offset) {
+                    break call;
+                }
+                answer(call, &t.storage, Duration::ZERO).await;
+            }
+        })
+        .await
+        .expect("the copy did not request a read beyond its initial pipeline");
+
+        t.phone.shutdown().await;
+        drop(held);
+        let p = finished(&mut progress, op).await;
+        assert!((CHUNK..size).contains(&p.done), "copied {} of {size} bytes", p.done);
+        let error = p.error.expect("the interrupted copy should fail");
         assert!(error.contains("Pixel"), "{error}");
         assert_eq!(tree(&t.out), Vec::<String>::new());
         assert!(t.history.list(None).is_empty());
