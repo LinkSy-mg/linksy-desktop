@@ -6,5 +6,8 @@
 //! receives, which is why it is a small program of its own and not part of the service.
 
 pub mod chord;
+pub mod evdev;
 pub mod event;
 pub mod router;
+pub mod sys;
+pub mod uinput;
