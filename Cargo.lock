@@ -2621,6 +2621,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "linksy-keys"
+version = "0.16.1"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "linksy-logs"
 version = "0.16.1"
 dependencies = [
