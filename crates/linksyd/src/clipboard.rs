@@ -325,7 +325,7 @@ fn announce(from: &str, text: &str, copied: bool) {
     }
     n.action("default", t!("Copy")).action("copy", t!("Copy"));
     if let Ok(handle) = n.show() {
-        handle.wait_for_action(|action| {
+        crate::notify::wait_for_action(handle, |action| {
             if matches!(action, "default" | "copy") {
                 let _ = copy_text(text);
             }
