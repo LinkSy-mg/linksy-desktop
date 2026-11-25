@@ -2,6 +2,16 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.18.1
+
+### Fixed
+- **A slow leak of session bus connections,** which could fill the session bus until the
+  desktop stopped working. Every notification with a button (a received file, imported photos,
+  the deck's Allow, the update notice, a clipboard Copy) waited for a click for as long as
+  Linksy ran, holding a connection, on desktops that never say an expired notification closed
+  (GNOME does this). Linksy now stops listening after 30 minutes. If your count still climbs,
+  please say so in linksy-releases#12.
+
 ## 0.18.0
 
 ### Added
