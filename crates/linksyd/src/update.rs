@@ -185,7 +185,7 @@ impl Updates {
                 }
                 let Ok(handle) = n.show() else { return };
                 if let Some(url) = notes {
-                    handle.wait_for_action(|action| {
+                    crate::notify::wait_for_action(handle, |action| {
                         if matches!(action, "default" | "notes") {
                             let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
                         }

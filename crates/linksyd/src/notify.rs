@@ -414,6 +414,31 @@ fn body_markup() -> bool {
     })
 }
 
+/// How long a notification's buttons are listened for. `wait_for_action` blocks a thread and
+/// keeps a session bus connection for as long as it waits, and a notification server that
+/// doesn't send "closed" for one that expired (GNOME keeps it in its list) never lets it go:
+/// each notice with a button left a thread and a connection for good, until the session
+/// bus ran out of them.
+const LISTEN_FOR: Duration = Duration::from_secs(30 * 60);
+
+/// `NotificationHandle::wait_for_action`, ended after `LISTEN_FOR`: the connection is let go
+/// then and a click later does nothing. Call it from a blocking thread (`spawn_blocking`).
+pub(crate) fn wait_for_action(handle: notify_rust::NotificationHandle, act: impl FnOnce(&str)) {
+    let listen = tokio::time::timeout(LISTEN_FOR, handle.wait_for_action_async(|response| match response {
+        notify_rust::NotificationResponse::Default => act("default"),
+        notify_rust::NotificationResponse::Action(name) => act(name),
+        notify_rust::NotificationResponse::Closed(_) => act("__closed"),
+        _ => {}
+    }));
+    if listen_blocking(listen).is_err() {
+        debug!("a notification's buttons were left unanswered; no longer listening");
+    }
+}
+
+fn listen_blocking<F: std::future::Future>(f: F) -> F::Output {
+    tokio::runtime::Handle::current().block_on(f)
+}
+
 pub fn base(summary: &str, body: &str) -> Notification {
     let markup = body_markup();
     let (summary, body) = (clean_summary(summary, markup), clean_body(body, markup));
@@ -438,7 +463,7 @@ pub(crate) fn deck_asks(phone: Fingerprint, device: String, actions: Vec<(String
         let mut n = base(&t!("{device}'s deck needs your OK", device = device), &t!("It uses {actions}, which are off on this computer. Allow them here, or choose in Linksy, on {device}'s page.", actions = names, device = device));
         n.action("allow", t!("Allow"));
         match n.show() {
-            Ok(handle) => handle.wait_for_action(|action| {
+            Ok(handle) => wait_for_action(handle, |action| {
                 if action != "allow" {
                     return;
                 }
@@ -476,7 +501,7 @@ fn prompt(node: Node, request: Uuid, pairing: Option<Fingerprint>, always: Optio
                     answered(request);
                 }
                 let forget = || PROMPTS.lock().unwrap().as_mut().map(|p| p.remove(&request));
-                handle.wait_for_action(|action| match action {
+                wait_for_action(handle, |action| match action {
                     "accept" => {
                         forget();
                         node.respond(request, true);
@@ -517,7 +542,7 @@ fn imported(from: String, saved: Vec<PathBuf>) {
         let mut n = base(&summary, &folder.display().to_string());
         n.action("default", t!("Show Photos"));
         match n.show() {
-            Ok(handle) => handle.wait_for_action(|action| {
+            Ok(handle) => wait_for_action(handle, |action| {
                 if action == "default" {
                     let _ = std::process::Command::new("xdg-open").arg(&folder).spawn();
                 }
@@ -539,7 +564,7 @@ fn received(from: String, saved: Vec<PathBuf>) {
         let mut n = base(&summary, &t!("From {device}", device = from));
         n.action("default", t!("Open")).action("show", t!("Show in Folder"));
         match n.show() {
-            Ok(handle) => handle.wait_for_action(|action| {
+            Ok(handle) => wait_for_action(handle, |action| {
                 let path = match action {
                     "default" => target.clone(),
                     "show" => target.parent().map(Path::to_path_buf).unwrap_or_default(),
