@@ -287,7 +287,7 @@ impl Controls {
         match self.found().airplane {
             Some(Airplane::Gnome) => {
                 let asked = async {
-                    let bus = zbus::Connection::session().await?;
+                    let bus = crate::bus::session().await?;
                     let value = zbus::zvariant::Value::from(!on);
                     bus.call_method(Some(RFKILL), RFKILL_PATH, Some("org.freedesktop.DBus.Properties"), "Set", &(RFKILL, "AirplaneMode", value)).await.map(|_| ())
                 };
@@ -326,7 +326,7 @@ impl Controls {
 /// Whether the notification server can be inhibited (Plasma's can).
 async fn inhibits() -> bool {
     let asked = async {
-        let bus = zbus::Connection::session().await?;
+        let bus = crate::bus::session().await?;
         let reply = bus.call_method(Some(NOTIFICATIONS), NOTIFICATIONS_PATH, Some(NOTIFICATIONS), "GetCapabilities", &()).await?;
         reply.body().deserialize::<Vec<String>>()
     };
@@ -336,7 +336,7 @@ async fn inhibits() -> bool {
 /// Plasma's `Inhibited`: whether its notifications are held back, by whatever.
 async fn kde_inhibited() -> Option<bool> {
     let asked = async {
-        let bus = zbus::Connection::session().await?;
+        let bus = crate::bus::session().await?;
         let reply = bus.call_method(Some(NOTIFICATIONS), NOTIFICATIONS_PATH, Some("org.freedesktop.DBus.Properties"), "Get", &(NOTIFICATIONS, "Inhibited")).await?;
         let value: zbus::zvariant::OwnedValue = reply.body().deserialize()?;
         bool::try_from(value).map_err(zbus::Error::from)
@@ -359,7 +359,7 @@ async fn inhibit() -> zbus::Result<(zbus::Connection, u32)> {
 /// GNOME's airplane mode, where it has one.
 async fn gnome_airplane() -> Option<bool> {
     let read = async {
-        let bus = zbus::Connection::session().await?;
+        let bus = crate::bus::session().await?;
         let get = |name: &'static str| {
             let bus = bus.clone();
             async move {

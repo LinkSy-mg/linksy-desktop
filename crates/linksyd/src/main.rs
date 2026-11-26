@@ -2,6 +2,8 @@
 //! and shows native notifications. Front ends (the app, the `linksy` CLI) talk to it over
 //! a Unix socket and can come and go.
 
+#[cfg(target_os = "linux")]
+mod bus;
 mod clipboard;
 mod codes;
 #[cfg(target_os = "linux")]
