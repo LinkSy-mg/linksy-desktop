@@ -55,7 +55,7 @@ fn pairing_over(device: Fingerprint) {
 }
 
 async fn close(id: u32) {
-    let Ok(bus) = zbus::Connection::session().await else { return };
+    let Ok(bus) = crate::bus::session().await else { return };
     let closed = bus
         .call_method(Some("org.freedesktop.Notifications"), "/org/freedesktop/Notifications", Some("org.freedesktop.Notifications"), "CloseNotification", &(id,))
         .await;

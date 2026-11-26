@@ -130,7 +130,7 @@ pub(crate) async fn lock_screen() -> bool {
         return tokio::process::Command::new("sh").arg("-c").arg(cmd).status().await.is_ok_and(|s| s.success());
     }
     #[cfg(target_os = "linux")]
-    if let Ok(bus) = zbus::Connection::session().await {
+    if let Ok(bus) = crate::bus::session().await {
         for (name, path) in [("org.gnome.ScreenSaver", "/org/gnome/ScreenSaver"), ("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver")] {
             if bus.call_method(Some(name), path, Some(name), "Lock", &()).await.is_ok() {
                 return true;

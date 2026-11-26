@@ -157,7 +157,7 @@ fn bookmark(uri: &str, name: &str) {
 /// Open a location in the file manager.
 async fn show_folder(uri: &str) {
     let shown = async {
-        let bus = zbus::Connection::session().await?;
+        let bus = crate::bus::session().await?;
         bus.call_method(Some("org.freedesktop.FileManager1"), "/org/freedesktop/FileManager1", Some("org.freedesktop.FileManager1"), "ShowFolders", &(vec![uri], ""))
             .await?;
         Ok::<_, zbus::Error>(())

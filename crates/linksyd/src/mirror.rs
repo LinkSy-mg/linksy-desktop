@@ -316,7 +316,7 @@ async fn close(id: u32) {
         return;
     }
     let closed = async {
-        let bus = zbus::Connection::session().await?;
+        let bus = crate::bus::session().await?;
         bus.call_method(Some("org.freedesktop.Notifications"), "/org/freedesktop/Notifications", Some("org.freedesktop.Notifications"), "CloseNotification", &(id,))
             .await?;
         Ok::<_, zbus::Error>(())
