@@ -77,6 +77,15 @@ const RECONNECT_EVERY: Duration = Duration::from_secs(15);
 const DIAL_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long a pairing QR code stays valid.
 const INVITE_TTL: Duration = Duration::from_secs(300);
+/// The most files one offer may list: more than any real folder, fewer than a frame can hold.
+const MAX_OFFER_FILES: usize = 20_000;
+
+/// What an offer's files add up to; none when the sizes overflow (they were made to: the
+/// sum would wrap to a small number that shows in the question and passes the room check).
+fn total_size(files: &[FileEntry]) -> Option<u64> {
+    files.iter().try_fold(0u64, |sum, f| sum.checked_add(f.size))
+}
+
 /// Pairings that may wait for the user's answer at the same time.
 const PAIRINGS_AT_ONCE: usize = 2;
 
@@ -1740,7 +1749,7 @@ impl Node {
         let task = tokio::spawn(async move {
             let entries: Vec<FileEntry> = files.iter().map(|f| f.entry.clone()).collect();
             let entries_len = entries.len() as u32;
-            let total = entries.iter().map(|f| f.size).sum();
+            let total = entries.iter().fold(0u64, |sum, f| sum.saturating_add(f.size));
             let result = async {
                 node.emit(Event::TransferStarted { transfer: id, peer, direction: Direction::Outgoing, files: entries.clone(), total, import, apps: apps.clone() });
                 // Big ones over a direct link, when the devices can set one up
@@ -1963,7 +1972,7 @@ impl Node {
         }
         tokio::time::sleep(GATHER).await;
         let Some(g) = self.inner.gathering.lock().unwrap().remove(&from.id) else { return false };
-        let total = g.files.iter().map(|f| f.size).sum();
+        let total = g.files.iter().fold(0u64, |sum, f| sum.saturating_add(f.size));
         let answer = self.expect_answer(id);
         self.emit(Event::TransferRequest { transfer: id, from: from.clone(), files: g.files, total, apps: g.apps });
         let accepted = self.await_answer(id, answer, OFFER_TIMEOUT).await;
@@ -2294,6 +2303,9 @@ impl Node {
                         tokio::spawn(async move {
                             match read_msg::<Message>(&mut recv).await {
                                 Ok(Message::Notify { title, body }) => node.emit(Event::Notification { from, title, body }),
+                                // What acts on this computer without asking needs everything
+                                // allowed from away, like the deck
+                                Ok(Message::Clipboard { .. } | Message::OpenUrl { .. }) if !node.deck_allowed(link, &from.id) => debug!("{} may not use the clipboard or links from away", from.name),
                                 Ok(Message::Clipboard { text }) if text.len() <= MAX_CLIPBOARD => {
                                     node.emit(Event::Clipboard { from, text })
                                 }
@@ -2724,11 +2736,19 @@ impl Node {
         lane: Option<Busy>,
     ) {
         let apps = valid_apps(apps, &files);
-        let total: u64 = files.iter().map(|f| f.size).sum();
+        // What it says it sends has to add up; and from away, files that nobody asked for
+        // (imports, the clipboard) need everything allowed from away, like the rest of what acts here
+        let total = total_size(&files).filter(|_| files.len() <= MAX_OFFER_FILES);
+        let unasked_from_away = (import || clipboard) && !self.allowed_from_here(&from.id);
+        let Some(total) = total.filter(|_| !unasked_from_away) else {
+            debug!("declined an offer from {}: {}", from.name, if unasked_from_away { "away" } else { "its sizes don't add up" });
+            let _ = write_msg(&mut send, &TransferMsg::Decline).await;
+            let _ = send.finish();
+            return;
+        };
         let busy = self.live(&from.id).map(|(_, a)| a.hold());
         // Clipboard files: one small file, into a folder of their own, kept until the next.
         let clipboard_to = if clipboard {
-            let total: u64 = files.iter().map(|f| f.size).sum();
             if files.len() != 1 || total > MAX_CLIPBOARD_FILE {
                 let _ = write_msg(&mut send, &TransferMsg::Decline).await;
                 let _ = send.finish();
@@ -3663,6 +3683,15 @@ mod tests {
         }
         write_msg(&mut send, &hello).await.unwrap();
         read_msg(&mut recv).await.unwrap()
+    }
+
+    #[test]
+    fn sizes_that_overflow_are_not_a_small_total() {
+        let file = |size| FileEntry { path: "f".into(), size };
+        assert_eq!(total_size(&[file(1), file(2)]), Some(3));
+        assert_eq!(total_size(&[file(1 << 63), file(1 << 63)]), None, "wrapped to 0 B before");
+        assert_eq!(total_size(&[file(u64::MAX), file(1)]), None);
+        assert_eq!(total_size(&[]), Some(0));
     }
 
     #[tokio::test]

@@ -411,6 +411,11 @@ pub(crate) fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Most players of one phone shown here.
+const MAX_PHONE_PLAYERS: usize = 8;
+/// Players published so far, for names that are never used twice.
+static EXPORTED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 /// Phones' players, each published as an MPRIS player of its own.
 struct Phones {
     exported: HashMap<(Fingerprint, String), Exported>,
@@ -423,7 +428,9 @@ struct Exported {
 }
 
 impl Phones {
-    async fn update(&mut self, from: &DeviceInfo, state: MediaState, commands: &mpsc::UnboundedSender<(Fingerprint, String, MediaCommand)>) {
+    async fn update(&mut self, from: &DeviceInfo, mut state: MediaState, commands: &mpsc::UnboundedSender<(Fingerprint, String, MediaCommand)>) {
+        // Each player is a connection to the session bus and a file: a phone has a few
+        state.players.truncate(MAX_PHONE_PLAYERS);
         let present: HashSet<&str> = state.players.iter().map(|p| p.id.as_str()).collect();
         self.exported.retain(|(dev, id), _| *dev != from.id || present.contains(id.as_str()));
         for p in state.players {
@@ -437,7 +444,9 @@ impl Phones {
                     }
                 }
                 None => {
-                    let n = self.exported.len();
+                    // Counted up, not by how many there are: one that went away would
+                    // hand its name to the next, which can't take it while the old one lives
+                    let n = EXPORTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     let name = format!("{OURS}d{}p{n}", from.id.short().replace('-', ""));
                     match export(&name, fresh).await {
                         Ok(bus) => {

@@ -1730,6 +1730,25 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     a.node.connect_away(&idb).await.expect("away connection");
     assert_eq!(a.node.link(&idb), Some(Link::Away));
     let mut rb = b.node.subscribe();
+    // What acts here without asking (the clipboard, a link) isn't taken from away unless
+    // Beta allowed everything from away for Alpha; a notice is
+    a.node.send_clipboard(&idb, "from far away").await.unwrap();
+    a.node.open_url(&idb, "https://example.org/").await.unwrap();
+    a.node.notify(&idb, "away", "hello").await.unwrap();
+    let mut seen = Vec::new();
+    wait_for(&mut rb, |e| {
+        match e {
+            Event::Clipboard { .. } => seen.push("clipboard"),
+            Event::OpenUrl { .. } => seen.push("url"),
+            Event::Notification { .. } => return Some(()),
+            _ => {}
+        }
+        None
+    })
+    .await;
+    assert!(seen.is_empty(), "taken from away without asking: {seen:?}");
+    assert_eq!(b.node.link(&ida), Some(Link::Away));
+    b.node.set_away_all(&ida, true).unwrap();
     a.node.send_clipboard(&idb, "from far away").await.unwrap();
     let text = wait_for(&mut rb, |e| match e {
         Event::Clipboard { text, .. } => Some(text.clone()),
@@ -1737,7 +1756,7 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     })
     .await;
     assert_eq!(text, "from far away");
-    assert_eq!(b.node.link(&ida), Some(Link::Away));
+    b.node.set_away_all(&ida, false).unwrap();
 
     // A phone's notification crosses the same link: nothing in the core holds it back from away
     let mut ra = a.node.subscribe();
@@ -1782,8 +1801,8 @@ async fn deck_from_away_needs_everything_allowed_there() {
     assert_eq!(phone.node.link(&pc_id), Some(linksy_core::Link::Away));
 
     let mut on_pc = pc.node.subscribe();
-    phone.node.send_clipboard(&pc_id, "away connection ready").await.unwrap();
-    wait_for(&mut on_pc, |e| matches!(e, Event::Clipboard { .. }).then_some(())).await;
+    phone.node.notify(&pc_id, "away", "connection ready").await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::Notification { .. }).then_some(())).await;
     assert_eq!(pc.node.link(&phone_id), Some(linksy_core::Link::Away));
 
     phone.node.deck_open(&pc_id, true).await.unwrap();

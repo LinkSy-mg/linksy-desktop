@@ -1160,7 +1160,7 @@ Kirigami.Page {
                     visible: page.view !== null && page.view.away_until !== undefined
                     iconName: "network-wireless-hotspot"
                     title: app.t("Allow Everything From Away")
-                    subtitle: app.t("Away from home, {device} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too.", { device: page.name })
+                    subtitle: app.t("Away from home, {device} can send files, which you still accept, and ring. On: the clipboard, links, screens, control, its files, camera and microphone too.", { device: page.name })
                     checked: page.view?.away_all ?? false
                     onSwitched: now => app.request("set_away_all", { device: page.info.id, on: now }, () => app.refreshDevices())
                 }

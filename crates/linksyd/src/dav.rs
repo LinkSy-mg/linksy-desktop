@@ -151,6 +151,15 @@ fn bookmark(uri: &str, name: &str) {
     text.push_str(&format!("{uri} {name}\n"));
     if let Err(e) = linksy_host::write(&path, text.as_bytes()) {
         debug!("bookmark: {e}");
+        return;
+    }
+    // The address has the phone's files' key in it: not for other users of this computer
+    #[cfg(unix)]
+    if linksy_host::flatpak() {
+        let _ = linksy_host::command("chmod", &[]).arg("600").arg(&path).status();
+    } else {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
     }
 }
 
