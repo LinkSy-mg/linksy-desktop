@@ -82,6 +82,11 @@
     <keyword>nearby</keyword>
   </keywords>
   <releases>
+    <release version="0.18.2" date="2026-11-26">
+      <description>
+        <p>Fixes the rest of the session bus connection leak: Linksy no longer opens a new connection for every Do Not Disturb check, screen lock or notification close.</p>
+      </description>
+    </release>
     <release version="0.18.1" date="2026-11-25">
       <description>
         <p>Fixes a slow leak of session bus connections that could fill the session bus and stop the desktop: notifications with a button no longer wait for a click forever.</p>

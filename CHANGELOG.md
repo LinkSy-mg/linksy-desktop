@@ -2,6 +2,15 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.18.2
+
+### Fixed
+- **The rest of the session bus connection leak.** One-off calls (reading Do Not Disturb,
+  which a phone that follows it makes every 2 seconds, locking the screen, closing a
+  notification, airplane mode) each opened their own session bus connection, and a few were
+  never given back, so the bus could still run out in a Flatpak after hours. They now share
+  one connection. If your count still climbs, please say so in linksy-releases#12.
+
 ## 0.18.1
 
 ### Fixed
