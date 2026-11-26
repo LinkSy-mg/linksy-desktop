@@ -1270,7 +1270,7 @@ impl DevicePage {
         self.settings_visible(d.trusted);
         self.syncing.set(true);
         self.accept_row.set_active(d.auto_accept);
-        self.screen_row.set_active(d.allow_screen);
+        self.screen_row.set_active(d.allow_screen && d.allow_control);
         self.lock_row.set_active(locks);
         self.away_row.set_active(d.away_all);
         self.syncing.set(false);

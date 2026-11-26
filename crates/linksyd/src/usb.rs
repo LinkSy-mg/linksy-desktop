@@ -190,6 +190,8 @@ impl Usb {
         let found = self.plugged.lock().unwrap().iter().find(|(_, (_, p))| p.key == key).map(|(id, (d, _))| (*id, d.clone()));
         let (id, d) = found.ok_or("that phone isn't plugged in anymore")?;
         self.unanswered.lock().unwrap().remove(key);
+        // The phone that is switched pairs over the cable if it isn't paired yet
+        self.node.allow_cable_pairing();
         self.switch(id, &d).await
     }
 
@@ -669,6 +671,7 @@ mod tests {
         answer_yes(&pc);
         answer_yes(&phone);
         let port = pc.local_addr().unwrap().port();
+        pc.open_pairing();
         phone.pair(SocketAddr::new(ip, port)).await.unwrap();
         let id = phone.info().id;
         let usb_of = |pc: &Node| pc.devices().into_iter().find(|d| d.device.id == id).map(|d| (d.connected, d.usb));
@@ -757,6 +760,7 @@ mod tests {
         answer_yes(&pc);
         answer_yes(&phone);
         let port = pc.local_addr().unwrap().port();
+        pc.open_pairing();
         phone.pair(SocketAddr::new(ip, port)).await.unwrap();
 
         let (pc_end, phone_end) = std::os::unix::net::UnixStream::pair().unwrap();
@@ -803,6 +807,7 @@ mod tests {
         answer_yes(&pc);
         answer_yes(&phone);
         let port = pc.local_addr().unwrap().port();
+        pc.open_pairing();
         phone.pair(SocketAddr::new(ip, port)).await.unwrap();
 
         let (pc_end, phone_end) = std::os::unix::net::UnixStream::pair().unwrap();

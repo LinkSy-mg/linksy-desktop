@@ -1126,8 +1126,11 @@ Kirigami.Page {
                     iconName: "video-display"
                     title: app.t("Always Allow Screen and Control")
                     subtitle: app.t("{device} can see and control this screen without asking, on the same network or by cable. Linksy still tells you when it starts.", { device: page.name })
-                    checked: page.view?.allow_screen ?? false
-                    onSwitched: now => app.request("set_allow_screen", { device: page.info.id, on: now }, () => app.refreshDevices())
+                    checked: (page.view?.allow_screen ?? false) && (page.view?.allow_control ?? false)
+                    onSwitched: now => {
+                        app.request("set_allow_screen", { device: page.info.id, on: now });
+                        app.request("set_allow_control", { device: page.info.id, on: now }, () => app.refreshDevices());
+                    }
                 }
                 // This computer's notifications on the phone, once the phone can show them and this
                 // computer can listen for them

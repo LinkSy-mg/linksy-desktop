@@ -31,12 +31,17 @@ pub struct TrustedDevice {
     /// Files from it are accepted without asking.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_accept: bool,
-    /// It sees and controls the screen without asking ([`SessionKind::may_always_allow`]),
-    /// on the same network or cable; from away it's always asked.
+    /// It sees the screen without asking ([`SessionKind::Screen`]), on the same network or
+    /// cable; from away it's always asked. Not what lets it control: `allow_control`.
     ///
     /// [`SessionKind::may_always_allow`]: crate::protocol::SessionKind::may_always_allow
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub allow_screen: bool,
+    /// It controls this computer without asking: the pointer and keyboard of a control or
+    /// touchpad session, or another computer's handed over. Apart from `allow_screen`, which
+    /// only lets it see the screen: allowing the one never allows the other.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub allow_control: bool,
 }
 
 impl TrustedDevice {
@@ -97,7 +102,7 @@ impl TrustStore {
 
     pub fn add(&mut self, device: DeviceInfo, addr: Option<SocketAddr>) -> Result<()> {
         let paired_at = now();
-        self.devices.insert(device.id, TrustedDevice { device, last_addr: addr, paired_at, last_met: Some(paired_at), away_all: false, discovery_key: None, auto_accept: false, allow_screen: false });
+        self.devices.insert(device.id, TrustedDevice { device, last_addr: addr, paired_at, last_met: Some(paired_at), away_all: false, discovery_key: None, auto_accept: false, allow_screen: false, allow_control: false });
         self.save()
     }
 
@@ -145,7 +150,15 @@ impl TrustStore {
         Ok(true)
     }
 
-    /// Let `id` see and control the screen without asking, or ask again.
+    /// Let `id` control this computer (pointer and keyboard) without asking, or ask again.
+    pub fn set_allow_control(&mut self, id: &Fingerprint, on: bool) -> Result<bool> {
+        let Some(d) = self.devices.get_mut(id) else { return Ok(false) };
+        d.allow_control = on;
+        self.save()?;
+        Ok(true)
+    }
+
+    /// Let `id` see the screen without asking, or ask again.
     pub fn set_allow_screen(&mut self, id: &Fingerprint, on: bool) -> Result<bool> {
         let Some(d) = self.devices.get_mut(id) else { return Ok(false) };
         d.allow_screen = on;

@@ -77,6 +77,28 @@ const RECONNECT_EVERY: Duration = Duration::from_secs(15);
 const DIAL_TIMEOUT: Duration = Duration::from_secs(3);
 /// How long a pairing QR code stays valid.
 const INVITE_TTL: Duration = Duration::from_secs(300);
+/// Pairings that may wait for the user's answer at the same time.
+const PAIRINGS_AT_ONCE: usize = 2;
+
+/// One of the few places for a pairing waiting on the user; given back when dropped.
+struct PairingSlot<'a>(&'a std::sync::atomic::AtomicUsize);
+
+impl<'a> PairingSlot<'a> {
+    fn take(counter: &'a std::sync::atomic::AtomicUsize) -> Option<Self> {
+        use std::sync::atomic::Ordering::SeqCst;
+        if counter.fetch_add(1, SeqCst) >= PAIRINGS_AT_ONCE {
+            counter.fetch_sub(1, SeqCst);
+            return None;
+        }
+        Some(Self(counter))
+    }
+}
+
+impl Drop for PairingSlot<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
 /// A direct link (docs/protocol.md §4.17) that isn't up this long after it was asked for
 /// has failed, and what waited for it goes the usual way. The first one between a realme
 /// 15 Pro and a ThinkPad took 25 s: 16 to find each other, 9 to connect.
@@ -456,9 +478,12 @@ pub struct DeviceView {
     /// Files from it are accepted without asking.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auto_accept: bool,
-    /// It sees and controls the screen without asking, except from away.
+    /// It sees the screen without asking, except from away.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub allow_screen: bool,
+    /// It controls this computer (pointer, keyboard) without asking, except from away.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub allow_control: bool,
     /// Round trip to it while connected, in milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<u32>,
@@ -637,6 +662,10 @@ struct Inner {
     session_sizes: Mutex<HashMap<Uuid, (u32, u32)>>,
     /// The token of the pairing QR code on screen, and when it expires.
     invite: Mutex<Option<(String, Instant)>>,
+    /// Until when a phone on the cable may pair (the user asked for the cable).
+    cable_pairing: Mutex<Option<Instant>>,
+    /// Pairings waiting for the user's yes or no: only a couple at a time.
+    pairing_pending: std::sync::atomic::AtomicUsize,
     /// Where imported photos go (a folder per device inside it); `None` refuses imports.
     import_dir: Mutex<Option<PathBuf>>,
     /// Each paired device's last reported battery.
@@ -705,6 +734,8 @@ impl Node {
                 events,
                 discovery: Mutex::new(None),
                 discovery_key: Mutex::new(discovery_key),
+                cable_pairing: Mutex::new(None),
+                pairing_pending: std::sync::atomic::AtomicUsize::new(0),
                 dialing: Mutex::new(HashMap::new()),
                 gathering: Mutex::default(),
                 invite: Mutex::new(None),
@@ -852,6 +883,7 @@ impl Node {
                 away_all: t.away_all,
                 auto_accept: t.auto_accept,
                 allow_screen: t.allow_screen,
+                allow_control: t.allow_control,
                 latency_ms: peers.get(&t.device.id).map(|p| p.conn.rtt().as_millis().min(u32::MAX as u128) as u32),
                 // Only once each knows how to reach the other away.
                 away_until: (away_on && t.device.away.is_some()).then(|| t.lease_until()),
@@ -874,7 +906,7 @@ impl Node {
             .collect();
         for (id, (device, _)) in nearby.iter() {
             if !trust.contains(id) {
-                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_relay: None, direct: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false, latency_ms: None });
+                out.push(DeviceView { device: device.clone(), trusted: false, connected: false, nearby: true, battery: None, usb: false, away: false, away_relay: None, direct: false, away_all: false, away_until: None, auto_accept: false, allow_screen: false, allow_control: false, latency_ms: None });
             }
         }
         // Paired and reachable first, then devices to pair, then paired ones that are away.
@@ -983,11 +1015,33 @@ impl Node {
         if addrs.is_empty() {
             return Err(invalid("this device isn't connected to a network"));
         }
+        let token = self.open_pairing();
+        Ok(Invite { id: self.inner.id, name: self.info().name, addrs, token })
+    }
+
+    /// Open pairing for five minutes: this device is findable by strangers, and only now does
+    /// it answer a stranger who wants to pair (with the code, or the token this returns).
+    /// Otherwise any device on the network could put a "Pair with…?" prompt in front of the
+    /// user at any time. Closed again by [`Node::cancel_invite`], or when a QR code is scanned.
+    pub fn open_pairing(&self) -> String {
         let token = Uuid::new_v4().simple().to_string();
         *self.inner.invite.lock().unwrap() = Some((token.clone(), Instant::now() + INVITE_TTL));
         // Findable by strangers while the code is on screen (pairing mode)
         self.rediscover();
-        Ok(Invite { id: self.inner.id, name: self.info().name, addrs, token })
+        token
+    }
+
+    /// A phone may pair over the cable for the next two minutes: the user asked for the cable.
+    /// Nothing else changes: the computer is no more findable than before.
+    pub fn allow_cable_pairing(&self) {
+        *self.inner.cable_pairing.lock().unwrap() = Some(Instant::now() + Duration::from_secs(120));
+    }
+
+    /// Whether pairing is open (see [`Node::open_pairing`]) to a device that arrives over `link`.
+    fn pairing_open(&self, link: Link) -> bool {
+        let now = Instant::now();
+        self.inner.invite.lock().unwrap().as_ref().is_some_and(|(_, until)| now < *until)
+            || (link == Link::Usb && self.inner.cable_pairing.lock().unwrap().is_some_and(|until| now < until))
     }
 
     /// Stop accepting the current invite (the QR code was closed).
@@ -1964,12 +2018,35 @@ impl Node {
                 // Let the reject arrive before the connection goes away.
                 let _ = tokio::time::timeout(Duration::from_secs(2), conn.closed()).await;
             }
+            Intent::Pair if !self.pairing_open(link_of(conn.remote_address())) => {
+                // Not asked for: the user didn't open "Add a device" here.
+                write_msg(&mut send, &Handshake::Reject { reason: RejectReason::NotPaired }).await?;
+                send.finish()?;
+                let _ = tokio::time::timeout(Duration::from_secs(2), conn.closed()).await;
+            }
+            Intent::Pair if pairing < PAIRING_VERSION => {
+                // The old code has no commitments: a device between the two could pick the
+                // same code on both sides. Both must update.
+                write_msg(&mut send, &Handshake::Reject { reason: RejectReason::IncompatibleVersion }).await?;
+                send.finish()?;
+                let _ = tokio::time::timeout(Duration::from_secs(2), conn.closed()).await;
+            }
             Intent::Pair => {
+                // At most a couple of questions to the user at once
+                let _waiting = match PairingSlot::take(&self.inner.pairing_pending) {
+                    Some(slot) => slot,
+                    None => {
+                        write_msg(&mut send, &Handshake::Reject { reason: RejectReason::Busy }).await?;
+                        send.finish()?;
+                        let _ = tokio::time::timeout(Duration::from_secs(2), conn.closed()).await;
+                        return Ok(());
+                    }
+                };
                 // Scanned our QR code: the scanner checked our certificate, the token proves
                 // it's them. Unknown or stale tokens fall back to comparing codes.
                 let preapproved = invite.as_deref().is_some_and(|t| self.redeem_invite(t));
                 write_msg(&mut send, &self.welcome()).await?;
-                self.run_pairing(&conn, &mut send, &mut recv, &device, true, preapproved, pairing >= PAIRING_VERSION).await?;
+                self.run_pairing(&conn, &mut send, &mut recv, &device, true, preapproved, true).await?;
                 self.register(conn, device, fp, peer_stays);
             }
         }
@@ -2004,7 +2081,11 @@ impl Node {
             other => return Err(protocol(format!("unexpected {other:?}"))),
         };
         if intent == Intent::Pair {
-            self.run_pairing(&conn, &mut send, &mut recv, &device, false, scanned, pairing >= PAIRING_VERSION).await?;
+            if pairing < PAIRING_VERSION {
+                conn.close(0u32.into(), b"update to pair");
+                return Err(Error::Protocol("that device's Linksy is too old to pair safely; update it".into()));
+            }
+            self.run_pairing(&conn, &mut send, &mut recv, &device, false, scanned, true).await?;
         }
         let _ = send.finish();
         if intent == Intent::Direct {
@@ -2599,7 +2680,7 @@ impl Node {
         // it always asks.
         if kind.may_always_allow()
             && self.link(&from.id) != Some(Link::Away)
-            && self.inner.trust.lock().unwrap().get(&from.id).is_some_and(|t| t.allow_screen)
+            && self.inner.trust.lock().unwrap().get(&from.id).is_some_and(|t| if kind.controls() { t.allow_control } else { t.allow_screen })
         {
             ask = false;
         }
@@ -3363,7 +3444,16 @@ impl Node {
         Ok(())
     }
 
-    /// Let a paired device see and control the screen without asking, or ask again.
+    /// Let a paired device control this computer (pointer, keyboard) without asking, or ask again.
+    pub fn set_allow_control(&self, id: &Fingerprint, on: bool) -> Result<()> {
+        if !self.inner.trust.lock().unwrap().set_allow_control(id, on)? {
+            return Err(Error::NotPaired);
+        }
+        self.emit(Event::DeviceUpdated { device: self.peer_info(id).or_else(|| self.inner.trust.lock().unwrap().get(id).map(|t| t.device.clone())).ok_or(Error::NotPaired)? });
+        Ok(())
+    }
+
+    /// Let a paired device see the screen without asking, or ask again.
     pub fn set_allow_screen(&self, id: &Fingerprint, on: bool) -> Result<()> {
         if !self.inner.trust.lock().unwrap().set_allow_screen(id, on)? {
             return Err(Error::NotPaired);
@@ -3559,34 +3649,56 @@ mod tests {
         Node::start(c).await.unwrap()
     }
 
+    /// A stranger's hello for `intent`, the answer it gets, over a fresh connection.
+    async fn stranger_says(node: &Node, pairing: Option<u32>) -> Handshake {
+        let stranger = Identity::generate().unwrap();
+        let mut endpoint = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        endpoint.set_default_client_config(tls::client_config(&stranger).unwrap());
+        let conn = endpoint.connect(node.local_addr().unwrap(), "linksy").unwrap().await.unwrap();
+        let (mut send, mut recv) = conn.open_bi().await.unwrap();
+        let device = serde_json::json!({"id": Fingerprint::of(&stranger.cert), "name": "Stranger", "kind": "phone", "os": "android"});
+        let mut hello = serde_json::json!({"type": "hello", "version": 1, "device": device, "intent": "pair"});
+        if let Some(p) = pairing {
+            hello["pairing"] = p.into();
+        }
+        write_msg(&mut send, &hello).await.unwrap();
+        read_msg(&mut recv).await.unwrap()
+    }
+
     #[tokio::test]
-    async fn older_devices_still_pair_with_a_code() {
+    async fn nobody_is_asked_to_pair_unless_pairing_is_open() {
         let dir = tempfile::tempdir().unwrap();
         let node = test_node(dir.path()).await;
         let mut events = node.subscribe();
-        let old = Identity::generate().unwrap();
-        let mut endpoint = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
-        endpoint.set_default_client_config(tls::client_config(&old).unwrap());
-        let conn = endpoint.connect(node.local_addr().unwrap(), "linksy").unwrap().await.unwrap();
-        let (mut send, mut recv) = conn.open_bi().await.unwrap();
-        // Hello as 0.9.13 says it: no `pairing`
-        let device = serde_json::json!({"id": Fingerprint::of(&old.cert), "name": "Old", "kind": "phone", "os": "android"});
-        write_msg(&mut send, &serde_json::json!({"type": "hello", "version": 1, "device": device, "intent": "pair"})).await.unwrap();
-        assert!(matches!(read_msg(&mut recv).await.unwrap(), Handshake::Welcome { pairing: PAIRING_VERSION, .. }));
-        let (request, code) = tokio::time::timeout(Duration::from_secs(10), async {
-            loop {
-                if let Event::PairingRequest { request, code, older: true, .. } = events.recv().await.unwrap() {
-                    break (request, code);
-                }
-            }
-        })
-        .await
-        .unwrap();
-        assert_eq!(code, tls::pairing_code(&conn, None).unwrap());
-        node.respond(request, true);
-        write_msg(&mut send, &Handshake::PairDecision { accept: true }).await.unwrap();
-        assert!(matches!(read_msg(&mut recv).await.unwrap(), Handshake::PairDecision { accept: true }));
-        tokio::time::timeout(Duration::from_secs(10), async { while !matches!(events.recv().await.unwrap(), Event::Paired { .. }) {} }).await.unwrap();
+        let answer = stranger_says(&node, Some(PAIRING_VERSION)).await;
+        assert!(matches!(answer, Handshake::Reject { reason: RejectReason::NotPaired }), "{answer:?}");
+        assert!(events.try_recv().is_err(), "no prompt for a pairing nobody opened");
+        // Once the user opens it, the same hello is answered
+        node.open_pairing();
+        assert!(matches!(stranger_says(&node, Some(PAIRING_VERSION)).await, Handshake::Welcome { .. }));
+    }
+
+    #[tokio::test]
+    async fn the_old_pairing_code_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let node = test_node(dir.path()).await;
+        node.open_pairing();
+        // 0.9.13 says no `pairing` at all; others say 0 or 1: all compare a code that two
+        // TLS sessions could be ground into agreeing on
+        for old in [None, Some(0), Some(PAIRING_VERSION - 1)] {
+            let answer = stranger_says(&node, old).await;
+            assert!(matches!(answer, Handshake::Reject { reason: RejectReason::IncompatibleVersion }), "{old:?}: {answer:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn only_a_couple_of_pairings_wait_for_an_answer_at_once() {
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        let (a, b) = (PairingSlot::take(&counter), PairingSlot::take(&counter));
+        assert!(a.is_some() && b.is_some());
+        assert!(PairingSlot::take(&counter).is_none());
+        drop(a);
+        assert!(PairingSlot::take(&counter).is_some(), "a finished one gives its place back");
     }
 
     #[tokio::test]

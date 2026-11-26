@@ -797,8 +797,11 @@ Kirigami.ApplicationWindow {
         property string from
         // Seeing or controlling the screen may be allowed for good (SessionKind::may_always_allow)
         property bool always: false
+        // What "Always Allow" would allow: seeing the screen, or controlling the computer; never both
+        property bool controls: false
         function ask(req, device, kind) {
             request = req; from = device.id;
+            controls = ["control", "input"].includes(kind);
             always = ["screen", "control", "input"].includes(kind);
             const name = device.name;
             const asks = {
@@ -826,7 +829,7 @@ Kirigami.ApplicationWindow {
                 text: root.t("Always Allow")
                 visible: sessionDialog.always
                 onTriggered: {
-                    root.request("set_allow_screen", { device: sessionDialog.from, on: true }, () => root.refreshDevices());
+                    root.request(sessionDialog.controls ? "set_allow_control" : "set_allow_screen", { device: sessionDialog.from, on: true }, () => root.refreshDevices());
                     root.request("respond", { request: sessionDialog.request, accept: true });
                     sessionDialog.close();
                 }

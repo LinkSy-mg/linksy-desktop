@@ -712,6 +712,7 @@ mod tests {
             let phone = node(&dir.path().join("phone"), "Pixel").await;
             let pc = node(&dir.path().join("pc"), "Desk").await;
             let mut connected = phone.subscribe();
+            phone.open_pairing();
             pc.pair(phone.local_addr().unwrap()).await.unwrap();
             tokio::time::timeout(Duration::from_secs(20), async {
                 while !matches!(connected.recv().await, Ok(Event::Connected { .. })) {}
