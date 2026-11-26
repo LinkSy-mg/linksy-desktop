@@ -128,6 +128,7 @@ pub enum Request {
     SetAutoAccept { device: String, on: bool },
     /// Let a device see and control the screen without asking, or ask again.
     SetAllowScreen { device: String, on: bool },
+    SetAllowControl { device: String, on: bool },
     /// What a phone's deck may do here (docs/protocol.md §4.19): each action this computer
     /// offers, on or off for that phone, and the user's own commands.
     DeckPrefs { phone: String },
@@ -1082,6 +1083,10 @@ impl Client {
 
     pub async fn set_allow_screen(&self, device: impl Into<String>, on: bool) -> Result<(), ClientError> {
         self.call(Request::SetAllowScreen { device: device.into(), on }).await
+    }
+
+    pub async fn set_allow_control(&self, device: impl Into<String>, on: bool) -> Result<(), ClientError> {
+        self.call(Request::SetAllowControl { device: device.into(), on }).await
     }
 
     pub async fn deck_prefs(&self, phone: impl Into<String>) -> Result<DeckPrefs, ClientError> {

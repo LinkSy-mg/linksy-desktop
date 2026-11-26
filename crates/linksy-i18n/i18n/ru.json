@@ -75,7 +75,7 @@
   "Away from home goes through Linksy's relay unless you give one you host yourself, as https://relay.example.com. Set the same relay on every device.": "Вне дома соединение идёт через релей Linksy, если не указать свой, например https://relay.example.com. Задайте один и тот же релей на всех устройствах.",
   "Away from home, direct": "Вне дома, напрямую",
   "Away from home, through the relay": "Вне дома, через ретранслятор",
-  "Away from home, {device} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too.": "Вне дома {device} всегда может отправлять буфер обмена, ссылки и файлы и звонить. Если включено: ещё экраны, управление, его файлы, камера и микрофон.",
+  "Away from home, {device} can send files, which you still accept, and ring. On: the clipboard, links, screens, control, its files, camera and microphone too.": "Вне дома {device} может отправлять файлы, которые вы всё равно принимаете, и звонить. Включено: ещё буфер обмена, ссылки, экраны, управление, его файлы, камера и микрофон.",
   "Back": "Назад",
   "Balanced": "Сбалансированный",
   "Battery {level}%": "Батарея {level}%",

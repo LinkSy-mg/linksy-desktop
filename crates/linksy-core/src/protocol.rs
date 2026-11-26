@@ -161,6 +161,12 @@ impl SessionKind {
     pub fn may_always_allow(self) -> bool {
         matches!(self, Self::Screen | Self::Control | Self::Input | Self::Handover)
     }
+
+    /// Whether it puts the other device's pointer or keyboard to work here. Allowed for good
+    /// apart from seeing the screen: one "Always Allow" never grants both.
+    pub fn controls(self) -> bool {
+        matches!(self, Self::Control | Self::Input | Self::Handover)
+    }
 }
 
 /// Input sent by the viewer of a `control` session, framed like every other message

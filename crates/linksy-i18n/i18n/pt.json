@@ -75,7 +75,7 @@
   "Away from home goes through Linksy's relay unless you give one you host yourself, as https://relay.example.com. Set the same relay on every device.": "Fora de casa, a conexão passa pelo relay do Linksy, a menos que você indique um hospedado por você, como https://relay.example.com. Defina o mesmo relay em todos os dispositivos.",
   "Away from home, direct": "Fora de casa, direto",
   "Away from home, through the relay": "Fora de casa, pelo relay",
-  "Away from home, {device} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too.": "Fora de casa, {device} sempre pode enviar área de transferência, links e arquivos e fazer tocar. Ativado: telas, controle, os arquivos dele, câmera e microfone também.",
+  "Away from home, {device} can send files, which you still accept, and ring. On: the clipboard, links, screens, control, its files, camera and microphone too.": "Fora de casa, {device} pode enviar ficheiros, que continua a aceitar, e fazer tocar. Ligado: também a área de transferência, as ligações, os ecrãs, o controlo, os seus ficheiros, a câmara e o microfone.",
   "Back": "Voltar",
   "Balanced": "Equilibrado",
   "Battery {level}%": "Bateria {level}%",

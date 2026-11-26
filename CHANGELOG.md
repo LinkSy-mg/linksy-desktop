@@ -2,6 +2,38 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## 0.19.0
+
+A security pass. Several things that used to happen silently now need a yes, so some of them
+behave differently; the notes say which.
+
+### Security
+- **Pairing is answered only when you opened it.** Any device on the network could put a
+  "Pair with …?" notification in front of you at any time. Now Linksy answers a stranger
+  only while "Add a device" or a QR code is open (five minutes), or for two minutes after you
+  asked for the cable, and no more than two pairings wait for an answer at once. If you pair
+  by typing an address, open "Add a device" on the other device first.
+- **The old pairing code is refused.** Devices that announce a pairing version below 2
+  compared a six-digit code with no commitments, which a device between the two could be made
+  to agree with. Update the other device (Android 0.3.x already does it right).
+- **"Always Allow" allows what it says.** Choosing it on a screen prompt also let that device
+  use your keyboard and mouse without asking. Seeing the screen and controlling the computer
+  (control, touchpad, Handover) are now allowed separately, and the switch on a device's page
+  sets both. A device you had allowed for the screen before still sees it, and is asked about
+  control again.
+- **From away, the clipboard and links need "Allow Everything From Away".** A phone that
+  could reach you over the internet could write your clipboard and open web pages in your
+  browser without asking; so could its photo imports and clipboard files. Files you accept,
+  ring, notifications and media controls still work from away as before.
+- **Transfers and phones can't use up the computer.** An offer whose sizes add up past what
+  a number can hold no longer passes as small (and skips the free-space check), an offer of
+  more than 20 000 files is declined, a phone's notification icons and pictures are limited in
+  size and number, and a phone's media players are limited to eight (each one is a connection
+  to the session bus).
+- **A new phone starts with Wi-Fi and Bluetooth off on its deck:** turning off the Wi-Fi the
+  phone is using cuts its own link. Allow them on the phone's page if you want them.
+- **The Files bookmark** for a phone's storage is written readable by you only.
+
 ## 0.18.2
 
 ### Fixed

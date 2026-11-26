@@ -26,6 +26,7 @@ const SAID_FOR: Duration = Duration::from_secs(60);
 enum Always {
     Files(Fingerprint),
     Screen(Fingerprint),
+    Control(Fingerprint),
 }
 
 /// Prompts on screen: request → the notification's id, and for pairing the device asking.
@@ -131,7 +132,7 @@ pub async fn run(node: Node) {
                     ),
                 };
                 asked.insert(request);
-                let always = kind.may_always_allow().then_some(Always::Screen(from.id));
+                let always = kind.may_always_allow().then_some(if kind.controls() { Always::Control(from.id) } else { Always::Screen(from.id) });
                 prompt(node.clone(), request, None, always, summary, body, t!("Allow"));
             }
             Event::TransferStarted { transfer, peer, direction: Direction::Incoming, import, .. } => {
@@ -489,7 +490,7 @@ fn prompt(node: Node, request: Uuid, pairing: Option<Fingerprint>, always: Optio
         n.action("accept", accept_label);
         match always {
             Some(Always::Files(_)) => n.action("always", t!("Always Accept")),
-            Some(Always::Screen(_)) => n.action("always", t!("Always Allow")),
+            Some(Always::Screen(_) | Always::Control(_)) => n.action("always", t!("Always Allow")),
             None => &mut n,
         };
         n.action("decline", t!("Decline")).urgency(Urgency::Critical).timeout(Timeout::Never);
@@ -511,6 +512,7 @@ fn prompt(node: Node, request: Uuid, pairing: Option<Fingerprint>, always: Optio
                         let set = match always {
                             Some(Always::Files(id)) => node.set_auto_accept(&id, true),
                             Some(Always::Screen(id)) => node.set_allow_screen(&id, true),
+                            Some(Always::Control(id)) => node.set_allow_control(&id, true),
                             None => Ok(()),
                         };
                         if let Err(e) = set {

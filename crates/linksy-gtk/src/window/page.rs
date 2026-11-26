@@ -1259,7 +1259,7 @@ impl DevicePage {
         // Away from home: only for devices that told this one how to reach them.
         self.away_row.set_visible(d.trusted && d.away_until.is_some());
         self.away_row.set_subtitle(&glib::markup_escape_text(&t!(
-            "Away from home, {device} can always send the clipboard, links and files and ring. On: screens, control, its files, camera and microphone too.",
+            "Away from home, {device} can send files, which you still accept, and ring. On: the clipboard, links, screens, control, its files, camera and microphone too.",
             device = d.device.name
         )));
         self.accept_row.set_subtitle(&glib::markup_escape_text(&t!("Files from {device} are saved without asking.", device = d.device.name)));
@@ -1270,7 +1270,7 @@ impl DevicePage {
         self.settings_visible(d.trusted);
         self.syncing.set(true);
         self.accept_row.set_active(d.auto_accept);
-        self.screen_row.set_active(d.allow_screen);
+        self.screen_row.set_active(d.allow_screen && d.allow_control);
         self.lock_row.set_active(locks);
         self.away_row.set_active(d.away_all);
         self.syncing.set(false);

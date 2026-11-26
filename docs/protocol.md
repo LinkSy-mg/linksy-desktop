@@ -221,7 +221,14 @@ For `intent: connect`, a dialer also refuses (closes) if the peer isn't in its t
 list.
 
 Both `hello` and `welcome` carry `"pairing":2` (core 0.9.13). Older versions leave it
-out.
+out. *Desktop 0.19:* a device that says less than 2 is refused (`reject`,
+`incompatible_version` when dialed; as dialer, the pair fails with "update"): the older code
+had no commitments, so a device between the two could grind its TLS sessions until both
+showed the same six digits. A computer answers `intent: pair` only while pairing is open (its
+"Add a device" screen, or a QR code on screen, five minutes; for a device over the cable,
+two minutes after Connect by USB Cable) and has at most two pairings waiting for an answer;
+anything else gets `reject`, `not_paired` (`busy` over the limit). A phone's own listener
+can do the same (`Node::open_pairing`).
 
 **Names from other devices** (core 0.9.14, desktop#55): in `hello`, `welcome`, discovery,
 QR codes and renames, the core drops control, bidi and invisible characters, collapses
@@ -565,10 +572,15 @@ A media session is a **bidirectional stream** whose first frame is a session req
 
 The receiving device **asks its user** ("Pixel 9 wants to see your screen", Allow /
 Always Allow / Don't Allow; auto-accept for files never applies) and answers within 120 s.
-**Always Allow** is only offered for `screen`, `control` and `input`: it marks the
-requesting device (core: `node.set_allow_screen(id, on)`, `DeviceView.allow_screen`, a
-switch **Always Allow Screen and Control** on its page), and from then on those three
-start without asking, on the same network or cable. From away they're always asked
+**Always Allow** is only offered for `screen`, `control`, `input` and `handover`. *Desktop
+0.19:* it allows what was asked for, not more: on a `screen` prompt it marks the device
+`allow_screen` (it sees the screen: `node.set_allow_screen(id, on)`,
+`DeviceView.allow_screen`); on `control`, `input` and `handover` it marks `allow_control`
+(`node.set_allow_control`, `DeviceView.allow_control`, `SessionKind::controls`). The switch
+**Always Allow Screen and Control** on a device's page sets both. Before 0.19 one flag
+covered all four, so allowing the screen for good allowed remote keyboard and mouse too; a
+flag set then still means seeing only. From then on those start without asking, on the same
+network or cable. From away they're always asked
 (and only after Allow Everything From Away, §4.13). The camera, the microphone, a second
 display and terminals are always asked. A session that started without asking is still
 announced when it starts ([desktop#49](https://github.com/LinkSy-mg/linksy-desktop/issues/49)).
@@ -1188,8 +1200,10 @@ carries its packets, like the USB cable (§4.11).
   (`node.set_away_all(id, true)`, `TrustedDevice.away_all`): every media or input session
   (screen, control, display, camera, microphone, input), answered
   `{"type":"session_decline","reason":"away"}` (`Error::NotFromAway` for the requester),
-  and file browsing (`fs`, answered with an error). Always allowed: clipboard, links,
-  files sent (asked as usual), ring, battery, notifications, media controls, locate.
+  and file browsing (`fs`, answered with an error), and (0.19) what acts here without a
+  question: the clipboard, links (`open_url`) and offers that import or fill the clipboard.
+  Always allowed: files sent (asked as usual), ring, battery, notifications, media controls,
+  locate.
 - **Lock When Away** must ignore heartbeats that arrive from away (`node.link(id) ==
   Some(Link::Away)`): far away is not nearby. The computer does.
 - **Settings:** `Settings.away` (default on) turns it off entirely. *Desktop 0.11.3:* off
@@ -1692,8 +1706,9 @@ phone → computer {"type":"deck_close"}          the deck is gone: stop sending
 
   More may come; show any id with its `name` and `kind`. `group` is in English whatever
   the language (`name` is in the computer's).
-- Desktop: media, sound, power profiles, Do Not Disturb, Lock, Wi-Fi and Bluetooth are on
-  for a phone until the user turns them off; restart, turn off, airplane mode and the
+- Desktop: media, sound, power profiles, Do Not Disturb and Lock are on for a phone until
+  the user turns them off; Wi-Fi, Bluetooth (0.19: turning Wi-Fi off cuts the phone's own
+  link), restart, turn off, airplane mode and the
   user's commands are off until turned on on the computer (a tile saved for one doesn't turn
   it on, §4.26). A
   tile kept from before whose action the computer no longer offers stays in its layout;
@@ -2850,3 +2865,12 @@ robust against any encoder (GPU ones may slice too):
   `deck_stats`, announced by both sides. Phone to-do: announce `deck_stats`, offer the tile in
   Add for a computer that announces it, draw it from `deck_stats` (`value` 0 to 1, `text`), and
   show a tile whose metric is missing from the message as unavailable.
+
+- **2026-11-26** — Desktop 0.19 (security pass, no wire change): pairing is answered only
+  while open and refused below `pairing: 2` (§4.4); Always Allow is per kind: `allow_screen`
+  sees, `allow_control` controls (§4.8); from away, the clipboard, `open_url` and offers that
+  import or fill the clipboard need Allow Everything From Away (§4.13); an offer whose sizes
+  overflow, or that lists over 20 000 files, is declined; at most 8 players of a phone are
+  shown; new phones get Wi-Fi and Bluetooth off on the deck. Phone to-do: a phone that
+  dials a computer must announce `pairing: 2` (it does since core 0.9.13); one that relied on
+  the clipboard or links from away must be told to allow everything from away.

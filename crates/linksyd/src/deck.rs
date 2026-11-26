@@ -225,10 +225,9 @@ impl Saved {
     fn on(&self, phone: &Fingerprint, id: &str) -> bool {
         match self.phones.get(phone).and_then(|choices| choices.get(id)) {
             Some(on) => *on,
-            // Everyday keys on; restarting, turning off and airplane mode once allowed
-            None => {
-                id.starts_with("media.") || id.starts_with("sound.") || id.starts_with("power.") || ["system.dnd", "system.lock", "network.wifi", "network.bluetooth"].contains(&id)
-            }
+            // Everyday keys on; restarting, turning off, airplane mode and the radios once
+            // allowed: turning Wi-Fi off cuts the very link the phone is using
+            None => id.starts_with("media.") || id.starts_with("sound.") || id.starts_with("power.") || ["system.dnd", "system.lock"].contains(&id),
         }
     }
 }
@@ -1078,7 +1077,7 @@ mod tests {
 
     /// Everything the fake computer offers, and what's on for a phone until changed.
     const OFFERED: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "system.restart", "system.shutdown", "network.wifi", "network.bluetooth", "network.airplane", "power.saver", "power.balanced", "power.performance", "power.auto"];
-    const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "network.wifi", "network.bluetooth", "power.saver", "power.balanced", "power.performance", "power.auto"];
+    const ON: &[&str] = &["media.play_pause", "media.next", "media.previous", "sound.volume", "sound.mute", "sound.mic_mute", "sound.output", "system.lock", "system.dnd", "power.saver", "power.balanced", "power.performance", "power.auto"];
 
     #[test]
     fn media_and_sound_on_until_changed_and_kept() {
@@ -1309,12 +1308,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn radios_are_toggles_airplane_off_until_allowed_and_they_warn_about_the_link() {
+    async fn radios_and_airplane_are_off_until_allowed_and_they_warn_about_the_link() {
         let dir = tempfile::tempdir().unwrap();
         let d = deck(&dir);
         let p = phone(1);
         let ids = ["network.wifi", "network.bluetooth", "network.airplane"];
-        assert_eq!(ids.map(|id| d.act(&p, id, None).is_some()), [true, true, false]);
+        assert_eq!(ids.map(|id| d.act(&p, id, None).is_some()), [false, false, false], "a new phone may not switch the computer's radios");
         for id in ids {
             d.set_action(&p, id, true).unwrap();
         }

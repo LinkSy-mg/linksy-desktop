@@ -223,7 +223,12 @@ impl Window {
                 return;
             }
             if response == "always" {
-                w.allow_screen(id, true);
+                // What was asked for, no more: seeing the screen never allows control
+                if kind.controls() {
+                    w.allow_control(id, true);
+                } else {
+                    w.allow_screen(id, true);
+                }
             }
             w.respond(request, response != "deny");
         });

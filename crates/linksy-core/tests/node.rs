@@ -98,6 +98,7 @@ async fn paired_with(tweak: impl Fn(&mut Config)) -> (Dev, Dev) {
     if addr.ip().is_unspecified() {
         addr.set_ip(std::net::Ipv6Addr::LOCALHOST.into());
     }
+    b.node.open_pairing();
     let got = a.node.pair(addr).await.unwrap();
     assert_eq!(got.name, "Beta");
     wait_for(&mut rb, |e| matches!(e, Event::Connected { .. }).then_some(())).await;
@@ -113,6 +114,7 @@ async fn pairing_shows_same_code_and_trusts_both_ways() {
     auto_answer(&a.node, true);
     auto_answer(&b.node, true);
 
+    b.node.open_pairing();
     a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
     let code_a = wait_for(&mut ra, |e| match e {
         Event::PairingRequest { code, incoming: false, older: false, .. } => Some(code.clone()),
@@ -163,6 +165,7 @@ async fn paired_devices_share_discovery_keys_and_forgetting_rotates_them() {
 
     let c = dev("Gamma").await;
     auto_answer(&c.node, true);
+    a.node.open_pairing();
     c.node.pair(a.node.local_addr().unwrap()).await.unwrap();
     let old = stored_key(&c, &a, None).await;
     assert_eq!(old, discovery_key(&a));
@@ -180,6 +183,7 @@ async fn declined_pairing_trusts_nobody() {
     let b = dev("Beta").await;
     auto_answer(&a.node, true);
     auto_answer(&b.node, false);
+    b.node.open_pairing();
     let err = a.node.pair(b.node.local_addr().unwrap()).await.unwrap_err();
     assert!(matches!(err, Error::Declined), "{err}");
     assert!(a.node.trusted().is_empty());
@@ -206,6 +210,7 @@ fn loopback(node: &Node) -> std::net::SocketAddr {
 async fn an_address_reconnects_a_paired_device_without_pairing_again() {
     let (a, b) = paired().await;
     let mut rb = b.node.subscribe();
+    b.node.open_pairing();
     let got = a.node.connect_or_pair(loopback(&b.node)).await.unwrap();
     assert_eq!(got.name, "Beta");
     // No second pairing was asked for on the other side
@@ -228,6 +233,7 @@ async fn an_address_of_a_device_not_paired_yet_pairs_with_it() {
     auto_answer(&a.node, true);
     auto_answer(&b.node, true);
     let mut rb = b.node.subscribe();
+    b.node.open_pairing();
     let got = a.node.connect_or_pair(loopback(&b.node)).await.unwrap();
     assert_eq!(got.name, "Beta");
     wait_for(&mut rb, |e| matches!(e, Event::Connected { .. }).then_some(())).await;
@@ -435,6 +441,7 @@ async fn declined_transfer_writes_nothing() {
             }
         }
     });
+    b.node.open_pairing();
     a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
 
     let f = a.dir.path().join("x.txt");
@@ -1199,6 +1206,7 @@ async fn busy_connection_stays_open_past_idle_time() {
         .await;
         bn.respond(request, true);
     });
+    b.node.open_pairing();
     a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
 
     let src = a.dir.path().join("wait.txt");
@@ -1282,10 +1290,18 @@ async fn always_allow_the_screen_from_one_device() {
     let (a, b) = paired().await;
     let (ida, idb) = (a.node.info().id, b.node.info().id);
     b.node.set_allow_screen(&ida, true).unwrap();
-    assert!(b.node.devices().iter().any(|d| d.device.id == ida && d.allow_screen));
+    assert!(b.node.devices().iter().any(|d| d.device.id == ida && d.allow_screen && !d.allow_control));
     let _incoming = b.node.incoming_sessions().unwrap();
     let mut rb = b.node.subscribe();
-    for kind in [SessionKind::Screen, SessionKind::Control, SessionKind::Input] {
+    a.node.request_session(&idb, SessionKind::Screen).await.unwrap();
+    assert!(!std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { .. })), "asked to see the screen anyway");
+    // Seeing the screen for good is not controlling it: control and the touchpad still ask
+    for kind in [SessionKind::Control, SessionKind::Input] {
+        a.node.request_session(&idb, kind).await.unwrap_or_else(|e| panic!("{kind:?}: {e:?}"));
+        assert!(std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { kind: k, .. } if k == kind)), "{kind:?} started without asking");
+    }
+    b.node.set_allow_control(&ida, true).unwrap();
+    for kind in [SessionKind::Control, SessionKind::Input] {
         a.node.request_session(&idb, kind).await.unwrap_or_else(|e| panic!("{kind:?}: {e:?}"));
     }
     assert!(!std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { .. })), "asked anyway");
@@ -1432,6 +1448,7 @@ async fn link_stays_open_when_either_side_wants_it() {
     auto_answer(&a.node, true);
     auto_answer(&b.node, true);
     let mut ra = a.node.subscribe();
+    b.node.open_pairing();
     a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
     // Alpha connects on demand, but Beta asked to stay connected: no idle close.
     let closed = tokio::time::timeout(Duration::from_millis(1200), async {
@@ -1513,12 +1530,12 @@ async fn invite_works_once_and_bad_tokens_ask_instead() {
     let invite = local_invite(&b.node);
     a.node.pair_with_invite(&invite.to_uri()).await.unwrap();
 
-    // The same code again (say, a photo of it): Beta falls back to asking, and says no.
-    auto_answer(&b.node, false);
+    // The same code again (say, a photo of it): pairing closed when it was scanned, so
+    // Beta isn't even asked.
     let mut rb = b.node.subscribe();
     let reused = c.node.pair_with_invite(&invite.to_uri()).await;
     assert!(reused.is_err());
-    wait_for(&mut rb, |e| matches!(e, Event::PairingRequest { device, .. } if device.name == "Gamma").then_some(())).await;
+    assert!(!std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::PairingRequest { .. })), "asked about a used code");
     assert!(!b.node.trusted().iter().any(|t| t.device.name == "Gamma"));
 
     // A cancelled invite is dead too.
@@ -1634,6 +1651,7 @@ async fn declined_screen_session_starts_nothing() {
             }
         }
     });
+    b.node.open_pairing();
     a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
     let mut incoming = b.node.incoming_sessions().unwrap();
     let err = a.node.request_session(&b.node.info().id, SessionKind::Screen).await.unwrap_err();
@@ -1679,6 +1697,7 @@ async fn unsupported_sessions_say_so() {
             }
         }
     });
+    b.node.open_pairing();
     a.node.pair(b.node.local_addr().unwrap()).await.unwrap();
     let _incoming = b.node.incoming_sessions();
     let err = a.node.request_session(&b.node.info().id, SessionKind::Control).await.unwrap_err();
@@ -1711,6 +1730,25 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     a.node.connect_away(&idb).await.expect("away connection");
     assert_eq!(a.node.link(&idb), Some(Link::Away));
     let mut rb = b.node.subscribe();
+    // What acts here without asking (the clipboard, a link) isn't taken from away unless
+    // Beta allowed everything from away for Alpha; a notice is
+    a.node.send_clipboard(&idb, "from far away").await.unwrap();
+    a.node.open_url(&idb, "https://example.org/").await.unwrap();
+    a.node.notify(&idb, "away", "hello").await.unwrap();
+    let mut seen = Vec::new();
+    wait_for(&mut rb, |e| {
+        match e {
+            Event::Clipboard { .. } => seen.push("clipboard"),
+            Event::OpenUrl { .. } => seen.push("url"),
+            Event::Notification { .. } => return Some(()),
+            _ => {}
+        }
+        None
+    })
+    .await;
+    assert!(seen.is_empty(), "taken from away without asking: {seen:?}");
+    assert_eq!(b.node.link(&ida), Some(Link::Away));
+    b.node.set_away_all(&ida, true).unwrap();
     a.node.send_clipboard(&idb, "from far away").await.unwrap();
     let text = wait_for(&mut rb, |e| match e {
         Event::Clipboard { text, .. } => Some(text.clone()),
@@ -1718,7 +1756,7 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     })
     .await;
     assert_eq!(text, "from far away");
-    assert_eq!(b.node.link(&ida), Some(Link::Away));
+    b.node.set_away_all(&ida, false).unwrap();
 
     // A phone's notification crosses the same link: nothing in the core holds it back from away
     let mut ra = a.node.subscribe();
@@ -1763,8 +1801,8 @@ async fn deck_from_away_needs_everything_allowed_there() {
     assert_eq!(phone.node.link(&pc_id), Some(linksy_core::Link::Away));
 
     let mut on_pc = pc.node.subscribe();
-    phone.node.send_clipboard(&pc_id, "away connection ready").await.unwrap();
-    wait_for(&mut on_pc, |e| matches!(e, Event::Clipboard { .. }).then_some(())).await;
+    phone.node.notify(&pc_id, "away", "connection ready").await.unwrap();
+    wait_for(&mut on_pc, |e| matches!(e, Event::Notification { .. }).then_some(())).await;
     assert_eq!(pc.node.link(&phone_id), Some(linksy_core::Link::Away));
 
     phone.node.deck_open(&pc_id, true).await.unwrap();
@@ -1834,6 +1872,7 @@ fn network_change_closes_links_that_stopped_answering() {
     ra.block_on(async {
         let a = dev_with("Alpha", |c| c.stay_connected = true).await;
         auto_answer(&a.node, true);
+        b.node.open_pairing();
         a.node.pair(addr).await.unwrap();
         let idb = b.node.info().id;
 
@@ -2343,6 +2382,7 @@ async fn group_credentials_go_only_to_a_device_that_joins_groups() {
         addr.set_ip(std::net::Ipv6Addr::LOCALHOST.into());
     }
     let mut on_phone = phone.node.subscribe();
+    phone.node.open_pairing();
     pc.node.pair(addr).await.unwrap();
     wait_for(&mut on_phone, |e| matches!(e, Event::Connected { .. }).then_some(())).await;
     let pc_id = pc.node.info().id;

@@ -333,6 +333,10 @@ fn conversation_id(phone: &Fingerprint, app: &str, title: &str) -> String {
 /// can read it.
 pub(crate) fn unpack(dir: &Path, name: &str, b64: &str) -> Option<PathBuf> {
     use base64::Engine;
+    // A picture of a notification, not a photo
+    if b64.len() > MAX_PICTURE * 4 / 3 + 4 {
+        return None;
+    }
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
     let ext = if bytes.starts_with(b"\x89PNG") {
         "png"
@@ -341,13 +345,33 @@ pub(crate) fn unpack(dir: &Path, name: &str, b64: &str) -> Option<PathBuf> {
     } else {
         return None;
     };
-    let name: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' }).collect();
+    let name: String = name.chars().take(MAX_FILE_NAME).map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' }).collect();
     let path = dir.join(format!("{name}.{ext}"));
     if std::fs::read(&path).ok().as_deref() != Some(&bytes[..]) {
         std::fs::create_dir_all(dir).ok()?;
+        prune(dir, MAX_FILES - 1);
         std::fs::write(&path, &bytes).ok()?;
     }
     Some(path)
+}
+
+/// Most bytes of one icon or picture, and files kept in a folder of them, and the longest
+/// name for one: what a phone sends with each notification would otherwise fill the disk.
+const MAX_PICTURE: usize = 128 * 1024;
+const MAX_FILES: usize = 400;
+const MAX_FILE_NAME: usize = 80;
+
+/// Keep the newest `keep` files in `dir`; the rest go.
+fn prune(dir: &Path, keep: usize) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let mut files: Vec<(std::time::SystemTime, PathBuf)> = entries.flatten().filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path()))).collect();
+    if files.len() <= keep {
+        return;
+    }
+    files.sort();
+    for (_, path) in files.iter().take(files.len() - keep) {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// A notification as a message, when it is one: its kind, conversation, sender and text.
@@ -599,5 +623,26 @@ mod tests {
         inbox.posted(&phone, &mail);
         let shop = inbox.list().into_iter().find(|c| c.title == "Shop").unwrap();
         assert_eq!(shop.last.unwrap().text, "Invoice\nHere it is");
+    }
+
+    #[test]
+    fn what_a_phone_sends_with_notifications_cannot_fill_the_disk() {
+        use base64::Engine;
+        let dir = tempfile::tempdir().unwrap();
+        let png = |extra: usize| {
+            let mut b = b"\x89PNG".to_vec();
+            b.extend(vec![7u8; extra]);
+            base64::engine::general_purpose::STANDARD.encode(b)
+        };
+        // Too big to be an icon
+        assert!(unpack(dir.path(), "big", &png(MAX_PICTURE + 10)).is_none());
+        // Names are cut, and only so many files are kept: the oldest go
+        let long = "a".repeat(500);
+        let path = unpack(dir.path(), &long, &png(10)).unwrap();
+        assert!(path.file_name().unwrap().len() <= MAX_FILE_NAME + 4);
+        for n in 0..MAX_FILES + 50 {
+            unpack(dir.path(), &format!("app{n}"), &png(10 + n)).unwrap();
+        }
+        assert!(std::fs::read_dir(dir.path()).unwrap().count() <= MAX_FILES);
     }
 }
