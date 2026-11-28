@@ -51,6 +51,7 @@
   "Allowed without asking, as you chose. Stop it in Linksy, or turn it off on {device}'s page.": "已按你的选择无需询问直接允许。可在 Linksy 中停止，或在 {device} 的页面上关闭。",
   "Always Accept": "始终接受",
   "Always Accept Files": "始终接受文件",
+  "Allow This Session": "允许本次会话",
   "Always Allow": "始终允许",
   "Always Allow Screen and Control": "始终允许屏幕和控制",
   "Ascending": "升序",

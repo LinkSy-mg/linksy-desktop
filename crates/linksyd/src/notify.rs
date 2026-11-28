@@ -94,7 +94,7 @@ pub async fn run(node: Node) {
                 let body = format!("{what} · {}", human_size(total));
                 prompt(node.clone(), transfer, None, Some(Always::Files(from.id)), t!("{device} wants to send you files", device = from.name), body, t!("Accept"));
             }
-            Event::SessionRequest { request, from, kind } => {
+            Event::SessionRequest { request, from, kind, from_away } => {
                 let (summary, body) = match kind {
                     SessionKind::Control => (
                         t!("{device} wants to control your screen", device = from.name),
@@ -132,8 +132,9 @@ pub async fn run(node: Node) {
                     ),
                 };
                 asked.insert(request);
-                let always = kind.may_always_allow().then_some(if kind.controls() { Always::Control(from.id) } else { Always::Screen(from.id) });
-                prompt(node.clone(), request, None, always, summary, body, t!("Allow"));
+                let always = (kind.may_always_allow() && !from_away).then_some(if kind.controls() { Always::Control(from.id) } else { Always::Screen(from.id) });
+                let allow = if from_away { t!("Allow This Session") } else { t!("Allow") };
+                prompt(node.clone(), request, None, always, summary, body, allow);
             }
             Event::TransferStarted { transfer, peer, direction: Direction::Incoming, import, .. } => {
                 answered(transfer);

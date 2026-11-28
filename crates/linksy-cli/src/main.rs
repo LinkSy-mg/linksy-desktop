@@ -705,7 +705,7 @@ async fn watch(c: &Client) -> Result<(), String> {
             }
             Event::SmsMessage { from, message, .. } if !message.from_me => println!("Text on {} from {}: {}", from.name, message.address, message.body),
             Event::NotificationPosted { from, notification: n } => println!("Notification from {} ({}): {}: {}", from.name, n.app_name, n.title, n.body),
-            Event::SessionRequest { request, from, kind } => {
+            Event::SessionRequest { request, from, kind, .. } => {
                 match kind {
                     linksy_ipc::linksy_core::SessionKind::Control => println!("{} wants to control your screen (mouse and keyboard).", from.name),
                     linksy_ipc::linksy_core::SessionKind::Screen => println!("{} wants to see your screen.", from.name),

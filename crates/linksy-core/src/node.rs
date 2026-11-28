@@ -261,7 +261,13 @@ pub enum Event {
     TransferFailed { transfer: Uuid, reason: String },
     SettingsChanged { settings: Settings },
     /// Ask the user whether `from` may start a media session (see their screen…).
-    SessionRequest { request: Uuid, from: DeviceInfo, kind: SessionKind },
+    SessionRequest {
+        request: Uuid,
+        from: DeviceInfo,
+        kind: SessionKind,
+        #[serde(default)]
+        from_away: bool,
+    },
     /// `sharing`: this device is the one sharing (its screen, camera…).
     SessionStarted { session: Uuid, peer: DeviceInfo, kind: SessionKind, sharing: bool },
     SessionEnded { session: Uuid },
@@ -2690,15 +2696,16 @@ impl Node {
         }
         // Otherwise asks, unless the user allowed this device the screen for good; from away
         // it always asks.
+        let from_away = self.link(&from.id) == Some(Link::Away);
         if kind.may_always_allow()
-            && self.link(&from.id) != Some(Link::Away)
+            && !from_away
             && self.inner.trust.lock().unwrap().get(&from.id).is_some_and(|t| if kind.controls() { t.allow_control } else { t.allow_screen })
         {
             ask = false;
         }
         let accepted = !ask || {
             let answer = self.expect_answer(id);
-            self.emit(Event::SessionRequest { request: id, from: from.clone(), kind });
+            self.emit(Event::SessionRequest { request: id, from: from.clone(), kind, from_away });
             self.await_answer(id, answer, OFFER_TIMEOUT).await
         };
         let unsupported = self.inner.unsupported.lock().unwrap().remove(&id);

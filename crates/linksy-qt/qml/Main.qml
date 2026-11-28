@@ -459,7 +459,7 @@ Kirigami.ApplicationWindow {
             request("status", {}, (ok, s) => { if (ok) root.status = s });
             break;
         case "session_request":
-            sessionDialog.ask(ev.request, ev.from, ev.kind);
+            sessionDialog.ask(ev.request, ev.from, ev.kind, ev.from_away === true);
             break;
         case "session_started":
             if (sessionDialog.request === ev.session) sessionDialog.close();
@@ -797,12 +797,14 @@ Kirigami.ApplicationWindow {
         property string from
         // Seeing or controlling the screen may be allowed for good (SessionKind::may_always_allow)
         property bool always: false
+        property bool fromAway: false
         // What "Always Allow" would allow: seeing the screen, or controlling the computer; never both
         property bool controls: false
-        function ask(req, device, kind) {
+        function ask(req, device, kind, away) {
             request = req; from = device.id;
+            fromAway = away;
             controls = ["control", "input"].includes(kind);
-            always = ["screen", "control", "input"].includes(kind);
+            always = !fromAway && ["screen", "control", "input"].includes(kind);
             const name = device.name;
             const asks = {
                 camera: ["{name} Wants to Use Your Camera", "Your camera will turn on and {name} will see it until you stop."],
@@ -822,7 +824,7 @@ Kirigami.ApplicationWindow {
         standardButtons: Kirigami.Dialog.NoButton
         customFooterActions: [
             Kirigami.Action {
-                text: root.t("Allow")
+                text: sessionDialog.fromAway ? root.t("Allow This Session") : root.t("Allow")
                 onTriggered: { root.request("respond", { request: sessionDialog.request, accept: true }); sessionDialog.close() }
             },
             Kirigami.Action {

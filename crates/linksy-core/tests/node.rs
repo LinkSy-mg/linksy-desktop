@@ -1779,7 +1779,7 @@ async fn away_from_home_connects_and_keeps_screens_local() {
     auto_answer(&b.node, true);
     let mut rb = b.node.subscribe();
     a.node.request_session(&idb, SessionKind::Screen).await.expect("allowed from away");
-    assert!(std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { .. })), "not asked from away");
+    assert!(std::iter::from_fn(|| rb.try_recv().ok()).any(|e| matches!(e, Event::SessionRequest { from_away: true, .. })), "not asked from away");
 }
 
 #[cfg(feature = "away")]

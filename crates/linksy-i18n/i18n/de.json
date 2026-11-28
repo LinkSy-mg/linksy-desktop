@@ -51,6 +51,7 @@
   "Allowed without asking, as you chose. Stop it in Linksy, or turn it off on {device}'s page.": "Ohne Nachfrage erlaubt, wie du es eingestellt hast. Beende es in Linksy oder schalte es auf der Seite von {device} aus.",
   "Always Accept": "Immer annehmen",
   "Always Accept Files": "Dateien immer annehmen",
+  "Allow This Session": "Für diese Sitzung erlauben",
   "Always Allow": "Immer erlauben",
   "Always Allow Screen and Control": "Bildschirm und Steuerung immer erlauben",
   "Ascending": "Aufsteigend",

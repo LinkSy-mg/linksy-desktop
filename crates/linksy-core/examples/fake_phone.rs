@@ -870,19 +870,19 @@ async fn main() {
                     println!("pairing with {} (code {code}): accepting", device.name);
                     node.respond(request, true);
                 }
-                Ok(Event::SessionRequest { request, from, kind }) if sound => {
+                Ok(Event::SessionRequest { request, from, kind, .. }) if sound => {
                     println!("{kind:?} requested by {}: accepting", from.name);
                     node.respond(request, true);
                 }
-                Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Camera }) if camera => {
+                Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Camera, .. }) if camera => {
                     println!("camera requested by {}: accepting", from.name);
                     node.respond(request, true);
                 }
-                Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Microphone }) if mic => {
+                Ok(Event::SessionRequest { request, from, kind: linksy_core::SessionKind::Microphone, .. }) if mic => {
                     println!("microphone requested by {}: accepting", from.name);
                     node.respond(request, true);
                 }
-                Ok(Event::SessionRequest { request, from, kind }) if display.is_some() => {
+                Ok(Event::SessionRequest { request, from, kind, .. }) if display.is_some() => {
                     println!("{kind:?} requested by {}: accepting as a 2400×1080 screen", from.name);
                     node.respond_session(request, true, Some((2400, 1080)));
                 }
