@@ -927,6 +927,8 @@ Kirigami.Page {
             app: page.app
             store: inbox
             narrow: page.narrow
+            // What History does: the room under the tab bar, when there's more than the minimum
+            fillHeight: flick.height - tabBar.height
         }
     }
 

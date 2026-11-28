@@ -27,7 +27,10 @@ Item {
         return store.oldestFirst ? list.reverse() : list;
     }
 
-    implicitHeight: Kirigami.Units.gridUnit * 31
+    // At least this tall, and as tall as the page leaves room for, so a tall window doesn't
+    // leave the conversations in a box with empty space under it
+    property real fillHeight: 0
+    implicitHeight: Math.max(Kirigami.Units.gridUnit * 31, fillHeight)
 
     onConversationsChanged: shown.sync(conversations, c => c.id)
 
