@@ -2,6 +2,20 @@
 
 Linksy for Linux. Each version's section becomes its release notes.
 
+## Unreleased
+
+### Added
+- **A phone's own texts in the Inbox.** A phone that offers its texts (the Linksy for Android
+  "sms" build) shows its SMS conversations in the Inbox beside the ones made from
+  notifications: the whole history, paged back with "Load earlier", new texts as they arrive,
+  and replies sent as texts through the phone. Its SMS app's notifications still pop up and
+  still copy one-time codes, but no longer add a second conversation. Phones that don't offer
+  texts (every Android build until now) behave exactly as before.
+
+### Fixed
+- **The Inbox fills the page.** On a tall window the Inbox stopped at a fixed height with
+  empty space under it; it now takes the room under the tabs, like History.
+
 ## 0.19.0
 
 A security pass. Several things that used to happen silently now need a yes, so some of them

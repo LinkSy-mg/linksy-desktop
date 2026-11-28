@@ -91,7 +91,9 @@ Finish Setup doesn't look: it shows the firewall as to set up until Linksy has o
   in tabs, with how it's connected and its battery at the top.
 - **Messages.** The phone's chats, texts and mail in one Inbox, made from its notifications:
   WhatsApp, Telegram, Signal, the SMS app, Gmail and others. Answer from the computer where
-  the app allows it; codes that arrive are copied for you. Nothing is kept on disk.
+  the app allows it; codes that arrive are copied for you. Nothing is kept on disk. A phone
+  running the "sms" build of Linksy for Android also gives its real text history, and answers
+  go out as texts.
 - **Photos and files.** The phone's photos and videos by album, saved to Pictures in a
   click, and a file manager for the folder it shares: copy both ways, rename, delete.
 - **Deck.** The phone as a deck of buttons for the computer: media, volume, microphone,
