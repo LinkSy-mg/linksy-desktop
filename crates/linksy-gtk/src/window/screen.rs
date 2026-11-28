@@ -170,7 +170,7 @@ impl Window {
     }
 
     /// Someone wants to see this screen.
-    pub(super) fn show_session_request(self: &Rc<Self>, request: Uuid, from: &DeviceInfo, kind: SessionKind) {
+    pub(super) fn show_session_request(self: &Rc<Self>, request: Uuid, from: &DeviceInfo, kind: SessionKind, from_away: bool) {
         let (heading, body) = match kind {
             // Never asked of a computer: the core answers that this one can't
             SessionKind::Sound => return,
@@ -209,10 +209,11 @@ impl Window {
         };
         let dialog = adw::AlertDialog::new(Some(&heading), Some(&body));
         dialog.add_responses(&[("deny", t!("Don't Allow"))]);
-        if kind.may_always_allow() {
+        if kind.may_always_allow() && !from_away {
             dialog.add_responses(&[("always", t!("Always Allow"))]);
         }
-        dialog.add_responses(&[("allow", t!("Allow"))]);
+        let allow = if from_away { t!("Allow This Session") } else { t!("Allow") };
+        dialog.add_responses(&[("allow", allow)]);
         dialog.set_response_appearance("allow", adw::ResponseAppearance::Suggested);
         dialog.set_default_response(Some("deny"));
         dialog.set_close_response("deny");

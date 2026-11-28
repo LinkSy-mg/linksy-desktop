@@ -1212,7 +1212,7 @@ impl Window {
                 self.state.borrow_mut().progress.remove(&transfer);
             }
             Event::SettingsChanged { .. } => self.refresh_status(),
-            Event::SessionRequest { request, from, kind } => self.show_session_request(request, &from, kind),
+            Event::SessionRequest { request, from, kind, from_away } => self.show_session_request(request, &from, kind, from_away),
             // Terminals show on the phone's page, with End; the service notifies.
             Event::SessionStarted { session, kind: SessionKind::Terminal, .. } => {
                 self.close_offer_dialog(&session);

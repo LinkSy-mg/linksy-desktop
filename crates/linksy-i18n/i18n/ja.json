@@ -51,6 +51,7 @@
   "Allowed without asking, as you chose. Stop it in Linksy, or turn it off on {device}'s page.": "設定どおり、確認なしで許可されました。Linksy で停止するか、{device} のページでオフにできます。",
   "Always Accept": "常に受け入れる",
   "Always Accept Files": "ファイルを常に受け入れる",
+  "Allow This Session": "このセッションを許可",
   "Always Allow": "常に許可",
   "Always Allow Screen and Control": "画面と操作を常に許可",
   "Ascending": "昇順",
