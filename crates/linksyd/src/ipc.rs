@@ -289,8 +289,12 @@ pub(crate) async fn handle(node: &Node, history: &History, sessions: &Sessions, 
             mirror.reply(node, &id, &key, &text).await?;
             Ok(Value::Null)
         }
-        Request::Inbox => serde_json::to_value(mirror.inbox().list()).map_err(|e| e.to_string()),
-        Request::InboxThread { conversation } => serde_json::to_value(mirror.inbox().thread(&conversation).ok_or("that conversation is gone")?).map_err(|e| e.to_string()),
+        Request::Inbox => {
+            // Phones that keep texts add theirs to the notifications' conversations.
+            mirror.refresh_sms(node, false).await;
+            serde_json::to_value(mirror.inbox().list()).map_err(|e| e.to_string())
+        }
+        Request::InboxThread { conversation } => serde_json::to_value(mirror.thread(node, &conversation).await?).map_err(|e| e.to_string()),
         Request::InboxRead { conversation } => {
             mirror.read(&conversation).await;
             Ok(Value::Null)

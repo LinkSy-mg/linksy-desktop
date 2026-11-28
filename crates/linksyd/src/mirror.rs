@@ -30,6 +30,8 @@ struct Inner {
     socket: PathBuf,
     next: std::sync::atomic::AtomicU64,
     inbox: crate::inbox::Inbox,
+    /// When each phone's texts were last listed, so opening the Inbox doesn't ask every time.
+    sms_listed: Mutex<HashMap<Fingerprint, std::time::Instant>>,
     /// Shown on the desktop (not with --no-notifications); the inbox fills either way.
     popups: bool,
 }
@@ -51,7 +53,7 @@ impl Mirror {
     pub fn load(prefs_path: PathBuf, icons: PathBuf, socket: PathBuf, popups: bool) -> Self {
         let prefs = std::fs::read(&prefs_path).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default();
         let inbox = crate::inbox::Inbox::new(icons.clone());
-        let inner = Inner { prefs_path, prefs: Mutex::new(prefs), shown: Mutex::default(), icons, socket, next: Default::default(), inbox, popups };
+        let inner = Inner { prefs_path, prefs: Mutex::new(prefs), shown: Mutex::default(), icons, socket, next: Default::default(), inbox, sms_listed: Mutex::default(), popups };
         Self { inner: Arc::new(inner) }
     }
 
@@ -86,11 +88,67 @@ impl Mirror {
         Ok(())
     }
 
+    /// Ask the phones that keep texts for their conversations (at most every few seconds
+    /// each, unless `force`): they join the Inbox beside those made from notifications.
+    pub async fn refresh_sms(&self, node: &Node, force: bool) {
+        use linksy_core::Event;
+
+        for v in node.devices().into_iter().filter(|v| v.connected && v.device.features.iter().any(|f| f == "sms")) {
+            let phone = v.device;
+            {
+                let mut listed = self.inner.sms_listed.lock().unwrap();
+                let recent = listed.get(&phone.id).is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(10));
+                if recent && !force {
+                    continue;
+                }
+                listed.insert(phone.id, std::time::Instant::now());
+            }
+            let id = phone.id;
+            let answer = wait_for(node, node.sms_list_threads(&id, 100), 8, |e| match e {
+                Event::SmsThreads { from, threads } if from.id == id => Some(threads),
+                _ => None,
+            })
+            .await;
+            match answer {
+                Ok(threads) => self.inner.inbox.sms_threads(&phone, &threads),
+                Err(e) => warn!("couldn't list {}'s texts: {e}", phone.name),
+            }
+        }
+    }
+
+    /// Conversation `id`'s messages: a texts conversation fetches them from the phone the
+    /// first time it's opened.
+    pub async fn thread(&self, node: &Node, id: &str) -> Result<Vec<linksy_ipc::InboxMessage>, String> {
+        use linksy_core::Event;
+
+        if let Some((phone, thread, _, false)) = self.inner.inbox.sms_source(id) {
+            let t = thread.clone();
+            let (messages, more) = wait_for(node, node.sms_list_messages(&phone, &thread, None, 50), 10, |e| match e {
+                Event::SmsMessages { from, thread: th, messages, more } if from.id == phone && th == t => Some((messages, more)),
+                _ => None,
+            })
+            .await?;
+            self.inner.inbox.sms_fill(id, &messages, more);
+        }
+        self.inner.inbox.thread(id).ok_or_else(|| "that conversation is gone".into())
+    }
+
     /// Conversation `id`'s earlier messages, asked of the phone: the whole conversation then.
     pub async fn older(&self, node: &Node, id: &str) -> Result<Vec<linksy_ipc::InboxMessage>, String> {
         use linksy_core::Event;
         use tokio::sync::broadcast::error::RecvError;
 
+        if let Some((phone, thread, _, _)) = self.inner.inbox.sms_source(id) {
+            let before = self.inner.inbox.sms_oldest(id).ok_or("that conversation is gone")?;
+            let t = thread.clone();
+            let (messages, more) = wait_for(node, node.sms_list_messages(&phone, &thread, Some(before), 50), 10, |e| match e {
+                Event::SmsMessages { from, thread: th, messages, more } if from.id == phone && th == t => Some((messages, more)),
+                _ => None,
+            })
+            .await?;
+            self.inner.inbox.sms_fill(id, &messages, more);
+            return self.inner.inbox.thread(id).ok_or_else(|| "that conversation is gone".into());
+        }
         let (phone, app, conversation, before) = self.inner.inbox.older_than(id).ok_or("no earlier messages to ask for")?;
         let mut events = node.subscribe();
         node.inbox_history(&phone, &app, &conversation, before, 50).await.map_err(|e| e.to_string())?;
@@ -110,6 +168,22 @@ impl Mirror {
 
     /// Answer conversation `id` through the phone's notification.
     pub async fn reply_in(&self, node: &Node, id: &str, text: &str) -> Result<(), String> {
+        use linksy_core::Event;
+
+        if let Some((phone, _, addresses, _)) = self.inner.inbox.sms_source(id) {
+            let client_id = linksy_core::Uuid::new_v4().to_string();
+            let c = client_id.clone();
+            let (ok, error) = wait_for(node, node.sms_send(&phone, &client_id, &addresses, text), 60, |e| match e {
+                Event::SmsSent { from, client_id, ok, error } if from.id == phone && client_id == c => Some((ok, error)),
+                _ => None,
+            })
+            .await?;
+            if !ok {
+                return Err(error.unwrap_or_else(|| "the phone couldn't send it".into()));
+            }
+            self.inner.inbox.replied(id, text);
+            return Ok(());
+        }
         let (phone, key, can_reply) = self.inner.inbox.notification(id).ok_or("answer it on the phone: its notification is gone")?;
         if !can_reply {
             return Err("this app's notification can't be answered from here".into());
@@ -172,11 +246,26 @@ impl Mirror {
                     if prefs.muted.iter().any(|m| m.app == notification.app) {
                         continue;
                     }
-                    let code = self.inner.inbox.posted(&from, &notification);
+                    // A phone that shares its texts gets them from there, whole; its SMS app's
+                    // notifications still pop up and carry their codes, but add nothing twice.
+                    let from_texts = crate::inbox::Inbox::is_sms_app(&notification) && from.features.iter().any(|f| f == "sms");
+                    let code = if from_texts {
+                        crate::codes::code_in(&format!("{} {}", notification.title, notification.body))
+                    } else {
+                        self.inner.inbox.posted(&from, &notification)
+                    };
                     let copied = code.as_deref().filter(|_| prefs.copy_codes).is_some_and(|c| crate::clipboard::copy_text(c).is_ok());
                     if prefs.show && self.inner.popups {
                         self.show(node.clone(), from, *notification, code, copied);
                     }
+                }
+                Ok(Event::SmsMessage { from, thread, message }) => {
+                    if !self.inner.inbox.sms_pushed(&from, &thread, &message) {
+                        self.refresh_sms(&node, true).await;
+                    }
+                }
+                Ok(Event::Connected { device }) if device.features.iter().any(|f| f == "sms") => {
+                    self.refresh_sms(&node, true).await;
                 }
                 Ok(Event::NotificationRemoved { from, key, reply_kept }) => {
                     self.inner.inbox.removed(&from.id, &key, reply_kept);
@@ -379,4 +468,32 @@ mod tests {
         assert!(line.ends_with(" · WhatsApp · Pixel"), "{line:?}");
         assert!(line.chars().count() <= 200);
     }
+}
+
+/// Send a request to a device and wait for the event that answers it, up to `secs`.
+async fn wait_for<T>(
+    node: &Node,
+    send: impl std::future::Future<Output = linksy_core::Result<()>>,
+    secs: u64,
+    mut pick: impl FnMut(linksy_core::Event) -> Option<T>,
+) -> Result<T, String> {
+    use tokio::sync::broadcast::error::RecvError;
+
+    // Listen first, so a quick answer isn't missed.
+    let mut events = node.subscribe();
+    send.await.map_err(|e| e.to_string())?;
+    let waiting = async {
+        loop {
+            match events.recv().await {
+                Ok(e) => {
+                    if let Some(t) = pick(e) {
+                        return Ok(t);
+                    }
+                }
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => return Err("the service is stopping".to_string()),
+            }
+        }
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(secs), waiting).await.map_err(|_| "the phone didn't answer; is Linksy open on it?".to_string())?
 }

@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use linksy_core::{ConversationMessage, DeviceInfo, Fingerprint, RemoteNotification};
+use linksy_core::{ConversationMessage, DeviceInfo, Fingerprint, RemoteNotification, SmsMessage, SmsThread};
 use linksy_ipc::{Alert, Conversation, InboxMessage};
 use tokio::sync::broadcast;
 
@@ -13,6 +13,10 @@ const MAX_CONVERSATIONS: usize = 100;
 const MAX_MESSAGES: usize = 200;
 const MAX_ALERTS: usize = 30;
 const MAX_TEXT: usize = 4096;
+
+/// The `app` of conversations read from a phone's own texts (its SMS database), as
+/// opposed to those made from its messaging apps' notifications.
+pub const SMS_APP: &str = "app.linksy.sms";
 
 const SMS: &[&str] = &["com.google.android.apps.messaging", "com.samsung.android.messaging", "com.android.mms", "com.android.messaging", "com.oneplus.mms"];
 const MAIL: &[&str] = &[
@@ -64,6 +68,16 @@ struct Entry {
     seen_key: String,
     /// The conversation as the phone names it, to ask for its history.
     asked: String,
+    /// Set for a conversation read from the phone's texts rather than its notifications.
+    sms: Option<SmsSource>,
+}
+
+/// Where a texts conversation comes from on the phone.
+struct SmsSource {
+    thread: String,
+    addresses: Vec<String>,
+    /// Its messages were fetched (they come when the conversation is opened).
+    loaded: bool,
 }
 
 /// What a notification says, as a message.
@@ -190,6 +204,7 @@ impl Inbox {
                     key: None,
                     seen_key: String::new(),
                     asked: parsed.title.clone(),
+                    sms: None,
                 });
                 inbox.len() - 1
             }
@@ -279,6 +294,136 @@ impl Inbox {
         }
     }
 
+    /// The phone's conversations from its texts, newest first, as the phone sent them:
+    /// they add to the ones here, and update what the phone says changed.
+    pub fn sms_threads(&self, from: &DeviceInfo, threads: &[SmsThread]) {
+        let mut inbox = self.inner.lock().unwrap();
+        for t in threads {
+            let id = conversation_id(&from.id, SMS_APP, &t.id);
+            let title = match (t.names.first().filter(|n| !n.is_empty()), t.addresses.first()) {
+                (Some(name), _) => name.clone(),
+                (None, Some(address)) => address.clone(),
+                (None, None) => continue,
+            };
+            let last = InboxMessage { at_ms: t.date_ms, sender: None, text: t.snippet.clone(), code: crate::codes::code_in(&t.snippet), mine: false };
+            let i = match inbox.iter().position(|e| e.conversation.id == id) {
+                Some(i) => i,
+                None => {
+                    if inbox.len() >= MAX_CONVERSATIONS
+                        && let Some(oldest) = inbox.iter().enumerate().min_by_key(|(_, e)| e.conversation.at_ms).map(|(i, _)| i)
+                    {
+                        inbox.remove(oldest);
+                    }
+                    inbox.push(Entry {
+                        phone: from.id,
+                        conversation: Conversation {
+                            id: id.clone(),
+                            phone: from.id.to_string(),
+                            phone_name: from.name.clone(),
+                            app: SMS_APP.into(),
+                            app_name: "Texts".into(),
+                            kind: "sms".into(),
+                            title: title.clone(),
+                            group: t.addresses.len() > 1,
+                            icon: None,
+                            picture: None,
+                            last: None,
+                            unread: 0,
+                            can_reply: true,
+                            at_ms: t.date_ms,
+                            older: true,
+                        },
+                        messages: VecDeque::new(),
+                        key: None,
+                        seen_key: String::new(),
+                        asked: t.id.clone(),
+                        sms: Some(SmsSource { thread: t.id.clone(), addresses: t.addresses.clone(), loaded: false }),
+                    });
+                    inbox.len() - 1
+                }
+            };
+            let e = &mut inbox[i];
+            let changed = e.conversation.at_ms != t.date_ms || e.conversation.last.as_ref().map(|m| &m.text) != Some(&last.text) || (e.conversation.unread > 0) != t.unread;
+            e.conversation.title = title;
+            e.conversation.phone_name = from.name.clone();
+            e.conversation.at_ms = t.date_ms;
+            e.conversation.unread = u32::from(t.unread);
+            e.conversation.last = Some(last);
+            if let Some(src) = e.sms.as_mut() {
+                src.addresses = t.addresses.clone();
+            }
+            if changed || e.messages.is_empty() {
+                let _ = self.updates.send(e.conversation.clone());
+            }
+        }
+    }
+
+    /// Conversation `id` as a phone's texts, if it is one: the phone, its thread, the
+    /// numbers in it, and whether its messages were fetched.
+    pub fn sms_source(&self, id: &str) -> Option<(Fingerprint, String, Vec<String>, bool)> {
+        let inbox = self.inner.lock().unwrap();
+        let e = inbox.iter().find(|e| e.conversation.id == id)?;
+        let src = e.sms.as_ref()?;
+        Some((e.phone, src.thread.clone(), src.addresses.clone(), src.loaded))
+    }
+
+    /// The time of the oldest message here in a texts conversation.
+    pub fn sms_oldest(&self, id: &str) -> Option<u64> {
+        let inbox = self.inner.lock().unwrap();
+        let e = inbox.iter().find(|e| e.conversation.id == id)?;
+        Some(e.messages.front().map_or(e.conversation.at_ms, |m| m.at_ms))
+    }
+
+    /// Messages the phone gave for a texts conversation (newest first); `more`: it has
+    /// older ones still.
+    pub fn sms_fill(&self, id: &str, messages: &[SmsMessage], more: bool) {
+        let mut inbox = self.inner.lock().unwrap();
+        let Some(e) = inbox.iter_mut().find(|e| e.conversation.id == id) else { return };
+        for m in messages {
+            add_message(&mut e.messages, (sms_message(m), true));
+        }
+        while e.messages.len() > MAX_MESSAGES {
+            e.messages.pop_front();
+        }
+        if let Some(src) = e.sms.as_mut() {
+            src.loaded = true;
+        }
+        e.conversation.older = more;
+        let _ = self.updates.send(e.conversation.clone());
+    }
+
+    /// A text came in or went out on `from`; false when its conversation isn't known here
+    /// yet (the caller asks the phone for its conversations again).
+    pub fn sms_pushed(&self, from: &DeviceInfo, thread: &str, m: &SmsMessage) -> bool {
+        let id = conversation_id(&from.id, SMS_APP, thread);
+        let mut inbox = self.inner.lock().unwrap();
+        let Some(e) = inbox.iter_mut().find(|e| e.conversation.id == id) else { return false };
+        let message = sms_message(m);
+        // Only messages of a conversation that was opened go in its list; the others
+        // come with their history when it is.
+        let loaded = e.sms.as_ref().is_some_and(|s| s.loaded);
+        let fresh = !e.messages.iter().any(|o| o.text == message.text && o.mine == message.mine && o.at_ms.abs_diff(message.at_ms) <= 1000);
+        if loaded {
+            add_message(&mut e.messages, (message.clone(), true));
+        }
+        if fresh && message.at_ms >= e.conversation.at_ms {
+            if message.mine {
+                e.conversation.unread = 0;
+            } else {
+                e.conversation.unread += 1;
+            }
+            e.conversation.at_ms = message.at_ms;
+            e.conversation.last = Some(message);
+        }
+        let _ = self.updates.send(e.conversation.clone());
+        true
+    }
+
+    /// Is `n` a notification from a phone's SMS app?
+    pub fn is_sms_app(n: &RemoteNotification) -> bool {
+        kind(n) == Some("sms")
+    }
+
     /// `text` was sent from here.
     pub fn replied(&self, id: &str, text: &str) {
         let mut inbox = self.inner.lock().unwrap();
@@ -294,6 +439,11 @@ impl Inbox {
             let _ = self.updates.send(e.conversation.clone());
         }
     }
+}
+
+/// A text from the phone's database, as a message.
+fn sms_message(m: &SmsMessage) -> InboxMessage {
+    InboxMessage { at_ms: m.date_ms, sender: None, code: crate::codes::code_in(&m.body), text: m.body.chars().take(MAX_TEXT).collect(), mine: m.from_me }
 }
 
 /// A message the phone kept, with its code; one without a time goes just before `before`.
@@ -528,6 +678,36 @@ mod tests {
         assert_eq!(inbox.thread(&alice.id).unwrap().len(), 2);
         inbox.removed(&phone.id, "k", false);
         assert!(inbox.list().iter().all(|c| !c.can_reply && c.unread == 0));
+    }
+
+    #[test]
+    fn texts_from_the_phones_own_database() {
+        let dir = tempfile::tempdir().unwrap();
+        let inbox = Inbox::new(dir.path().into());
+        let phone = DeviceInfo { id: Fingerprint::of(b"p"), name: "Pixel".into(), kind: linksy_core::DeviceKind::Phone, os: "android".into(), features: vec!["sms".into()], away: None };
+        let thread = SmsThread { id: "7".into(), addresses: vec!["+261340000000".into()], names: vec!["Alice".into()], snippet: "Lunch?".into(), date_ms: 2000, unread: true };
+        inbox.sms_threads(&phone, std::slice::from_ref(&thread));
+        let list = inbox.list();
+        assert_eq!(list.len(), 1);
+        let c = &list[0];
+        assert_eq!((c.title.as_str(), c.kind.as_str(), c.unread, c.can_reply, c.older), ("Alice", "sms", 1, true, true));
+        let (_, t, addresses, loaded) = inbox.sms_source(&c.id).unwrap();
+        assert_eq!((t.as_str(), addresses, loaded), ("7", vec!["+261340000000".to_string()], false));
+        // Its history, newest first from the phone, oldest first here
+        let m = |id: &str, mine: bool, body: &str, at: u64| SmsMessage { id: id.into(), from_me: mine, address: String::new(), body: body.into(), date_ms: at };
+        inbox.sms_fill(&c.id, &[m("2", false, "Lunch?", 2000), m("1", true, "Hi", 1000)], false);
+        let texts: Vec<_> = inbox.thread(&c.id).unwrap().into_iter().map(|x| (x.text, x.mine)).collect();
+        assert_eq!(texts, [("Hi".to_string(), true), ("Lunch?".to_string(), false)]);
+        assert!(inbox.sms_source(&c.id).unwrap().3);
+        // A new text on a known thread; an unknown thread asks for a refresh
+        assert!(inbox.sms_pushed(&phone, "7", &m("3", false, "At one?", 3000)));
+        assert!(!inbox.sms_pushed(&phone, "99", &m("4", false, "Who?", 3000)));
+        let c = inbox.list().remove(0);
+        assert_eq!((c.unread, c.last.unwrap().text.as_str()), (2, "At one?"));
+        assert_eq!(inbox.thread(&c.id).unwrap().len(), 3);
+        // The same thread listed again doesn't duplicate it
+        inbox.sms_threads(&phone, &[thread]);
+        assert_eq!(inbox.list().len(), 1);
     }
 
     #[test]
